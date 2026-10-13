@@ -22,7 +22,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 1 | Inbound tenant resolution from verified GitHub installation; multi-workspace membership | F15, F25 (expand), F59 | D2 (expand), D3, N6 (inbound) | ✅ | #6 |
 | 2 | Worker modularisation, envelope encryption with AAD and key version, queue messages carry ids not secrets, delivery-path integration tests | F33, F35–F37 (F34 tier 2) | D5, D6, D13 | ✅ | #7 |
 | 3a | Tenant-scoped integrations API; domain capabilities; audit log; closed GitHub event catalog; write-time allowlist; DB-enforced tenant contract | F24, F26, F28, F61 (catalog), F72 (write-time) | D9, D12, D16, D2 (contract for new writes) | ✅ | #9 |
-| 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ⬜ | — |
+| 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ✅ | #11 |
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F169–F190 | D4, D10, D11 | ⬜ | — |
 | 5 | Destination capability model; Slack and Teams adapters | F91–F104 | D8 | ⬜ | — |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
@@ -194,3 +194,57 @@ The LOW findings are also handled:
 - There is no audit-log read API yet. The `audit.read` capability exists.
 - Legacy rows without `organization_id` still need a backfill before the triggers can be
   replaced by `NOT NULL` + `FOREIGN KEY`.
+
+## Slice 3b — GitHub App install flow, lifecycle and repository scope (PR #11)
+
+**What changed** ([ADR 0008](adr/0008-github-install-verification.md),
+[`GITHUB_APP.md`](GITHUB_APP.md))
+
+- The `install` → setup URL → OAuth (PKCE) → callback flow is in
+  `src/connectors/sources/github/install.ts`. The setup URL's `installation_id` is treated
+  only as a claim. The callback proves the installer can access our App's installation via
+  `GET /user/installations`, then revokes the user token.
+- States are single-use, expire after 10 minutes, are bound to the user, and are stored as
+  SHA-256.
+- An installation bound to another workspace is refused and audited, and a database trigger
+  forbids a rebind.
+- `src/connectors/sources/github/lifecycle.ts` turns suspend, unsuspend, delete, create,
+  permission and repository add/remove events into immediate state changes, each with an
+  audit row. They never route a notification. A signed `ping` is acknowledged.
+- Ingress refuses and audits a repository outside a `selected` installation (F67). The
+  integrations API accepts only repositories an active installation covers, and stores
+  GitHub's canonical casing.
+- New endpoints:
+  - `POST /api/github/install`
+  - `GET /api/github/installations`
+  - `GET /github/setup`
+  - `GET /github/callback`
+- `migrations/0010` adds `github_auth_states` and `github_installation_repositories`, the
+  installation timestamp columns, and the no-rebind trigger.
+
+**Verified by** — `tests/github/install-flow.test.ts`, over the real migrations with GitHub's
+HTTP endpoints mocked:
+
+- binding and auditing;
+- the PKCE challenge matching the verifier;
+- token revocation;
+- states that are hashed, single-use, user-bound, expiring and purpose-checked;
+- refusal of a spoofed installation id and of a foreign App;
+- refusal of a rebind (API and trigger);
+- refusal of a malformed id before any GitHub call;
+- a failed code exchange, a missing session, an unconfigured App and a missing Origin;
+- installation listing scoped to the workspace;
+- in-scope and out-of-scope routing;
+- suspend, unsuspend and delete stopping and resuming delivery immediately;
+- repository add and remove;
+- unbound or foreign lifecycle events being ignored;
+- unsigned lifecycle events being rejected;
+- `ping`.
+
+The integrations API tests also cover the new repository-scope rule.
+
+**Known gaps**
+
+- No real GitHub App has been registered or exercised.
+- Reconciliation (F69), permission reads (F61), the unbind action, and the dashboard's
+  "Connect GitHub" button. The button belongs to the UI slice.

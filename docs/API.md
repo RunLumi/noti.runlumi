@@ -92,3 +92,30 @@ and leaves no false "success" entry.
 The audit log refuses `UPDATE`. It is append-only at the application level, not
 tamper-evident: organization deletion cascades to it, and a future retention job will
 delete rows.
+
+## GitHub connection
+
+See [ADR 0008](adr/0008-github-install-verification.md) and [GITHUB_APP.md](GITHUB_APP.md).
+
+| Method and path | Capability | Result |
+| --- | --- | --- |
+| `POST /api/github/install` | `integration.create` | `200 {url}`. Navigate the browser to `url`. Returns `503` when the App is not configured and `403` without our `Origin`. |
+| `GET /api/github/installations` | `integration.read` | `200 {configured, installations: [{id, account, accountType, repositorySelection, status, updatedAt, repositories: string[]}]}` |
+| `GET /github/setup` | session | GitHub's setup redirect. Continues to GitHub OAuth. |
+| `GET /github/callback` | session | GitHub's OAuth redirect. Verifies and binds, then redirects to `/integrations?github=<status>`. |
+
+`status` is one of:
+
+- `connected`
+- `state_invalid`
+- `state_user_mismatch`
+- `installation_id_invalid`
+- `oauth_failed`
+- `installation_not_accessible`
+- `installation_bound_elsewhere`
+- `github_unavailable`
+- `not_configured`
+- `signin_required`
+
+An integration's `repo` must be covered by an active installation in the workspace. Otherwise
+the request gets `422` with a `repo` field error. The stored value uses GitHub's casing.

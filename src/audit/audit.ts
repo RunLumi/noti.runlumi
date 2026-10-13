@@ -10,7 +10,11 @@ export type AuditAction =
   | 'integration.update'
   | 'integration.delete'
   | 'integration.credentials.rotate'
-  | 'access.denied';
+  | 'access.denied'
+  | 'github.installation.bind'
+  | 'github.installation.bind_refused'
+  | 'github.installation.lifecycle'
+  | 'github.repository.out_of_scope';
 
 export type AuditMetadata = Readonly<Record<string, string | number | boolean | null | readonly string[]>>;
 
@@ -18,7 +22,7 @@ export interface AuditEntry {
   readonly organizationId: string | null;
   readonly actorId: string | null;
   readonly action: AuditAction;
-  readonly subjectType: 'integration' | 'organization' | 'capability';
+  readonly subjectType: 'integration' | 'organization' | 'capability' | 'github_installation' | 'repository';
   readonly subjectId: string | null;
   readonly outcome: 'success' | 'denied';
   readonly ip?: string | null;

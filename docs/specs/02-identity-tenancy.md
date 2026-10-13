@@ -388,7 +388,7 @@ membership first, then joins through `membership.organizationId`. That is the ri
 
 ## F27 — Connection and installation registry
 
-**Priority** P0 · **Status** ❌ not started
+**Priority** P0 · **Status** ✅ installation registry with verified binding (PR #6, PR #11)
 
 **Story** As an operator, I want every inbound event to resolve to exactly one organization
 through its verified installation, so that no event can be routed using sender-chosen data.

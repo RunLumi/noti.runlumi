@@ -19,6 +19,10 @@ ENCRYPTION_KEY=replace-with-64-hex-characters
 # Shared secret used to verify GitHub webhook signatures (X-Hub-Signature-256).
 GITHUB_WEBHOOK_SECRET=replace-me
 
+# OAuth client secret of the GitHub App. Used once per install to verify, with the
+# installer's own token, that they can access the installation (ADR 0008).
+GITHUB_CLIENT_SECRET=replace-me
+
 # Better Auth signing key for session cookies. Minimum 32 characters; use a
 # high-entropy random value, not a memorable phrase.
 BETTER_AUTH_SECRET=replace-with-at-least-32-characters-of-entropy

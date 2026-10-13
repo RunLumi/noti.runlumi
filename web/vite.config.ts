@@ -5,7 +5,14 @@ import { fileURLToPath, URL } from 'node:url';
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react(), tailwindcss()],
-  server: { port: 5173, proxy: { '/auth': 'http://127.0.0.1:8787', '/api': 'http://127.0.0.1:8787' } },
+  server: {
+    port: 5173,
+    proxy: {
+      '/auth': 'http://127.0.0.1:8787',
+      '/api': 'http://127.0.0.1:8787',
+      '/github': 'http://127.0.0.1:8787',
+    },
+  },
   build: { outDir: 'dist', emptyOutDir: true },
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
 });

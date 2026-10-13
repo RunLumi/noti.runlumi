@@ -46,6 +46,21 @@ function member(userId: string, org: string, role: 'admin' | 'member'): void {
     .run(`${userId}-${org}`, userId, org, role, 1);
 }
 
+function githubInstallation(
+  org: string,
+  installationId: string,
+  selection: 'all' | 'selected' = 'all',
+): string {
+  const id = `gi-${installationId}`;
+  db.raw
+    .prepare(
+      `INSERT INTO github_installations(id,organization_id,installation_id,app_id,account_login,account_type,repository_selection)
+       VALUES(?,?,?,?,?,?,?)`,
+    )
+    .run(id, org, installationId, '1', 'acme', 'Organization', selection);
+  return id;
+}
+
 async function call(
   method: string,
   path: string,
@@ -107,6 +122,10 @@ beforeEach(() => {
   member('alice', 'org-a', 'admin');
   member('bob', 'org-a', 'member');
   member('mallory', 'org-b', 'admin');
+  // Each workspace has connected GitHub for the `acme` account (F67: an integration may
+  // only name a repository an active installation covers).
+  githubInstallation('org-a', '1001');
+  githubInstallation('org-b', '1002');
   env = {
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
@@ -399,5 +418,39 @@ describe('review hardening', () => {
         )
         .run(),
     ).toThrow(/required/);
+  });
+});
+
+describe('repository scope (F67)', () => {
+  it('stores the canonical repository name from the installation', async () => {
+    const { integration } = await json<{ integration: View & { repo: string } }>(
+      await create('bob', { repo: 'ACME/web' }),
+    );
+    expect(integration.repo).toBe('acme/web');
+  });
+
+  it('refuses a repository no active installation covers', async () => {
+    const res = await create('bob', { repo: 'someone-else/web' });
+    expect(res.status).toBe(422);
+    expect(await res.text()).toContain('Connect GitHub');
+  });
+
+  it('honours a selected installation’s repository list', async () => {
+    db.raw.exec(
+      "UPDATE github_installations SET repository_selection='selected' WHERE organization_id='org-a'",
+    );
+    db.raw
+      .prepare(
+        'INSERT INTO github_installation_repositories(installation_row_id,repository_id,full_name) VALUES(?,?,?)',
+      )
+      .run('gi-1001', '42', 'acme/Allowed');
+    expect((await create('bob', { repo: 'acme/web' })).status).toBe(422);
+    const ok = await json<{ integration: { repo: string } }>(await create('bob', { repo: 'acme/allowed' }));
+    expect(ok.integration.repo).toBe('acme/Allowed');
+  });
+
+  it('refuses repositories of a suspended installation', async () => {
+    db.raw.exec("UPDATE github_installations SET status='suspended' WHERE organization_id='org-a'");
+    expect((await create('bob')).status).toBe(422);
   });
 });
