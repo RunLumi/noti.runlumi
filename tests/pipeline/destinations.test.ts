@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { Bindings, DeliveryMessage } from '../../src/env';
 import { consumeDeliveries, toNotification, type ConsumerDeps } from '../../src/pipeline/consumer';
 import { parseDeliveryMessage } from '../../src/pipeline/outbox';
@@ -22,7 +22,7 @@ type Kind = keyof typeof URLS;
 
 let db: FakeD1;
 let env: Bindings;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: Mock<typeof fetch>;
 let claimTokens = 0;
 
 const deps = (random = 0.999999): ConsumerDeps => ({
@@ -135,7 +135,7 @@ beforeEach(() => {
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',
   } as Bindings;
-  fetchMock = vi.fn();
+  fetchMock = vi.fn<typeof fetch>();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -150,7 +150,7 @@ describe('delivered vs accepted (F99, F100)', () => {
     fetchMock.mockResolvedValueOnce(new Response('ok', { status: 200 }));
     expect((await consume(enqueue('d1', 'slack'))).acked).toBe(true);
     expect(row('d1')).toMatchObject({ state: 'sent', attempts: 1, last_error_code: null });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(URLS.slack);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(URLS.slack);
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', redirect: 'manual' });
     const body = sentBody();
     for (const text of [
@@ -186,7 +186,7 @@ describe('delivered vs accepted (F99, F100)', () => {
       last_error: null,
       last_error_code: null,
     });
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(URLS.teams);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(URLS.teams);
     expect(JSON.parse(sentBody())).toMatchObject({ type: 'message' });
   });
 

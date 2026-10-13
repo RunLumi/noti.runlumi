@@ -3,7 +3,7 @@
  * Dependency audit gate (docs/specs/15-security-and-compliance.md F239).
  *
  * `npm audit --omit=dev --audit-level=high` is the policy. This wrapper applies the same
- * policy but lets a small, dated, reasoned exception list through, so a known advisory in
+ * policy but lets a small, dated, reasoned exception list through (currently empty), so a known advisory in
  * a package that never reaches the Worker bundle does not train everyone to ignore a red
  * CI. Anything not listed, or listed past its expiry, still fails the build.
  *
@@ -14,19 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 /** @type {ReadonlyArray<{ id: string, expires: string, reason: string }>} */
-export const EXCEPTIONS = [
-  {
-    id: 'GHSA-5gmw-xhrv-c9v3',
-    expires: '2027-01-11',
-    reason:
-      'tinypool (test-runner worker pool) reached through vitest, which better-auth lists as an optional peer. Vitest is a devDependency and is not in the Worker bundle (verify:worker-bundle). Upgrading to vitest 4, which has no tinypool dependency, removes it.',
-  },
-  {
-    id: 'GHSA-85c8-ppgw-ccpr',
-    expires: '2027-01-11',
-    reason: 'Same package and reason as GHSA-5gmw-xhrv-c9v3.',
-  },
-];
+export const EXCEPTIONS = [];
 
 const FAIL_LEVELS = new Set(['high', 'critical']);
 

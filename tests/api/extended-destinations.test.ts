@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { fromBase64 } from '../../src/connectors/sources/generic/encoding';
 import { verifyStandardWebhook } from '../../src/connectors/sources/generic/signature';
 import type { Bindings, DeliveryMessage } from '../../src/env';
@@ -35,7 +35,8 @@ const DISCORD = 'https://discord.com/api/webhooks/123456789012345678/DiscordApiT
 const HOOK = 'https://hooks.example.com/noti/inbound?channel=ci';
 let db: FakeD1;
 let env: Bindings;
-let fetchMock: ReturnType<typeof vi.fn>;
+type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
+let fetchMock: Mock<FetchFn>;
 /** Hostname -> addresses the stubbed DNS-over-HTTPS endpoint returns (A records). */
 let dns: Record<string, string[] | 'servfail' | 'nxdomain'>;
 
@@ -71,7 +72,7 @@ function setUp(): void {
 beforeEach(() => {
   setUp();
   dns = { 'hooks.example.com': ['93.184.216.34'] };
-  fetchMock = vi.fn((input: string) => {
+  fetchMock = vi.fn<FetchFn>((input) => {
     const url = new URL(String(input));
     if (url.origin === 'https://cloudflare-dns.com') {
       const answer = dns[url.searchParams.get('name') ?? ''];

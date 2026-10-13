@@ -45,7 +45,7 @@ needs a named owner, a written rationale and an entry in the register in
 | SPA headers and strict CSP | partly | `web/public/_headers`; signed-out screens loaded with no CSP violations in a real browser; signed-in screens not exercised. **Deployment of the `_headers` file to the static host is unconfirmed** |
 | Webhook ingress flood control (F29) | partly | `ingressLimiter` is implemented and unit-tested; it is **not wired into the route** (follow-up in PROGRESS) |
 | CI pinned actions, read-only permissions, concurrency | done | `ci.yml`, asserted by `tests/security/config-guards.test.ts` |
-| Production dependency audit gate | done | `npm run audit:gate`; two dated exceptions for dev-only tinypool (`docs/SECURITY.md`) |
+| Production dependency audit gate | done | `npm run audit:gate`; exception list is empty (`docs/SECURITY.md`) |
 | Dependency review on PRs | partly | Job present but `continue-on-error` until it has run green |
 | Dependabot | done | `.github/dependabot.yml` |
 | `SECURITY.md` disclosure policy | partly | Present. Private vulnerability reporting must be enabled in repository settings (not verified) |

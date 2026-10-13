@@ -5,7 +5,7 @@
 
 ## Stack
 
-Vite + React 19 + TypeScript, Tailwind 4, Base UI headless Dialog, TanStack Router / Query /
+Vite 8 + React 19 + TypeScript, Tailwind 4, Base UI headless Dialog, TanStack Router / Query /
 Table. **Tabler Outline** icons (`@tabler/icons-react`). Geist self-hosted via
 `@fontsource-variable/geist`.
 
