@@ -1,5 +1,5 @@
 import { larkAccepted, larkPayload } from '../connectors/destinations/lark/webhook';
-import { CryptoError } from '../crypto/envelope';
+import { CryptoError, type Keyring } from '../crypto/envelope';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import type { Bindings, DeliveryMessage } from '../env';
 import { CREDENTIAL_COLUMNS, openCredentials, type CredentialRow } from './credentials';
@@ -36,13 +36,24 @@ async function loadIntegration(env: Bindings, d: DeliveryMessage): Promise<Integ
   return row;
 }
 
-async function deliver(env: Bindings, d: DeliveryMessage): Promise<void> {
+/**
+ * Only defects in the row's own bytes are permanent. A wrong or missing key, or an unknown
+ * KEK version, is a deployment fault: retrying after the fix delivers, so the message must
+ * not be acknowledged and lost.
+ */
+function classifyCryptoError(e: CryptoError): Error {
+  return e.code === 'destination_credentials_invalid' || e.code === 'malformed_envelope'
+    ? new PermanentFailure(e.code)
+    : new Error(`provider_config_${e.code}`);
+}
+
+async function deliver(env: Bindings, keyring: Keyring, d: DeliveryMessage): Promise<void> {
   const row = await loadIntegration(env, d);
   let credentials;
   try {
-    credentials = await openCredentials(row, keyringFromEnv(env), env.ENCRYPTION_KEY);
+    credentials = await openCredentials(row, keyring, env.ENCRYPTION_KEY);
   } catch (e) {
-    if (e instanceof CryptoError) throw new PermanentFailure(e.code);
+    if (e instanceof CryptoError) throw classifyCryptoError(e);
     throw e;
   }
 
@@ -66,7 +77,11 @@ async function deliver(env: Bindings, d: DeliveryMessage): Promise<void> {
     body: JSON.stringify(payload),
     redirect: 'error',
   });
-  if (!res.ok) throw new Error(`provider_http_${res.status}`);
+  if (!res.ok) {
+    // Release the connection; the body is never read, so it can never reach a log.
+    await res.body?.cancel();
+    throw new Error(`provider_http_${res.status}`);
+  }
 
   if (row.destination === 'lark') {
     // `unknown`, not `any`: the provider response is untrusted and narrowing is
@@ -76,12 +91,28 @@ async function deliver(env: Bindings, d: DeliveryMessage): Promise<void> {
   }
 }
 
-async function record(env: Bindings, id: string, state: string, error: string | null): Promise<void> {
+/** Scoped to the tenant and integration the message names, never by id alone. */
+async function record(env: Bindings, d: DeliveryMessage, state: string, error: string | null): Promise<void> {
   await env.DB.prepare(
-    'UPDATE deliveries SET state=?,attempts=attempts+1,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+    `UPDATE deliveries SET state=?,attempts=attempts+1,last_error=?,updated_at=CURRENT_TIMESTAMP
+     WHERE id=? AND organization_id=? AND integration_id=?`,
   )
-    .bind(state, error, id)
+    .bind(state, error, d.id, d.organizationId, d.integrationId)
     .run();
+}
+
+/**
+ * A redelivered queue message for a delivery already sent is acknowledged without a second
+ * provider call. This narrows, but cannot close, the at-least-once window: a crash between
+ * the provider accepting and this row being written still duplicates.
+ */
+async function alreadySent(env: Bindings, d: DeliveryMessage): Promise<boolean> {
+  const row = await env.DB.prepare(
+    'SELECT state FROM deliveries WHERE id=? AND organization_id=? AND integration_id=?',
+  )
+    .bind(d.id, d.organizationId, d.integrationId)
+    .first<{ state: string }>();
+  return row?.state === 'sent';
 }
 
 /**
@@ -93,6 +124,15 @@ export function transientCode(e: unknown): string {
 }
 
 export async function consumeDeliveries(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
+  let keyring: Keyring;
+  try {
+    keyring = keyringFromEnv(env);
+  } catch {
+    // Misconfigured keys: nothing in this batch can be delivered, and nothing is lost.
+    // /health reports which binding is wrong.
+    batch.retryAll();
+    return;
+  }
   for (const msg of batch.messages) {
     const d = parseDeliveryMessage(msg.body);
     if (!d) {
@@ -101,19 +141,23 @@ export async function consumeDeliveries(batch: MessageBatch<unknown>, env: Bindi
       continue;
     }
     try {
-      await deliver(env, d);
-      await record(env, d.id, 'sent', null);
+      if (await alreadySent(env, d)) {
+        msg.ack();
+        continue;
+      }
+      await deliver(env, keyring, d);
+      await record(env, d, 'sent', null);
       msg.ack();
     } catch (e) {
       if (e instanceof PermanentFailure) {
-        await record(env, d.id, 'failed', e.message);
+        await record(env, d, 'failed', e.message);
         msg.ack();
         continue;
       }
       // NOTE (D11): transient failures are not yet classified per provider; slice 4 adds the
       // taxonomy, bounded backoff and dead-letter surfacing (F179/F180). Only codes we
       // minted reach `last_error` — never a URL or a provider body.
-      await record(env, d.id, 'retrying', transientCode(e));
+      await record(env, d, 'retrying', transientCode(e));
       msg.retry();
     }
   }

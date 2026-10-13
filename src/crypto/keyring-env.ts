@@ -1,6 +1,6 @@
 import { createKeyring, CryptoError, type Keyring } from './envelope';
 
-type KeyringEnv = { KEK_V1: string; KEK_V2?: string; KMS_ACTIVE_VERSION: string };
+type KeyringEnv = { KEK_V1: string; KEK_V2?: string; KMS_ACTIVE_VERSION: string; ENCRYPTION_KEY?: string };
 
 /**
  * Build the key ring from Worker secrets (F34 tier 2). Names are explicit rather than
@@ -22,9 +22,12 @@ export function keyringFromEnv(env: KeyringEnv): Keyring {
 export function keyringProblem(env: KeyringEnv): string | null {
   try {
     keyringFromEnv(env);
-    return null;
   } catch (e) {
     if (e instanceof CryptoError) return 'KEK_V1/KEK_V2/KMS_ACTIVE_VERSION';
     throw e;
   }
+  // The legacy key is optional, but a present one must be well-formed, or the migration
+  // job would fail every row.
+  if (env.ENCRYPTION_KEY && !/^[0-9a-f]{64}$/i.test(env.ENCRYPTION_KEY)) return 'ENCRYPTION_KEY';
+  return null;
 }

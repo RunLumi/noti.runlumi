@@ -87,8 +87,11 @@ AI features (F243–F262) stay out of scope until the delivery ledger is trustwo
   org, connection, field and purpose. The envelope format is versioned and stored as a `BLOB`.
 - `migrations/0007` adds the envelope and quarantine columns. It also rebuilds
   `notification_outbox` to allow `state='invalid'`.
-- The cron job re-seals v0 rows into v1 and rewraps DEKs that are on an old KEK. Each row is
-  one guarded `UPDATE`, and a row that fails is quarantined.
+- The cron job re-seals v0 rows and rewraps DEKs that are on an old KEK. Each new envelope is
+  verified by re-opening it before it is written. Every `UPDATE` is guarded on the tenant and
+  on the exact values read. Only a defect in a row's own bytes quarantines it. A key fault
+  aborts the job, and a circuit breaker stops a bad key from quarantining a whole batch. v0
+  columns are kept so a Worker rollback still works.
 - Queue messages are `{id, integrationId, organizationId, title, url}`. The consumer re-reads
   the row scoped to the organization. A crypto failure, a missing row or a disallowed host is
   a permanent `failed` delivery and no provider call is made. `last_error` only holds codes we
@@ -100,12 +103,17 @@ AI features (F243–F262) stay out of scope until the delivery ledger is trustwo
 - `tests/crypto/envelope.test.ts` (24 cases). They cover byte layout, strict parsing, a fresh IV
   per seal, the size cap, AAD row binding, url/secret non-interchangeability, DEK unwrap
   refused across tenant or connection, version pinning, rewrap, and the legacy v0 reader.
-- `tests/pipeline/delivery-path.test.ts` (16 cases). These are end-to-end tests over the real
+- `tests/pipeline/delivery-path.test.ts` (23 cases, plus a security review whose 2 HIGH and
+  7 MEDIUM findings are all fixed and covered). These are end-to-end tests over the real
   migrations, using a `node:sqlite` D1 fake (`tests/support/d1.ts`). They cover cross-tenant
   routing with the same repo name, a credential-free queue, idempotent redelivery, delivery
   for v0 and then v1, refusal of a row-swap attack, the consumer's tenant re-check, the
   allowlist, provider 5xx, URL-echo redaction, quarantine, and full KEK rotation with the old
-  KEK removed.
+  KEK removed. They also cover duplicate suppression for deliveries already `sent`, retry
+  rather than drop when keys are misconfigured, the circuit breaker, config-fault abort, and
+  a concurrent-edit race.
+- `tests/migrations.test.ts`: 0007 strips legacy ciphertext from every outbox row and keeps
+  the rows.
 
 **Known gaps**
 

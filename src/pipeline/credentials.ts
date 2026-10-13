@@ -127,31 +127,106 @@ export async function sealCredentials(
 export interface JobReport {
   readonly processed: number;
   readonly quarantined: number;
+  /** Rows a concurrent writer changed between our read and our guarded UPDATE. */
+  readonly skipped: number;
+}
+
+/** A batch that should stop and be surfaced, not quarantine rows. */
+export class CredentialJobAborted extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = 'CredentialJobAborted';
+  }
 }
 
 const JOB_BATCH = 25;
 
-async function quarantine(db: D1Database, id: string, reason: string): Promise<void> {
-  await db
-    .prepare(
-      'UPDATE integrations SET credentials_quarantined_at=CURRENT_TIMESTAMP,credentials_quarantine_reason=? WHERE id=?',
-    )
-    .bind(reason, id)
-    .run();
-}
-
-function reasonOf(e: unknown): string {
-  return e instanceof CryptoError ? e.code : 'internal_error';
+/**
+ * D1 binds BLOBs from `ArrayBuffer`. Every `Bytes` we produce owns an exact-length buffer
+ * at offset 0, which this asserts rather than assumes.
+ */
+export function blob(bytes: Uint8Array | null): ArrayBuffer | null {
+  if (!bytes) return null;
+  if (
+    bytes.byteOffset !== 0 ||
+    bytes.byteLength !== bytes.buffer.byteLength ||
+    !(bytes.buffer instanceof ArrayBuffer)
+  )
+    return blob(new Uint8Array(bytes));
+  return bytes.buffer;
 }
 
 /**
- * Convert v0 rows to the v1 envelope (F37 migration). Chunked and resumable: each row is
- * rewritten by one guarded UPDATE, so a crash leaves a v0 row or a v1 row, never both.
- * The v0 ciphertext is cleared in the same statement. A row that will not decrypt is
- * quarantined, never silently skipped.
+ * Only a failure that is a property of the row's own bytes justifies quarantine. A wrong or
+ * missing key, an unknown KEK version or a platform error is a property of the deployment:
+ * quarantining would take healthy rows out of service on a bad deploy.
+ */
+function isRowDefect(e: unknown): e is CryptoError {
+  return (
+    e instanceof CryptoError &&
+    (e.code === 'destination_credentials_invalid' || e.code === 'malformed_envelope')
+  );
+}
+
+type Outcome =
+  | { row: CredentialRow; ok: true; apply: () => Promise<boolean> }
+  | { row: CredentialRow; ok: false; reason: string };
+
+/**
+ * Run a batch in two phases: compute every outcome first, then write. If every row of a
+ * multi-row batch is a "defect", the likelier explanation is a wrong key, so the batch
+ * aborts without quarantining anything (circuit breaker).
+ */
+async function runBatch(
+  db: D1Database,
+  rows: readonly CredentialRow[],
+  prepare: (row: CredentialRow) => Promise<() => Promise<boolean>>,
+): Promise<JobReport> {
+  const outcomes: Outcome[] = [];
+  for (const row of rows) {
+    try {
+      outcomes.push({ row, ok: true, apply: await prepare(row) });
+    } catch (e) {
+      if (!isRowDefect(e))
+        throw new CredentialJobAborted(e instanceof CryptoError ? e.code : 'internal_error');
+      outcomes.push({ row, ok: false, reason: e.code });
+    }
+  }
+  if (outcomes.length >= 2 && outcomes.every((o) => !o.ok))
+    throw new CredentialJobAborted('every_row_failed');
+
+  let processed = 0;
+  let quarantined = 0;
+  let skipped = 0;
+  for (const o of outcomes) {
+    if (o.ok) {
+      if (await o.apply()) processed++;
+      else skipped++;
+    } else {
+      await db
+        .prepare(
+          `UPDATE integrations SET credentials_quarantined_at=CURRENT_TIMESTAMP,credentials_quarantine_reason=?
+           WHERE id=? AND organization_id=?`,
+        )
+        .bind(o.reason, o.row.id, o.row.organization_id)
+        .run();
+      quarantined++;
+    }
+  }
+  return { processed, quarantined, skipped };
+}
+
+/**
+ * Convert v0 rows to the v1 envelope (F37 migration). Chunked and resumable.
  *
- * Rows without `organization_id` are left alone: the AAD needs a tenant, and such rows
- * are already unroutable until the tenancy backfill assigns one.
+ * - The new envelope is opened and compared with the plaintext before anything is written.
+ * - The v0 columns are left intact. Clearing them is a separate, operator-run contract step
+ *   after the zero-check (docs/IMPLEMENTATION.md), so rolling the Worker back still works.
+ * - The UPDATE is guarded on the v0 values read, so a concurrent edit is never overwritten
+ *   with stale plaintext, and only `changes === 1` counts as processed.
+ *
+ * Rows without `organization_id` are left alone: the AAD needs a tenant, and such rows are
+ * already unroutable until the tenancy backfill assigns one.
  */
 export async function migrateLegacyCredentials(
   db: D1Database,
@@ -167,69 +242,108 @@ export async function migrateLegacyCredentials(
     .bind(JOB_BATCH)
     .all<CredentialRow>();
 
-  let processed = 0;
-  let quarantined = 0;
-  for (const row of rows.results) {
-    try {
-      const plain = await openCredentials(row, keyring, legacyKeyHex);
-      const sealed = await sealCredentials(
-        { organizationId: row.organization_id, connectionId: row.id },
-        plain,
-        keyring,
-      );
-      await db
+  return runBatch(db, rows.results, async (row) => {
+    const plain = await openCredentials(row, keyring, legacyKeyHex);
+    const ids = { organizationId: row.organization_id, connectionId: row.id };
+    const sealed = await sealCredentials(ids, plain, keyring);
+    const reopened = await openCredentials(
+      {
+        ...row,
+        key_salt: sealed.keySalt,
+        dek_wrapped: sealed.dekWrapped,
+        kek_version: sealed.kekVersion,
+        webhook_envelope: sealed.webhookEnvelope,
+        lark_secret_envelope: sealed.signingSecretEnvelope,
+      },
+      keyring,
+      legacyKeyHex,
+    );
+    if (reopened.webhookUrl !== plain.webhookUrl || reopened.signingSecret !== plain.signingSecret)
+      throw new CredentialJobAborted('seal_verification_failed');
+
+    return async () => {
+      const result = await db
         .prepare(
-          `UPDATE integrations SET key_salt=?,dek_wrapped=?,kek_version=?,webhook_envelope=?,lark_secret_envelope=?,
-             webhook_ciphertext='',lark_secret_ciphertext=NULL
-           WHERE id=? AND organization_id=? AND webhook_envelope IS NULL`,
+          `UPDATE integrations SET key_salt=?,dek_wrapped=?,kek_version=?,webhook_envelope=?,lark_secret_envelope=?
+           WHERE id=? AND organization_id=? AND webhook_envelope IS NULL
+             AND webhook_ciphertext=? AND lark_secret_ciphertext IS ?`,
         )
         .bind(
-          sealed.keySalt,
-          sealed.dekWrapped,
+          blob(sealed.keySalt),
+          blob(sealed.dekWrapped),
           sealed.kekVersion,
-          sealed.webhookEnvelope,
-          sealed.signingSecretEnvelope,
+          blob(sealed.webhookEnvelope),
+          blob(sealed.signingSecretEnvelope),
           row.id,
           row.organization_id,
+          row.webhook_ciphertext,
+          row.lark_secret_ciphertext,
         )
         .run();
-      processed++;
-    } catch (e) {
-      await quarantine(db, row.id, reasonOf(e));
-      quarantined++;
-    }
-  }
-  return { processed, quarantined };
+      return result.meta.changes === 1;
+    };
+  });
 }
 
 /**
- * Rewrap connection keys still on an older KEK (F37). Field envelopes are untouched. The
- * UPDATE is guarded on the version it read, so a concurrent run cannot double-apply.
+ * Rewrap connection keys still on another KEK version (F37). Field envelopes are untouched.
+ * The UPDATE is guarded on the exact wrapped bytes read, so a concurrent run or a version
+ * rollback cannot overwrite a newer DEK wrap.
  */
 export async function rewrapStaleKeys(db: D1Database, keyring: Keyring): Promise<JobReport> {
   const rows = await db
     .prepare(
       `SELECT ${CREDENTIAL_COLUMNS} FROM integrations
-       WHERE dek_wrapped IS NOT NULL AND kek_version != ? AND credentials_quarantined_at IS NULL
+       WHERE dek_wrapped IS NOT NULL AND kek_version IS NOT ? AND credentials_quarantined_at IS NULL
        LIMIT ?`,
     )
     .bind(keyring.activeVersion, JOB_BATCH)
     .all<CredentialRow>();
 
-  let processed = 0;
-  let quarantined = 0;
-  for (const row of rows.results) {
-    try {
-      const next = await rewrapConnectionKey(keyring, material(row));
-      await db
-        .prepare('UPDATE integrations SET dek_wrapped=?,kek_version=? WHERE id=? AND kek_version=?')
-        .bind(next.dekWrapped, next.kekVersion, row.id, row.kek_version)
+  return runBatch(db, rows.results, async (row) => {
+    const current = material(row);
+    const next = await rewrapConnectionKey(keyring, current);
+    return async () => {
+      const result = await db
+        .prepare(
+          `UPDATE integrations SET dek_wrapped=?,kek_version=?
+           WHERE id=? AND organization_id=? AND kek_version=? AND dek_wrapped=?`,
+        )
+        .bind(
+          blob(next.dekWrapped),
+          next.kekVersion,
+          row.id,
+          row.organization_id,
+          current.kekVersion,
+          blob(current.dekWrapped),
+        )
         .run();
-      processed++;
-    } catch (e) {
-      await quarantine(db, row.id, reasonOf(e));
-      quarantined++;
-    }
-  }
-  return { processed, quarantined };
+      return result.meta.changes === 1;
+    };
+  });
+}
+
+export interface CredentialStatus {
+  readonly legacyRemaining: number;
+  readonly staleKekRemaining: number;
+  readonly quarantined: number;
+}
+
+/** The numbers the rotation runbook's zero-check reads (F37). Counts only, never values. */
+export async function credentialStatus(db: D1Database, activeVersion: number): Promise<CredentialStatus> {
+  const row = await db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN webhook_envelope IS NULL AND organization_id IS NOT NULL AND credentials_quarantined_at IS NULL THEN 1 ELSE 0 END) AS legacy,
+         SUM(CASE WHEN dek_wrapped IS NOT NULL AND kek_version IS NOT ? AND credentials_quarantined_at IS NULL THEN 1 ELSE 0 END) AS stale,
+         SUM(CASE WHEN credentials_quarantined_at IS NOT NULL THEN 1 ELSE 0 END) AS quarantined
+       FROM integrations`,
+    )
+    .bind(activeVersion)
+    .first<{ legacy: number | null; stale: number | null; quarantined: number | null }>();
+  return {
+    legacyRemaining: row?.legacy ?? 0,
+    staleKekRemaining: row?.stale ?? 0,
+    quarantined: row?.quarantined ?? 0,
+  };
 }

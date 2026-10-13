@@ -5,7 +5,7 @@ import { githubWebhook } from './connectors/sources/github/route';
 import { keyringFromEnv, keyringProblem } from './crypto/keyring-env';
 import type { Bindings } from './env';
 import { consumeDeliveries } from './pipeline/consumer';
-import { migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
+import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
 import { dispatchOutbox } from './pipeline/outbox';
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -23,11 +23,19 @@ app.get('/health', (c) => {
 
 app.post('/webhooks/github', githubWebhook);
 
-/** Credential maintenance, bounded per tick: v0 → v1 migration, then KEK rewrap (F37). */
+/**
+ * Credential maintenance, bounded per tick: v0 → v1 migration, then KEK rewrap (F37).
+ * Logs counts only — the runbook's zero-check reads `remaining`. An aborted batch throws,
+ * so the cron invocation fails visibly instead of quarantining healthy rows.
+ */
 async function maintainCredentials(env: Bindings): Promise<void> {
   const keyring = keyringFromEnv(env);
-  await migrateLegacyCredentials(env.DB, keyring, env.ENCRYPTION_KEY);
-  await rewrapStaleKeys(env.DB, keyring);
+  const migrated = env.ENCRYPTION_KEY
+    ? await migrateLegacyCredentials(env.DB, keyring, env.ENCRYPTION_KEY)
+    : null;
+  const rewrapped = await rewrapStaleKeys(env.DB, keyring);
+  const remaining = await credentialStatus(env.DB, keyring.activeVersion);
+  console.info(JSON.stringify({ job: 'credential_maintenance', migrated, rewrapped, remaining }));
 }
 
 export default {

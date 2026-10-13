@@ -29,19 +29,42 @@ ciphertext was also copied into every queue message (D5).
    exists.
 5. **Queue messages carry ids and display text only.** The consumer re-reads the integration
    with `WHERE id=? AND organization_id=?` and opens the credentials itself.
-6. **Migration is structural and resumable.** A row with no `webhook_envelope` is v0. The
-   cron job re-seals up to 25 rows per tick. Each row is one guarded `UPDATE` that writes v1
-   and clears the v0 ciphertext together. A row that will not decrypt is quarantined
-   (`credentials_quarantined_at`, `credentials_quarantine_reason`). It is never skipped.
-7. **Rotation rewraps DEKs only.** A row still on an old `kek_version` is rewrapped by a
-   guarded `UPDATE ... WHERE kek_version = <old>`. `open` uses only the version the envelope
-   names. There is no fallback.
+6. **Migration is structural, verified and reversible.** A row with no `webhook_envelope` is
+   v0. Each cron tick re-seals up to 25 rows:
+   - The new envelope is opened and compared with the plaintext before anything is written.
+   - The guarded `UPDATE` matches on the v0 values that were read, so a concurrent edit is
+     skipped, never overwritten with stale plaintext.
+   - The v0 columns are **kept**, so rolling the Worker back still delivers. Clearing them is
+     an operator-run contract step after the zero-check (`docs/IMPLEMENTATION.md`).
+7. **Quarantine only for defects in a row's own bytes**, meaning `destination_credentials_invalid`
+   or `malformed_envelope`. A wrong or missing key, an unknown KEK version or a platform error
+   aborts the batch and fails the cron run visibly. A circuit breaker treats "every row in a
+   multi-row batch failed" as a key fault: it aborts and quarantines nothing.
+8. **Rotation rewraps DEKs only.** A row whose `kek_version IS NOT <active>` is rewrapped by an
+   `UPDATE` guarded on `organization_id`, the version that was read and the exact wrapped bytes.
+   `open` uses only the version the envelope names. There is no fallback.
+9. **Key separation (deviation from F35's wording).** One HKDF tenant key per
+   `(KEK, salt, org, purpose)` wraps only the DEK. Separation between fields comes from the
+   per-connection DEK plus the `field` component of the AAD, not from separate HKDF keys. The
+   property F35 asks for still holds: a URL ciphertext cannot be opened as a signing secret,
+   and one connection's key cannot open another's.
 
 ## Consequences
 
 - Errors carry taxonomy codes only (`malformed_envelope`, `destination_credentials_invalid`,
-  `unknown_kek_version`, `config_invalid`). A crypto failure is permanent. The delivery is
-  marked `failed`, the message is acknowledged, and nothing is retried.
+  `unknown_kek_version`, `config_invalid`).
+- Consumer handling depends on the cause:
+  - A row defect is permanent. The delivery is marked `failed` and acknowledged, and the
+    provider is never called.
+  - A key-configuration fault (`unknown_kek_version`, an invalid key ring) is retried, so
+    fixing the deploy delivers instead of losing the message.
+- Every consumer write is scoped by `id AND organization_id AND integration_id`. A redelivered
+  message whose delivery is already `sent` is acknowledged without a second provider call.
+  This narrows the duplicate window but does not close it.
+- Migration 0007 strips legacy ciphertext from every outbox row, including dispatched ones.
+  Retiring the legacy key therefore retires every copy of the ciphertext it can open.
+- Job counts (`migrated`, `rewrapped`, `remaining`) are logged on every tick. They contain no
+  values.
 - `last_error` only ever holds codes we minted. Platform errors from `fetch` or `URL` can echo
   the destination URL, so they collapse to `transient_error`.
 - `/health` returns `503` naming the misconfigured binding when the key ring is invalid.

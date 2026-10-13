@@ -26,9 +26,10 @@ ALTER TABLE integrations ADD COLUMN credentials_quarantine_reason TEXT;
 CREATE INDEX IF NOT EXISTS integrations_kek_version ON integrations(kek_version);
 
 -- Outbox rows the dispatcher cannot parse are marked rather than retried forever.
--- SQLite cannot alter a CHECK constraint in place, so the table is rebuilt. Existing
--- rows are copied verbatim; pending rows written before this release may still hold
--- ciphertext in payload_json, and the dispatcher rewrites them to the id-only shape.
+-- SQLite cannot alter a CHECK constraint in place, so the table is rebuilt. Rows written
+-- before this release carried destination ciphertext in payload_json (D5); it is removed
+-- during the copy, for dispatched rows as well as pending ones, so retiring the legacy
+-- key actually retires every copy it can open.
 CREATE TABLE notification_outbox_v2 (
   id TEXT PRIMARY KEY,
   payload_json TEXT NOT NULL,
@@ -38,7 +39,12 @@ CREATE TABLE notification_outbox_v2 (
   organization_id TEXT
 );
 INSERT INTO notification_outbox_v2(id,payload_json,state,created_at,dispatched_at,organization_id)
-  SELECT id,payload_json,state,created_at,dispatched_at,organization_id FROM notification_outbox;
+  SELECT id,
+         CASE WHEN json_valid(payload_json)
+              THEN json_remove(payload_json,'$.ciphertext','$.larkSecretCiphertext','$.destination')
+              ELSE payload_json END,
+         state,created_at,dispatched_at,organization_id
+  FROM notification_outbox;
 DROP TABLE notification_outbox;
 ALTER TABLE notification_outbox_v2 RENAME TO notification_outbox;
 CREATE INDEX IF NOT EXISTS notification_outbox_pending ON notification_outbox(state,created_at);

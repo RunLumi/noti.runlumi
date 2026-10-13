@@ -16,6 +16,9 @@ function normaliseBinding(value: unknown): SQLInputValue {
   if (value === undefined) return null;
   if (typeof value === 'boolean') return value ? 1 : 0;
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  // D1 documents ArrayBuffer as the BLOB binding type. Refuse typed-array views so a test
+  // cannot pass with a binding the real runtime might serialise differently.
+  if (ArrayBuffer.isView(value)) throw new TypeError('Bind BLOBs as ArrayBuffer, not a typed-array view');
   return value as SQLInputValue;
 }
 
@@ -63,14 +66,23 @@ export interface FakeD1 {
   readonly raw: DatabaseSync;
 }
 
-export function createFakeD1(): FakeD1 {
+export function migrationFiles(): string[] {
+  return readdirSync(join(root, 'migrations'))
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+}
+
+export function applyMigration(raw: DatabaseSync, file: string): void {
+  raw.exec(readFileSync(join(root, 'migrations', file), 'utf8'));
+}
+
+/** All migrations, or only those sorting before `options.before` (to test a migration's effect). */
+export function createFakeD1(options: { before?: string } = {}): FakeD1 {
   const raw = new DatabaseSync(':memory:');
   raw.exec('PRAGMA foreign_keys=ON');
-  const dir = join(root, 'migrations');
-  for (const file of readdirSync(dir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort()) {
-    raw.exec(readFileSync(join(dir, file), 'utf8'));
+  for (const file of migrationFiles()) {
+    if (options.before && file >= options.before) break;
+    applyMigration(raw, file);
   }
 
   const d1 = {

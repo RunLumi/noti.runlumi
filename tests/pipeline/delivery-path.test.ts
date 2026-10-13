@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index';
 import type { Bindings, DeliveryMessage } from '../../src/env';
 import { keyringFromEnv } from '../../src/crypto/keyring-env';
-import { migrateLegacyCredentials, rewrapStaleKeys } from '../../src/pipeline/credentials';
+import {
+  credentialStatus,
+  CredentialJobAborted,
+  migrateLegacyCredentials,
+  rewrapStaleKeys,
+} from '../../src/pipeline/credentials';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 import { legacySeal } from '../support/legacy';
 
@@ -129,7 +134,20 @@ function message(body: unknown): FakeMessage {
 }
 
 async function consume(messages: FakeMessage[], e: Bindings = env): Promise<void> {
-  await worker.queue({ messages } as unknown as MessageBatch<unknown>, e);
+  const retryAll = () => messages.forEach((m) => m.retry());
+  await worker.queue({ messages, retryAll } as unknown as MessageBatch<unknown>, e);
+}
+
+/** Queue one delivery for an existing integration's repo and consume it. */
+async function postWebhookFor(integrationId: string): Promise<void> {
+  installation('org-a', '100');
+  db.raw
+    .prepare('UPDATE integrations SET event_types=? WHERE id=?')
+    .run(JSON.stringify(['issues.opened']), integrationId);
+  await postWebhook(issueEvent(100), `d-${integrationId}`);
+  const m = sent.find((x) => x.integrationId === integrationId);
+  if (!m) throw new Error('nothing queued');
+  await consume([message(m)]);
 }
 
 function delivery(id: string): { state: string; last_error: string | null } | undefined {
@@ -226,15 +244,16 @@ describe('consumer', () => {
     expect(delivery(m.id)?.state).toBe('sent');
   });
 
-  it('delivers after the v0 → v1 migration and clears the v0 ciphertext', async () => {
+  it('delivers after the v0 → v1 migration and no longer needs the legacy key', async () => {
     const m = await queued();
     const report = await migrateLegacyCredentials(db.d1, keyringFromEnv(env), K_LEGACY);
-    expect(report).toEqual({ processed: 1, quarantined: 0 });
+    expect(report).toEqual({ processed: 1, quarantined: 0, skipped: 0 });
 
     const row = db.raw
       .prepare('SELECT webhook_ciphertext,kek_version,webhook_envelope FROM integrations WHERE id=?')
       .get('int-a') as { webhook_ciphertext: string; kek_version: number; webhook_envelope: Uint8Array };
-    expect(row.webhook_ciphertext).toBe('');
+    // v0 stays intact so a Worker rollback still delivers; clearing it is an operator step.
+    expect(row.webhook_ciphertext).not.toBe('');
     expect(row.kek_version).toBe(1);
     expect(row.webhook_envelope[0]).toBe(0x01);
 
@@ -264,7 +283,42 @@ describe('consumer', () => {
     const msg = message({ ...m, organizationId: 'org-b' });
     await consume([msg]);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(delivery(m.id)?.last_error).toBe('integration_unavailable');
+    expect(msg.acked).toBe(true);
+    // The forged message cannot even write to the real tenant's delivery row.
+    expect(delivery(m.id)).toEqual({ state: 'pending', last_error: null });
+  });
+
+  it('does not call the provider again for a delivery already sent', async () => {
+    const m = await queued();
+    await consume([message(m)]);
+    const again = message(m);
+    await consume([again]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(again.acked).toBe(true);
+  });
+
+  it('retries, never drops, when the key ring is misconfigured', async () => {
+    const m = await queued();
+    const batch = {
+      messages: [message(m)],
+      retriedAll: false,
+      retryAll() {
+        this.retriedAll = true;
+      },
+    };
+    await worker.queue(batch as unknown as MessageBatch<unknown>, makeEnv({ KEK_V1: 'bad' }));
+    expect(batch.retriedAll).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(delivery(m.id)?.state).toBe('pending');
+  });
+
+  it('retries, never fails permanently, when the KEK version for a row is not configured', async () => {
+    const m = await queued();
+    await migrateLegacyCredentials(db.d1, keyringFromEnv(env), K_LEGACY);
+    const msg = message(m);
+    await consume([msg], makeEnv({ KEK_V1: '', KEK_V2: K2, KMS_ACTIVE_VERSION: '2', ENCRYPTION_KEY: '' }));
+    expect(msg.retried).toBe(true);
+    expect(delivery(m.id)).toEqual({ state: 'retrying', last_error: 'provider_config_unknown_kek_version' });
   });
 
   it('refuses a destination outside the allowlist', async () => {
@@ -309,8 +363,9 @@ describe('credential maintenance jobs', () => {
          VALUES('int-bad','acme/web','[]','lark',?,'org-a')`,
       )
       .run(await legacySeal(LARK_A, '99'.repeat(32)));
+    await integration('int-good', 'org-a', LARK_A);
     const report = await migrateLegacyCredentials(db.d1, keyringFromEnv(env), K_LEGACY);
-    expect(report).toEqual({ processed: 0, quarantined: 1 });
+    expect(report).toEqual({ processed: 1, quarantined: 1, skipped: 0 });
     const row = db.raw
       .prepare('SELECT credentials_quarantine_reason AS r FROM integrations WHERE id=?')
       .get('int-bad') as { r: string };
@@ -323,8 +378,21 @@ describe('credential maintenance jobs', () => {
     await migrateLegacyCredentials(db.d1, keyringFromEnv(env), K_LEGACY);
 
     const rotating = makeEnv({ KEK_V2: K2, KMS_ACTIVE_VERSION: '2' });
-    expect(await rewrapStaleKeys(db.d1, keyringFromEnv(rotating))).toEqual({ processed: 1, quarantined: 0 });
-    expect(await rewrapStaleKeys(db.d1, keyringFromEnv(rotating))).toEqual({ processed: 0, quarantined: 0 });
+    expect(await rewrapStaleKeys(db.d1, keyringFromEnv(rotating))).toEqual({
+      processed: 1,
+      quarantined: 0,
+      skipped: 0,
+    });
+    expect(await rewrapStaleKeys(db.d1, keyringFromEnv(rotating))).toEqual({
+      processed: 0,
+      quarantined: 0,
+      skipped: 0,
+    });
+    expect(await credentialStatus(db.d1, 2)).toEqual({
+      legacyRemaining: 0,
+      staleKekRemaining: 0,
+      quarantined: 0,
+    });
 
     env = makeEnv({ KEK_V1: '', KEK_V2: K2, KMS_ACTIVE_VERSION: '2' });
     await postWebhook(issueEvent(100));
@@ -335,7 +403,65 @@ describe('credential maintenance jobs', () => {
   });
 });
 
+describe('credential job safety', () => {
+  it('aborts without quarantining when every row fails, because the key is the likelier fault', async () => {
+    await integration('int-1', 'org-a', LARK_A);
+    await integration('int-2', 'org-a', LARK_B);
+    await expect(
+      migrateLegacyCredentials(db.d1, keyringFromEnv(env), '99'.repeat(32)),
+    ).rejects.toBeInstanceOf(CredentialJobAborted);
+    expect(await credentialStatus(db.d1, 1)).toEqual({
+      legacyRemaining: 2,
+      staleKekRemaining: 0,
+      quarantined: 0,
+    });
+  });
+
+  it('aborts on a configuration fault instead of quarantining', async () => {
+    await integration('int-1', 'org-a', LARK_A);
+    await migrateLegacyCredentials(db.d1, keyringFromEnv(env), K_LEGACY);
+    // KEK v1 removed before the rewrap finished: a deployment fault, not a row defect.
+    const v1Gone = makeEnv({ KEK_V1: '', KEK_V2: K2, KMS_ACTIVE_VERSION: '2' });
+    await expect(rewrapStaleKeys(db.d1, keyringFromEnv(v1Gone))).rejects.toBeInstanceOf(CredentialJobAborted);
+    expect((await credentialStatus(db.d1, 2)).quarantined).toBe(0);
+  });
+
+  it('never overwrites a credential edited between read and write', async () => {
+    await integration('int-1', 'org-a', LARK_A);
+    const edited = await legacySeal(LARK_B, K_LEGACY);
+    let raced = false;
+    // Land a concurrent edit after the job's SELECT, just before its guarded UPDATE.
+    const racingDb = {
+      ...db.d1,
+      prepare: (sql: string) => {
+        if (!raced && sql.trimStart().startsWith('UPDATE integrations SET key_salt')) {
+          raced = true;
+          db.raw.prepare("UPDATE integrations SET webhook_ciphertext=? WHERE id='int-1'").run(edited);
+        }
+        return db.d1.prepare(sql);
+      },
+    } as D1Database;
+
+    expect(await migrateLegacyCredentials(racingDb, keyringFromEnv(env), K_LEGACY)).toEqual({
+      processed: 0,
+      quarantined: 0,
+      skipped: 1,
+    });
+    // The next run seals the edited value, never the stale one.
+    expect((await migrateLegacyCredentials(db.d1, keyringFromEnv(env), K_LEGACY)).processed).toBe(1);
+    await postWebhookFor('int-1');
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(LARK_B);
+  });
+});
+
 describe('/health', () => {
+  it('names a malformed legacy key', async () => {
+    env = makeEnv({ ENCRYPTION_KEY: 'nope' });
+    const res = await worker.fetch(new Request('https://noti.test/health'), env, {} as ExecutionContext);
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain('ENCRYPTION_KEY');
+  });
+
   it('names the misconfigured key binding without revealing a value', async () => {
     env = makeEnv({ KEK_V1: 'short' });
     const res = await worker.fetch(new Request('https://noti.test/health'), env, {} as ExecutionContext);

@@ -38,6 +38,22 @@ The next rotation reuses the free slot: write `KEK_V1` again and set it active.
 
 ## Retiring the legacy v0 key
 
-After deploying the envelope release, each cron tick re-seals up to 25 v0 rows. When
-`SELECT COUNT(*) FROM integrations WHERE webhook_envelope IS NULL AND organization_id IS NOT NULL`
-returns 0 and nothing is quarantined, run `wrangler secret delete ENCRYPTION_KEY`.
+After the envelope release deploys, each cron tick re-seals up to 25 v0 rows. Every tick logs
+`{"job":"credential_maintenance", ..., "remaining":{"legacyRemaining":N,...}}`.
+
+1. Wait for `legacyRemaining` to reach 0 and `quarantined` to be 0. If the cron run fails with
+   `CredentialJobAborted`, the legacy key or KEK configuration is wrong; `GET /health` names the
+   binding. No rows are quarantined in that case.
+2. Keep the v0 columns until you are sure you will not roll back past this release. Then
+   clear them (this is the contract step):
+   `wrangler d1 execute lumi-noti --remote --command "UPDATE integrations SET webhook_ciphertext='', lark_secret_ciphertext=NULL WHERE webhook_envelope IS NOT NULL"`.
+3. `wrangler secret delete ENCRYPTION_KEY`.
+
+## Quarantined credentials
+
+A row is quarantined only when its own ciphertext will not open. Common causes are a row
+edited by hand or a ciphertext copied from another row. It stops delivering until fixed. Once
+slice 3 ships, the fix is to re-enter the destination in the dashboard, which writes fresh key
+material and clears the quarantine. Before that, an operator can reset the flag after
+correcting the row:
+`UPDATE integrations SET credentials_quarantined_at=NULL, credentials_quarantine_reason=NULL WHERE id='<id>' AND organization_id='<org>'`.
