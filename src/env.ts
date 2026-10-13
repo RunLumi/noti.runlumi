@@ -46,4 +46,8 @@ export type Bindings = AuthBindings & {
   KEK_V2?: string;
   /** Which KEK version wraps new connection keys. */
   KMS_ACTIVE_VERSION: string;
+  /** Delivery ledger retention in days (30..365, default 90). See src/pipeline/retention.ts. */
+  DELIVERY_RETENTION_DAYS?: string;
+  /** Audit event retention in days (30..3650, default 365). */
+  AUDIT_RETENTION_DAYS?: string;
 };

@@ -337,7 +337,7 @@ deletes ciphertext without decrypting it.
 
 ## F193 — Correlation id propagation
 
-**Priority** P0 · **Status** not started · **Extends F11 — does not redefine it**
+**Priority** P0 · **Status** partial (slice 9: our id minted at ingress, `external_request_id` and `cf_ray` captured, `x-request-id` echoed, id attached to every log line inside a request; NOT propagated to the queue message, `deliveries`/outbox rows or the consumer's log lines, no `X-Noti-Correlation-Id` storage, no lookup by id) · **Extends F11 — does not redefine it**
 
 **Story** As a support engineer, I want one identifier that survives the whole path from webhook
 receipt to rendered message, so that a customer can quote it and I can find the exact event.
@@ -438,7 +438,7 @@ the caller is not a member, so the endpoint does not confirm that an id exists.
 
 ## F194 — Structured log event catalogue
 
-**Priority** P0 · **Status** not started · **Extends F11's key set — does not duplicate it**
+**Priority** P0 · **Status** partial (slice 9: `log()` adds `correlation_id`, `external_request_id`, `cf_ray` inside a request; the full key set and the catalogue are not enforced) · **Extends F11's key set — does not duplicate it**
 
 **Story** As an engineer debugging at 2am, I want every log line to have the same shape and to
 name a known event, so that I can filter without reading.
@@ -814,7 +814,7 @@ two have different audit requirements.
 
 ## F197 — Delivery SLIs: accepted is not delivered
 
-**Priority** P0 · **Status** not started · **The most honesty-sensitive feature in this file**
+**Priority** P0 · **Status** partial (slice 9: confirmed-delivery/success ratio, retry rate and dead-letter counts per workspace from the D1 ledger via `GET /api/observability/summary`, Teams reported as accepted; acceptance, routing and duplicate rates are `not measurable yet`; no publication gate, no UI) · **The most honesty-sensitive feature in this file**
 
 **Story** As a customer, I want the reliability number to mean what the word means, so that I can
 decide whether to keep my own alerting or delete it.
@@ -944,7 +944,7 @@ repository names.
 
 ## F198 — Latency, queue depth and reliability measurement
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partial (slice 9: exact end-to-end and queue-delay p50/p95 from `deliveries` timestamps at one-second resolution, backlog AGE from D1; ack and attempt latency are not recorded, no `delivery_attempts` table, no Analytics Engine)
 
 **Story** As an operator, I want to know where time is going between "GitHub sent it" and "the
 message appeared", so that a slow channel is diagnosed rather than guessed at.
@@ -1168,7 +1168,7 @@ D1 under the tenant predicate, not from a shared dataset.
 
 ## F200 — Alerting on our own failure modes
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 9: `outbox_stalled`/`consumer_lag`-style stall detection from D1 with transition-based logging via `ops_state`; it logs, it does not page; no `alert_state` table, `job_runs`, or the other alerts)
 
 **Story** As an on-call engineer, I want to be told when the system is losing notifications
 before a customer tells me, so that the first report is our apology rather than our discovery.
@@ -1303,7 +1303,7 @@ Thresholds and suppression policy are configuration changes and are audited (F28
 
 ## F201 — Incident response runbook
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partial (slice 9: `docs/RUNBOOK.md` with the delivery model, severity table and procedures tied to real tables; not generated from the alert table, no test ties alerts to entries, never rehearsed)
 
 **Story** As an on-call engineer at 3am, I want the runbook to tell me what to check first, so
 that I act on evidence rather than on hunches while a customer's alerts are missing.
