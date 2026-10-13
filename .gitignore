@@ -1,14 +1,39 @@
+# Dependencies and generated build output (including nested web builds)
 node_modules/
 dist/
+coverage/
+*.tsbuildinfo
+
+# Cloudflare local state
 .wrangler/
+
+# Local environment and credentials; keep documented examples
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+!.dev.vars.*.example
 .env
 .env.*
 !.env.example
-coverage/
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Test/browser artifacts
 playwright-report/
 test-results/
+output/playwright/
+.playwright-cli/
+
+# Logs and editor/OS temporary files
 *.log
 .DS_Store
+._*
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Commit package-lock.json, DESIGN.md, brand/ and shared tool configuration.

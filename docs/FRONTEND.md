@@ -28,3 +28,18 @@ The Vite frontend is currently a separate build artifact (`web/dist`). Deploy it
 - Live delivery log and retry endpoints
 - Frontend integration/E2E tests and accessibility audit
 - Build and deploy verification; no tests have been executed in this session
+
+## Shared Lumi design system
+
+Read `DESIGN.md` before changing the UI and use original assets from `brand/`.
+Noti adapts the shared design to application screens rather than reproducing the
+landing-page narrative. `web/src/styles.css` defines canonical color tokens, paper
+and sheet materials, responsive layout and accessibility states. Geist is self-hosted
+through the font package, including Vietnamese glyphs; Tabler Outline provides icons.
+The supplied full wordmark is imported in the shell/auth screens; Vite bundles the
+supplied brand mark for the favicon. See ADR 0002 for acceptance criteria and limits.
+
+Review at desktop and 320px widths, keyboard navigation and reduced motion. Preserve
+prototype/planned labels and empty metrics until real APIs and provider tests support
+them. Build output, local secrets and browser verification artifacts are ignored;
+`package-lock.json`, design assets and shared configuration are committed.

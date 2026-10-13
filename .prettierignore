@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.wrangler/
+playwright-report/
+test-results/
+package-lock.json
+docs/specs/
+docs/DESTINATION_API_REFERENCE.md
+*.md

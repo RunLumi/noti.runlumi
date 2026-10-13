@@ -1,28 +1,36 @@
-import { authClient, assertAuthSuccess } from "./auth-client";
+import { authClient, assertAuthSuccess } from './auth-client';
 
-export type Me = { user: {
-  id: string;
-  name: string;
-  email: string;
-  emailVerified: boolean;
-  org_id: string | null;
-  org_name: string | null;
-  role: "admin" | "member" | null;
-}};
+export type Me = {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    emailVerified: boolean;
+    org_id: string | null;
+    org_name: string | null;
+    role: 'admin' | 'member' | null;
+  };
+};
 export class ApiError extends Error {
-  constructor(message: string, public status: number) { super(message); }
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message);
+  }
 }
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json", ...init.headers },
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ...init.headers },
     ...init,
   });
-  const body = await res.json().catch(() => null);
+  const body: unknown = await res.json().catch(() => null);
   if (!res.ok) {
     throw new ApiError(
-      body && typeof body === "object" && typeof body.error === "string"
-        ? body.error : "Request failed",
+      body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+        ? body.error
+        : 'Request failed',
       res.status,
     );
   }
@@ -30,7 +38,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const authApi = {
-  me: () => api<Me>("/api/workspace/me"),
+  me: () => api<Me>('/api/workspace/me'),
   signin: async (email: string, password: string) => {
     assertAuthSuccess(await authClient.signIn.email({ email, password }));
     return { authenticated: true };
@@ -40,25 +48,35 @@ export const authApi = {
     return { authenticated: true };
   },
   signup: async (email: string, password: string, name: string) => {
-    assertAuthSuccess(await authClient.signUp.email({
-      name: name.trim() || email.split("@")[0],
-      email, password,
-      callbackURL: window.location.origin + "/signin?verified=1",
-    }));
-    return { message: "Check your email for a verification link. Then sign in to create or join your workspace." };
+    assertAuthSuccess(
+      await authClient.signUp.email({
+        name: name.trim() || email.split('@')[0],
+        email,
+        password,
+        callbackURL: window.location.origin + '/signin?verified=1',
+      }),
+    );
+    return {
+      message: 'Check your email for a verification link. Then sign in to create or join your workspace.',
+    };
   },
   resendVerification: async (email: string) => {
-    assertAuthSuccess(await authClient.sendVerificationEmail({
-      email,
-      callbackURL: window.location.origin + "/signin?verified=1",
-    }));
-    return { message: "If eligible, a new verification email has been sent." };
+    assertAuthSuccess(
+      await authClient.sendVerificationEmail({
+        email,
+        callbackURL: window.location.origin + '/signin?verified=1',
+      }),
+    );
+    return { message: 'If eligible, a new verification email has been sent.' };
   },
   forgot: async (email: string) => {
-    assertAuthSuccess(await authClient.requestPasswordReset({
-      email, redirectTo: window.location.origin + "/reset",
-    }));
-    return { message: "If the account exists, a reset link will be sent." };
+    assertAuthSuccess(
+      await authClient.requestPasswordReset({
+        email,
+        redirectTo: window.location.origin + '/reset',
+      }),
+    );
+    return { message: 'If the account exists, a reset link will be sent.' };
   },
   reset: async (token: string, password: string) => {
     assertAuthSuccess(await authClient.resetPassword({ token, newPassword: password }));
@@ -69,5 +87,7 @@ export const authApi = {
     assertAuthSuccess(await authClient.verifyEmail({ query: { token } }));
     return { verified: true };
   },
-  signout: async () => { assertAuthSuccess(await authClient.signOut()); },
+  signout: async () => {
+    assertAuthSuccess(await authClient.signOut());
+  },
 };

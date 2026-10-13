@@ -3,24 +3,24 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": [
-      "ES2022",
-      "DOM"
-    ],
-    "types": [
-      "@cloudflare/workers-types"
-    ],
+    "lib": ["ES2022", "DOM"],
+    "types": ["@cloudflare/workers-types"],
     "strict": true,
+
+    // Hardening beyond `strict`. Each of these has already caught or would catch a real
+    // class of defect in this codebase; see docs/specs/01-platform-runtime.md F01.
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true,
+
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
   },
-  "include": [
-    "src/**/*.ts",
-    "tests/**/*.ts"
-  ],
-  "exclude": [
-    "web",
-    "node_modules",
-    "generated"
-  ]
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist", ".wrangler", "web"]
 }
