@@ -28,13 +28,13 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
 | 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
 | 6a | Dashboard: integrations list, guided create wizard, settings (edit, pause, rotate, delete), GitHub connection panel and repository picker | F206 (partial), F210 (partial), F211, F216 (partial), F217 (partial), F220 (partial), F221, F223, F224 (structure), F225 | — | 🟡 | #13 |
-| 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | this PR |
+| 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | #16 |
 | 7 | Per-integration routing filters with provenance (backend, API, dashboard); the F121 rule engine is not started | F124, F125, F127, F128, F136–F140 (each in part) | — | 🟡 | #25 |
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
-| 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | this PR |
+| 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | #16 |
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
 | W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
-| S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (helper only), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | this PR |
+| S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
 [`specs/00-current-state.md` §5](specs/00-current-state.md#5-non-goals-this-audit-implies).
@@ -586,7 +586,7 @@ Also fixed:
 - No automated axe scan or screen-reader pass yet; only the strings on these screens are in
   the catalogue.
 
-## Slice S — security hardening (this PR)
+## Slice S — security hardening (PR #16)
 
 **What changed**
 
@@ -760,3 +760,11 @@ Also fixed:
   diacritics), no axe or screen-reader pass, and no test against real GitHub deliveries.
 - The routing log is not yet on the activity page; the deliveries API was not on this
   branch's base.
+
+## Slice S2 — ingress flood control wired (F29)
+
+`POST /webhooks/github` now calls `ingressLimiter` after signature verification and tenant
+resolution: 600 events per installation per minute, `429` with `Retry-After` beyond that.
+Lifecycle events and pings return before it, so a revocation is never delayed. A limiter
+fault fails open and logs a redacted `rate_limit_error`. Covered by three tests in
+`tests/pipeline/delivery-path.test.ts`. AR-16 is reworded to the residual risk.

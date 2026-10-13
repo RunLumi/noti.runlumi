@@ -424,7 +424,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F29 — Webhook ingress protection
 
-**Priority** P0 · **Status** 🟡 limiter implemented and unit-tested (`src/security/rate-limit.ts`), not wired into `POST /webhooks/github`; see PROGRESS "Slice S"
+**Priority** P0 · **Status** 🟡 per-installation flood control wired (fixed window, fails open); per-connection keying and quota accounting pending
 
 **Story** As an operator, I want webhook ingress bounded, so that one misbehaving provider
 cannot exhaust our Worker quota.
