@@ -113,7 +113,11 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
         ac,
         roles,
         creatorRole: 'admin',
-        organizationLimit: 1,
+        // No organizationLimit: a user may belong to several workspaces.
+        // docs/PRODUCT.md names "agency/operator: needs many customer workspaces"
+        // as a target audience, which a cap of 1 excludes outright.
+        // Isolation comes from organization_id predicates on our own tables
+        // (docs/specs/02 F24-F27), never from membership cardinality.
         disableOrganizationDeletion: true,
         requireEmailVerificationOnInvitation: true,
         sendInvitationEmail: async ({ id, email, organization: org }) => {
