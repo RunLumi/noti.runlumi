@@ -48,7 +48,7 @@ multi-tenant product.**
 
 ## 0b. New findings introduced or revealed by PR #2
 
-### N1 — A dead parallel auth schema still exists in the migration chain 🆕
+### N1 — A dead parallel auth schema still exists in the migration chain ✅ marked
 `migrations/0004_identity.sql` creates `auth_users`, `auth_orgs`, `auth_memberships`,
 `auth_tokens`, `auth_invites`. Better Auth replaced all of them in `0005`. A **fresh**
 database still gets six unused tables — including `auth_tokens`, which has **no hash column**
@@ -56,38 +56,63 @@ database still gets six unused tables — including `auth_tokens`, which has **n
 Cannot be dropped (already applied); must be documented as deprecated, and `0004` must be
 labelled so nobody re-reads it as the current design.
 
-### N2 — `organizationLimit: 1` contradicts the stated audience 🆕
-`better-auth.ts:92` sets `organizationLimit: 1`, and `ensureNotMember` throws
+### N2 — `organizationLimit: 1` contradicted the stated audience ✅ resolved
+`better-auth.ts` set `organizationLimit: 1`, and `ensureNotMember` threw
 `"An account can belong to only one organization"` on create, add-member and accept-invite.
 `docs/PRODUCT.md` names as audience #4: **"Agency/operator: needs many customer workspaces
-without cross-tenant leaks."** With this setting an agency operator **cannot serve two
-clients**. This is a product contradiction, not a security control — the restriction is
-currently enforced three ways over (plugin limit, two hooks, and the old `auth_memberships`
-PK), so removing it is a small change.
-⚠️ `organizationLimit` is not in the Better Auth docs I could retrieve. Treat as unverified
-until checked against the installed version.
+without cross-tenant leaks."** With this setting an agency operator cannot serve two clients.
 
-### N3 — No self-service workspace deletion 🆕
-`disableOrganizationDeletion: true` with no replacement. There is no way for a customer to
-delete their workspace and its data. This blocks the data-deletion obligation in
-`docs/SECURITY.md` and F216.
+**Resolved 2026-10-13.** `organizationLimit` and `ensureNotMember` are removed. Relaxing the
+cap alone would have introduced a tenant leak — see N7 — so the selection rule was rewritten
+in the same change.
 
-### N4 — `createAuth()` is constructed per request 🆕
-`src/auth/workspace.ts:10` calls `createAuth(c.env, c.executionCtx)` on every request.
-Better Auth caches its schema validation **per adapter instance**, so per-request construction
-defeats that cache and re-runs setup work each time. A module-level cache keyed on `env`
-is the usual Workers pattern.
+### N3 — No self-service workspace deletion ⛔ still open
+`disableOrganizationDeletion: true` with no replacement. Still no path for a customer to
+delete their workspace and its data. Tracked as `02` F30.
 
-### N5 — `docs/AUTH_SETUP.md` is now actively wrong 🆕
-It documents `auth_users`, PBKDF2 in `src/auth/crypto.ts`, `auth_tokens`, a hand-built passkey
-plan and `AUTH_EMAIL` setup — all of which have changed. Every security invariant in it is now
-unverified against the code. It is the document most likely to mislead the next contributor,
-and `AGENTS.md` requires docs to track behaviour.
+### N4 — `createAuth()` constructed per request ❌ was a false positive
+`src/auth/workspace.ts` calls `createAuth(c.env, c.executionCtx)` on every request.
 
-### N6 — No bridge from a GitHub installation to an organization 🆕
+**Reassessed and deliberately left as-is**, with a comment in the source explaining why. The
+original reasoning — defeating Better Auth's schema-validation cache — does not hold here:
+with the Drizzle adapter, validation inspects the local schema object and issues **no**
+database query. Meanwhile [better-auth#10315](https://github.com/better-auth/better-auth/issues/10315)
+(open, filed from a production incident) shows promises cached on a Better Auth instance can be
+poisoned when the first client disconnects, hanging every later request on that isolate.
+Module-scope caching would widen that blast radius. Per-request construction is the safer
+shape until the upstream bug is fixed.
+
+### N5 — `docs/AUTH_SETUP.md` was actively wrong ✅ resolved
+It documented `auth_users`, PBKDF2 in `src/auth/crypto.ts`, `auth_tokens`, a hand-built
+passkey plan and `AUTH_EMAIL` setup — all superseded. It also carried an out-of-date claim
+that Cloudflare Email Sending cannot send to arbitrary recipients; that restriction was
+lifted once a sending domain is onboarded. Rewritten against the working tree on 2026-10-13.
+
+### N6 — No bridge from a GitHub installation to an organization ⛔ still open
 There is no `github_installations` table, no install flow, and no path from an inbound webhook
-to an `organization_id`. The two halves of the system — identity (PR #2) and delivery
-(`src/index.ts`) — do not meet. This is the concrete form of the gap in `06-source-github.md`.
+to an `organization_id`. Identity (PR #2) and delivery (`src/index.ts`) still do not meet.
+This is the concrete form of the gap in `05-source-github.md`.
+
+### N7 — Ambiguous membership selection would have leaked a tenant ✅ resolved
+Found while implementing N2 — the most valuable thing in this change.
+
+`GET /team` resolved the caller's organization with:
+
+```ts
+.where(eq(schema.member.userId, s.user.id)).limit(1)
+```
+
+With one organization that is correct. The moment `organizationLimit` was relaxed it would
+return **whichever** membership the database happened to yield first, and `/team` would list
+**that organization's members** to a user who also belongs to another. Multi-organization
+support would have converted a latent assumption into a cross-tenant read — the same defect
+class as D3, arriving through a different door.
+
+Resolved by extracting `selectMembership` as a pure function: an explicit `?org=` request
+(validated against membership, `404` when absent), then the session's active organization,
+then the single-membership case, and **refusal when ambiguous** rather than a guess. Covered
+by 11 cases in `tests/workspace.test.ts`, including a stale-active-organization case that must
+not silently fall through to another tenant.
 
 ## 1. What exists today
 
@@ -135,7 +160,7 @@ Status at `86c9679`:
 | D15 | Magic 1 MiB webhook cap | ⬜ unchanged |
 | D16 | Unbounded event-type string space | ⬜ unchanged |
 
-New: **N1–N6** above.
+New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N3 and N6 remain open.
 
 Each item below is reproducible from the code. Severity is our judgement.
 
