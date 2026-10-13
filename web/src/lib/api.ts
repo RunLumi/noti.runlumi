@@ -1,4 +1,73 @@
-export type Me={user:{id:string;email:string;org_id:string;role:'admin'|'member'}};
-export class ApiError extends Error{constructor(message:string,public status:number){super(message);}}
-export async function api<T>(path:string,init:RequestInit={}):Promise<T>{const res=await fetch(path,{credentials:'same-origin',headers:{'Content-Type':'application/json',...init.headers},...init});let data:unknown;try{data=await res.json();}catch{throw new ApiError('Unexpected server response',res.status);}if(!res.ok){const message=(data&&typeof data==='object'&&'error'in data&&typeof data.error==='string')?data.error:'Request failed';throw new ApiError(message,res.status);}return data as T;}
-export const authApi={me:()=>api<Me>('/auth/me'),signin:(email:string,password:string)=>api<{authenticated:boolean}>('/auth/signin',{method:'POST',body:JSON.stringify({email,password})}),signup:(email:string,password:string,orgName:string)=>api<{message:string}>('/auth/signup',{method:'POST',body:JSON.stringify({email,password,orgName})}),forgot:(email:string)=>api<{message:string}>('/auth/forgot-password',{method:'POST',body:JSON.stringify({email})}),reset:(token:string,password:string)=>api<{reset:boolean}>('/auth/reset-password',{method:'POST',body:JSON.stringify({token,password})}),verify:(token:string)=>api<{verified:boolean}>('/auth/verify?token='+encodeURIComponent(token)),signout:()=>api('/auth/signout',{method:'POST'})};
+import { authClient, assertAuthSuccess } from "./auth-client";
+
+export type Me = { user: {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  org_id: string | null;
+  org_name: string | null;
+  role: "admin" | "member" | null;
+}};
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(path, {
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...init.headers },
+    ...init,
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new ApiError(
+      body && typeof body === "object" && typeof body.error === "string"
+        ? body.error : "Request failed",
+      res.status,
+    );
+  }
+  return body as T;
+}
+
+export const authApi = {
+  me: () => api<Me>("/api/workspace/me"),
+  signin: async (email: string, password: string) => {
+    assertAuthSuccess(await authClient.signIn.email({ email, password }));
+    return { authenticated: true };
+  },
+  signinPasskey: async () => {
+    assertAuthSuccess(await authClient.signIn.passkey({}));
+    return { authenticated: true };
+  },
+  signup: async (email: string, password: string, name: string) => {
+    assertAuthSuccess(await authClient.signUp.email({
+      name: name.trim() || email.split("@")[0],
+      email, password,
+      callbackURL: window.location.origin + "/signin?verified=1",
+    }));
+    return { message: "Check your email for a verification link. Then sign in to create or join your workspace." };
+  },
+  resendVerification: async (email: string) => {
+    assertAuthSuccess(await authClient.sendVerificationEmail({
+      email,
+      callbackURL: window.location.origin + "/signin?verified=1",
+    }));
+    return { message: "If eligible, a new verification email has been sent." };
+  },
+  forgot: async (email: string) => {
+    assertAuthSuccess(await authClient.requestPasswordReset({
+      email, redirectTo: window.location.origin + "/reset",
+    }));
+    return { message: "If the account exists, a reset link will be sent." };
+  },
+  reset: async (token: string, password: string) => {
+    assertAuthSuccess(await authClient.resetPassword({ token, newPassword: password }));
+    return { reset: true };
+  },
+  // Native Better Auth verification email links call /api/auth/verify-email directly.
+  verify: async (token: string) => {
+    assertAuthSuccess(await authClient.verifyEmail({ query: { token } }));
+    return { verified: true };
+  },
+  signout: async () => { assertAuthSuccess(await authClient.signOut()); },
+};
