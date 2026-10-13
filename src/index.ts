@@ -7,12 +7,15 @@ import { Hono } from 'hono';
 type Bindings = AuthBindings & {
   DELIVERY_QUEUE: Queue<Delivery>;
   GITHUB_WEBHOOK_SECRET: string;
+  GITHUB_APP_ID: string;
   ENCRYPTION_KEY: string;
 };
 
 type Delivery = {
   id: string;
   integrationId: string;
+  /** Resolved from the verified installation. Carried so the consumer can re-check scope. */
+  organizationId: string;
   destination: 'lark' | 'slack';
   ciphertext: string;
   larkSecretCiphertext?: string | null;
@@ -76,6 +79,71 @@ async function decrypt(ciphertext: string, keyHex: string): Promise<string> {
   );
 }
 
+type InstallationRow = { organization_id: string; status: string };
+
+/**
+ * Resolve the workspace that owns an inbound GitHub delivery.
+ *
+ * The signature alone proves only that the request was signed with our App-wide webhook
+ * secret — which every installation of our App holds. It does **not** identify a tenant.
+ * The `installation` block in the verified payload body is the only tenant signal we can
+ * trust, because it arrives inside the signed bytes.
+ *
+ * `X-GitHub-Hook-Installation-Target-ID` / `-Type` are deliberately NOT used: GitHub
+ * documents them only as "the resource where the webhook was created", and the sole worked
+ * example is a repository webhook, so their meaning for an App webhook is undefined.
+ *
+ * Returns a discriminated result rather than throwing so the caller can map each failure to
+ * the right status code. **Every non-`ok` outcome is a rejection.** There is no fallback to
+ * "route it everywhere" — that was the original defect.
+ */
+export type TenantResolution =
+  | { kind: 'ok'; organizationId: string }
+  | { kind: 'no-installation' }
+  | { kind: 'app-mismatch' }
+  | { kind: 'unknown-installation' }
+  | { kind: 'not-active' };
+
+/** Pure part of tenant resolution: validate the payload's installation block. */
+export function readInstallationBlock(
+  event: Record<string, unknown>,
+  expectedAppId: string,
+): { kind: 'ok'; installationId: string } | { kind: 'no-installation' | 'app-mismatch' } {
+  const installation = asRecord(event.installation);
+  if (!installation) return { kind: 'no-installation' };
+
+  const appId = installation.app_id;
+  // Absent `app_id` is tolerated (GitHub omits it in some shapes) and the installation
+  // lookup below is still scoped to OUR app id. But a *present* app_id must be a number
+  // that matches ours — any other type or value is a cross-App payload and is rejected.
+  if (appId !== undefined && (typeof appId !== 'number' || String(appId) !== expectedAppId)) {
+    return { kind: 'app-mismatch' };
+  }
+
+  const id = installation.id;
+  // GitHub installation ids are positive integers; anything else is not a real installation.
+  if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) return { kind: 'no-installation' };
+
+  return { kind: 'ok', installationId: String(id) };
+}
+
+async function resolveTenant(env: Bindings, event: Record<string, unknown>): Promise<TenantResolution> {
+  const block = readInstallationBlock(event, env.GITHUB_APP_ID);
+  if (block.kind !== 'ok') return block;
+
+  const row = await env.DB.prepare(
+    'SELECT organization_id, status FROM github_installations WHERE installation_id=? AND app_id=?',
+  )
+    .bind(block.installationId, env.GITHUB_APP_ID)
+    .first<InstallationRow>();
+
+  // Unknown installation: 403. Never "allow", never fall back.
+  if (!row) return { kind: 'unknown-installation' };
+  if (row.status !== 'active') return { kind: 'not-active' };
+
+  return { kind: 'ok', organizationId: row.organization_id };
+}
+
 app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
 app.route('/api/workspace', workspace);
 
@@ -108,15 +176,34 @@ app.post('/webhooks/github', async (c) => {
   const deliveryId = c.req.header('x-github-delivery');
   if (!repo || !deliveryId) return c.text('Invalid event', 400);
 
+  // ---- Tenant resolution (fixes D2/D3) -------------------------------------
+  // Previously this routed on `repo`, a field chosen by the sender. The organization is
+  // now resolved ONLY from the verified installation, and every failure rejects.
+  const tenant = await resolveTenant(c.env, event);
+  switch (tenant.kind) {
+    case 'ok':
+      break;
+    // No installation block (e.g. a repository-webhook style `ping`): there is nowhere to
+    // route, so reject rather than guess. A payload claiming a different App is rejected
+    // before any lookup. All three share one response so callers cannot probe which applied.
+    case 'no-installation':
+    case 'app-mismatch':
+    case 'unknown-installation':
+      return c.text('Unknown installation', 403);
+    case 'not-active':
+      // Suspended or uninstalled. Must stop delivery immediately (05-source-github.md F68).
+      return c.text('Installation not active', 403);
+  }
+  const organizationId = tenant.organizationId;
+
   const eventType = classifyGithubEvent(c.req.header('x-github-event') || '', event);
 
-  // NOTE (D3, unresolved): this still routes on `repo`, a field chosen by the sender.
-  // Correct routing must key on the verified connection/installation, not a body field.
-  // See docs/specs/02-identity-tenancy.md F25-F27 and F01/F04 in 00-current-state.md.
+  // `repo` is retained only as a display/narrowing attribute. It is NOT authorization:
+  // the tenant already came from the verified installation above.
   const rows = await c.env.DB.prepare(
-    'SELECT id,destination,webhook_ciphertext,lark_secret_ciphertext,event_types FROM integrations WHERE repo=? AND enabled=1',
+    'SELECT id,destination,webhook_ciphertext,lark_secret_ciphertext,event_types FROM integrations WHERE organization_id=? AND repo=? AND enabled=1',
   )
-    .bind(repo)
+    .bind(organizationId, repo)
     .all<IntegrationRow>();
 
   let queued = 0;
@@ -137,6 +224,7 @@ app.post('/webhooks/github', async (c) => {
     const payload: Delivery = {
       id: `${deliveryId}:${row.id}`,
       integrationId: row.id,
+      organizationId,
       destination: row.destination,
       ciphertext: row.webhook_ciphertext,
       larkSecretCiphertext: row.lark_secret_ciphertext,
@@ -144,14 +232,16 @@ app.post('/webhooks/github', async (c) => {
       url,
     };
 
+    // One batch, one transaction: the delivery row and the outbox row are committed
+    // together or not at all. `organization_id` is written on both so the tenant scope
+    // survives to the consumer (audit D4).
     const results = await c.env.DB.batch([
       c.env.DB.prepare(
-        "INSERT OR IGNORE INTO deliveries(id,integration_id,state) VALUES(?,?,'pending')",
-      ).bind(payload.id, row.id),
-      c.env.DB.prepare('INSERT OR IGNORE INTO notification_outbox(id,payload_json) VALUES(?,?)').bind(
-        payload.id,
-        JSON.stringify(payload),
-      ),
+        "INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state) VALUES(?,?,?,'pending')",
+      ).bind(payload.id, row.id, organizationId),
+      c.env.DB.prepare(
+        'INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json) VALUES(?,?,?)',
+      ).bind(payload.id, organizationId, JSON.stringify(payload)),
     ]);
     if (outboxResult(results, 1).meta.changes) queued++;
   }

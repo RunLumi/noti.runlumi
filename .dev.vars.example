@@ -17,11 +17,17 @@ GITHUB_WEBHOOK_SECRET=replace-me
 # high-entropy random value, not a memorable phrase.
 BETTER_AUTH_SECRET=replace-with-at-least-32-characters-of-entropy
 
-# --- Non-secret configuration -----------------------------------------------
+# Non-secret configuration -----------------------------------------------
 # These are also declared as `vars` in wrangler.jsonc. Override locally only if
 # your dev origin differs (e.g. http://localhost:5173).
 APP_ORIGIN=http://localhost:5173
 AUTH_FROM_EMAIL=noreply@runlumi.app
+
+# Public ID of the GitHub App (it appears in install URLs, so it is not a secret).
+# Inbound events are matched against github_installations by this id AND the
+# installation id from the payload. Until this is the real App ID, webhook ingress
+# fails closed with 403 — which is the intended behaviour, not a misconfiguration.
+GITHUB_APP_ID=000000
 
 # --- Notes -----------------------------------------------------------------
 # `AUTH_EMAIL` is a Cloudflare Email Sending binding declared in wrangler.jsonc,

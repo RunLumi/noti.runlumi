@@ -87,7 +87,14 @@ export const member = sqliteTable(
     role: text('role', { enum: ['admin', 'member'] }).notNull(),
     createdAt: timestamp('created_at').notNull(),
   },
-  (t) => [uniqueIndex('member_one_org_per_user').on(t.userId), index('member_org_idx').on(t.organizationId)],
+  // NOT unique: a user may belong to several workspaces. The previous
+  // `member_one_org_per_user` unique index was what actually blocked a second
+  // membership, not Better Auth's `organizationLimit`. See migrations/0006.
+  (t) => [
+    index('member_user_idx').on(t.userId),
+    uniqueIndex('member_user_org_unique').on(t.userId, t.organizationId),
+    index('member_org_idx').on(t.organizationId),
+  ],
 );
 
 export const invitation = sqliteTable(
@@ -127,6 +134,41 @@ export const passkey = sqliteTable(
     aaguid: text('aaguid'),
   },
   (t) => [index('passkey_user_idx').on(t.userId)],
+);
+
+/**
+ * GitHub App installations — the inbound tenant resolver.
+ *
+ * A verified webhook signature proves only that the request was signed with our
+ * App-wide secret, which every installation of our App holds. This table is the only
+ * authorized mapping from an inbound event to a workspace. `installation_id` comes
+ * from the verified payload body; the X-GitHub-Hook-Installation-Target-* headers are
+ * deliberately NOT used because their meaning for an App webhook is undocumented.
+ */
+export const githubInstallation = sqliteTable(
+  'github_installations',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id')
+      .notNull()
+      .references(() => organization.id, { onDelete: 'cascade' }),
+    installationId: text('installation_id').notNull(),
+    appId: text('app_id').notNull(),
+    accountLogin: text('account_login').notNull(),
+    accountType: text('account_type', { enum: ['User', 'Organization'] }).notNull(),
+    repositorySelection: text('repository_selection', { enum: ['all', 'selected'] }).notNull(),
+    accessTokenCiphertext: text('access_token_ciphertext'),
+    tokenExpiresAt: integer('token_expires_at'),
+    status: text('status', { enum: ['active', 'suspended', 'uninstalled'] })
+      .notNull()
+      .default('active'),
+    createdAt: timestamp('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('github_installations_unique').on(t.installationId, t.appId),
+    index('github_installations_org_idx').on(t.organizationId),
+    index('github_installations_status_idx').on(t.status),
+  ],
 );
 
 export const rateLimit = sqliteTable('rate_limit', {
