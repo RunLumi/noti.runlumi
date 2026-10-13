@@ -130,10 +130,14 @@ interface ListBody {
   nextCursor: string | null;
 }
 
+async function json<T>(res: Response): Promise<T> {
+  return await res.json();
+}
+
 async function list(query = '', as = 'bob'): Promise<ListBody> {
   const res = await call('GET', `/api/deliveries${query}`, { as });
   expect(res.status).toBe(200);
-  return (await res.json()) as ListBody;
+  return await json<ListBody>(res);
 }
 
 function auditActions(org: string): string[] {
@@ -263,12 +267,12 @@ describe('GET /api/deliveries/:id', () => {
     delivery({ id: 'd1', attempts: 3 });
     delivery({ id: 'r1', state: 'pending', code: null, replayOf: 'd1' });
     const res = await call('GET', '/api/deliveries/d1', { as: 'bob' });
-    const body = (await res.json()) as {
+    const body = await json<{
       delivery: { id: string; attempts: number };
       timeline: { kind: string }[];
       attemptDetail: string;
       replays: { id: string; state: string }[];
-    };
+    }>(res);
     expect(res.status).toBe(200);
     expect(body.delivery).toMatchObject({ id: 'd1', attempts: 3 });
     expect(body.attemptDetail).toBe('summary');
@@ -300,7 +304,7 @@ describe('GET /api/deliveries/summary', () => {
     delivery({ id: 'old', state: 'sent', code: null, updatedAt: '2020-01-01 00:00:00' });
     delivery({ id: 'x', org: 'org-b', integrationId: 'int-b', state: 'sent', code: null, updatedAt: now });
     const res = await call('GET', '/api/deliveries/summary', { as: 'bob' });
-    const body = (await res.json()) as { counts: Record<string, number>; windowHours: number };
+    const body = await json<{ counts: Record<string, number>; windowHours: number }>(res);
     expect(body.windowHours).toBe(24);
     expect(body.counts).toMatchObject({ sent: 2, dead_lettered: 1, retrying: 0 });
   });
@@ -326,7 +330,7 @@ describe('POST /api/deliveries/:id/replay', () => {
     delivery({ id: 'd1', attempts: 13 });
     const res = await replay('d1');
     expect(res.status).toBe(202);
-    const { replay: r } = (await res.json()) as { replay: { deliveryId: string; created: boolean } };
+    const { replay: r } = await json<{ replay: { deliveryId: string; created: boolean } }>(res);
     expect(r.created).toBe(true);
     expect(
       db.raw.prepare('SELECT state,attempts,replay_of FROM deliveries WHERE id=?').get(r.deliveryId),
@@ -353,8 +357,8 @@ describe('POST /api/deliveries/:id/replay', () => {
     const second = await replay('d1');
     expect(first.status).toBe(202);
     expect(second.status).toBe(200);
-    const a = (await first.json()) as { replay: { deliveryId: string } };
-    const b = (await second.json()) as { replay: { deliveryId: string; created: boolean } };
+    const a = await json<{ replay: { deliveryId: string } }>(first);
+    const b = await json<{ replay: { deliveryId: string; created: boolean } }>(second);
     expect(b.replay).toMatchObject({ deliveryId: a.replay.deliveryId, created: false });
     expect(rowsReplaying('d1')).toHaveLength(1);
     expect(auditActions('org-a')).toEqual(['delivery.replay']);
@@ -368,7 +372,7 @@ describe('POST /api/deliveries/:id/replay', () => {
 
   it('allows another replay once the previous one dead-lettered too', async () => {
     delivery({ id: 'd1' });
-    const first = (await (await replay('d1')).json()) as { replay: { deliveryId: string } };
+    const first = await json<{ replay: { deliveryId: string } }>(await replay('d1'));
     db.raw.prepare("UPDATE deliveries SET state='dead_lettered' WHERE id=?").run(first.replay.deliveryId);
     expect((await replay('d1')).status).toBe(202);
     expect(rowsReplaying('d1')).toHaveLength(2);
@@ -380,12 +384,12 @@ describe('POST /api/deliveries/:id/replay', () => {
     delivery({ id: 'r', state: 'retrying', code: 'destination_unavailable' });
     delivery({ id: 'p', state: 'pending', code: null });
     expect((await replay('s')).status).toBe(409);
-    expect(((await (await replay('a')).json()) as { reason: string }).reason).toBe('already_delivered');
-    expect(((await (await replay('r')).json()) as { reason: string }).reason).toBe('not_replayable');
-    expect(((await (await replay('p')).json()) as { reason: string }).reason).toBe('not_replayable');
+    expect((await json<{ reason: string }>(await replay('a'))).reason).toBe('already_delivered');
+    expect((await json<{ reason: string }>(await replay('r'))).reason).toBe('not_replayable');
+    expect((await json<{ reason: string }>(await replay('p'))).reason).toBe('not_replayable');
     delivery({ id: 'gone' });
     db.raw.prepare('DELETE FROM notification_outbox WHERE id=?').run('gone');
-    expect(((await (await replay('gone')).json()) as { reason: string }).reason).toBe('payload_unavailable');
+    expect((await json<{ reason: string }>(await replay('gone'))).reason).toBe('payload_unavailable');
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM deliveries WHERE replay_of IS NOT NULL').get()).toEqual({
       n: 0,
     });

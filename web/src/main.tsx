@@ -7,6 +7,7 @@ import { OnboardingPage, InvitePage } from './onboarding';
 import { IntegrationsPage } from './integrations/IntegrationsPage';
 import { CreateWizard } from './integrations/wizard/CreateWizard';
 import { IntegrationSettings } from './integrations/settings/IntegrationSettings';
+import { validateActivitySearch } from './deliveries/search';
 import '@fontsource-variable/geist';
 import './styles.css';
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 30_000 } } });
@@ -25,7 +26,13 @@ const routes = [
   }),
   createRoute({ getParentRoute: () => root, path: '/onboarding', component: OnboardingPage }),
   createRoute({ getParentRoute: () => root, path: '/invite', component: InvitePage }),
-  createRoute({ getParentRoute: () => root, path: '/activity', component: Activity }),
+  createRoute({
+    getParentRoute: () => root,
+    path: '/activity',
+    component: Activity,
+    // Filters live in the URL so a link shows exactly what the sender saw (F213).
+    validateSearch: validateActivitySearch,
+  }),
   createRoute({ getParentRoute: () => root, path: '/team', component: Team }),
   createRoute({ getParentRoute: () => root, path: '/settings', component: Settings }),
   createRoute({ getParentRoute: () => root, path: '/signin', component: () => <AuthPage mode="signin" /> }),
