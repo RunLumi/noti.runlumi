@@ -403,3 +403,46 @@ describe('migration 0013', () => {
     expect(raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()).toEqual({ n: 1 });
   });
 });
+
+describe('migration 0017', () => {
+  it('adds sources and integrations.source_id without changing existing rows', () => {
+    const { raw } = createFakeD1({ before: '0017' });
+    raw.prepare("INSERT INTO organization(id,name,slug,created_at) VALUES('o','o','o',1)").run();
+    raw
+      .prepare(
+        `INSERT INTO integrations(id,repo,event_types,destination,webhook_ciphertext,organization_id,name)
+         VALUES('i1','acme/web','["issues.opened"]','slack','c','o','Alerts')`,
+      )
+      .run();
+    applyMigration(raw, '0017_generic_source.sql');
+
+    expect(raw.prepare('SELECT id,repo,event_types,name,source_id FROM integrations').all()).toEqual([
+      { id: 'i1', repo: 'acme/web', event_types: '["issues.opened"]', name: 'Alerts', source_id: null },
+    ]);
+    const names = (
+      raw.prepare("SELECT name FROM sqlite_master WHERE type='trigger'").all() as { name: string }[]
+    ).map((r) => r.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'sources_org_required_insert',
+        'sources_org_immutable',
+        'integrations_source_same_org',
+        'integrations_org_required_insert',
+        'integrations_org_immutable',
+      ]),
+    );
+    // A source cascades from its organization; the unique endpoint id is enforced.
+    const insert = (id: string, endpoint: string) =>
+      raw
+        .prepare(
+          `INSERT INTO sources(id,organization_id,kind,name,endpoint_id,secret_envelope,key_salt,dek_wrapped,kek_version)
+           VALUES(?,'o','generic','n',?,x'00',x'00',x'00',1)`,
+        )
+        .run(id, endpoint);
+    insert('s1', 'a'.repeat(22));
+    expect(() => insert('s2', 'a'.repeat(22))).toThrow();
+    expect(() => insert('s3', 'short')).toThrow();
+    raw.prepare("DELETE FROM organization WHERE id='o'").run();
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM sources').get()).toEqual({ n: 0 });
+  });
+});

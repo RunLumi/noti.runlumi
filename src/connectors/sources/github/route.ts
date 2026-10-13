@@ -1,5 +1,6 @@
 import type { Context } from 'hono';
 import { SUMMARY_MAX_CHARS, type Bindings, type DeliveryMessage } from '../../../env';
+import { readBodyCapped } from '../../../lib/body';
 import { asRecord, str } from '../../../lib/json';
 import { newLeaseToken } from '../../../delivery/claim';
 import { dedupKey, deliveryId as deriveDeliveryId } from '../../../delivery/ids';
@@ -18,8 +19,6 @@ import { ingressLimiter } from '../../../security/rate-limit';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
 const MAX_BODY_BYTES = 1024 * 1024;
-
-const enc = new TextEncoder();
 
 type IntegrationRow = { id: string; event_types: string; filters_json: string | null };
 
@@ -93,9 +92,9 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
 
   // Size is checked against the declared header AND the encoded body; a header alone is
   // attacker-controlled and may be absent or wrong.
-  if (Number(c.req.header('content-length') || 0) > MAX_BODY_BYTES) return c.text('Too large', 413);
-  const body = await c.req.text();
-  if (enc.encode(body).length > MAX_BODY_BYTES) return c.text('Too large', 413);
+  const read = await readBodyCapped(c.req.raw, MAX_BODY_BYTES);
+  if (!read.ok) return c.text('Too large', 413);
+  const body = new TextDecoder().decode(read.bytes);
 
   const signature = c.req.header('x-hub-signature-256') || '';
   if (!(await verifyGithubSignature(body, signature, c.env.GITHUB_WEBHOOK_SECRET)))
@@ -251,9 +250,11 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
         `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)
          SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP ${notLegacy}`,
       ).bind(id, row.id, organizationId, dedup.hex, legacyId, organizationId),
+      // Only when the delivery row above was new (`changes()` is the previous statement's row
+      // count): a redelivery after the outbox row was purged must not be sent again.
       c.env.DB.prepare(
         `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
-         SELECT ?,?,? ${notLegacy}`,
+         SELECT ?,?,? ${notLegacy} AND changes() > 0`,
       ).bind(id, organizationId, JSON.stringify(message), legacyId, organizationId),
     ]);
     if (batchResult(results, 1).meta.changes) queued++;

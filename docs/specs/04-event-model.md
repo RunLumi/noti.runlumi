@@ -6,6 +6,12 @@
 >
 > External references read **2026-10-13**; see `README.md#sources`.
 
+> **Implementation note, slice 10a.** The generic webhook source does **not** yet produce the
+> F41 envelope or use the closed F42 catalog. It validates a small documented body and maps it
+> straight onto the existing display model (`DeliveryMessage`: title, link, actor, status,
+> summary, free-form `eventType`), the same path the GitHub route uses today. Generic event
+> types are display labels and cannot be filtered on. See [ADR 0012](../adr/0012-generic-source.md).
+
 ## Why CloudEvents
 
 Not for interoperability marketing — we are not a broker. Because it supplies one

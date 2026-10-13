@@ -1,0 +1,193 @@
+import type { Context } from 'hono';
+import { CryptoError } from '../../../crypto/envelope';
+import { keyringFromEnv } from '../../../crypto/keyring-env';
+import { newLeaseToken } from '../../../delivery/claim';
+import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../../delivery/ids';
+import type { Bindings, DeliveryMessage } from '../../../env';
+import { readBodyCapped } from '../../../lib/body';
+import { log } from '../../../platform/log';
+import { dispatchOutbox } from '../../../pipeline/outbox';
+import { sourceIngressLimiter } from '../../../security/rate-limit';
+import { parseGenericEvent, toDisplayFields } from './event';
+import { openSourceSecret, type SourceCredentialRow } from './secret';
+import { verifyStandardWebhook } from './signature';
+
+/**
+ * `POST /webhooks/generic/:endpointId` — the generic inbound source (ADR 0012, spec 06).
+ *
+ * Order matters and mirrors the GitHub route (spec 05 F58/F63/F64): cheap, endpoint-agnostic
+ * checks first (content type, size), then the source lookup, then signature verification
+ * over the RAW bytes, and only then flood limiting, JSON parsing and routing. The tenant
+ * comes only from the source row the endpoint id selects; the payload cannot name one.
+ * 202 is returned only after the delivery and outbox rows have committed.
+ */
+
+/** Hard cap on an inbound body (256 KiB). Generic events are small by contract. */
+export const MAX_BODY_BYTES = 256 * 1024;
+
+const ENDPOINT_ID = /^[A-Za-z0-9_-]{22,64}$/;
+
+type SourceRow = SourceCredentialRow & { enabled: number };
+
+/** One shape for every "no such live endpoint" outcome: unknown, malformed id, disabled. */
+function notFound(c: Context<{ Bindings: Bindings }>): Response {
+  return c.text('Not found', 404);
+}
+
+function isJson(contentType: string | undefined): boolean {
+  return /^application\/json\s*(;|$)/i.test(contentType ?? '');
+}
+
+// A fixed throwaway key so the unknown/disabled path performs the same HMAC work over the
+// same bytes as a real verification (best-effort timing parity; see ADR 0012).
+/** Bodies larger than this skip the decoy HMAC. */
+export const DECOY_MAX_BODY_BYTES = 16 * 1024;
+const DECOY_KEY = new Uint8Array(new ArrayBuffer(32)).fill(0x5a);
+
+export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promise<Response> {
+  if (!isJson(c.req.header('content-type'))) return c.text('Expected application/json', 415);
+  // Counts bytes as they arrive, so a chunked or lying request is cut off at the cap instead
+  // of being buffered first (review M1).
+  const read = await readBodyCapped(c.req.raw, MAX_BODY_BYTES);
+  if (!read.ok) return c.text('Too large', 413);
+  const raw = read.bytes;
+
+  const headers = {
+    id: c.req.header('webhook-id') ?? null,
+    timestamp: c.req.header('webhook-timestamp') ?? null,
+    signature: c.req.header('webhook-signature') ?? null,
+  };
+  const nowMs = Date.now();
+  const endpointId = c.req.param('endpointId') ?? '';
+
+  const source = ENDPOINT_ID.test(endpointId)
+    ? await c.env.DB.prepare(
+        `SELECT id,organization_id,enabled,secret_envelope,key_salt,dek_wrapped,kek_version
+         FROM sources WHERE endpoint_id=? AND kind='generic'`,
+      )
+        .bind(endpointId)
+        .first<SourceRow>()
+    : null;
+  if (!source || source.enabled !== 1) {
+    // Timing parity is best effort and only worth its CPU for ordinary bodies: above the
+    // threshold the decoy is skipped so an unauthenticated 256 KiB body costs one D1 read
+    // and no HMAC (review M2, ADR 0012).
+    if (raw.length <= DECOY_MAX_BODY_BYTES)
+      await verifyStandardWebhook(DECOY_KEY, headers, raw, Math.floor(nowMs / 1000));
+    return notFound(c);
+  }
+
+  let key: Uint8Array<ArrayBuffer>;
+  try {
+    key = await openSourceSecret(source, keyringFromEnv(c.env));
+  } catch (e) {
+    // A deployment or row fault, not the sender's: 5xx so a retrying sender recovers once
+    // fixed. Category only; never the row, the secret or the body.
+    log('error', 'generic_source_secret_unavailable', {
+      source_id: source.id,
+      code: e instanceof CryptoError ? e.code : 'internal_error',
+    });
+    return c.text('Temporarily unavailable', 500);
+  }
+
+  const verdict = await verifyStandardWebhook(key, headers, raw, Math.floor(nowMs / 1000));
+  if (!verdict.ok) return c.text('Unauthorized', 401);
+
+  // After verification, so an unauthenticated caller cannot burn this source's budget.
+  const limit = await sourceIngressLimiter(c.env, source.id, nowMs);
+  if (limit.limited)
+    return c.text('Too many requests', 429, { 'retry-after': String(limit.retryAfterSeconds) });
+
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw));
+  } catch {
+    return c.json({ error: 'Invalid JSON' }, 400);
+  }
+  const parsed = parseGenericEvent(parsedJson);
+  if (!parsed.ok) return c.json({ error: 'Invalid event', fields: parsed.errors }, 400);
+
+  const organizationId = source.organization_id;
+  const rows = await c.env.DB.prepare(
+    'SELECT id FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
+  )
+    .bind(organizationId, source.id)
+    .all<{ id: string }>();
+
+  // F170: tenant-bound transport identity. A sender retry or replay inside the tolerance
+  // window repeats `webhook-id`, so the same event is accepted once per destination.
+  const dedup = await dedupKey({
+    orgId: organizationId,
+    connectionId: source.id,
+    source: 'generic',
+    eventId: headers.id ?? '',
+  });
+  const display = toDisplayFields(parsed.event);
+
+  // A webhook-id must be unique per event. If this id was already accepted with a DIFFERENT
+  // body, the event would be silently dropped as a "duplicate": refuse it loudly instead
+  // (review M3). Same id and same body stays an idempotent 202.
+  const bodyHash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)));
+  const earlier = await c.env.DB.prepare(
+    'SELECT body_hash FROM deliveries WHERE dedup_key=? AND organization_id=? LIMIT 1',
+  )
+    .bind(dedup.hex, organizationId)
+    .first<{ body_hash: string | null }>();
+  if (earlier && earlier.body_hash !== null && earlier.body_hash !== bodyHash) {
+    try {
+      await c.env.DB.prepare(
+        `UPDATE sources SET reused_id_rejections=reused_id_rejections+1,last_reuse_rejected_at=CURRENT_TIMESTAMP
+         WHERE id=? AND organization_id=?`,
+      )
+        .bind(source.id, organizationId)
+        .run();
+    } catch {
+      // Display-only counter; the rejection stands either way.
+    }
+    // Counts and ids of ours only: never the webhook-id (sender controlled) or the body.
+    log('warn', 'generic_webhook_id_reused', { source_id: source.id });
+    return c.json({ error: 'webhook_id_reused', message: 'webhook-id must be unique per event.' }, 409);
+  }
+
+  let queued = 0;
+  for (const row of rows.results) {
+    const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
+    const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...display };
+    const results = await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,body_hash,created_at)
+         VALUES(?,?,?,'pending',?,?,CURRENT_TIMESTAMP)`,
+      ).bind(id, row.id, organizationId, dedup.hex, bodyHash),
+      // Only if the delivery row above was NEW (`changes()` is the previous statement's row
+      // count). Otherwise a repeat after the outbox row was purged (retention drops dispatched
+      // outbox rows after 7 days while the delivery lives on) would send the event again.
+      c.env.DB.prepare(
+        `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
+         SELECT ?,?,? WHERE changes() > 0`,
+      ).bind(id, organizationId, JSON.stringify(message)),
+    ]);
+    if (results[1]?.meta.changes) queued++;
+  }
+
+  try {
+    await c.env.DB.prepare(
+      'UPDATE sources SET last_received_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?',
+    )
+      .bind(source.id, organizationId)
+      .run();
+  } catch {
+    // Display-only bookkeeping; the event itself is already durable.
+    log('warn', 'generic_source_touch_failed', { source_id: source.id });
+  }
+
+  if (queued > 0)
+    c.executionCtx.waitUntil(dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }));
+  return c.json(
+    {
+      accepted: true,
+      persisted: queued,
+      ...(rows.results.length > 0 && queued === 0 ? { duplicate: true } : {}),
+    },
+    202,
+  );
+}

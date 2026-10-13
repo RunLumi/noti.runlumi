@@ -207,6 +207,31 @@ Do not `wrangler secret delete KEK_V1` until the first returns 0 and the second 
 rows. The `credential_maintenance` log line reports `remaining` per tick. Rotation has not
 been rehearsed (docs/RELEASE_GATES.md).
 
+## Generic source: edge rate rule
+
+`POST /webhooks/generic/<endpointId>` is public and unauthenticated until its signature
+verifies. Before that point a request costs one indexed D1 read and one HMAC over up to
+256 KiB; the per-source limiter (600 verified events a minute) cannot help, by design (it runs
+after verification so strangers cannot burn a source's budget). **Configure a Cloudflare rate
+limiting rule on the zone** (dashboard: Security, WAF, Rate limiting rules), because the
+Worker cannot do this itself:
+
+- Match: URI path starts with `/webhooks/generic/` and method is `POST`.
+- Characteristics: IP address. Threshold: start at 300 requests per 10 seconds per IP (a busy
+  legitimate sender behind one NAT is well under this; tune from `wrangler tail`).
+- Action: block for 60 seconds (or managed challenge is NOT suitable: senders are machines).
+- Optional: also cap request body size at 256 KiB at the edge for the same path; the Worker
+  already refuses more than that, but the edge refuses first.
+
+Verify after configuring: send 400 unsigned requests from one IP in 10 seconds and expect `429`
+from the edge (not from the Worker; the Worker never returns 429 before verification). This rule
+has not been created or rehearsed yet (UNVERIFIED); until it is, AR-18 in docs/THREAT_MODEL.md
+is an open exposure, not an accepted one.
+
+A sender that is being refused `409 webhook_id_reused` shows a counter on its card on the
+Sources page and `generic_webhook_id_reused` warnings in the logs (source id only, never the
+id or body). The fix is on the sender: every event needs its own `webhook-id`.
+
 ## Missed GitHub webhooks
 
 GitHub is not known to retry failed deliveries automatically (**UNVERIFIED**). If ingress was down or rejected

@@ -64,6 +64,17 @@ Code: `src/connectors/sources/github/route.ts`, `tenant.ts`, `events.ts`. Tests:
 | D | Lifecycle events throttled | Deliberately never rate limited: a revocation is a security signal and a 429 delays GitHub's view of it | Cost is small: lifecycle handling routes nothing |
 | E | Replay | Stable idempotency key per `(org, installation, delivery id)`; GitHub provides no timestamp, so there is no replay window to enforce | Replays inside the dedup window are absorbed, outside it are treated as new (F170) |
 
+### 4.1b Generic webhook ingress `POST /webhooks/generic/:endpointId` (slice 10a, ADR 0012)
+
+| STRIDE | Threat | Control | Residual |
+| --- | --- | --- | --- |
+| S | Forged event | Standard Webhooks `v1` HMAC over the raw bytes with a per-source secret, constant-time `crypto.subtle.verify`, every candidate checked, other schemes ignored; verification precedes parsing and queueing | A leaked secret signs anything until it is rotated (cutover, no overlap) |
+| T | Tampering, shifting bytes across the signed fields | A `.` in `webhook-id` and a non-digit timestamp are rejected before any HMAC | None known |
+| R | Replay | Timestamp within 5 minutes; stable idempotency key per `(org, source, webhook-id)`; a reused id with a different body is refused (409) and counted | A replay with a fresh signature needs the secret |
+| I | Probing which endpoints exist | Unknown, malformed and disabled endpoints share one 404 (status, body, headers tested); a decoy HMAC runs for bodies up to 16 KiB | Timing is best effort and not measured (AR-18) |
+| D | Unauthenticated body flood | Content type and size checked first; the body is read through a counting reader that stops at the cap; before authentication the cost is **one indexed D1 read plus one HMAC over at most 256 KiB** (no HMAC for a dead endpoint above 16 KiB); the per-source limiter (600 per minute) runs only after verification | The pre-authentication cost cannot be limited per source without an oracle: it needs an edge rule (AR-18, RUNBOOK) |
+| E | Cross-tenant routing | Tenant comes only from the source row the endpoint selects; routing reads `organization_id` AND `source_id`; triggers refuse a cross-organization or re-pointed `source_id` | None known |
+
 ### 4.2 GitHub install flow `/api/github/install`, `/github/callback`
 
 Code: `src/api/github.ts`, `src/connectors/sources/github/install.ts`. ADR 0008. Tests:
@@ -178,6 +189,8 @@ IDs AR-1 to AR-12 are the ones in spec 15 F241; AR-13 onward were added here.
 | AR-15 | Teams accepts any `*.logic.azure.com` host, which tenants can create (ADR 0006) | Microsoft documents the trigger URL as opaque | https-only, no IP literals, no redirects, body and timeout bounds; payload is the rendered notification | security owner | Microsoft documents a narrower form |
 | AR-16 | Ingress flood control is a fixed window (600 events per installation per minute) | Applied after signature verification and tenant resolution; lifecycle events and pings are never limited; a limiter fault fails open and logs `rate_limit_error` | A runaway installation is bounded; a window boundary allows up to 2× (AR-8); GitHub does not retry a 429, so an operator redelivers | platform owner | A legitimate burst above 600 per minute |
 | AR-17 | Rate-limit counters (one row per key per minute) | Pruned from `scheduled()` (older than 1 h, up to 5,000 rows per tick) and indexed on `window_start` (migration 0014) | Counters are tiny; bursts of up to 2× the limit are possible at a window boundary (AR-8) | platform owner | Growth outpacing 5,000 rows per minute |
+| AR-18 | Pre-authentication cost of `/webhooks/generic/*`: one D1 read and one HMAC over up to 256 KiB per request, with no per-source limit possible before the signature is known | A per-source limit before verification would let anyone burn a source's budget, and an unknown endpoint has no source to limit | Counting body reader (cap at 256 KiB); decoy HMAC skipped above 16 KiB; per-source limiter after verification; the edge rule in docs/RUNBOOK.md ("Generic source: edge rate rule") must be configured on the zone | platform owner | An abuse spike, or the zone rule being absent in production |
+| AR-19 | A sender that reuses `webhook-id` for different events loses them (409) | The producer owns id uniqueness; the alternative, silently dropping or double-sending, is worse | 409 `webhook_id_reused`, a redacted warning, and a visible per-source counter on the Sources page | product owner | Support reports of rejected events |
 
 An accepted risk whose compensating control regresses stops being accepted and becomes a
 defect. Adding a row is a PR; removing one requires the control to have shipped.

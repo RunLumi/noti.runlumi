@@ -186,7 +186,7 @@ lifecycle.get('/export', async (c) => {
   const who = await gate(c, 'workspace.export');
   if (who instanceof Response) return who;
   const db = c.env.DB;
-  const [members, integrations, installations, deliveries, audit] = await db.batch([
+  const [members, integrations, sources, installations, deliveries, audit] = await db.batch([
     db
       .prepare(
         `SELECT u.name AS name, u.email AS email, m.role AS role, m.created_at AS joined_at
@@ -195,8 +195,15 @@ lifecycle.get('/export', async (c) => {
       .bind(who.orgId),
     db
       .prepare(
-        `SELECT id,name,repo,event_types,filters_json,destination,destination_host,enabled,created_at,updated_at
+        `SELECT id,name,repo,source_id,event_types,filters_json,destination,destination_host,enabled,created_at,updated_at
          FROM integrations WHERE organization_id=? ORDER BY created_at`,
+      )
+      .bind(who.orgId),
+    // Never the secret, key, salt or envelope: an explicit column list, not SELECT *.
+    db
+      .prepare(
+        `SELECT id,kind,name,endpoint_id,enabled,created_at,updated_at,last_received_at,secret_rotated_at
+         FROM sources WHERE organization_id=? ORDER BY created_at`,
       )
       .bind(who.orgId),
     db
@@ -237,6 +244,7 @@ lifecycle.get('/export', async (c) => {
     rowLimitPerTable: EXPORT_ROW_LIMIT,
     members: members?.results ?? [],
     integrations: integrations?.results ?? [],
+    sources: sources?.results ?? [],
     githubInstallations: installations?.results ?? [],
     deliveries: (deliveries?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
     auditEvents: (audit?.results ?? []).slice(0, EXPORT_ROW_LIMIT),

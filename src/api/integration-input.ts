@@ -18,7 +18,10 @@ export type Parsed<T> = { ok: true; value: T } | { ok: false; errors: FieldError
 
 export interface CreateIntegrationInput {
   readonly name: string;
+  /** For a source integration this is empty and the handler substitutes the sentinel repo. */
   readonly repo: string;
+  /** Set when the integration routes events from a generic source instead of a repository. */
+  readonly sourceId?: string;
   readonly eventTypes: readonly GithubEventType[];
   readonly destination: DestinationKind;
   readonly webhookUrl: string;
@@ -184,9 +187,43 @@ function parseFilterField(r: Record<string, unknown>, errors: FieldError[]): Fil
   return parsed.value;
 }
 
+const SOURCE_ID = /^[A-Za-z0-9-]{8,64}$/;
+
+/**
+ * A source integration receives every event its source sends (filters arrive with slice 7),
+ * so it carries no repository, GitHub event types or routing filters.
+ */
+function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegrationInput> {
+  const errors: FieldError[] = [];
+  if (typeof r.sourceId !== 'string' || !SOURCE_ID.test(r.sourceId))
+    errors.push({ field: 'sourceId', message: 'Choose one of your sources.' });
+  for (const field of ['repo', 'eventTypes', 'filters'])
+    if (field in r)
+      errors.push({ field, message: 'Not used with a source: it receives every event the source sends.' });
+  const name = parseName(r.name, errors);
+  const destination = parseDestination(r.destination, errors);
+  const credentials = parseCredentials(r, destination, errors);
+  if (errors.length || !name || !destination || !credentials || typeof r.sourceId !== 'string')
+    return { ok: false, errors };
+  return {
+    ok: true,
+    value: {
+      name,
+      repo: '',
+      sourceId: r.sourceId,
+      eventTypes: [],
+      filters: {},
+      destination,
+      webhookUrl: credentials.webhookUrl,
+      signingSecret: credentials.signingSecret,
+    },
+  };
+}
+
 export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationInput> {
   const r = asRecord(body);
   if (!r) return { ok: false, errors: [{ field: 'body', message: 'Expected a JSON object.' }] };
+  if ('sourceId' in r) return parseSourceIntegration(r);
   const errors: FieldError[] = [];
   const name = parseName(r.name, errors);
   const repo = parseRepo(r.repo, errors);

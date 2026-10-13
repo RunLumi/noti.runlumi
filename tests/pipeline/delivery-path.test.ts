@@ -379,6 +379,44 @@ describe('ingress tenant isolation', () => {
     expect(await again.json()).toEqual({ accepted: true, persisted: 0 });
     expect(sent).toHaveLength(1);
   });
+
+  it('does not queue a redelivery again after its outbox row was purged by retention', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    await postWebhook(issueEvent(100), 'purged');
+    expect(sent).toHaveLength(1);
+    // Retention drops dispatched outbox rows after 7 days while the delivery row lives on.
+    db.raw.prepare('DELETE FROM notification_outbox').run();
+    const again = await postWebhook(issueEvent(100), 'purged');
+    expect(await again.json()).toEqual({ accepted: true, persisted: 0 });
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get()).toEqual({ n: 0 });
+    expect(sent).toHaveLength(1);
+  });
+
+  it('cuts off a chunked body at the cap instead of buffering it (no Content-Length)', async () => {
+    const chunk = new Uint8Array(64 * 1024).fill(0x61);
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= 64) return controller.close();
+        pulled++;
+        controller.enqueue(chunk);
+      },
+    });
+    const res = await worker.fetch(
+      new Request('https://noti.test/webhooks/github', {
+        method: 'POST',
+        body: stream,
+        duplex: 'half',
+        headers: { 'x-github-event': 'issues', 'x-github-delivery': 'chunked' },
+      } as RequestInit),
+      env,
+      { waitUntil: () => undefined } as unknown as ExecutionContext,
+    );
+    expect(res.status).toBe(413);
+    // 1 MiB cap = 16 chunks; the reader stops at the first byte over, not at 64 chunks.
+    expect(pulled).toBeLessThan(25);
+  });
 });
 
 describe('consumer', () => {

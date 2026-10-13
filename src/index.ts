@@ -4,9 +4,12 @@ import { api as githubApi, browser as githubBrowser } from './api/github';
 import deliveries from './api/deliveries';
 import integrations from './api/integrations';
 import routing from './api/routing';
+import sources from './api/sources';
 import workspaceLifecycle from './api/workspace-lifecycle';
 import workspace from './auth/workspace';
 import { githubWebhook } from './connectors/sources/github/route';
+import { genericWebhook } from './connectors/sources/generic/route';
+import { rewrapStaleSourceKeys } from './connectors/sources/generic/secret';
 import { keyringFromEnv, keyringProblem } from './crypto/keyring-env';
 import type { Bindings } from './env';
 import { consumeDeliveries } from './pipeline/consumer';
@@ -36,6 +39,7 @@ app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.ra
 app.route('/api/workspace', workspace);
 app.route('/api/workspace', workspaceLifecycle);
 app.route('/api/integrations', integrations);
+app.route('/api/sources', sources);
 app.route('/api/deliveries', deliveries);
 app.route('/api/observability', observability);
 app.route('/api/integrations', routing);
@@ -51,6 +55,7 @@ app.get('/health', (c) => {
 });
 
 app.post('/webhooks/github', githubWebhook);
+app.post('/webhooks/generic/:endpointId', genericWebhook);
 
 /**
  * Credential maintenance, bounded per tick: v0 → v1 migration, then KEK rewrap (F37).
@@ -63,8 +68,9 @@ async function maintainCredentials(env: Bindings): Promise<void> {
     ? await migrateLegacyCredentials(env.DB, keyring, env.ENCRYPTION_KEY)
     : null;
   const rewrapped = await rewrapStaleKeys(env.DB, keyring);
+  const sourcesRewrapped = await rewrapStaleSourceKeys(env.DB, keyring);
   const remaining = await credentialStatus(env.DB, keyring.activeVersion);
-  log('info', 'credential_maintenance', { migrated, rewrapped, remaining });
+  log('info', 'credential_maintenance', { migrated, rewrapped, sourcesRewrapped, remaining });
 }
 
 /** Backstop first, so a released claim is redispatched in the same tick (H1), then F174. */

@@ -42,7 +42,7 @@ export function parseDeliveryMessage(value: unknown): DeliveryMessage | null {
   return { id, integrationId, organizationId, title, url, ...optionalDisplayFields(r) };
 }
 
-const STATUSES: ReadonlySet<unknown> = new Set(['success', 'failure', 'info']);
+const STATUSES: ReadonlySet<unknown> = new Set(['success', 'failure', 'warning', 'info']);
 
 /** A bounded, non-empty string, or nothing: a malformed optional field never blocks delivery. */
 function bounded(value: unknown, max: number): string | undefined {

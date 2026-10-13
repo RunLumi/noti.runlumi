@@ -20,7 +20,7 @@ export interface DeliveryMessage {
   readonly repo?: string;
   /** The sender's login. */
   readonly actor?: string;
-  readonly status?: 'success' | 'failure' | 'info';
+  readonly status?: 'success' | 'failure' | 'warning' | 'info';
   /** Catalog event type, e.g. `workflow_run.failure`. */
   readonly eventType?: string;
   /** At most {@link SUMMARY_MAX_CHARS}; derived from a few scalar fields, not the body. */

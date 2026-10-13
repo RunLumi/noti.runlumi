@@ -5,6 +5,7 @@ import { RouterProvider, createRouter, createRootRoute, createRoute } from '@tan
 import { AppShell, Overview, Activity, Team, Settings, AuthPage, VerifyPage, ResetPage } from './pages';
 import { OnboardingPage, InvitePage } from './onboarding';
 import { IntegrationsPage } from './integrations/IntegrationsPage';
+import { SourcesPage } from './sources/SourcesPage';
 import { CreateWizard } from './integrations/wizard/CreateWizard';
 import { IntegrationSettings } from './integrations/settings/IntegrationSettings';
 import { validateActivitySearch } from './deliveries/search';
@@ -24,6 +25,7 @@ const routes = [
     validateSearch: (search: Record<string, unknown>): { created?: boolean } =>
       search.created === true || search.created === 'true' ? { created: true } : {},
   }),
+  createRoute({ getParentRoute: () => root, path: '/sources', component: SourcesPage }),
   createRoute({ getParentRoute: () => root, path: '/onboarding', component: OnboardingPage }),
   createRoute({ getParentRoute: () => root, path: '/invite', component: InvitePage }),
   createRoute({

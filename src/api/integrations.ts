@@ -37,6 +37,7 @@ interface IntegrationRow {
   id: string;
   name: string | null;
   repo: string;
+  source_id: string | null;
   event_types: string;
   destination: DestinationKind;
   destination_host: string | null;
@@ -49,13 +50,16 @@ interface IntegrationRow {
   sealed: number;
 }
 
-const SELECT_COLUMNS = `id,name,repo,event_types,destination,destination_host,enabled,created_at,updated_at,
+const SELECT_COLUMNS = `id,name,repo,source_id,event_types,destination,destination_host,enabled,created_at,updated_at,
   credentials_quarantined_at,credentials_quarantine_reason,filters_json,(webhook_envelope IS NOT NULL) AS sealed`;
 
 export interface IntegrationView {
   readonly id: string;
   readonly name: string;
+  /** Empty for a source integration, which has no repository. */
   readonly repo: string;
+  /** The generic source this integration routes from, or null for a GitHub integration. */
+  readonly sourceId: string | null;
   readonly eventTypes: readonly string[];
   readonly destination: DestinationKind;
   readonly destinationHost: string | null;
@@ -88,7 +92,8 @@ export function toView(row: IntegrationRow): IntegrationView {
   return {
     id: row.id,
     name: row.name ?? row.repo,
-    repo: row.repo,
+    repo: row.source_id ? '' : row.repo,
+    sourceId: row.source_id,
     eventTypes: eventTypesOf(row.event_types),
     destination: row.destination,
     destinationHost: row.destination_host,
@@ -249,8 +254,19 @@ integrations.post('/', async (c) => {
   const parsed = parseCreateIntegration(read.body);
   if (!parsed.ok) return invalid(c, parsed.errors);
 
-  const repo = await canonicalRepository(c.env.DB, who.orgId, parsed.value.repo);
-  if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
+  let repo: string | null;
+  if (parsed.value.sourceId) {
+    // The source must belong to this workspace; another workspace's source is "not found".
+    const owned = await c.env.DB.prepare('SELECT id FROM sources WHERE id=? AND organization_id=?')
+      .bind(parsed.value.sourceId, who.orgId)
+      .first();
+    if (!owned) return invalid(c, [{ field: 'sourceId', message: 'Choose one of your sources.' }]);
+    // A value no GitHub owner/name can equal, so repository routing can never select it.
+    repo = `source:${parsed.value.sourceId}`;
+  } else {
+    repo = await canonicalRepository(c.env.DB, who.orgId, parsed.value.repo);
+    if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
+  }
   const input = { ...parsed.value, repo };
   const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM integrations WHERE organization_id=?')
     .bind(who.orgId)
@@ -269,15 +285,16 @@ integrations.post('/', async (c) => {
 
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO integrations(id,organization_id,name,repo,event_types,destination,destination_host,
+      `INSERT INTO integrations(id,organization_id,name,repo,source_id,event_types,destination,destination_host,
          webhook_ciphertext,key_salt,dek_wrapped,kek_version,webhook_envelope,lark_secret_envelope,
          enabled,created_by,created_at,updated_at,filters_json)
-       VALUES(?,?,?,?,?,?,?,'',?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)`,
+       VALUES(?,?,?,?,?,?,?,?,'',?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)`,
     ).bind(
       id,
       who.orgId,
       input.name,
       input.repo,
+      input.sourceId ?? null,
       JSON.stringify(input.eventTypes),
       input.destination,
       host,
@@ -295,7 +312,7 @@ integrations.post('/', async (c) => {
       'integration.create',
       id,
       {
-        repo: input.repo,
+        ...(input.sourceId ? { sourceId: input.sourceId } : { repo: input.repo }),
         destination: input.destination,
         destinationHost: host,
         eventTypes: input.eventTypes,
@@ -324,6 +341,23 @@ integrations.patch('/:id', async (c) => {
   if (!read.ok) return read.response;
   const parsed = parseUpdateIntegration(read.body, existing.destination);
   if (!parsed.ok) return invalid(c, parsed.errors);
+  if (
+    existing.source_id &&
+    (parsed.value.repo !== undefined ||
+      parsed.value.eventTypes !== undefined ||
+      parsed.value.filters !== undefined)
+  )
+    return invalid(c, [
+      {
+        field:
+          parsed.value.repo !== undefined
+            ? 'repo'
+            : parsed.value.eventTypes !== undefined
+              ? 'eventTypes'
+              : 'filters',
+        message: 'This integration receives every event from its source; this cannot be changed.',
+      },
+    ]);
   let input = parsed.value;
   if (input.repo !== undefined) {
     const repo = await canonicalRepository(c.env.DB, who.orgId, input.repo);

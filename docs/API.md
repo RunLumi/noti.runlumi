@@ -30,6 +30,8 @@ Capabilities, as defined in `src/auth/permissions.ts`:
 | Capability | admin | member |
 | --- | --- | --- |
 | `integration.read/create/update/delete` | ✅ | ✅ |
+| `source.read/create/update` | ✅ | ✅ |
+| `source.rotate`, `source.delete` | ✅ | ❌ |
 | `delivery.read` | ✅ | ✅ |
 | `delivery.replay`, `audit.read` | ✅ | ❌ |
 
@@ -46,7 +48,8 @@ only `destinationHost`.
 type Integration = {
   id: string;
   name: string;
-  repo: string;                       // owner/repository, a filter within the workspace
+  repo: string;                       // owner/repository, a filter within the workspace; '' for a source integration
+  sourceId: string | null;            // set when it routes every event of a generic source (see below)
   eventTypes: string[];               // from GITHUB_EVENT_TYPES (src/connectors/sources/github/catalog.ts)
   destination: 'lark' | 'slack' | 'teams';
   destinationHost: string | null;     // e.g. "hooks.slack.com"
@@ -178,6 +181,105 @@ Capability `integration.read`; another workspace's integration is `404`.
   It follows the mutation rules (our `Origin`, a JSON body) and is limited to 60 per user per
   minute. It needs `integration.read` only, because nothing is written.
 
+A source integration is created with `sourceId` instead of `repo` and `eventTypes`:
+`{name, sourceId, destination, webhookUrl, signingSecret?}`. It receives every event its source
+accepts. Sending `repo` or `eventTypes` with `sourceId` is `422`, as is a `sourceId` from another
+workspace (indistinguishable from an unknown one). `PATCH` may rename, pause or replace
+credentials on it, but a `repo` or `eventTypes` change is `422`.
+
+## Sources (generic signed webhook source)
+
+Capabilities `source.*`; the same mutation rules as above (Origin, JSON, 20 mutations per user
+per minute, 25 sources per workspace, enforced atomically in the INSERT). Every query is scoped to the workspace; another
+workspace's source is `404`.
+
+```ts
+type Source = {
+  id: string;
+  name: string;
+  kind: 'generic';
+  endpointId: string;                 // public routing id, 24 base64url characters
+  endpointUrl: string;                // APP_ORIGIN + /webhooks/generic/<endpointId>
+  enabled: boolean;
+  createdAt: string; updatedAt: string;
+  lastReceivedAt: string | null;      // last accepted, verified event
+  secretRotatedAt: string | null;
+  reusedIdRejections: number;         // events refused with 409 webhook_id_reused
+  lastReuseRejectedAt: string | null;
+  integrationCount: number;           // chats bound to it
+};
+```
+
+| Method and path | Body | Success |
+| --- | --- | --- |
+| `GET /api/sources` | | `200 {sources: Source[]}` |
+| `GET /api/sources/:id` | | `200 {source}` |
+| `POST /api/sources` | `{name}` (1–80 characters, no control characters) | `201 {source, secret}`, `Cache-Control: no-store` |
+| `PATCH /api/sources/:id` | `{name?, enabled?}` | `200 {source}`; any other field is `422` |
+| `POST /api/sources/:id/rotate` | none | **Admin only** (`source.rotate`). `200 {source, secret}`, `Cache-Control: no-store`; the previous secret is invalid at once. `409` if the source changed while rotating (nothing changed; retry). |
+| `DELETE /api/sources/:id[?cascade=true]` | none | **Admin only** (`source.delete`). `204`. A source with connected chats returns `409 {error, integrations: n}` unless `cascade=true`, which also deletes those integrations and their saved webhook URLs. |
+
+`secret` (`whsec_` + base64 of 32 random bytes) is returned **only** by create and rotate and is
+never readable again; it is also absent from the workspace export, which lists sources without
+credential columns. While a workspace deletion is pending, mutations return `409`.
+
+### Sending events: `POST /webhooks/generic/:endpointId`
+
+No session. Authentication is the [Standard Webhooks](https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md)
+`v1` signature. Body at most 256 KiB, `Content-Type: application/json`.
+
+| Header | Meaning |
+| --- | --- |
+| `webhook-id` | **Must be unique per event**; letters, digits, `_`, `:`, `-`, at most 128 characters (no `.`). Retrying the same event with the same id and body is safe: it is accepted once. Reusing an id for different content is refused with `409`. |
+| `webhook-timestamp` | Unix **seconds**; must be within 5 minutes of the server clock. |
+| `webhook-signature` | Space-separated `v1,<base64 HMAC-SHA256>` entries (at most 10); the HMAC is over `<webhook-id>.<webhook-timestamp>.<raw body>`, keyed with the **base64-decoded** secret after `whsec_`. Other versions are ignored. |
+
+Body (all strings are single-line unless noted; unknown keys are rejected):
+
+```json
+{
+  "type": "deploy.failed",
+  "title": "Deploy failed on production",
+  "summary": "Exit code 1",
+  "url": "https://ci.example.com/runs/42",
+  "severity": "error",
+  "actor": "deploy-bot",
+  "fields": { "env": "prod", "attempt": 2 }
+}
+```
+
+`type` (≤ 100; letters, digits, `. _ : -`) and `title` (≤ 300) are required. `summary` (≤ 1000,
+may span lines), `actor` (≤ 100), `url` (absolute `https:`, no credentials, ≤ 2048, rendered as a
+link, never fetched), `severity` (`info` default, `warning`, `error`, `critical`) and `fields`
+(≤ 10 entries; keys ≤ 40 of letters, digits, space, `_ . -`; values text, number or boolean, ≤ 200)
+are optional. Destinations show `severity` as info / warning / failure (`error` and `critical`
+both render as failure) and `summary` plus `fields` within a 280-character budget, cut with an ellipsis.
+
+| Status | Meaning |
+| --- | --- |
+| `202 {accepted: true, persisted: n}` | Durably accepted for `n` integrations (`0` if the source has none). `duplicate: true` marks a repeat of an already-accepted `webhook-id`. |
+| `400 {error, fields: [{field, message}]}` | Authentic but invalid JSON or event; names fields, never echoes values. |
+| `409 {error: "webhook_id_reused"}` | This `webhook-id` was already accepted with a different body. Nothing was queued; the source's `reusedIdRejections` counter increments. Give every event its own id. |
+| `401 Unauthorized` | Missing or malformed headers, wrong signature, or timestamp outside the window (all identical). |
+| `404 Not found` | Unknown, malformed or paused endpoint (all identical). |
+| `413` / `415` | Body over 256 KiB (counted as it streams in, so chunked and lying `Content-Length` requests are cut off at the cap) / not `application/json`. |
+| `429` | More than 600 verified events per minute for this source; honour `Retry-After`. |
+| `500` | The stored secret could not be opened; retry later. |
+
+```bash
+export NOTI_SIGNING_SECRET='whsec_…'      # shown once when the source was created or rotated
+URL='https://<your-origin>/webhooks/generic/<endpointId>'
+BODY='{"type":"deploy.failed","title":"Deploy failed on production","severity":"error"}'
+ID="msg_$(date +%s)_$RANDOM"; TS=$(date +%s)
+KEY=$(printf '%s' "${NOTI_SIGNING_SECRET#whsec_}" | openssl base64 -d -A | xxd -p -c 256)
+SIG=$(printf '%s.%s.%s' "$ID" "$TS" "$BODY" | openssl dgst -sha256 -mac HMAC -macopt hexkey:"$KEY" -binary | openssl base64 -A)
+curl -sS -X POST "$URL" -H 'content-type: application/json' \
+  -H "webhook-id: $ID" -H "webhook-timestamp: $TS" -H "webhook-signature: v1,$SIG" --data-binary "$BODY"
+```
+
+Delivery semantics are at-least-once on our side and idempotent by `webhook-id`: a retry with the
+same id never produces a second message, but a producer that mints a new id per retry will.
+
 ## GitHub connection
 
 See [ADR 0008](adr/0008-github-install-verification.md) and [GITHUB_APP.md](GITHUB_APP.md).
@@ -239,7 +341,7 @@ with `Retry-After`.
 | `POST /api/workspace/deletion` | `workspace.delete` | Body `{confirm: "<workspace name>"}`. Returns `202`. Integrations are disabled immediately and the purge runs after 7 days. Returns `422` on a wrong confirmation and `409` if a deletion is already scheduled. |
 | `DELETE /api/workspace/deletion` | `workspace.delete` | Cancels and restores the integrations that were enabled. Returns `409` once the purge has started. |
 
-While a deletion is pending, integration mutations and `POST /api/github/install` return `409`.
+While a deletion is pending, integration and source mutations and `POST /api/github/install` return `409`.
 
 ## Observability
 

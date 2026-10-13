@@ -15,6 +15,7 @@ import {
   IconChevronRight,
   IconLayoutDashboard,
   IconLogout,
+  IconPlugConnected,
   IconPlus,
   IconSettings,
   IconShieldCheck,
@@ -24,7 +25,7 @@ import {
 } from '@tabler/icons-react';
 import { authApi } from './lib/api';
 import { Badge, Button, Card, Input, Notice } from './components/ui';
-const privatePaths = ['/', '/integrations', '/activity', '/team', '/settings', '/onboarding'];
+const privatePaths = ['/', '/integrations', '/sources', '/activity', '/team', '/settings', '/onboarding'];
 /** `/integrations/new` and `/integrations/:id` live under the Integrations section. */
 const sectionOf = (pathname: string) => '/' + (pathname.split('/')[1] ?? '');
 function Logo() {
@@ -82,6 +83,7 @@ export function AppShell() {
           {[
             { to: '/', icon: IconLayoutDashboard, label: 'Overview' },
             { to: '/integrations', icon: IconWebhook, label: 'Integrations' },
+            { to: '/sources', icon: IconPlugConnected, label: 'Sources' },
             { to: '/activity', icon: IconActivity, label: 'Activity' },
             { to: '/team', icon: IconUsers, label: 'Team' },
             { to: '/settings', icon: IconSettings, label: 'Settings' },

@@ -47,11 +47,19 @@ export function IntegrationCard({ orgId, integration }: IntegrationCardProps) {
         <div>
           <dt>
             <IconFolderCode size={18} aria-hidden="true" />
-            {t('integration.repo')}
+            {t(integration.sourceId ? 'integration.source' : 'integration.repo')}
           </dt>
-          <dd className="mono-wrap" title={integration.repo}>
-            {integration.repo}
-          </dd>
+          {integration.sourceId ? (
+            <dd>
+              <Link to="/sources" className="text-link">
+                {t('integration.source.value')}
+              </Link>
+            </dd>
+          ) : (
+            <dd className="mono-wrap" title={integration.repo}>
+              {integration.repo}
+            </dd>
+          )}
         </div>
         <div>
           <dt>
@@ -63,7 +71,11 @@ export function IntegrationCard({ orgId, integration }: IntegrationCardProps) {
         <div className="integration-facts-wide">
           <dt>{t('integration.events')}</dt>
           <dd>
-            <EventList eventTypes={integration.eventTypes} limit={EVENTS_SHOWN} />
+            {integration.sourceId ? (
+              t('settings.details.source')
+            ) : (
+              <EventList eventTypes={integration.eventTypes} limit={EVENTS_SHOWN} />
+            )}
           </dd>
         </div>
       </dl>

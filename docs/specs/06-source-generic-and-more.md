@@ -10,6 +10,18 @@
 > The existing event model already builds on it (F42, F170); this file makes it the
 > **generic source's** verification contract.
 
+> **Implementation status, slice 10a (2026-10-13).** The generic source ships in part; see
+> [ADR 0012](../adr/0012-generic-source.md) for decisions and the not-done list.
+> Done: F74 (verification core; `webhook-id` cap is 128, not 255), F75 (5-minute window,
+> seconds-only, idempotency on `webhook-id`; not done: `clock_skew_suspected`,
+> `providerIdStability`), F76 in part (144-bit random path id, tenant from the source row,
+> identical 404, per-source revocation by pause or delete; not done: hashed key, two live keys,
+> overlap), F77 in part (rotation is **cutover**, no overlap and no wizard), F78 in part (a
+> fixed, strictly validated envelope instead of a per-connection mapping; 256 KiB cap and
+> `application/json` only, not the 1 MiB/CloudEvents policy), F79 in part (tests with runtime
+> secrets, not a captured-fixture corpus), F80 in part (a Sources page, not the wizard with a
+> send-test step). F73 and F81 onward are unchanged.
+
 ## The finding that orders this file
 
 Two sources in this file have a **verified, documented signature scheme** we can implement
@@ -99,7 +111,7 @@ requirement (F90), not just a token check.
 
 ## F74 — Standard Webhooks verification core
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** implemented (slice 10a)
 
 **Story** As a security reviewer, I want any standards-compliant webhook to be verifiable with
 one code path, so that adding a new producer costs no new crypto.
@@ -188,7 +200,7 @@ echoes the presented signature.
 
 ## F75 — Replay window and idempotency key
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partly implemented (slice 10a)
 
 **Story** As a customer, I want a replayed webhook to be ignored, so that a captured request
 cannot replay my CI failures into a channel forever.
@@ -261,7 +273,7 @@ is not configurable to 0. Stripe documents the same trap: *"Don't use a toleranc
 
 ## F76 — Unguessable tenant key in the URL path
 
-**Priority** P0 · **Status** not started · **Fixes** part of D3
+**Priority** P0 · **Status** partly implemented (slice 10a) · **Fixes** part of D3
 
 **Story** As a customer, I want my webhook URL to be unguessable and rotatable, so that
 nobody can inject events into my workspace or discover my endpoint.
@@ -350,7 +362,7 @@ unknown key is rate-limited on a bucket keyed by its own hash rather than being 
 
 ## F77 — Zero-downtime secret rotation
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partly implemented: cutover only (slice 10a)
 
 **Story** As a customer whose signing secret leaked, I want to rotate without losing events,
 so that I never have to choose between a compromised credential and a broken integration.
@@ -449,7 +461,7 @@ material is destroyed on revoke, not merely disabled.
 
 ## F78 — Generic source mapping and schema contract
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partly implemented: fixed envelope, no mapping (slice 10a)
 
 **Story** As a user with an internal system, I want to map a JSON payload onto Noti's event
 model without writing code, so that my deploy tool can page my team.
@@ -552,7 +564,7 @@ credential, or an organisation.
 
 ## F79 — Fixture corpus gate
 
-**Priority** P0 · **Status** not started · **Fixes** part of D13
+**Priority** P0 · **Status** partly implemented (slice 10a) · **Fixes** part of D13
 
 **Story** As a maintainer, I want a real captured payload per source and per event type, so
 that an upstream change breaks a test instead of a customer's channel.
@@ -620,7 +632,7 @@ documents that the working copy is as sensitive as the repository.
 
 ## F80 — Source onboarding wizard
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partly implemented: Sources page only (slice 10a)
 
 **Story** As a non-technical administrator, I want a wizard that gets me from "connect
 GitLab" to a working notification in minutes, so that I never have to read a webhook
