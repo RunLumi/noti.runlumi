@@ -260,3 +260,31 @@ describe('the recent-decisions list', () => {
     expect(screen.getByText(/Urgent: sent right away, ignoring quiet hours/)).toBeTruthy();
   });
 });
+
+describe('related copy', () => {
+  it('explains that a window ending at midnight uses 00:00', async () => {
+    await renderApp('/integrations/int_6');
+    const root = await section();
+    expect(within(root).getByText('To end at midnight, choose 00:00.')).toBeTruthy();
+  });
+
+  it('the delete confirmation says how many updates are still waiting and will be deleted', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_6');
+    await user.click(await screen.findByRole('button', { name: 'Delete integration' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(
+      await within(dialog).findByText(
+        '3 updates are still waiting to be sent. They will be deleted with this integration.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('says nothing about waiting updates when there are none', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_1');
+    await user.click(await screen.findByRole('button', { name: 'Delete integration' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).queryByText(/still waiting to be sent/)).toBeNull();
+  });
+});

@@ -131,9 +131,11 @@ export default {
     await runCronJobs([
       { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
       { name: 'stall_detection', run: () => detectStalls(env) },
-      // Before the outbox reconcile so a released notification is dispatched in the same tick.
-      { name: 'noise_release', run: () => releaseNoise(env) },
       { name: 'outbox_reconcile', run: () => reconcileOutbox(env) },
+      // After the reconcile, with its own bounded budget (100 notifications per tick), so a large
+      // backlog can never starve the reconcile or the jobs after it; what it releases is
+      // dispatched by the next tick's reconcile.
+      { name: 'noise_release', run: () => releaseNoise(env) },
       { name: 'credential_maintenance', run: () => maintainCredentials(env) },
       { name: 'rate_limit_prune', run: () => pruneRateLimitWindows(env) },
       { name: 'workspace_purge', run: () => purgeWorkspace(env) },

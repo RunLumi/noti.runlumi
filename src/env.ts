@@ -35,7 +35,7 @@ export interface DeliveryMessage {
 
 export const SUMMARY_MAX_CHARS = 280;
 /** Summary bound for a combined notification; destination adapters still fit it to their caps. */
-export const COMBINED_SUMMARY_MAX_CHARS = 1800;
+export const COMBINED_SUMMARY_MAX_CHARS = 1400;
 export const COMBINED_COUNT_MAX = 500;
 
 export type Bindings = AuthBindings & {

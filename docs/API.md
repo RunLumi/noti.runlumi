@@ -298,8 +298,9 @@ type NoiseSettings = {
   type, summary line), never the payload. A cron job releases due updates through the normal outbox:
   one notification per group (the newest item, a count and a list capped at 5 with "and N more not
   shown"), a lone held update as itself, or one digest per integration (failures first, collapsed by
-  group key with `(×N)`, capped at 10 entries and 1800 characters, with "and N more items not
-  shown"). A digest that would be empty is not sent. Released notifications are ordinary deliveries:
+  group key with `(×N)`, capped at 10 entries per message and 1400 characters). A digest that does
+  not fit one message is split into up to 3 ("part 1 of 3") before anything is left out, and the last
+  one ends "and N more items not shown. Their details are not kept." when even that is not enough. A digest that would be empty is not sent. Released notifications are ordinary deliveries:
   retries, dead-lettering, replay and the delivery log apply.
 - `resolution: true` (GitHub repository integrations only) sends **"Resolved: ..."** when a
   `workflow_run.success` follows a delivered failure of the same repository, workflow and head
@@ -313,11 +314,15 @@ type NoiseSettings = {
 - The audit entry for a create or update lists feature names (`noise: ["quietHours","grouping"]`),
   never times, zones or windows. Deleting an integration (or a source with `cascade=true`) deletes
   what it was holding. Clearing the settings (`null` or `{}`) makes what is already held due at the
-  next cron tick; changing them leaves held updates on their original schedule.
+  next cron tick; changing them reschedules updates held for quiet hours or a digest to the next
+  boundary under the new settings (or at once if none applies); grouped updates keep their window.
+  At most 100 notifications are released per cron tick across all integrations. Updates of a disabled
+  integration, or one with quarantined credentials, wait and release after it is enabled again. A
+  held update that fails to release 5 times is dead-lettered (`failed`): kept 30 days, never released.
 
 | Method and path | Capability | Result |
 | --- | --- | --- |
-| `GET /api/integrations/:id/noise-status` | `integration.read` | `200 {held: {count, nextReleaseAt}}`: updates waiting for this integration and the earliest scheduled release (ISO), or `null`. Another workspace's integration is `404`. |
+| `GET /api/integrations/:id/noise-status` | `integration.read` | `200 {held: {count, nextReleaseAt}, failed}`: updates waiting for this integration, the earliest scheduled release (ISO) or `null`, and how many rows were dead-lettered after repeated release failures. Another workspace's integration is `404`. |
 
 Ingress responses (`POST /webhooks/...`) add `held: <n>` when updates were held for some
 integration of the event; a held update is not reported as `duplicate`.

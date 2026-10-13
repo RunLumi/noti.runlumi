@@ -17,7 +17,13 @@ import {
   type FieldError,
   type ParseOptions,
 } from './integration-input';
-import { noiseCoverageIssue, readStoredNoise, serializeNoise, type NoiseSettings } from '../routing/noise';
+import {
+  decideNoise,
+  noiseCoverageIssue,
+  readStoredNoise,
+  serializeNoise,
+  type NoiseSettings,
+} from '../routing/noise';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
 import { isDeletionPending } from './workspace-lifecycle';
 import {
@@ -555,15 +561,37 @@ integrations.patch('/:id', async (c) => {
     );
   }
 
-  // Turning every noise setting off releases what is already held at the next cron tick instead
-  // of leaving it waiting for a schedule the person has just removed (nothing was ever lost).
-  if (input.noise === null) {
-    statements.push(
-      c.env.DB.prepare(
-        `UPDATE held_events SET release_at=? WHERE organization_id=? AND integration_id=?
-           AND state='held' AND release_at>?`,
-      ).bind(Date.now(), who.orgId, id, Date.now()),
-    );
+  // Held updates follow the settings that are now in force (nothing was ever lost):
+  //  - every setting off: everything already held is due at the next cron tick;
+  //  - otherwise: updates held for quiet hours or a digest are rescheduled to when an update
+  //    arriving now would be released under the NEW settings (the next boundary, the end of quiet
+  //    hours), or at once if no digest-style hold applies any more. Grouped updates keep their
+  //    window.
+  if (input.noise !== undefined) {
+    const nowMs = Date.now();
+    if (input.noise === null) {
+      statements.push(
+        c.env.DB.prepare(
+          `UPDATE held_events SET release_at=? WHERE organization_id=? AND integration_id=?
+             AND state='held' AND release_at>?`,
+        ).bind(nowMs, who.orgId, id, nowMs),
+      );
+    } else {
+      const decision = decideNoise(input.noise, {
+        critical: false,
+        nowMs,
+        openGroupReleaseAt: null,
+        heldCount: 0,
+      });
+      const releaseAt =
+        decision.action === 'hold' && decision.reason !== 'grouped' ? decision.releaseAt : nowMs;
+      statements.push(
+        c.env.DB.prepare(
+          `UPDATE held_events SET release_at=? WHERE organization_id=? AND integration_id=?
+             AND state='held' AND hold_reason IN ('quiet_hours','digest')`,
+        ).bind(releaseAt, who.orgId, id),
+      );
+    }
   }
 
   const changed = Object.keys(input)

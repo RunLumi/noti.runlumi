@@ -81,18 +81,23 @@ export function createNoisePlanner(db: D1Database, organizationId: string, nowMs
       // Only resolved notices configured: nothing can hold an update, so skip the reads.
       if (!holdsUpdates(settings)) return { action: 'deliver', reason: null, settings };
       const critical = isCritical(c.display.status, c.eventType);
-      // A critical update never needs the backlog read: it is delivered whatever it says.
-      const groupKey = await groupKeyOf({
-        organizationId,
-        integrationId: c.integrationId,
-        eventType: c.eventType,
-        repo: c.display.repo ?? '',
-        subject: c.subject,
-      });
-      const context = critical
-        ? { heldCount: 0, openGroupReleaseAt: null }
-        : await readHoldContext(db, organizationId, c.integrationId, groupKey);
-      const decision = decideNoise(settings, { critical, nowMs, ...context });
+      // Ask first with an empty backlog: when the answer is "deliver" (a critical update, or nothing
+      // applies right now) no D1 read is needed. Only a hold needs the group key, the open group and
+      // the backlog size (to enforce the cap), so only a hold pays for them.
+      const first = decideNoise(settings, { critical, nowMs, openGroupReleaseAt: null, heldCount: 0 });
+      let decision = first;
+      let groupKey = '';
+      if (first.action === 'hold') {
+        groupKey = await groupKeyOf({
+          organizationId,
+          integrationId: c.integrationId,
+          eventType: c.eventType,
+          repo: c.display.repo ?? '',
+          subject: c.subject,
+        });
+        const context = await readHoldContext(db, organizationId, c.integrationId, groupKey);
+        decision = decideNoise(settings, { critical, nowMs, ...context });
+      }
       if (decision.action === 'deliver') {
         if (decision.reason === 'hold_capacity')
           log('warn', 'noise_hold_capacity', { integration_id: c.integrationId });

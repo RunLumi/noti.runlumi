@@ -833,12 +833,14 @@ Also fixed:
   `noise.ts` (settings, validation, stored-document reader, the pure `decideNoise`, group key),
   `noise-store.ts` (SQL), `noise-ingress.ts` (the one place ingress asks "deliver or hold?"),
   `noise-render.ts` (group and digest rendering), `github/noise.ts` (subject and workflow facts).
-- `src/pipeline/noise-release.ts` plus cron jobs `noise_release` (before `outbox_reconcile`) and
-  `noise_purge`: leased, bounded (20 integrations, 500 rows), atomic in one D1 batch, creating
-  ordinary deliveries and outbox rows.
+- `src/pipeline/noise-release.ts` plus cron jobs `noise_release` (after `outbox_reconcile`) and
+  `noise_purge`: leased, budgeted (100 notifications per tick across integrations, decided before
+  claiming; 15 per D1 batch), atomic per notification, poison-proof (attempts, backoff, dead-letter
+  after 5), paused integrations wait, released rows blanked, creating ordinary deliveries and outbox
+  rows. Digests split into up to 3 messages before anything is left out.
 - Ingress wired into the GitHub, generic and provider (GitLab, Stripe) routes. `held_events` and
   `noise_open_failures` are in `TENANT_TABLES` and deleted with an integration or a source cascade.
-  `DeliveryMessage.count` lets a combined notification carry a summary of up to 1800 characters.
+  `DeliveryMessage.count` lets a combined notification carry a summary of up to 1400 characters.
 - API: `noise` on create and update (validated, audited by feature name), `noiseInvalid` /
   `noiseNewer` on the view, `GET /api/integrations/:id/noise-status`, `heldReason` and
   `groupedCount` on the delivery log, and the noise reason codes in the routing log
@@ -862,8 +864,15 @@ and definitions (F154, F155), three-level preferences and a configurable critica
 F148), one-click unsubscribe, bot-suppression presets, per-destination budgets, silences,
 per-repository overrides, in-place updates and correlation tables, escalation, inhibition, noise
 reports and metrics, weekly digests, "send at least every", a link from a digest to an in-app view,
-resolved notices on run attempts and for non-GitHub sources, noise settings in the create wizard and
-the workspace export, and any AI summarisation.
+resolved notices on run attempts and for non-GitHub sources, noise settings in the create wizard, and
+any AI summarisation.
+
+**Review round 2 (independent review of the pre-rebase branch):** a per-tick notification budget and
+batches of 15 (about 13 D1 calls per tick), `noise_release` after `outbox_reconcile`, continuation
+digests with an honest "not shown, details not kept", paused integrations wait, held rows rescheduled
+on settings change, poison rows (attempts, backoff, `failed`), released rows blanked, the cheaper
+ingress read, the settings in the workspace export, and a conservation test with injected D1
+failures, overlapping runs, pauses and deletion.
 
 **Not verified:** a browser pass of the new section (320 px reflow, contrast, native time pickers,
 Vietnamese diacritics), a screen reader, a long digest against real Slack, Lark and Teams, real D1

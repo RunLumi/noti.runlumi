@@ -9,14 +9,9 @@ import { SELECT_VIEW, FROM_VIEW } from '../../src/api/delivery-queries';
 import { toDeliveryView, type DeliveryRowRecord } from '../../src/api/delivery-view';
 import { toNotification } from '../../src/pipeline/consumer';
 import { parseDeliveryMessage } from '../../src/pipeline/outbox';
-import {
-  RELEASE_LEASE_MS,
-  UNITS_PER_TICK,
-  releaseHeldEvents,
-  type ReleaseDeps,
-} from '../../src/pipeline/noise-release';
+import { UNITS_PER_TICK, releaseHeldEvents, type ReleaseDeps } from '../../src/pipeline/noise-release';
 import { DEFAULT_NOISE, HELD_CAPACITY, type NoiseSettings } from '../../src/routing/noise';
-import { DIGEST_LIST_MAX } from '../../src/routing/noise-render';
+import { DIGEST_LIST_MAX, DIGEST_MAX_PARTS } from '../../src/routing/noise-render';
 import {
   comment,
   count,
@@ -221,20 +216,34 @@ describe('release is bounded', () => {
     expect(count(h, 'deliveries')).toBe(total);
   });
 
-  it('releases a full backlog in one digest that caps its list and says how many are not shown', async () => {
+  it('splits a full backlog of distinct entries into continuation digests and counts every row honestly', async () => {
     insertIntegration(h, 'i1', 'org-a', quiet);
     insert(HELD_CAPACITY, 'i1', 'org-a');
     await run(MORNING);
-    expect(count(h, 'deliveries')).toBe(1);
-    const [message] = outboxMessages(h);
-    expect(message?.count).toBe(HELD_CAPACITY);
-    expect(message?.title).toBe(`Summary: ${HELD_CAPACITY} updates`);
-    const lines = (message?.summary ?? '').split('\n').filter((l) => /^[✗!•✓]/.test(l));
-    expect(lines).toHaveLength(DIGEST_LIST_MAX);
-    expect(message?.summary).toContain(`…and ${HELD_CAPACITY - DIGEST_LIST_MAX} more items not shown.`);
-    expect((message?.summary ?? '').length).toBeLessThanOrEqual(1800);
-    // Nothing waits any longer: every row is accounted for by the one delivery.
+    const digests = outboxMessages(h);
+    expect(digests).toHaveLength(DIGEST_MAX_PARTS);
+    expect(digests.map((m) => m.title)).toEqual(
+      [1, 2, 3].map((i) => `Summary: ${HELD_CAPACITY} updates (part ${i} of ${DIGEST_MAX_PARTS})`),
+    );
+    let listed = 0;
+    for (const [index, message] of digests.entries()) {
+      const summary = message.summary ?? '';
+      expect(summary.length).toBeLessThanOrEqual(1400);
+      const lines = summary.split('\n').filter((l) => /^[✗!•✓]/.test(l));
+      expect(lines).toHaveLength(DIGEST_LIST_MAX);
+      listed += lines.length;
+      if (index < digests.length - 1) expect(summary).toContain('Continued in the next message.');
+    }
+    // The last message states what no message lists, and that its details are not kept.
+    const notShown = HELD_CAPACITY - listed;
+    expect(digests.at(-1)?.summary).toContain(
+      `…and ${notShown} more items not shown. Their details are not kept.`,
+    );
+    // listed + not shown == rows, and each message's count is the rows it stands for.
+    expect(digests.reduce((n, m) => n + (m.count ?? 0), 0)).toBe(HELD_CAPACITY);
     expect(count(h, 'held_events', "state='released'")).toBe(HELD_CAPACITY);
+    for (const message of digests)
+      expect(count(h, 'held_events', `released_in='${message.id}'`)).toBe(message.count);
   });
 
   it('keeps the digest inside the character budget however long the titles and links are', async () => {
@@ -262,9 +271,11 @@ describe('release is bounded', () => {
         's'.repeat(280),
       );
     await run(MORNING);
-    const summary = outboxMessages(h)[0]?.summary ?? '';
-    expect(summary.length).toBeLessThanOrEqual(1800);
-    expect(summary).toMatch(/more items? not shown\.$/);
+    const digests = outboxMessages(h);
+    for (const message of digests) expect((message.summary ?? '').length).toBeLessThanOrEqual(1400);
+    // The closing line is never cut, whatever the titles and links were.
+    expect(digests.at(-1)?.summary).toMatch(/more items? not shown\. Their details are not kept\.$/);
+    expect(digests.reduce((n, m) => n + (m.count ?? 0), 0)).toBe(40);
   });
 });
 
@@ -288,7 +299,7 @@ describe('release is safe when things fail', () => {
     };
   };
 
-  it('a failed release leaves the rows claimed, creates nothing, and the lease expiry makes them due again', async () => {
+  it('a failed release creates nothing, counts an attempt, backs off, and then releases once', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     insertIntegration(h, 'i1', 'org-a', quiet);
     setNow(NIGHT);
@@ -299,14 +310,22 @@ describe('release is safe when things fail', () => {
     await expect(releaseHeldEvents(flaky, clock(MORNING))).rejects.toThrow(/noise release failed/);
     expect(count(h, 'deliveries')).toBe(0);
     expect(count(h, 'notification_outbox')).toBe(0);
-    expect(heldRows(h).map((r) => r.state)).toEqual(['claimed', 'claimed']);
+    const failedRows = h.db.raw
+      .prepare('SELECT state, attempts, last_error_class, retry_after FROM held_events')
+      .all();
+    expect(failedRows).toEqual(
+      Array(2).fill({
+        state: 'held',
+        attempts: 1,
+        last_error_class: 'batch_failed',
+        retry_after: Date.parse(MORNING) + 60_000,
+      }),
+    );
 
-    // While the lease is live, another run leaves the rows alone.
-    expect(await releaseHeldEvents(flaky, clock('2026-10-15T01:06:00Z'))).toMatchObject({ events: 0 });
-    // After it expires they are reclaimed and released, once.
-    const later = new Date(Date.parse(MORNING) + RELEASE_LEASE_MS + 1000).toISOString();
-    expect(await releaseHeldEvents(flaky, clock(later))).toMatchObject({
-      reclaimed: 2,
+    // Inside the backoff window the rows are not due, so nothing is attempted.
+    expect(await releaseHeldEvents(flaky, clock('2026-10-15T01:05:30Z'))).toMatchObject({ events: 0 });
+    // After it they are released, once.
+    expect(await releaseHeldEvents(flaky, clock('2026-10-15T01:06:10Z'))).toMatchObject({
       events: 2,
       notifications: 1,
     });
@@ -328,14 +347,14 @@ describe('release is safe when things fail', () => {
       .prepare('SELECT integration_id, state FROM held_events ORDER BY integration_id')
       .all();
     expect(states).toEqual([
-      { integration_id: 'i1', state: 'claimed' },
+      { integration_id: 'i1', state: 'held' },
       { integration_id: 'i2', state: 'released' },
     ]);
     expect(count(h, 'deliveries')).toBe(1);
     spy.mockRestore();
   });
 
-  it('releases each combined notification in its own transaction: one failing leaves only its rows claimed', async () => {
+  it('releases notifications in separate batches: one failing batch affects only its own rows', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     insertIntegration(h, 'i1', 'org-a', grouped);
     setNow('2026-10-14T10:00:00Z');
@@ -355,13 +374,14 @@ describe('release is safe when things fail', () => {
           ++calls === 2 ? Promise.reject(new Error('D1 unavailable')) : db.batch(statements),
       } as unknown as D1Database,
     } as Bindings;
-    await expect(releaseHeldEvents(second, clock('2026-10-14T10:05:00Z'))).rejects.toThrow();
+    await expect(
+      releaseHeldEvents(second, { ...clock('2026-10-14T10:05:00Z'), batchSize: 1 }),
+    ).rejects.toThrow();
     expect(count(h, 'deliveries')).toBe(1);
     expect(count(h, 'held_events', "state='released'")).toBe(2);
-    expect(count(h, 'held_events', "state='claimed'")).toBe(2);
-    // After the lease expires the other group is released on its own, once.
-    const later = new Date(Date.parse('2026-10-14T10:05:00Z') + RELEASE_LEASE_MS + 1000).toISOString();
-    await releaseHeldEvents(h.env, clock(later));
+    expect(count(h, 'held_events', "state='held' AND attempts=1")).toBe(2);
+    // After the backoff the other group is released on its own, once.
+    await releaseHeldEvents(h.env, clock('2026-10-14T10:07:00Z'));
     expect(count(h, 'deliveries')).toBe(2);
     expect(count(h, 'held_events', "state='released'")).toBe(4);
     spy.mockRestore();
@@ -459,7 +479,7 @@ describe('tenant isolation', () => {
 });
 
 describe('the scheduled job', () => {
-  it('releases and dispatches in the same tick through the existing outbox', async () => {
+  it('releases after the outbox reconcile; the next tick dispatches through the existing outbox', async () => {
     insertIntegration(h, 'i1', 'org-a', quiet);
     setNow(NIGHT);
     await postGithub(h, 'issue_comment', comment(1), 'gh-1');
@@ -468,6 +488,10 @@ describe('the scheduled job', () => {
     const { default: worker } = await import('../../src/index');
     await worker.scheduled({} as ScheduledEvent, h.env);
     expect(count(h, 'deliveries')).toBe(1);
+    // noise_release runs after outbox_reconcile with its own budget, so dispatch is next tick.
+    expect(h.sent).toHaveLength(0);
+    setNow('2026-10-15T01:06:00Z');
+    await worker.scheduled({} as ScheduledEvent, h.env);
     // The queue received the digest: retries, dead-lettering and replay apply to it as to any delivery.
     expect(h.sent).toHaveLength(1);
     expect(h.sent[0]).toMatchObject({ eventType: 'noti.digest', count: 2 });
@@ -489,7 +513,7 @@ describe('rendered through the destination adapters', () => {
     setNow(NIGHT);
     for (let i = 1; i <= 25; i++) await postGithub(h, 'issue_comment', comment(i), `gh-${i}`);
     await run(MORNING);
-    const [stored] = outboxMessages(h);
+    const stored = outboxMessages(h).find((m) => m.title?.includes('part 1 of'));
     const message = parseDeliveryMessage(stored) as DeliveryMessage;
     // The long summary survives parsing only because it is a combined notification.
     expect(message.summary?.length ?? 0).toBeGreaterThan(280);
@@ -499,7 +523,8 @@ describe('rendered through the destination adapters', () => {
     expect(prepared.ok).toBe(true);
     if (prepared.ok) {
       expect(prepared.request.body).toContain('while you were away');
-      expect(prepared.request.body).toContain('more items not shown');
+      // 25 entries do not fit one message: the first part says it continues.
+      expect(prepared.request.body).toContain('Continued in the next message.');
     }
   });
 

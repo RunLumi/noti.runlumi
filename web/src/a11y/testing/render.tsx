@@ -147,7 +147,12 @@ export function installFetch(state: ApiState): void {
         return Promise.resolve(
           state.sources === 'error' ? json({ error: 'boom' }, 500) : json({ sources: state.sources }),
         );
-      if (/^\/api\/integrations\/[^/]+\/noise-status$/.test(path)) return Promise.resolve(json(NOISE_STATUS));
+      const noise = /^\/api\/integrations\/([^/]+)\/noise-status$/.exec(path);
+      // Only the quiet-hours fixture has updates waiting.
+      if (noise)
+        return Promise.resolve(
+          json(noise[1] === 'int_6' ? NOISE_STATUS : { held: { count: 0, nextReleaseAt: null }, failed: 0 }),
+        );
       if (/^\/api\/integrations\/[^/]+\/routing-log$/.test(path))
         return Promise.resolve(json({ entries: ROUTING_LOG, nextCursor: null }));
       const one = /^\/api\/integrations\/([^/]+)$/.exec(path);

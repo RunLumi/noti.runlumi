@@ -8,6 +8,8 @@ import type { HoldReason } from './noise';
 
 /** Released rows stay this long so a provider redelivery is still recognised. */
 export const HELD_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** Dead-lettered (`failed`) rows are kept this long for inspection, then removed. */
+export const FAILED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** An open failure older than this is forgotten: a much later success is just a success. */
 export const OPEN_FAILURE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** Open failures tracked per integration; beyond this new ones are simply not tracked. */
@@ -199,7 +201,7 @@ export function closeFailureStatement(
 export async function purgeNoise(
   db: D1Database,
   nowMs: number,
-): Promise<{ held: number; openFailures: number }> {
+): Promise<{ held: number; openFailures: number; failed: number }> {
   const drain = async (sql: string, cutoff: number): Promise<number> => {
     let total = 0;
     for (let i = 0; i < NOISE_PURGE_ROUNDS; i++) {
@@ -220,7 +222,12 @@ export async function purgeNoise(
        SELECT rowid FROM noise_open_failures WHERE opened_at < ? LIMIT ?)`,
     nowMs - OPEN_FAILURE_RETENTION_MS,
   );
-  return { held, openFailures };
+  const failed = await drain(
+    `DELETE FROM held_events WHERE rowid IN (
+       SELECT rowid FROM held_events WHERE state='failed' AND released_at IS NOT NULL AND released_at < ? LIMIT ?)`,
+    nowMs - FAILED_RETENTION_MS,
+  );
+  return { held, openFailures, failed };
 }
 
 // --- status for the dashboard -----------------------------------------------------------------
@@ -229,6 +236,8 @@ export interface HeldStatus {
   readonly count: number;
   /** Epoch ms of the earliest scheduled release, or null when nothing is waiting. */
   readonly nextReleaseAt: number | null;
+  /** Rows dead-lettered after repeated release failures (kept 30 days, never released). */
+  readonly failed: number;
 }
 
 export async function heldStatus(
@@ -238,10 +247,12 @@ export async function heldStatus(
 ): Promise<HeldStatus> {
   const row = await db
     .prepare(
-      `SELECT COUNT(*) AS n, MIN(release_at) AS next FROM held_events
-       WHERE organization_id=? AND integration_id=? AND state IN ('held','claimed')`,
+      `SELECT SUM(state IN ('held','claimed')) AS n,
+              MIN(CASE WHEN state IN ('held','claimed') THEN release_at END) AS next,
+              SUM(state='failed') AS failed
+       FROM held_events WHERE organization_id=? AND integration_id=?`,
     )
     .bind(organizationId, integrationId)
-    .first<{ n: number; next: number | null }>();
-  return { count: row?.n ?? 0, nextReleaseAt: row?.next ?? null };
+    .first<{ n: number | null; next: number | null; failed: number | null }>();
+  return { count: row?.n ?? 0, nextReleaseAt: row?.next ?? null, failed: row?.failed ?? 0 };
 }

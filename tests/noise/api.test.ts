@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { purgeDueWorkspace } from '../../src/pipeline/purge';
-import { purgeNoise, HELD_RETENTION_MS, OPEN_FAILURE_RETENTION_MS } from '../../src/routing/noise-store';
+import {
+  FAILED_RETENTION_MS,
+  HELD_RETENTION_MS,
+  OPEN_FAILURE_RETENTION_MS,
+  purgeNoise,
+} from '../../src/routing/noise-store';
 import {
   EVENT,
   SLACK,
@@ -197,29 +202,67 @@ describe('updating', () => {
     expect(row.metadata_json).not.toContain(HCM);
   });
 
-  it('turning every setting off releases what is already held at the next tick', async () => {
-    const id = await createdId(await createGithub('alice', { noise: quietDoc }));
-    const farFuture = Date.now() + 20 * 3_600_000;
-    h.db.raw
-      .prepare(
+  describe('what is already held follows a settings change', () => {
+    async function seed() {
+      const id = await createdId(await createGithub('alice', { noise: quietDoc }));
+      const farFuture = Date.now() + 20 * 3_600_000;
+      const insert = h.db.raw.prepare(
         `INSERT INTO held_events(id,organization_id,integration_id,hold_reason,group_key,state,release_at,held_at,event_type,title,url,repo,actor,status,summary)
-         VALUES('h1','org-a',?,'quiet_hours',?,'held',?,1,'issues.opened','t','','','','info','')`,
-      )
-      .run(id, 'k'.repeat(32), farFuture);
-    // Changing (not clearing) the settings leaves the schedule alone.
-    await call('PATCH', `/api/integrations/${id}`, { as: 'alice', body: { noise: { digest: 'hourly' } } });
-    const kept = h.db.raw.prepare("SELECT release_at FROM held_events WHERE id='h1'").get() as {
-      release_at: number;
-    };
-    expect(kept.release_at).toBe(farFuture);
-    // Clearing them makes it due now.
-    expect(
-      (await call('PATCH', `/api/integrations/${id}`, { as: 'alice', body: { noise: null } })).status,
-    ).toBe(200);
-    const due = h.db.raw.prepare("SELECT release_at FROM held_events WHERE id='h1'").get() as {
-      release_at: number;
-    };
-    expect(due.release_at).toBeLessThanOrEqual(Date.now());
+         VALUES(?,'org-a',?,?,?,'held',?,1,'issues.opened','t','','','','info','')`,
+      );
+      insert.run('quiet1', id, 'quiet_hours', 'k'.repeat(32), farFuture);
+      insert.run('digest1', id, 'digest', 'd'.repeat(32), farFuture);
+      insert.run('group1', id, 'grouped', 'g'.repeat(32), farFuture);
+      return { id, farFuture };
+    }
+    const at = (rowId: string): number =>
+      (h.db.raw.prepare('SELECT release_at FROM held_events WHERE id=?').get(rowId) as { release_at: number })
+        .release_at;
+
+    it('rescheduling to a new digest moves quiet-hours and digest rows, not grouped ones', async () => {
+      const { id, farFuture } = await seed();
+      const res = await call('PATCH', `/api/integrations/${id}`, {
+        as: 'alice',
+        body: { noise: { digest: 'hourly' } },
+      });
+      expect(res.status).toBe(200);
+      // The next hourly boundary is at most an hour away; the grouped row keeps its window.
+      for (const row of ['quiet1', 'digest1']) {
+        expect(at(row)).toBeLessThanOrEqual(Date.now() + 3_600_000);
+        expect(at(row)).toBeGreaterThan(Date.now() - 1000);
+      }
+      expect(at('group1')).toBe(farFuture);
+    });
+
+    it('settings that no longer hold digest-style make those rows due now', async () => {
+      const { id } = await seed();
+      await call('PATCH', `/api/integrations/${id}`, {
+        as: 'alice',
+        body: { noise: { groupWindowSec: 300 } },
+      });
+      expect(at('quiet1')).toBeLessThanOrEqual(Date.now());
+      expect(at('digest1')).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('a later daily summary moves them to that boundary', async () => {
+      const { id } = await seed();
+      await call('PATCH', `/api/integrations/${id}`, {
+        as: 'alice',
+        body: { noise: { timezone: 'UTC', digest: 'daily', digestAt: '23:59' } },
+      });
+      const boundary = new Date();
+      boundary.setUTCHours(23, 59, 0, 0);
+      if (boundary.getTime() <= Date.now()) boundary.setUTCDate(boundary.getUTCDate() + 1);
+      expect(at('quiet1')).toBe(boundary.getTime());
+    });
+
+    it('turning every setting off releases everything held at the next tick', async () => {
+      const { id } = await seed();
+      expect(
+        (await call('PATCH', `/api/integrations/${id}`, { as: 'alice', body: { noise: null } })).status,
+      ).toBe(200);
+      for (const row of ['quiet1', 'digest1', 'group1']) expect(at(row)).toBeLessThanOrEqual(Date.now());
+    });
   });
 
   it('flags an unreadable stored document without hiding the integration', async () => {
@@ -352,7 +395,18 @@ describe('a source integration', () => {
     const status = await call('GET', `/api/integrations/${id}/noise-status`, { as: 'alice' });
     expect(await status.json()).toEqual({
       held: { count: 1, nextReleaseAt: '2026-10-15T01:00:00.000Z' },
+      failed: 0,
     });
+  });
+});
+
+describe('workspace export', () => {
+  it('includes the noise settings of each integration, and no held updates', async () => {
+    await createGithub('alice', { noise: quietDoc });
+    const res = await call('GET', '/api/workspace/export', { as: 'alice' });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ integrations: { noise_json: string | null }[] }>();
+    expect(JSON.parse(String(body.integrations[0]?.noise_json))).toMatchObject({ v: 1, timezone: HCM });
   });
 });
 
@@ -360,7 +414,7 @@ describe('noise-status', () => {
   it('reports nothing held for a quiet integration', async () => {
     const id = await createdId(await createGithub('alice'));
     const res = await call('GET', `/api/integrations/${id}/noise-status`, { as: 'alice' });
-    expect(await res.json()).toEqual({ held: { count: 0, nextReleaseAt: null } });
+    expect(await res.json()).toEqual({ held: { count: 0, nextReleaseAt: null }, failed: 0 });
   });
 });
 
@@ -484,7 +538,7 @@ describe('retention', () => {
     );
     await failure.bind('org-a', 'i', 'a'.repeat(32), now - OPEN_FAILURE_RETENTION_MS - 1).run();
     await failure.bind('org-a', 'i', 'b'.repeat(32), now - 1000).run();
-    expect(await purgeNoise(h.db.d1, now)).toEqual({ held: 1, openFailures: 1 });
+    expect(await purgeNoise(h.db.d1, now)).toEqual({ held: 1, openFailures: 1, failed: 0 });
     const ids = (h.db.raw.prepare('SELECT id FROM held_events ORDER BY id').all() as { id: string }[]).map(
       (r) => r.id,
     );
@@ -501,5 +555,20 @@ describe('retention', () => {
     const first = await purgeNoise(h.db.d1, now);
     expect(first.held).toBe(2500); // 5 rounds of 500
     expect((await purgeNoise(h.db.d1, now)).held).toBe(700);
+  });
+});
+
+describe('dead-lettered rows', () => {
+  it('are kept 30 days for inspection, then removed', async () => {
+    const now = Date.parse('2026-10-14T00:00:00Z');
+    const insert = h.db.raw.prepare(
+      `INSERT INTO held_events(id,organization_id,integration_id,hold_reason,group_key,state,release_at,held_at,released_at,attempts,last_error_class,event_type,title,url,repo,actor,status,summary)
+       VALUES(?,'org-a','i','digest',?,'failed',1,1,?,5,'batch_failed','x','t','','','','info','')`,
+    );
+    insert.run('old', 'a'.repeat(32), now - FAILED_RETENTION_MS - 1);
+    insert.run('new', 'b'.repeat(32), now - 1000);
+    expect(await purgeNoise(h.db.d1, now)).toMatchObject({ failed: 1 });
+    const ids = (h.db.raw.prepare('SELECT id FROM held_events').all() as { id: string }[]).map((r) => r.id);
+    expect(ids).toEqual(['new']);
   });
 });

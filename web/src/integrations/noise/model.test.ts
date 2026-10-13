@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_NOISE, type NoiseSettings } from '../../../../src/routing/noise';
+import { isValidTimeZone } from '../../../../src/routing/noise-time';
 import { parseNoiseStatus } from '../../lib/api';
 import {
   clockAt,
@@ -9,7 +10,9 @@ import {
   isSavedReason,
   noiseLogText,
   quietSendTime,
+  FALLBACK_ZONES,
   resolutionBlocked,
+  supportedZones,
   timeZoneChoices,
   validateNoiseDraft,
 } from './model';
@@ -166,4 +169,45 @@ describe('parseNoiseStatus', () => {
     'rejects %j',
     (body) => expect(() => parseNoiseStatus(body)).toThrow(),
   );
+});
+
+describe('the preview is pure: it takes the instant instead of reading the clock', () => {
+  const s = settings({ timezone: 'America/New_York', quietHours: { start: '22:00', end: '07:00' } });
+  it('gives the same answer for the same instant, and follows the daylight-saving week', () => {
+    const winter = Date.parse('2026-01-15T12:00:00Z');
+    const dstWeek = Date.parse('2026-03-08T00:00:00Z');
+    expect(quietSendTime(s, winter)).toBe('07:00');
+    expect(quietSendTime(s, winter)).toBe(quietSendTime(s, winter));
+    expect(quietSendTime(s, dstWeek)).toBe('07:00');
+    expect(describeNoise(s, false, winter)[0]).toContain('at 07:00');
+  });
+});
+
+describe('the time-zone list without Intl.supportedValuesOf', () => {
+  const original = Object.getOwnPropertyDescriptor(Intl, 'supportedValuesOf');
+  afterEach(() => {
+    if (original) Object.defineProperty(Intl, 'supportedValuesOf', original);
+  });
+
+  it.each([
+    ['missing', undefined],
+    [
+      'throwing',
+      () => {
+        throw new Error('unsupported');
+      },
+    ],
+    ['empty', () => []],
+  ])('falls back to a built-in list when the function is %s', (_name, impl) => {
+    Object.defineProperty(Intl, 'supportedValuesOf', { value: impl, configurable: true, writable: true });
+    expect(supportedZones()).toBe(FALLBACK_ZONES);
+    const choices = timeZoneChoices('Asia/Ho_Chi_Minh');
+    expect(choices.length).toBeGreaterThan(30);
+    expect(choices).toContain('UTC');
+    expect(choices).toContain('Asia/Ho_Chi_Minh');
+  });
+
+  it('every built-in zone is one the server accepts', () => {
+    for (const zone of FALLBACK_ZONES) expect(isValidTimeZone(zone), zone).toBe(true);
+  });
 });

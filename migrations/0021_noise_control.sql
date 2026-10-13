@@ -15,6 +15,9 @@
 --    deleted before the delivery that carries it exists). Released rows stay for 7 days so a
 --    redelivery is still recognised, then retention removes them.
 --
+--    Once released, the display columns are blanked (kept: id, released_in, hold_reason, state), so
+--    nothing but what the dedupe and the delivery-log join need outlives the notification.
+--
 -- 3. noise_open_failures: which workflow (per repository and branch) is currently failing, per
 --    integration, so a later success can be sent as a "resolved" notice. A key hash only.
 --
@@ -36,11 +39,16 @@ CREATE TABLE held_events (
   integration_id TEXT NOT NULL,
   hold_reason TEXT NOT NULL CHECK(hold_reason IN ('quiet_hours','digest','grouped')),
   group_key TEXT NOT NULL CHECK(length(group_key) = 32),
-  state TEXT NOT NULL DEFAULT 'held' CHECK(state IN ('held','claimed','released')),
+  state TEXT NOT NULL DEFAULT 'held' CHECK(state IN ('held','claimed','released','failed')),
   release_at INTEGER NOT NULL,
   held_at INTEGER NOT NULL,
   claim_token TEXT,
   claim_expires_at INTEGER,
+  -- Poison-row handling: each failed or abandoned release attempt counts; the row is not due again
+  -- until retry_after, and after 5 attempts it becomes 'failed' (kept, visible, never released).
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error_class TEXT CHECK(last_error_class IS NULL OR length(last_error_class) <= 40),
+  retry_after INTEGER NOT NULL DEFAULT 0,
   released_at INTEGER,
   released_in TEXT,
   event_type TEXT NOT NULL CHECK(length(event_type) <= 100),
@@ -55,6 +63,7 @@ CREATE TABLE held_events (
 
 CREATE INDEX held_events_due ON held_events(organization_id, integration_id, state, release_at);
 CREATE INDEX held_events_state_due ON held_events(state, release_at);
+CREATE INDEX held_events_failed ON held_events(state, released_at) WHERE state = 'failed';
 CREATE INDEX held_events_released_in ON held_events(organization_id, released_in) WHERE released_in IS NOT NULL;
 CREATE INDEX held_events_released_at ON held_events(released_at) WHERE released_at IS NOT NULL;
 

@@ -139,7 +139,20 @@ Interpretation (src/pipeline/noise-release.ts):
   `job: noise_release` and `noise_release_failed` (integration id only). At most 20 integrations are
   released per tick, so a very large backlog drains over several ticks.
 - `claimed`, `lease_until` in the past: a run died mid-release. The next tick returns the rows to
-  `held` and releases them; the release is atomic, so nothing was half-sent.
+  `held` (counting an attempt) and releases them; the release is atomic, so nothing was half-sent.
+- `held` with `attempts` > 0 and a future `retry_after`: a release failed and is backing off (1 min,
+  2, 4 ... up to an hour). `last_error_class` is `batch_failed` or `lease_expired`. Fix the cause (D1,
+  a bad row) and it releases on its own.
+- `failed`: the row failed 5 times and was dead-lettered. It is kept 30 days, never released, and
+  shown as `failed` in `GET /api/integrations/:id/noise-status`. List them with
+  `SELECT organization_id, integration_id, hold_reason, attempts, last_error_class, released_at FROM held_events WHERE state='failed';`.
+  They hold display fields only; the updates themselves can be replayed from the provider's own
+  delivery log while it retains them.
+- Rows of a **disabled** integration, or one with quarantined credentials, are deliberately not due:
+  they wait and release after it is enabled again. They are not dead-lettered.
+- At most 100 notifications are released per tick across all integrations (about 13 D1 calls), so
+  a large backlog drains over several ticks; `noise_release` runs after `outbox_reconcile`, and what it
+  released is dispatched by the next tick.
 - A `noise_hold_capacity` warn: an integration has 500 updates waiting, and further updates are being
   delivered immediately instead of held (by design, to bound storage).
 - `noise_settings_unusable` error: an integration's `noise_json` cannot be read, so its updates are

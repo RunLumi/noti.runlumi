@@ -53,6 +53,8 @@ routing.get('/:id/noise-status', async (c) => {
       count: status.count,
       nextReleaseAt: status.nextReleaseAt === null ? null : new Date(status.nextReleaseAt).toISOString(),
     },
+    // Rows dead-lettered after repeated release failures: kept 30 days, never released (runbook).
+    failed: status.failed,
   });
 });
 

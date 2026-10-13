@@ -59,6 +59,7 @@ export function NoiseEditor({
           />
           <span>{t('noise.quiet.enable')}</span>
         </label>
+        {draft.quietOn && <p className="field-hint">{t('noise.quiet.midnight')}</p>}
         {draft.quietOn && (
           <div className="noise-times">
             <Field label={t('noise.quiet.start')} error={errors.quietStart}>

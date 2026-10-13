@@ -199,6 +199,10 @@ the browser has it). Design decisions, so they are reviewable:
 - Errors sit next to the control in our own catalogue copy (never the server's wording) and the
   first invalid control takes focus. An unreadable stored document is a warning, not a block:
   updates are being sent normally, and saving replaces it.
+- The delete confirmation says how many updates are still waiting and will be deleted with the
+  integration. A hint says that a window that ends at midnight uses 00:00. The preview takes the
+  instant as an argument (pure), and the time-zone list falls back to a built-in set of common zones
+  when the browser cannot list them.
 - The recent-decisions list shows a saved update as "Saved for later" with a sentence, and an
   urgent bypass as such.
 - Every component calls `useLocale()`; every English id in `messages.noise.en.ts` has a

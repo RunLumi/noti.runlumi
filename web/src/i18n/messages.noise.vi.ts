@@ -88,6 +88,10 @@ export const noiseVi = {
     'Hãy chọn “workflow run thất bại” hoặc “hết thời gian” trong các cập nhật của tích hợp này trước.',
   'noise.error.generic': 'Không lưu được các cài đặt này. Hãy kiểm tra các trường được đánh dấu.',
 
+  'noise.delete.waiting': {
+    other: '{count} cập nhật vẫn đang chờ gửi. Chúng sẽ bị xóa cùng tích hợp này.',
+  } satisfies PluralMessage,
+  'noise.quiet.midnight': 'Để kết thúc vào nửa đêm, hãy chọn 00:00.',
   'noise.log.held': 'Đã lưu để gửi sau',
   'noise.log.quiet_hours': 'Đã lưu trong giờ yên tĩnh và gửi trong một bản tóm tắt.',
   'noise.log.digest': 'Đã lưu cho bản tóm tắt tiếp theo.',

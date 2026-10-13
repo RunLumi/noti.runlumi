@@ -86,6 +86,11 @@ export const noiseEn = {
     'Choose “workflow run failed” or “timed out” among this integration’s updates first.',
   'noise.error.generic': 'These settings could not be saved. Check the highlighted fields.',
 
+  'noise.delete.waiting': {
+    one: '{count} update is still waiting to be sent. It will be deleted with this integration.',
+    other: '{count} updates are still waiting to be sent. They will be deleted with this integration.',
+  } satisfies PluralMessage,
+  'noise.quiet.midnight': 'To end at midnight, choose 00:00.',
   'noise.log.held': 'Saved for later',
   'noise.log.quiet_hours': 'Saved during quiet hours and sent in a summary.',
   'noise.log.digest': 'Saved for the next summary.',

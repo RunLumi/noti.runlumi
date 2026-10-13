@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { COMBINED_SUMMARY_MAX_CHARS } from '../../src/env';
 import {
   DIGEST_LIST_MAX,
+  DIGEST_MAX_PARTS,
   GROUP_LIST_MAX,
   renderDigest,
+  renderDigestParts,
   renderGroup,
   worstStatus,
   type HeldItem,
@@ -141,6 +143,80 @@ describe('renderDigest', () => {
 
   it('refuses an empty list: an empty digest is not rendered at all', () => {
     expect(() => renderDigest([], 'digest')).toThrow();
+  });
+});
+
+describe('renderDigestParts (continuation digests)', () => {
+  const many = (n: number, over: Partial<HeldItem> = {}): HeldItem[] =>
+    Array.from({ length: n }, (_, i) => item({ n: i + 1, ...over }));
+
+  it('is one message when it fits, with no part wording', () => {
+    const parts = renderDigestParts(many(5), 'digest');
+    expect(parts).toHaveLength(1);
+    expect(parts[0]?.title).toBe('Summary: 5 updates');
+    expect(parts[0]?.summary).not.toContain('Continued');
+    expect(parts[0]?.notShown).toBe(0);
+  });
+
+  it('splits into parts before it drops anything, and numbers them', () => {
+    const parts = renderDigestParts(many(25), 'digest');
+    expect(parts.map((p) => p.title)).toEqual([
+      'Summary: 25 updates (part 1 of 3)',
+      'Summary: 25 updates (part 2 of 3)',
+      'Summary: 25 updates (part 3 of 3)',
+    ]);
+    expect(parts.map((p) => p.listedItems)).toEqual([10, 10, 5]);
+    expect(parts.map((p) => p.notShown)).toEqual([0, 0, 0]);
+    expect(parts[0]?.summary).toContain('Continued in the next message.');
+    expect(parts[2]?.summary).not.toContain('Continued');
+  });
+
+  it('after the maximum number of parts says how many are not shown and that they are not kept', () => {
+    const parts = renderDigestParts(many(100), 'digest');
+    expect(parts).toHaveLength(DIGEST_MAX_PARTS);
+    const last = parts.at(-1);
+    expect(last?.notShown).toBe(100 - 3 * DIGEST_LIST_MAX);
+    expect(last?.summary).toMatch(/…and 70 more items not shown\. Their details are not kept\.$/);
+  });
+
+  it('accounts for every row: listed + not shown == rows, and keys never repeat across parts', () => {
+    for (const n of [1, 9, 10, 11, 30, 31, 64, 500]) {
+      const items = many(n);
+      const parts = renderDigestParts(items, 'quiet_hours');
+      expect(parts.reduce((s, p) => s + p.listedItems, 0) + (parts.at(-1)?.notShown ?? 0)).toBe(n);
+      expect(parts.reduce((s, p) => s + p.rows, 0)).toBe(n);
+      const keys = parts.flatMap((p) => p.groupKeys);
+      expect(new Set(keys).size).toBe(keys.length);
+      for (const p of parts) expect((p.summary ?? '').length).toBeLessThanOrEqual(COMBINED_SUMMARY_MAX_CHARS);
+    }
+  });
+
+  it('collapsed entries count all their rows towards listed items', () => {
+    const same = 'same'.padEnd(32, '0');
+    const items = [...many(3, { groupKey: same }).map((i, k) => ({ ...i, id: `s${k}` })), ...many(2)];
+    const [only] = renderDigestParts(items, 'digest');
+    expect(only?.listedItems).toBe(5);
+    expect(only?.summary).toContain('(×3)');
+  });
+});
+
+describe('renderGroup keeps its closing line', () => {
+  it('computes "not shown" from what was listed, even when long lines cut the list short', () => {
+    const huge = Array.from({ length: 12 }, (_, i) =>
+      item({
+        n: i + 1,
+        groupKey: 'same'.padEnd(32, '0'),
+        title: 'x'.repeat(300),
+        repo: 'r'.repeat(200),
+        url: `https://example.test/${'u'.repeat(100)}`,
+      }),
+    );
+    const g = renderGroup(huge);
+    const listed = (g.summary ?? '').split('\n').filter((l) => /^[✗!•✓]/.test(l)).length;
+    expect(listed).toBeGreaterThan(0);
+    expect(listed).toBeLessThan(12);
+    expect(g.summary).toMatch(new RegExp(`…and ${12 - listed} more not shown\\.$`));
+    expect((g.summary ?? '').length).toBeLessThanOrEqual(COMBINED_SUMMARY_MAX_CHARS);
   });
 });
 

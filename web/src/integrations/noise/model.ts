@@ -153,12 +153,62 @@ export function timeZoneChoices(selected: string): readonly string[] {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
-function supportedZones(): string[] {
+/** Used when the browser cannot list zones (older Safari, some webviews): common ones, filtered for validity. */
+export const FALLBACK_ZONES: readonly string[] = [
+  'Africa/Cairo',
+  'Africa/Johannesburg',
+  'Africa/Lagos',
+  'America/Anchorage',
+  'America/Argentina/Buenos_Aires',
+  'America/Bogota',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Mexico_City',
+  'America/New_York',
+  'America/Sao_Paulo',
+  'America/Toronto',
+  'Asia/Bangkok',
+  'Asia/Dhaka',
+  'Asia/Dubai',
+  'Asia/Hong_Kong',
+  'Asia/Jakarta',
+  'Asia/Karachi',
+  'Asia/Kolkata',
+  'Asia/Kuala_Lumpur',
+  'Asia/Manila',
+  'Asia/Seoul',
+  'Asia/Shanghai',
+  'Asia/Singapore',
+  'Asia/Taipei',
+  'Asia/Tehran',
+  'Asia/Tokyo',
+  'Atlantic/Reykjavik',
+  'Australia/Adelaide',
+  'Australia/Melbourne',
+  'Australia/Perth',
+  'Australia/Sydney',
+  'Europe/Amsterdam',
+  'Europe/Berlin',
+  'Europe/Istanbul',
+  'Europe/Lisbon',
+  'Europe/London',
+  'Europe/Madrid',
+  'Europe/Moscow',
+  'Europe/Paris',
+  'Europe/Rome',
+  'Pacific/Auckland',
+  'Pacific/Honolulu',
+];
+
+export function supportedZones(): readonly string[] {
   try {
     const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
-    return supported ? supported('timeZone') : [];
+    const listed = supported ? supported('timeZone') : [];
+    // Some engines return an empty or throwing list; never leave the person without choices.
+    return listed.length > 0 ? listed : FALLBACK_ZONES;
   } catch {
-    return [];
+    return FALLBACK_ZONES;
   }
 }
 
@@ -173,11 +223,11 @@ export function clockAt(ms: number, timeZone: string): string {
  * decision ingress makes: an update arriving just after quiet hours begin. With a summary
  * schedule that ends later than quiet hours, this is the later time.
  */
-export function quietSendTime(settings: NoiseSettings): string | null {
+export function quietSendTime(settings: NoiseSettings, nowMs: number = Date.now()): string | null {
   if (!settings.quietHours) return null;
   const start = parseClock(settings.quietHours.start);
   if (start === null) return null;
-  const probe = nextLocalClock(Date.now(), start, settings.timezone) + 30_000;
+  const probe = nextLocalClock(nowMs, start, settings.timezone) + 30_000;
   const decision = decideNoise(settings, {
     critical: false,
     nowMs: probe,
@@ -201,10 +251,14 @@ export const GROUP_WINDOW_CHOICES: readonly { readonly value: GroupWindow; reado
 export const windowLabel = (w: GroupWindow): string => t(WINDOW_LABEL[w]);
 
 /** The plain-language sentences shown under the controls: exactly what ingress will do. */
-export function describeNoise(settings: NoiseSettings | null, isSource: boolean): string[] {
+export function describeNoise(
+  settings: NoiseSettings | null,
+  isSource: boolean,
+  nowMs: number = Date.now(),
+): string[] {
   if (!settings) return [t('noise.preview.none')];
   const lines: string[] = [];
-  const quietTime = quietSendTime(settings);
+  const quietTime = quietSendTime(settings, nowMs);
   if (quietTime) lines.push(t('noise.preview.quiet', { time: quietTime }));
   if (settings.groupWindowSec > 0)
     lines.push(t('noise.preview.group', { window: windowLabel(settings.groupWindowSec) }));

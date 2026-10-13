@@ -83,20 +83,37 @@ build the preset library, personal preferences, silences or any AI.
    `TENANT_TABLES`, is deleted with its integration and with a source cascade, and is purged by a
    bounded 7-day retention job (open failures: 30 days).
 
-6. **Release is a leased, bounded, atomic cron job** (`src/pipeline/noise-release.ts`, job
-   `noise_release`, run before `outbox_reconcile` so a released notification is dispatched in the
-   same tick).
+6. **Release is a leased, budgeted, atomic cron job** (`src/pipeline/noise-release.ts`, job
+   `noise_release`, run **after** `outbox_reconcile`: a released notification is dispatched by the
+   next tick, at most a minute later, and a large backlog can never starve the reconcile or the jobs
+   after it).
 
-   - *Bounded:* 20 integrations per tick, at most 500 rows (the ingress cap) per integration.
+   - *Bounded by D1 calls, not only rows (a review finding):* at most **100 notifications per tick
+     across all integrations** (a digest counts as up to 3), decided **before** anything is claimed
+     (only that many scopes are claimed), 20 integrations per tick, claims of at most 40 group keys
+     per statement (D1 allows 100 bound parameters) and **15 notifications per `DB.batch`**. A tick
+     makes about 13 D1 calls however large the backlog; 500 distinct group keys drain over five
+     ticks (a test counts the calls and asserts every row is released exactly once across ticks).
    - *Leased:* due rows are claimed (`state='claimed'`, token, 2-minute expiry) with
-     `UPDATE ... RETURNING`; an expired claim is returned to `held` at the start of the next run.
-   - *Atomic:* for one notification (a group, a lone update or a digest), its delivery row, its
-     outbox row and the "released" marks of the rows it covers commit in **one D1 batch**, and the
-     delivery insert is guarded on the claim still being ours, so a run that lost its lease creates
-     nothing and a held row is never marked released without a delivery. Each notification is its own
-     batch (a large backlog is not one giant transaction); if one fails, only its rows stay claimed
-     and come back when the lease expires, and the failure is rethrown so the cron records it.
-   - *Idempotent:* a second or concurrent run finds nothing due (a test runs two at once).
+     `UPDATE ... RETURNING`; an expired claim is returned to `held` at the start of the next run and
+     counts as an attempt.
+   - *Atomic:* each notification's delivery row, outbox row and the "released" marks of the rows it
+     covers are statements of one D1 batch (a batch holds up to 15 notifications over disjoint rows),
+     and each delivery insert is guarded on the claim still being ours, so a run that lost its lease
+     creates nothing and a held row is never marked released without a delivery. If a batch fails
+     none of its notifications was created.
+   - *Poison-proof:* every failed batch or abandoned claim counts on the row (`attempts`,
+     `last_error_class`) and delays it (`retry_after`: 1 min, 2, 4 ... capped at 1 h). After **5**
+     attempts the row becomes `failed`: kept (30 days), counted in the noise status, listed by the
+     runbook query, **never released and never silently dropped**. Rows still backing off are not
+     due, so 25 poison integrations cannot starve a healthy one (tested).
+   - *Paused integrations wait:* rows of a disabled integration, or one with quarantined
+     credentials, are not due. Nothing is dead-lettered; they release after it is enabled again (they
+     still count towards the 500 cap, so a paused integration falls back to delivering, not holding).
+   - *Data minimised:* when a row is released its title, summary, link, actor and repository are
+     blanked; only the id (for redelivery dedupe), `hold_reason`, `released_in` (the delivery-log
+     join) and the timestamps remain until the 7-day retention removes it.
+   - *Idempotent:* a second or concurrent run finds nothing due (tests run overlapping runs).
    - It produces ordinary delivery + outbox rows, so retries, dead-lettering, replay, audit and the
      delivery log all apply unchanged. A digest that would be empty is not rendered at all (F144).
 
@@ -104,11 +121,22 @@ build the preset library, personal preferences, silences or any AI.
    is an ordinary canonical notification: title, repo, status, and a `summary` that lists items. To
    allow a long summary without loosening the 280-character bound for everything else, a message
    may carry `count` (1..500); only then does `parseDeliveryMessage` raise the summary bound to
-   1800 characters (a test proves an ordinary message cannot smuggle a long summary). Lists are
-   capped and say so ("and 12 more items not shown."), the digest collapses entries with the same
-   group key into one line with `(×N)`, orders failures first and then newest first, and marks
-   outcome with a text marker (`✗ ! • ✓`), never colour alone. Rendering is tested for Slack, Lark
-   and Teams.
+   **1400** characters (a test proves an ordinary message cannot smuggle a long summary). The budget
+   keeps a reserve for the closing line, so "and N more not shown" is computed from what was
+   actually listed and can never be cut (a review finding; tested through Slack, Lark, Teams,
+   Discord and the custom webhook at the largest sizes). Discord keeps one embed with no repeated
+   URL, `content` within 2000 characters and inert mentions; the custom webhook stays inside its
+   64 KB cap. The digest collapses entries with the same group key into one line with `(×N)`,
+   orders failures first and then newest first, and marks outcome with a text marker (`✗ ! • ✓`),
+   never colour alone.
+
+   **Continuation digests.** When a digest does not fit one message it is **split** into up to 3
+   messages ("part 1 of 3", "Continued in the next message."), each listing up to 10 entries.
+   Only what does not fit even then is left out, and the last message says so: "and N more items not
+   shown. Their details are not kept." Items listed plus "not shown" always equal the rows (a
+   property test parses the digest text to check it). Those N rows are marked released with the last
+   part: the product keeps only the display fields it already bounded, and says it does not keep the
+   rest.
 
 8. **Group key (F141, F165).** `SHA-256` over length-prefixed `organization, integration (hence
    destination), event type, repository, subject`, truncated to 32 hex characters. The subject is
@@ -163,9 +191,13 @@ build the preset library, personal preferences, silences or any AI.
   (`COUNT` + `MIN` over a per-integration index) and one write.
 - A held update is delayed by design. The longest delay is the quiet-hours length, a day for a
   daily summary, or an hour for a group window, plus up to a minute for the cron.
-- Turning every setting off (`noise: null` or `{}`) makes the integration's already-held rows due at
-  the next tick instead of leaving them waiting for a schedule that was just removed. Changing
-  settings without clearing them leaves held rows on their original schedule.
+- **Settings changes reschedule what is held.** Turning every setting off (`noise: null` or `{}`)
+  makes all the integration's held rows due at the next tick. Any other change recomputes `release_at`
+  of rows held for quiet hours or a digest to when an update arriving now would be released under the
+  NEW settings (the next boundary or the end of quiet hours), or at once when no digest-style hold
+  applies any more. Grouped rows keep their window.
+- **Held updates are exported** with the integration's `noise_json` (the settings), not the held
+  display rows.
 - Rolling the Worker back **strands** held rows (state `held`/`claimed`) until a Worker that
   knows about them runs again. They are not lost; the migration header says so. Turn noise
   settings off and let the table drain before a rollback if updates must not be delayed.
@@ -194,7 +226,7 @@ Spec 11 items this slice does **not** implement, or implements only in part:
 - F152: re-run attempts, "original no longer retained" wording, grouping of notices, default on.
 - Provider and generic sources have no "resolved" notice (workflow runs are GitHub-only), and they
   derive `critical` from the mapped status only.
-- Noise settings are not in the create wizard and not in the workspace export.
+- Noise settings are not in the create wizard (they are in the workspace export).
 - No AI summarisation of any kind.
 
 ## Verification
