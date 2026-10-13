@@ -150,15 +150,15 @@ Status as of PR #6 (2026-10-13):
 | D2 | No tenant boundary in schema | 🟡 expand phase: nullable `organization_id` on `integrations`, `deliveries`, `notification_outbox` (0006); NOT NULL contract migration pending backfill |
 | D3 | Routing keys on `repo` from body | ✅ tenant comes from the verified installation; `repo` only narrows within that tenant |
 | D4 | Queue publish not atomic with claim | ⬜ unchanged |
-| D5 | Secrets copied into queue bodies | ⬜ unchanged |
-| D6 | No envelope encryption, AAD or key version | ⬜ unchanged |
+| D5 | Secrets copied into queue bodies | ✅ messages carry ids only; consumer re-reads the row by `id AND organization_id` (PR #7) |
+| D6 | No envelope encryption, AAD or key version | ✅ envelope + AAD + versioned KEK + rewrap + v0 migration (PR #7, ADR 0004) |
 | D7 | Plaintext session tokens | 🟡 moot for Better Auth's `session`; ⬜ `0004`'s dead `auth_tokens` still plaintext (N1) |
 | D8 | Slack has no adapter | ⬜ unchanged |
 | D9 | Allowlist runs too late | ⬜ unchanged |
 | D10 | Delivery-id collisions | ⬜ unchanged |
 | D11 | No error classification | ⬜ unchanged |
 | D12 | `event_types` unvalidated JSON | ⬜ unchanged |
-| D13 | No integration test of the delivery path | 🟡 improved: schema-invariant smoke tests added (`scripts/test_auth_schema.py`); delivery path still untested |
+| D13 | No integration test of the delivery path | ✅ `tests/pipeline/delivery-path.test.ts` runs ingress → outbox → queue → consumer over the real migrations (PR #7) |
 | D14 | CI does not enforce the documented workflow | 🟡 `npm ci`, format, lint, typecheck, build, tests and bundle guard enforced; coverage threshold not yet |
 | D15 | Magic 1 MiB webhook cap | ⬜ unchanged |
 | D16 | Unbounded event-type string space | ⬜ unchanged |

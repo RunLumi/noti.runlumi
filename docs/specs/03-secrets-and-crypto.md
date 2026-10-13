@@ -48,7 +48,7 @@ binding, and that reference is correct against this numbering.
 
 ## F33 — Envelope encryption core
 
-**Priority** P0 · **Status** not started · **Fixes** D6 (core half)
+**Priority** P0 · **Status** ✅ implemented (PR #7, `src/crypto/envelope.ts`) · **Fixes** D6 (core half)
 
 **Story** As a security engineer, I want every stored credential sealed by a single audited
 primitive, so that a database dump, a log line or a queue inspector yields no usable secret.
@@ -158,7 +158,7 @@ one invocation.
 
 ## F34 — Key storage boundary: Secrets Store holds keys, D1 holds ciphertext
 
-**Priority** P0 · **Status** not started · **Fixes** D6 (storage half)
+**Priority** P0 · **Status** 🟡 tier 2 (Worker secret) only (PR #7); Secrets Store binding open · **Fixes** D6 (storage half)
 
 **Story** As a security engineer, I want the key that can read the database to live outside the
 database, so that read access to D1 is not equivalent to decryption access.
@@ -227,7 +227,7 @@ never logged, never returned by an endpoint, and its loss is detectable: a KEK s
 
 ## F35 — Tenant-scoped key derivation
 
-**Priority** P0 · **Status** not started · **Fixes** part of D6
+**Priority** P0 · **Status** ✅ implemented (PR #7) · **Fixes** part of D6
 
 **Story** As a security engineer, I want keys separated by tenant *and* by purpose, so that
 defeating one column type's key does not silently open another.
@@ -299,7 +299,7 @@ to be correlated.
 
 ## F36 — AAD binding of ciphertext to its row
 
-**Priority** P0 · **Status** not started · **Fixes** D6 (the security half of D6)
+**Priority** P0 · **Status** ✅ implemented (PR #7) · **Fixes** D6 (the security half of D6)
 
 **Story** As a security reviewer, I want a ciphertext to be useless anywhere but its own row, so
 that a database write primitive — not a cryptographic break — is required to send a notification
@@ -359,7 +359,7 @@ are eliminating.
 
 ## F37 — Key version and rotation, including the D6 migration
 
-**Priority** P0 · **Status** not started · **Fixes** D6 (rotation half) · **Fixes** D1 (the
+**Priority** P0 · **Status** 🟡 versioning, rewrap and v0 migration shipped (PR #7); audited key destruction open · **Fixes** D6 (rotation half) · **Fixes** D1 (the
 key-name half of it)
 
 **Story** As an operator, I want to change keys while the service is running, so that a key

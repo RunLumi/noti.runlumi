@@ -5,9 +5,15 @@
 
 # --- Secrets (set with `wrangler secret put <NAME>` in deployed environments) ---
 
-# AES-256-GCM key for encrypting destination credentials at rest.
-# Exactly 64 hexadecimal characters (32 bytes). Decryption fails closed on any
-# other length — see `decrypt()` in src/index.ts.
+# Key-encryption keys (KEKs) for destination credentials, by version. Each is exactly
+# 64 hexadecimal characters (32 bytes): `openssl rand -hex 32`. KMS_ACTIVE_VERSION in
+# wrangler.jsonc names the one that wraps new connection keys. Leave KEK_V2 empty unless
+# you are rotating; see docs/IMPLEMENTATION.md "Key rotation".
+KEK_V1=replace-with-64-hex-characters
+KEK_V2=
+
+# LEGACY v0 key (pre-envelope format). Read-only: the scheduled job re-seals every v0
+# row under the KEK and then this key can be retired. Same 64-hex format.
 ENCRYPTION_KEY=replace-with-64-hex-characters
 
 # Shared secret used to verify GitHub webhook signatures (X-Hub-Signature-256).
