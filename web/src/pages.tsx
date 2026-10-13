@@ -7,6 +7,7 @@ import { SetupProgressCard } from './setup/SetupProgressCard';
 import { DeliveryLogPage } from './deliveries/DeliveryLogPage';
 import { WorkspaceDataPanel } from './workspace/WorkspaceDataPanel';
 import { WorkspaceSwitcher } from './workspace/WorkspaceSwitcher';
+import { WorkspaceDriftBanner } from './workspace/drift';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -147,6 +148,7 @@ function ShellContent() {
           <Badge variant="neutral">{t('shell.preview')}</Badge>
         </header>
         <div className="content">
+          <WorkspaceDriftBanner user={me.data.user} />
           <Outlet />
         </div>
       </main>

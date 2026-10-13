@@ -19,6 +19,9 @@ import { toCsv } from './csv';
 import { useAuditList } from './hooks';
 import { hasAuditFilters, toAuditFilters, type AuditSearch } from './search';
 
+/** A byte-order mark, so Excel reads the file as UTF-8 (Vietnamese names and labels). */
+export const CSV_BOM = '\uFEFF';
+
 /** How long the blob URL stays valid after the click (a revoke straight after can cancel it). */
 const REVOKE_DELAY_MS = 10_000;
 
@@ -49,7 +52,7 @@ export function eventsToCsv(rows: readonly AuditEvent[]): string {
 }
 
 function downloadCsv(rows: readonly AuditEvent[]): void {
-  const url = URL.createObjectURL(new Blob([eventsToCsv(rows)], { type: 'text/csv;charset=utf-8' }));
+  const url = URL.createObjectURL(new Blob([CSV_BOM, eventsToCsv(rows)], { type: 'text/csv;charset=utf-8' }));
   const link = document.createElement('a');
   link.href = url;
   link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;

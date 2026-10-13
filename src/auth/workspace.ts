@@ -27,7 +27,9 @@ type Resolved = {
   orgName: string;
 };
 
-type Failure = { status: 401 | 403 | 404; error: string };
+type Failure = { status: 400 | 401 | 403 | 404; error: string };
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 async function current(c: WorkspaceContext) {
   // Constructed per request on purpose. Better Auth caches async init promises on
@@ -109,6 +111,13 @@ async function resolveWorkspace(c: WorkspaceContext): Promise<Resolved | Failure
     emailVerified: s.user.emailVerified,
     name: s.user.name,
   };
+
+  // A person in several workspaces must NAME the workspace on every write. Without this a tab
+  // left open on workspace A would write into B after another tab switched the session's active
+  // workspace. One membership is unambiguous, so it needs no parameter. Enforced here, the one
+  // place every domain route resolves its tenant.
+  if (MUTATING_METHODS.has(c.req.method) && memberships.length > 1 && !c.req.query('org'))
+    return { status: 400, error: 'org is required' };
 
   const selection = selectMembership(memberships, {
     requested: c.req.query('org'),
@@ -257,7 +266,10 @@ workspace.post('/active', async (c) => {
     .where(and(eq(schema.member.userId, s.user.id), eq(schema.member.organizationId, requested)))
     .limit(1);
   const membership = found[0];
-  if (!membership) return c.json({ error: 'Not found' }, 404);
+  if (!membership) {
+    await recordProbe(c, requested, 'workspace.switch');
+    return c.json({ error: 'Not found' }, 404);
+  }
 
   // Scoped to the caller's own session row, so another user's session can never be touched.
   if (typeof s.session.id === 'string')
@@ -291,6 +303,41 @@ workspace.get('/team', async (c) => {
   return c.json({ organizationId: resolved.orgId, members });
 });
 
+/** Probes recorded per person per minute; a scan of organization ids must not fill the log. */
+const PROBES_RECORDED_PER_MINUTE = 20;
+
+/**
+ * Record a request for a workspace the caller is not a member of. It is written against that
+ * workspace when it exists, so its admins can see probes, and never reveals which case it was.
+ * Organization ids are short; anything longer is not one and is not stored verbatim. A person
+ * is limited to a few recorded probes a minute (the response is unaffected), so scanning ids
+ * cannot be used to flood another workspace's audit log or the orphan (no-workspace) rows.
+ */
+async function recordProbe(c: WorkspaceContext, raw: string | null, capability: string): Promise<void> {
+  const requested = raw && raw.length <= 64 ? raw : raw ? '(invalid)' : null;
+  const s = await current(c);
+  if (s) {
+    const limit = await hit(c.env.DB, `probe-audit:${s.user.id}`, PROBES_RECORDED_PER_MINUTE, 60_000).catch(
+      () => null,
+    );
+    if (limit?.limited) return;
+  }
+  const exists =
+    requested && requested !== '(invalid)'
+      ? await c.env.DB.prepare('SELECT 1 AS x FROM organization WHERE id=?').bind(requested).first()
+      : null;
+  await recordDenial(c.env.DB, {
+    organizationId: exists ? requested : null,
+    actorId: s?.user.id ?? null,
+    action: 'access.denied',
+    subjectType: 'organization',
+    subjectId: requested,
+    outcome: 'denied',
+    ...requestOrigin(c.req.raw.headers),
+    metadata: { capability, reason: 'not_a_member' },
+  });
+}
+
 /**
  * The single authorization gate for domain routes (F24, F26).
  *
@@ -303,28 +350,7 @@ export async function authorize(c: WorkspaceContext, capability: Capability): Pr
   const origin = requestOrigin(c.req.raw.headers);
 
   if (isFailure(resolved)) {
-    if (resolved.status === 404) {
-      // A request for a workspace the caller is not a member of. Record it against that
-      // workspace when it exists, so its admins can see probes; never reveal which it was.
-      // Organization ids are short; anything longer is not one and is not stored verbatim.
-      const raw = c.req.query('org') ?? null;
-      const requested = raw && raw.length <= 64 ? raw : raw ? '(invalid)' : null;
-      const exists =
-        requested && requested !== '(invalid)'
-          ? await c.env.DB.prepare('SELECT 1 AS x FROM organization WHERE id=?').bind(requested).first()
-          : null;
-      const s = await current(c);
-      await recordDenial(c.env.DB, {
-        organizationId: exists ? requested : null,
-        actorId: s?.user.id ?? null,
-        action: 'access.denied',
-        subjectType: 'organization',
-        subjectId: requested,
-        outcome: 'denied',
-        ...origin,
-        metadata: { capability, reason: 'not_a_member' },
-      });
-    }
+    if (resolved.status === 404) await recordProbe(c, c.req.query('org') ?? null, capability);
     return resolved;
   }
 

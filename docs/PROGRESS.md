@@ -1042,7 +1042,13 @@ Two gaps left on purpose. Full decisions, the disclosure rules and the verificat
 - **Tests.** API (`tests/api/workspace-active.test.ts`, `tests/api/audit.test.ts`) and dashboard
   (`web/src/workspace/switcher.test.tsx`, `web/src/audit/audit.test.tsx`, new axe scenarios for `/audit`
   and the multi-workspace shell in both languages).
-- **Not done:** invitation acceptance still refuses a person who is already in a workspace; the F222
+- **Security review follow-ups (this PR):** a person in several workspaces must send `?org=` on every
+  write (400 otherwise, enforced in `resolveWorkspace`), forms bind the workspace they were opened for,
+  a tab detects a switch made in another tab and says so; invitations can be accepted by an existing
+  member; onboarding no longer invites a duplicate on a failed activation; the audit actor distinguishes
+  a former member from an outside user; refused-probe auditing is rate limited per person (and a refused
+  switch is audited); more invisible characters stripped and cuts are by code point; CSV has a BOM.
+- **Not done:** the F222
   read side beyond this (actor/target filters, total, correlation id, diff, member and session
   events); the workspace export still carries raw `metadata_json`; no screen reader, Firefox or Safari
   pass; the Vietnamese copy is unreviewed.

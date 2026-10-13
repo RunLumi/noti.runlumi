@@ -63,7 +63,14 @@ every workspace route uses when no `?org=` is given.
 | Cross-site or missing `Origin` | `403` (central CSRF middleware, as for every `/api/*` mutation) |
 | Not JSON | `415` |
 | `organizationId` missing, not a string or longer than 64 | `422` with `fields` |
+| A refused switch | Audited like any refused workspace request (an `access.denied` row, at most 20 recorded per person a minute) |
 | More than 30 switches a minute per user | `429` with `Retry-After` |
+
+**Writes need `?org=` for a person in several workspaces.** A `POST`, `PUT`, `PATCH` or `DELETE` on a
+workspace route that does not carry `?org=<id>` from a caller with more than one membership is
+`400 {"error":"org is required"}` (it would otherwise use the session's active workspace, which another
+tab may have changed). A caller with one membership is unaffected; reads still fall back to the active
+workspace.
 
 Membership is read from the database for the caller; the body is never trusted. Only the caller's own
 session row is written. It is not audited (it changes no workspace data). `Cache-Control: no-store`.
@@ -634,7 +641,8 @@ type AuditPage = {
     actor:
       | { kind: 'member'; name: string }   // a CURRENT member of this workspace, name only
       | { kind: 'system' }                 // no actor (automatic)
-      | { kind: 'other' };                 // left the workspace, or an outsider whose probe was recorded here
+      | { kind: 'former' }                 // a successful action by someone no longer a member
+      | { kind: 'other' };                 // a refused request from someone who never was (an outsider's probe)
     summary: { key: string; value: string | number | boolean | string[] }[];  // allow-listed, bounded
   }[];
   nextCursor: string | null;

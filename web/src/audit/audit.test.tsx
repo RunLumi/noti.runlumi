@@ -94,7 +94,7 @@ describe('audit log page', () => {
     expect(within(table).getByText('Integration created')).toBeTruthy();
     expect(within(table).getByText('Linh Nguyen')).toBeTruthy();
     expect(within(table).getByText('Noti (automatic)')).toBeTruthy();
-    expect(within(table).getByText('Not a current member')).toBeTruthy();
+    expect(within(table).getByText('Outside user')).toBeTruthy();
     expect(within(table).getAllByText('Refused').length).toBe(2);
     // plain-language details, localised values
     expect(within(table).getByText('acme/website')).toBeTruthy();
@@ -175,6 +175,14 @@ describe('audit log page', () => {
     await user.click(screen.getByRole('button', { name: /Download loaded events/ }));
     expect(blobs).toHaveLength(1);
     expect(blobs[0]?.type).toContain('text/csv');
+    // A byte-order mark first, so Excel reads Vietnamese as UTF-8.
+    const buffer = await new Promise<ArrayBuffer>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.readAsArrayBuffer(blobs[0] ?? new Blob());
+    });
+    const bytes = new Uint8Array(buffer);
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     create.mockRestore();
   });
 

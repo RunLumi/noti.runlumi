@@ -67,7 +67,8 @@ export const auditEn = {
   'audit.csv.header.details': 'Details',
 
   'audit.actor.system': 'Noti (automatic)',
-  'audit.actor.other': 'Not a current member',
+  'audit.actor.former': 'Former member',
+  'audit.actor.other': 'Outside user',
   'audit.outcome.success': 'Done',
   'audit.outcome.denied': 'Refused',
   'audit.noDetails': 'No further details recorded.',

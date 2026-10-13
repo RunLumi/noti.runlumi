@@ -84,10 +84,19 @@ export const MAX_LIST_ITEMS = 10;
 const UNSAFE_RANGES: readonly (readonly [number, number])[] = [
   [0x0000, 0x001f],
   [0x007f, 0x009f],
+  [0x00ad, 0x00ad], // soft hyphen
+  [0x034f, 0x034f], // combining grapheme joiner
+  [0x061c, 0x061c], // Arabic letter mark
+  [0x115f, 0x1160], // Hangul fillers
+  [0x180e, 0x180e], // Mongolian vowel separator
   [0x200b, 0x200f],
   [0x2028, 0x202e],
   [0x2060, 0x206f],
+  [0x3164, 0x3164], // Hangul filler
+  [0xfe00, 0xfe0f], // variation selectors
   [0xfeff, 0xfeff],
+  [0xfff9, 0xfffb], // interlinear annotation
+  [0xe0000, 0xe007f], // tag characters
 ];
 
 const isUnsafe = (code: number) => UNSAFE_RANGES.some(([lo, hi]) => code >= lo && code <= hi);
@@ -97,7 +106,9 @@ export function safeText(value: string, max: number = MAX_TEXT): string {
   const clean = Array.from(value)
     .filter((ch) => !isUnsafe(ch.codePointAt(0) ?? 0))
     .join('');
-  return clean.length > max ? `${clean.slice(0, max - 1)}\u2026` : clean;
+  // By code point, so a cut never splits a surrogate pair.
+  const points = Array.from(clean);
+  return points.length > max ? `${points.slice(0, max - 1).join('')}\u2026` : clean;
 }
 
 function coerce(kind: Kind, value: unknown): SummaryValue | undefined {
@@ -144,6 +155,9 @@ export function summarise(action: string, metadataJson: string): readonly Summar
 export type AuditActor =
   | { readonly kind: 'member'; readonly name: string }
   | { readonly kind: 'system' }
+  /** A person who did something here and has since left (or whose membership is gone). */
+  | { readonly kind: 'former' }
+  /** Someone who never belonged here: an outsider whose refused request was recorded. */
   | { readonly kind: 'other' };
 
 export interface AuditRowRecord {
@@ -180,7 +194,9 @@ function actorOf(row: AuditRowRecord): AuditActor {
   if (row.actor_id === null) return { kind: 'system' };
   if (row.actor_is_member === 1 && row.actor_name)
     return { kind: 'member', name: safeText(row.actor_name, 80) };
-  return { kind: 'other' };
+  // A successful action can only have been taken by someone who was a member then; a refused
+  // request from a non-member is an outsider. Neither is named.
+  return row.outcome === 'denied' ? { kind: 'other' } : { kind: 'former' };
 }
 
 export function toAuditView(row: AuditRowRecord): AuditEventView {

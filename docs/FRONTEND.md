@@ -137,6 +137,12 @@ switcher was explicitly not built" note from slice Fix F is closed by this.
 | `audit/AuditPage.tsx`, `AuditFilters.tsx`, `AuditTable.tsx` | `/audit`, admin only: filters in the URL, table that stacks into cards, load more, empty/error/forbidden states, retention note, CSV of the loaded events |
 | `audit/api.ts`, `hooks.ts`, `search.ts`, `copy.ts`, `csv.ts` | Strict parsing, query keys `['audit', orgId, ...]`, URL validation, plain-language labels (`audit.action.<id>`, `audit.detail.<key>`), formula-safe CSV |
 
+| `workspace/bound.tsx` | `useBoundWorkspace`: a form, wizard or dialog keeps the workspace it was opened for; `StaleWorkspaceNotice` |
+| `workspace/drift.tsx` | `WorkspaceDriftBanner`: detects an active-workspace change made in another tab (`BroadcastChannel('noti-workspace')`, focus), drops caches, alerts |
+
+**Write rule:** every dashboard mutation names its workspace with `?org=` (the server requires it for
+people in several workspaces); `workspace/org-param.test.ts` scans for a mutation that does not.
+
 **Query-key rule:** every workspace-scoped key is `[area, orgId, ...]`. On a switch every cached
 query that is not `me`, `passkeys` or the new workspace's is removed, so a new feature must follow
 the rule or its data is dropped (never leaked).

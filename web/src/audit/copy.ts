@@ -28,6 +28,8 @@ export function actorLabel(actor: AuditEvent['actor']): string {
       return actor.name;
     case 'system':
       return t('audit.actor.system');
+    case 'former':
+      return t('audit.actor.former');
     case 'other':
       return t('audit.actor.other');
   }

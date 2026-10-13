@@ -9,6 +9,7 @@ export type AuditOutcome = 'success' | 'denied';
 export type AuditActor =
   | { readonly kind: 'member'; readonly name: string }
   | { readonly kind: 'system' }
+  | { readonly kind: 'former' }
   | { readonly kind: 'other' };
 
 export type SummaryValue = string | number | boolean | readonly string[];
@@ -56,6 +57,7 @@ function parseActor(value: unknown): AuditActor {
   if (isRecord(value) && value.kind === 'member' && typeof value.name === 'string')
     return { kind: 'member', name: value.name };
   if (isRecord(value) && value.kind === 'system') return { kind: 'system' };
+  if (isRecord(value) && value.kind === 'former') return { kind: 'former' };
   if (isRecord(value) && value.kind === 'other') return { kind: 'other' };
   throw bad('audit actor');
 }

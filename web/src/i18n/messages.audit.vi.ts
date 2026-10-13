@@ -66,7 +66,8 @@ export const auditVi = {
   'audit.csv.header.details': 'Chi tiết',
 
   'audit.actor.system': 'Noti (tự động)',
-  'audit.actor.other': 'Không phải thành viên hiện tại',
+  'audit.actor.former': 'Thành viên cũ',
+  'audit.actor.other': 'Người ngoài',
   'audit.outcome.success': 'Đã thực hiện',
   'audit.outcome.denied': 'Bị từ chối',
   'audit.noDetails': 'Không có chi tiết nào khác được ghi lại.',

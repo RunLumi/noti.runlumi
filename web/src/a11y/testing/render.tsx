@@ -119,6 +119,10 @@ export interface ApiState {
   /** The delivery a test creates, as `GET /api/deliveries/:id` reports it. */
   testDelivery: Record<string, unknown>;
   audit: unknown[] | 'error';
+  /** Make `POST /api/workspace/active` fail (a network or server fault). */
+  failActivate?: boolean;
+  /** The workspace a pending invitation would add the person to. */
+  invitation?: { orgId: string; name: string; role: string };
   /**
    * Per-workspace data, selected by the `?org=` the page asked for. When present it overrides
    * `integrations`, `deliveries`, `members` and `audit`, so a test can prove that workspace A's
@@ -180,6 +184,24 @@ export function installFetch(state: ApiState): void {
     const deliveries = scoped?.deliveries ?? state.deliveries;
     const members = scoped?.members ?? state.members;
     const auditRows = scoped?.audit ?? state.audit;
+    if (method === 'POST' && path === '/api/workspace/active' && state.failActivate)
+      return Promise.resolve(json({ error: 'boom' }, 500));
+    if (
+      method === 'POST' &&
+      path === '/api/auth/organization/accept-invitation' &&
+      state.me !== 'unauthenticated' &&
+      state.invitation
+    ) {
+      const joined = {
+        orgId: state.invitation.orgId,
+        role: state.invitation.role,
+        name: state.invitation.name,
+      };
+      state.me = { user: { ...state.me.user, organizations: [...state.me.user.organizations, joined] } };
+      return Promise.resolve(
+        json({ invitation: { organizationId: joined.orgId }, member: { organizationId: joined.orgId } }),
+      );
+    }
     if (method === 'POST' && path === '/api/workspace/active' && state.me !== 'unauthenticated') {
       const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
         organizationId?: string;
@@ -207,7 +229,17 @@ export function installFetch(state: ApiState): void {
         role: 'admin',
         name: body.name ?? '',
       };
-      state.me = { user: { ...state.me.user, organizations: [...state.me.user.organizations, created] } };
+      // Better Auth makes a new organization the session's active one.
+      state.me = {
+        user: {
+          ...state.me.user,
+          org_id: created.orgId,
+          activeOrgId: created.orgId,
+          org_name: created.name,
+          role: 'admin',
+          organizations: [...state.me.user.organizations, created],
+        },
+      };
       return Promise.resolve(json({ id: created.orgId, name: created.name, slug: body.slug }));
     }
     if (method === 'GET' && path === '/api/audit') {
@@ -335,6 +367,8 @@ export function installFetch(state: ApiState): void {
 
 export interface RenderedApp extends RenderResult {
   readonly router: ReturnType<typeof buildRouter>;
+  /** The mock server's live state: a test changes it to play "another tab" or a server fault. */
+  readonly api: ApiState;
 }
 
 export interface RenderOptions {
@@ -347,7 +381,8 @@ export async function renderApp(path: string, options: RenderOptions = {}): Prom
   setLocale(options.locale ?? 'en', { persist: false });
   // Pages such as /invite and /verify read the query string from `window.location`.
   window.history.replaceState(null, '', path);
-  installFetch({ ...defaultApi(), ...options.api });
+  const api: ApiState = { ...defaultApi(), ...options.api };
+  installFetch(api);
   const router = buildRouter(path);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await router.load();
@@ -358,7 +393,7 @@ export async function renderApp(path: string, options: RenderOptions = {}): Prom
       </LocaleProvider>
     </QueryClientProvider>,
   );
-  return Object.assign(result, { router });
+  return Object.assign(result, { router, api });
 }
 
 export { ORG_ID };

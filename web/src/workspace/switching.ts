@@ -22,6 +22,33 @@ export function dropOtherWorkspaces(qc: QueryClient, orgId: string): void {
   });
 }
 
+/** Sibling tabs listen here; the message carries nothing but the fact that a switch happened. */
+export const WORKSPACE_CHANNEL = 'noti-workspace';
+
+/**
+ * The workspace this tab just switched to itself. The drift detector consumes it, so a switch the
+ * person made here is not reported as "changed in another tab".
+ */
+let ownSwitch: string | null = null;
+
+export function takeOwnSwitch(orgId: string): boolean {
+  const mine = ownSwitch === orgId;
+  if (mine) ownSwitch = null;
+  return mine;
+}
+
+/** Call right after this tab changes the active workspace (switch, create, accept an invitation). */
+export function noteOwnSwitch(orgId: string): void {
+  ownSwitch = orgId;
+  try {
+    const channel = new BroadcastChannel(WORKSPACE_CHANNEL);
+    channel.postMessage({ changed: true });
+    channel.close();
+  } catch {
+    // Unsupported: the other tabs notice on focus.
+  }
+}
+
 function withActive(me: Me | undefined, active: ActiveWorkspace): Me | undefined {
   if (!me) return me;
   return {
@@ -45,6 +72,7 @@ export function useSwitchWorkspace(onSwitched?: (active: ActiveWorkspace) => voi
   return useMutation({
     mutationFn: (organizationId: string) => authApi.setActiveWorkspace(organizationId),
     onSuccess: (active) => {
+      noteOwnSwitch(active.activeOrgId);
       qc.setQueryData<Me>(['me'], (me) => withActive(me, active));
       dropOtherWorkspaces(qc, active.activeOrgId);
       void qc.invalidateQueries({ queryKey: ['me'] });
@@ -53,4 +81,22 @@ export function useSwitchWorkspace(onSwitched?: (active: ActiveWorkspace) => voi
     // A refusal means the list on screen is stale (membership removed): refresh it.
     onError: () => void qc.invalidateQueries({ queryKey: ['me'] }),
   });
+}
+
+/**
+ * After this tab created or joined a workspace (Better Auth already made it active), pin it
+ * through our own endpoint, which re-checks the membership. That second call is best effort: if
+ * it fails the workspace exists and is active anyway, so the caller must carry on (a retry
+ * would create a duplicate workspace). Either way the old workspace's cache is dropped and `me`
+ * is refreshed.
+ */
+export async function adoptWorkspace(qc: QueryClient, orgId: string): Promise<void> {
+  noteOwnSwitch(orgId);
+  try {
+    await authApi.setActiveWorkspace(orgId);
+  } catch {
+    // Created or joined, and already active: nothing to undo and nothing to retry.
+  }
+  dropOtherWorkspaces(qc, orgId);
+  await qc.invalidateQueries({ queryKey: ['me'] });
 }

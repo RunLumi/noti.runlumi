@@ -12,6 +12,12 @@ export const appVi = {
   'shell.loading': 'Đang tải không gian làm việc của bạn…',
   'shell.workspaceFallback': 'Không gian làm việc chưa đặt tên',
   'shell.workspaceKind': 'Tổ chức',
+  'workspace.drift.title': 'Không gian làm việc đã đổi ở một tab khác',
+  'workspace.drift.body':
+    'Tab này giờ hiển thị {name}. Mọi thứ bạn đang điền ở đây là cho không gian làm việc trước đó nên chưa được gửi. Hãy kiểm tra bạn đang ở đâu trước khi tiếp tục.',
+  'workspace.drift.dismiss': 'Đã hiểu',
+  'workspace.stale.form':
+    'Không gian làm việc đã đổi ở một tab khác nên biểu mẫu này bị tắt để không lưu nhầm vào sai không gian. Hãy tải lại trang hoặc quay lại không gian làm việc bạn định dùng.',
   'switcher.heading': 'Không gian làm việc của bạn',
   'switcher.trigger': 'Không gian làm việc: {name}, {role}. Chuyển không gian làm việc',
   'switcher.create': 'Tạo không gian làm việc',
@@ -170,8 +176,6 @@ export const appVi = {
     'Hãy đăng nhập bằng địa chỉ email đã nhận lời mời này. Hãy xác minh email đó trước khi chấp nhận.',
   'invite.signinAction': 'Đăng nhập để chấp nhận',
   'invite.signupLink': 'Bạn mới dùng Lumi Noti? Tạo tài khoản',
-  'invite.alreadyMember':
-    'Bạn đã thuộc về một tổ chức. Hãy rời khỏi tổ chức đó trước khi chấp nhận lời mời này.',
   'invite.signedInAs': 'Bạn đang đăng nhập với {email}. Chấp nhận lời mời sẽ đưa bạn vào tổ chức đã mời.',
   'invite.accept': 'Chấp nhận lời mời',
   'invite.accepting': 'Đang tham gia…',

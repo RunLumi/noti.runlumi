@@ -12,6 +12,12 @@ export const appEn = {
   'shell.loading': 'Loading your workspace…',
   'shell.workspaceFallback': 'Setup workspace',
   'shell.workspaceKind': 'Organization',
+  'workspace.drift.title': 'Workspace changed in another tab',
+  'workspace.drift.body':
+    'This tab now shows {name}. Anything you were filling in here was meant for the previous workspace, so it has not been sent. Check where you are before you continue.',
+  'workspace.drift.dismiss': 'Got it',
+  'workspace.stale.form':
+    'The workspace changed in another tab, so this form is turned off to stop it saving into the wrong workspace. Reload or go back to the workspace you meant to use.',
   'switcher.heading': 'Your workspaces',
   'switcher.trigger': 'Workspace: {name}, {role}. Switch workspace',
   'switcher.create': 'Create workspace',
@@ -168,7 +174,6 @@ export const appEn = {
     'Sign in with the email address that received this invitation. Verify that email before accepting.',
   'invite.signinAction': 'Sign in to accept',
   'invite.signupLink': 'New to Lumi Noti? Create an account',
-  'invite.alreadyMember': 'You already belong to an organization. Leave it before accepting this invitation.',
   'invite.signedInAs': 'You’re signed in as {email}. Accepting joins the inviting organization.',
   'invite.accept': 'Accept invitation',
   'invite.accepting': 'Joining…',

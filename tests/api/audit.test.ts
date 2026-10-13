@@ -258,7 +258,7 @@ describe('what a row discloses', () => {
     }>();
     const actor = (id: string) => body.events.find((e) => e.id === id)?.actor;
     expect(actor('probe')).toEqual({ kind: 'other' });
-    expect(actor('gone')).toEqual({ kind: 'other' });
+    expect(actor('gone')).toEqual({ kind: 'former' });
     expect(actor('system')).toEqual({ kind: 'system' });
     const text = JSON.stringify(body);
     expect(text).not.toContain('Name of dave');
@@ -311,6 +311,17 @@ describe('summarise', () => {
     );
     expect((list[0]?.value as string[]).length).toBe(10);
     expect(safeText('ab\u202ecd\u0007\u200bef\nxy')).toBe('abcdefxy');
+    // invisible characters that can hide or spoof text
+    expect(safeText('a\u061cb\u00adc\u034fd\u180ee\ufff9f\ufffbg\u115fh\u1160i\u3164j\ufe0fk')).toBe(
+      'abcdefghijk',
+    );
+    expect(safeText('x\u{e0041}\u{e007f}y')).toBe('xy');
+  });
+
+  it('cuts by code point, never through a surrogate pair', () => {
+    const cut = safeText('\u{1f600}'.repeat(10), 4);
+    expect(cut).toBe('\u{1f600}\u{1f600}\u{1f600}\u2026');
+    expect(cut).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
   });
 
   it('has an allow-list entry for every action the application records', () => {

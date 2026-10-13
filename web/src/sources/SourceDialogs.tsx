@@ -1,3 +1,4 @@
+import { StaleWorkspaceNotice, useBoundWorkspace } from '../workspace/bound';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { AlertDialog } from '@base-ui/react/alert-dialog';
 import { IconRefresh, IconTrash } from '@tabler/icons-react';
@@ -34,12 +35,13 @@ function Failure({ error, title }: { readonly error: unknown; readonly title: st
  * sealed on write and never shown again.
  */
 export function RotateDialog({
-  orgId,
+  orgId: liveOrgId,
   source,
   onRotated,
 }: DialogProps & { readonly onRotated: (result: SourceWithSecret) => void }) {
   useLocale();
-  const rotate = useRotateSource(orgId);
+  const ws = useBoundWorkspace(liveOrgId);
+  const rotate = useRotateSource(ws.orgId);
   const [open, setOpen] = useState(false);
   const [secret, setSecret] = useState('');
   const [authMode, setAuthMode] = useState<AuthMode | null>(source.authMode);
@@ -61,7 +63,7 @@ export function RotateDialog({
   };
   const confirm = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (rotate.isPending) return;
+    if (rotate.isPending || ws.stale) return;
     let body: Record<string, unknown> | undefined;
     if (provider) {
       const local = validateSecret(provider, authMode, secret);
@@ -110,6 +112,7 @@ export function RotateDialog({
               : t('sources.rotate.body')}
           </AlertDialog.Description>
           <form className="form-stack" noValidate onSubmit={(e) => void confirm(e)}>
+            <StaleWorkspaceNotice show={ws.stale} />
             {provider === 'gitlab' && (
               <fieldset className="destination-choice">
                 <legend className="field-label">{t('sources.gitlab.auth.legend')}</legend>
@@ -175,7 +178,7 @@ export function RotateDialog({
               <AlertDialog.Close render={<Button ref={cancelRef} type="button" variant="outline" />}>
                 {t('sources.rotate.keep')}
               </AlertDialog.Close>
-              <Button type="submit" aria-disabled={rotate.isPending || undefined}>
+              <Button type="submit" aria-disabled={rotate.isPending || ws.stale || undefined}>
                 {rotate.isPending
                   ? t(provider ? 'sources.rotate.provider.replacing' : 'sources.rotate.rotating')
                   : t(provider ? 'sources.rotate.provider.confirm' : 'sources.rotate.confirm')}
@@ -189,9 +192,10 @@ export function RotateDialog({
 }
 
 /** Delete destroys the secret and the connected chats, so the name is typed to confirm. */
-export function DeleteSourceDialog({ orgId, source }: DialogProps) {
+export function DeleteSourceDialog({ orgId: liveOrgId, source }: DialogProps) {
   useLocale();
-  const remove = useDeleteSource(orgId);
+  const ws = useBoundWorkspace(liveOrgId);
+  const remove = useDeleteSource(ws.orgId);
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -200,7 +204,7 @@ export function DeleteSourceDialog({ orgId, source }: DialogProps) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!matches || remove.isPending) return;
+    if (!matches || remove.isPending || ws.stale) return;
     try {
       await remove.mutateAsync(source);
     } catch {
@@ -236,6 +240,7 @@ export function DeleteSourceDialog({ orgId, source }: DialogProps) {
               : t('sources.delete.bodyNoChats')}
           </AlertDialog.Description>
           <form className="form-stack" onSubmit={(e) => void onSubmit(e)}>
+            <StaleWorkspaceNotice show={ws.stale} />
             <div className="field">
               <label className="field-label" htmlFor={inputId}>
                 {t('sources.delete.confirmLabel', { name: source.name })}
@@ -256,7 +261,7 @@ export function DeleteSourceDialog({ orgId, source }: DialogProps) {
               <Button
                 type="submit"
                 variant="danger"
-                aria-disabled={!matches || remove.isPending || undefined}
+                aria-disabled={!matches || remove.isPending || ws.stale || undefined}
               >
                 {remove.isPending ? t('sources.delete.deleting') : t('sources.delete.confirm')}
               </Button>

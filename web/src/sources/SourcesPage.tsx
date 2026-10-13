@@ -1,3 +1,4 @@
+import { StaleWorkspaceNotice, useBoundWorkspace } from '../workspace/bound';
 import { useRef, useState, type FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { IconPlus, IconRefresh, IconPlugConnected } from '@tabler/icons-react';
@@ -101,14 +102,15 @@ function RadioGroup<T extends string | boolean>({
 }
 
 function CreateForm({
-  orgId,
+  orgId: liveOrgId,
   onCreated,
 }: {
   readonly orgId: string;
   readonly onCreated: (r: SourceWithSecret) => void;
 }) {
   useLocale();
-  const create = useCreateSource(orgId);
+  const ws = useBoundWorkspace(liveOrgId);
+  const create = useCreateSource(ws.orgId);
   const formRef = useRef<HTMLFormElement>(null);
   const [draft, setDraft] = useState<CreateDraft>(EMPTY_DRAFT);
   const [errors, setErrors] = useState<CreateErrors>({});
@@ -117,7 +119,7 @@ function CreateForm({
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (create.isPending) return;
+    if (create.isPending || ws.stale) return;
     const local = validateCreate(draft, validateName(draft.name));
     setErrors(local);
     if (Object.keys(local).length > 0) {
@@ -146,6 +148,7 @@ function CreateForm({
     <section className="source-create" aria-labelledby="source-create-title">
       <h2 id="source-create-title">{t('sources.create.title')}</h2>
       <form ref={formRef} className="source-create-form" noValidate onSubmit={(e) => void onSubmit(e)}>
+        <StaleWorkspaceNotice show={ws.stale} />
         <RadioGroup<SourceKind>
           legend={t('sources.kind.legend')}
           name="source-kind"
@@ -244,7 +247,7 @@ function CreateForm({
             )}
           </Field>
         )}
-        <Button type="submit" aria-disabled={create.isPending || undefined}>
+        <Button type="submit" aria-disabled={create.isPending || ws.stale || undefined}>
           <IconPlus size={18} aria-hidden="true" />
           {create.isPending ? t('sources.create.submitting') : t('sources.create.submit')}
         </Button>
