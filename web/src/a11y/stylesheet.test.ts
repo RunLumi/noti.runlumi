@@ -195,6 +195,20 @@ describe('focus, target size and type size (DESIGN.md §16)', () => {
   });
 });
 
+describe('reflow fixes found in the browser pass (WCAG 1.4.10)', () => {
+  it('stacks the wizard review rows below 1100px so values are not squeezed to a few characters', () => {
+    const rule = allRules.find(
+      (r) => r.selectors.includes('.review .review-row') && inMedia(r, 'max-width: 1100px'),
+    );
+    expect(declares(rule as FlatRule, 'grid-template-columns')?.value).toBe('minmax(0, 1fr) auto');
+  });
+
+  it('lets destination option cards fill the columns that fit instead of a fixed two', () => {
+    const rule = allRules.find((r) => r.selectors.includes('.destination-choice .destination-options'));
+    expect(declares(rule as FlatRule, 'grid-template-columns')?.value).toMatch(/auto-fit/);
+  });
+});
+
 describe('Vietnamese typography (DESIGN.md §6.2, F224)', () => {
   const vi = allRules.filter((r) => r.selectors.some((s) => s.includes(':lang(vi)')));
 

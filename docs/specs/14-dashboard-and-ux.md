@@ -1748,7 +1748,7 @@ of reflected-content bug.
 
 ## F221 — Accessibility
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 6c, ADR 0013: axe-core scans every route, wizard step, dialog and error state in the tests and in one real-browser pass, failing the build on serious or critical violations; palette contrast test; skip link; route title, announcement and focus; focus contract for dialogs; stylesheet checks for reduced motion, reduced transparency, increased contrast and forced colours. **Not done:** no screen-reader pass; the preference modes were not seen in a browser; no sticky-bar 2.4.11 test (no sticky bar); two non-text contrast gaps accepted and pinned (switch track 1.55:1, warning rail 2.03:1); no conformance claim)
 
 **Story** As a person who uses a keyboard or a screen reader, I want the whole product to work
 without a mouse and without sighted assistance, so that I am not locked out of my own alerts.
@@ -1970,7 +1970,7 @@ webhook URL, a token, or a raw event payload.
 
 ## F223 — Responsive and mobile UX
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 6c: no horizontal scroll and no sub-44px control at 320 px on the shell, overview, integrations, wizard, activity, team, settings and sign-in, and an emulated 200% zoom of the wizard, in a real browser; wizard review and destination cards fixed for 700-1100 px. Not verified: real devices, touch, Safari/Firefox, the other screens in F223's list, orientation, safe areas)
 
 **Story** As someone who reads notifications on my phone between meetings, I want the dashboard
 to work on a small screen, so that I can check whether my alerts are working from anywhere.
@@ -2060,7 +2060,7 @@ fixture would breach that by accident).
 
 ## F224 — Internationalisation and translated-ready strings
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partial (slice 6c, ADR 0013: Vietnamese catalogue with a language switcher, saved choice, `<html lang>`, `Intl` dates/numbers/plurals, `:lang(vi)` display type, Geist Vietnamese subset asserted; tests for catalogue drift and hard-coded strings. **Not done:** locale in the URL, preserving unsaved forms across a switch, localised server-supplied errors, `lang` on inline provider text, the locale-aware screenshot pipeline, ICU `{count, plural}` syntax (a per-message `one`/`other` object is used instead); the Vietnamese copy has had no native-speaker review)
 
 **Story** As a user who does not read English, I want the product in my language, so that setup
 does not require an interpreter.

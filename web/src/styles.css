@@ -109,7 +109,7 @@
 
   /* WCAG 1.4.11: the edge of an empty text field is what identifies it, so it needs 3:1.
      The archival border (#d9dee8) is 1.35:1 on white. Soft Slate is a canonical Lumi value
-     (5.77:1 on white, 5.07:1 on Paper White), reused here in a new role; no token changes. */
+     (5.76:1 on white, 5.07:1 on Paper White), reused here in a new role; no token changes. */
   --color-control-border: var(--color-soft-slate);
 
   --focus-ring: 2px solid var(--color-lumi-blue);

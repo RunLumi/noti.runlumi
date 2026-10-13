@@ -30,3 +30,23 @@ h1[tabindex='-1']:focus {
 :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   scroll-margin-block: 5rem;
 }
+
+/* Reflow (WCAG 1.4.10), found in the browser pass at 1024px and at 200% zoom.
+   The wizard shows the sidebar, a 240px stepper and the sheet side by side. Between about
+   700px and 1100px the sheet is only ~350px wide, and a fixed 180px label column and two-up
+   option cards left a few characters per line ("Slac / k"). The review rows now stack below
+   1100px and the option cards fill however many columns fit (`auto-fit`). Doubled class
+   selectors win over integrations.css whatever the stylesheet order. */
+@media (max-width: 1100px) {
+  .review .review-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .review .review-row dt {
+    grid-column: 1 / -1;
+  }
+}
+
+.destination-choice .destination-options {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
