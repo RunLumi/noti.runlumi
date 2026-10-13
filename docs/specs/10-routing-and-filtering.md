@@ -52,7 +52,7 @@
 
 ## F121 — Routing rule model
 
-**Priority** P0 · **Status** not started · **Fixes** D3
+**Priority** P0 · **Status** 🟡 only a closed filter set stored on each integration (slice 7, [ADR 0010](../adr/0010-routing-filters.md)); no rule object · **Fixes** D3
 
 **Story** As a user, I want one object that says which events, under which conditions, go where
 and in what format, so that I can understand and change my setup as a whole rather than as a
@@ -345,7 +345,7 @@ this path. That property is the security argument, and it is asserted by a test,
 
 ## F124 — Comparison semantics and three-valued logic
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 three-valued evaluation for the five shipped filters (slice 7); no general comparison engine
 
 **Story** As a user, I want "is not a bot" to behave correctly when the source never told us
 whether someone is a bot, so that my alerts do not silently disappear.
@@ -437,7 +437,7 @@ so no ReDoS surface exists.
 
 ## F125 — Filter field registry
 
-**Priority** P0 · **Status** not started · **Blocks** every other feature in this file
+**Priority** P0 · **Status** 🟡 five filters in a typed, versioned registry (slice 7); not the general field registry · **Blocks** every other feature in this file
 
 **Story** As a user, I want the filter list to be short, typed and honest about what each field
 means, so that I can pick the right one without documentation.
@@ -619,7 +619,7 @@ lookup first, which is an independent, tested path.
 
 ## F127 — Branch filter capability
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `*`/`**` globs and allow/deny lists with a linear matcher (slice 7); no separate `eq`/`in`/`not_in` operators
 
 **Story** As a user, I want "only the release branch" and "not the sandbox branch", so that
 routine work on experimental branches does not page me.
@@ -707,7 +707,7 @@ is bounded too.
 
 ## F128 — Label filter capability
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 label include/exclude shipped (slice 7); no picker from observed labels
 
 **Story** As a user, I want "only things labelled bug" so that the triage channel stays about
 bugs.
@@ -1386,7 +1386,7 @@ template cannot become a way to persist an SSRF payload (F96) or a secret.
 
 ## F136 — Filter evaluator, compiled predicates and the evaluation budget
 
-**Priority** P0 · **Status** not started · **The reason rules are evaluated in the consumer**
+**Priority** P0 · **Status** 🟡 pure `evaluate` per filter, run at ingress rather than in the consumer (ADR 0010 explains why); no compiled-predicate cache or evaluation budget · **The reason rules are evaluated in the consumer**
 
 **Story** As an operator, I want rule evaluation to cost a bounded amount of work per event, so
 that adding rules does not degrade delivery for everyone on the platform.
@@ -1525,7 +1525,7 @@ the compiler's input is a validated data structure, not source text — the asse
 
 ## F137 — Delivery provenance: `rule_id` and the evaluation trace
 
-**Priority** P0 · **Status** not started · **The data half of F149**
+**Priority** P0 · **Status** 🟡 `routing_decisions` records delivered/filtered with a reason code (slice 7); no `deliveries.rule_id`, `rule_version` or evaluation trace · **The data half of F149**
 
 **Story** As a user who got a notification I did not expect, I want the delivery record to name
 the rule that produced it, so that I can fix the cause instead of muting the symptom.
@@ -1605,7 +1605,7 @@ into a support export. Rule names are user text and pass F94 escaping.
 
 ## F138 — Actor, bot and ghost filter capability
 
-**Priority** P1 · **Status** not started · **Implements F43's promise**
+**Priority** P1 · **Status** 🟡 bot any/exclude/only and the ghost exemption shipped (slice 7); no "don't know" choice, no `isGhost` control · **Implements F43's promise**
 
 **Story** As a user, I want "not from bots" and "not from deleted accounts" as separate, honest
 choices, so that machine noise goes to one channel and human activity goes to another.
@@ -1703,7 +1703,7 @@ Actor identity is **never** used for authorization — the installation is (F57)
 
 ## F139 — Safe rule change: impact preview, simulate, versioning, rollback, test-before-enable
 
-**Priority** P1 · **Status** not started · **Deliberately one feature, four facets**
+**Priority** P1 · **Status** 🟡 pure dry run (`POST /api/integrations/:id/filters/preview`) and a dashboard tester only (slice 7); no impact preview, versioning or rollback · **Deliberately one feature, four facets**
 
 **Story** As a user about to change a working rule, I want to see what the change would have
 done to my recent notifications before it does it, so that tightening a filter never silently
@@ -1839,7 +1839,7 @@ dialog. Replay and rollback both require an explicit capability (F204) and are a
 
 ## F140 — Event picker and the rule authoring contract
 
-**Priority** P0 · **Status** not started · **Blocks** by F42
+**Priority** P0 · **Status** 🟡 per-filter plain-language controls in the wizard and settings (slice 7); no event-picker contract changes · **Blocks** by F42
 
 **Story** As a non-technical user, I want the rule builder to read as a sentence I can check,
 so that I can tell what I am about to build without reading documentation.

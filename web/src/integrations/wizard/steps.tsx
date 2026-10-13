@@ -10,6 +10,9 @@ import { EventList } from '../EventList';
 import { EventPicker } from '../EventPicker';
 import type { GithubEventType } from '../events';
 import { WebhookFields, WebhookGuide } from '../WebhookFields';
+import { FilterTester } from '../filters/FilterTester';
+import { FiltersEditor } from '../filters/FiltersEditor';
+import { coverageNotes, describeFilterCount, validateFilterDraft, type FilterErrors } from '../filters/model';
 import type { Draft, WizardErrors, WizardField } from './draft';
 
 export interface StepProps {
@@ -120,6 +123,30 @@ export function EventsStep({ draft, errors, update }: StepProps) {
   );
 }
 
+/**
+ * Optional. Nothing here is needed to create the integration; with no filters every update
+ * chosen in the previous step is sent. Errors appear beside their controls once the person has
+ * tried to continue (or the server has refused them).
+ */
+export function FiltersStep({ draft, errors, update }: StepProps) {
+  const checked = validateFilterDraft(draft.filters, draft.eventTypes);
+  const parsed = validateFilterDraft(draft.filters);
+  const notes = coverageNotes(parsed.ok ? parsed.config : {}, draft.eventTypes);
+  const shown: FilterErrors = errors.filters ? (checked.ok ? { form: errors.filters } : checked.errors) : {};
+  return (
+    <div className="form-stack">
+      <p>{t('filters.intro')}</p>
+      <FiltersEditor
+        draft={draft.filters}
+        errors={shown}
+        notes={notes}
+        onChange={(field, value) => update('filters', { ...draft.filters, [field]: value })}
+      />
+      <FilterTester config={parsed.ok ? parsed.config : null} />
+    </div>
+  );
+}
+
 interface ReviewStepProps {
   readonly draft: Draft;
   readonly onEdit: (field: WizardField) => void;
@@ -157,6 +184,8 @@ function ReviewRow({
 /** A summary that never shows the URL or secret back, only that they were provided. */
 export function ReviewStep({ draft, onEdit }: ReviewStepProps) {
   const destination = draft.destination ? t(DESTINATIONS[draft.destination].name) : '';
+  const checked = validateFilterDraft(draft.filters, draft.eventTypes);
+  const filterSummary = checked.ok ? describeFilterCount(checked.config) : t('filters.error.generic');
   return (
     <div className="review">
       <p>{t('wizard.review.intro')}</p>
@@ -180,6 +209,9 @@ export function ReviewStep({ draft, onEdit }: ReviewStepProps) {
         </ReviewRow>
         <ReviewRow label={t('field.events')} field="eventTypes" onEdit={onEdit}>
           <EventList eventTypes={draft.eventTypes} />
+        </ReviewRow>
+        <ReviewRow label={t('filters.review.label')} field="filters" onEdit={onEdit}>
+          {filterSummary}
         </ReviewRow>
       </dl>
     </div>

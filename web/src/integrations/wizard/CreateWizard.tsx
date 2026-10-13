@@ -25,14 +25,22 @@ import {
 } from './draft';
 import { GithubGate } from './GithubGate';
 import { Stepper } from './Stepper';
-import { DestinationStep, EventsStep, ReviewStep, SourceStep, WebhookStep, type StepProps } from './steps';
+import {
+  DestinationStep,
+  EventsStep,
+  FiltersStep,
+  ReviewStep,
+  SourceStep,
+  WebhookStep,
+  type StepProps,
+} from './steps';
 import '../integrations.css';
 
-const STEP_BODIES = [SourceStep, DestinationStep, WebhookStep, EventsStep] as const;
+const STEP_BODIES = [SourceStep, DestinationStep, WebhookStep, EventsStep, FiltersStep] as const;
 const LAST = STEPS.length - 1;
 
 /**
- * Five short steps, repository first; nothing is saved until the last one. Each "Continue" checks only that
+ * Six short steps, repository first (filters are optional); nothing is saved until the last one. Each "Continue" checks only that
  * step. The server re-validates on create, and its field errors send the person back to the
  * earliest step that needs attention, with the message beside the field.
  */

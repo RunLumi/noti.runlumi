@@ -195,7 +195,7 @@ lifecycle.get('/export', async (c) => {
       .bind(who.orgId),
     db
       .prepare(
-        `SELECT id,name,repo,event_types,destination,destination_host,enabled,created_at,updated_at
+        `SELECT id,name,repo,event_types,filters_json,destination,destination_host,enabled,created_at,updated_at
          FROM integrations WHERE organization_id=? ORDER BY created_at`,
       )
       .bind(who.orgId),

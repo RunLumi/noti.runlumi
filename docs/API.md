@@ -52,6 +52,9 @@ type Integration = {
   destinationHost: string | null;     // e.g. "hooks.slack.com"
   enabled: boolean;
   credentials: 'ok' | 'legacy' | 'quarantined';
+  filters: FilterConfig;              // {} when none; see "Routing filters"
+  filtersInvalid: boolean;            // stored filters corrupt/invalid: events are HELD BACK until replaced
+  filtersNewer: boolean;              // saved by a newer release (rollback): sent unfiltered
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -61,8 +64,8 @@ type Integration = {
 | --- | --- | --- |
 | `GET /api/integrations` | — | `200 {organizationId, integrations: Integration[], truncated}` (max 200) |
 | `GET /api/integrations/:id` | — | `200 {integration}` |
-| `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?, triggerAuth?}` | `201 {integration}`; `409` at 100 per workspace |
-| `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled}`, and/or `{webhookUrl, signingSecret?, triggerAuth?}` to rotate credentials | `200 {integration}` |
+| `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?, triggerAuth?, filters?}` | `201 {integration}`; `409` at 100 per workspace |
+| `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled, filters}` (`filters` replaces all filters; `null` or `{}` clears them), and/or `{webhookUrl, signingSecret?, triggerAuth?}` to rotate credentials | `200 {integration}` |
 | `DELETE /api/integrations/:id` | — | `204` |
 
 Validation failures return `422 {"error":"Validation failed","fields":[{field,message}]}`. Every
@@ -100,6 +103,80 @@ and leaves no false "success" entry.
 The audit log refuses `UPDATE`. It is append-only at the application level, not
 tamper-evident: organization deletion cascades to it, and a future retention job will
 delete rows.
+
+## Routing filters
+
+Per-integration filters narrow which of the subscribed events are sent
+([ADR 0010](adr/0010-routing-filters.md)). They are evaluated at ingress against a handful of
+normalised facts, never against a stored payload. `filters` is a closed object; every key is
+optional and a missing key means "no condition":
+
+```ts
+type FilterConfig = {
+  branch?:     { allow: string[]; deny: string[] };   // head branch: push, pull_request*, workflow_run*
+  baseBranch?: { allow: string[]; deny: string[] };   // pull request target branch
+  actor?:      { allow: string[]; deny: string[]; bots: 'any' | 'exclude' | 'only' };
+  draft?:      'exclude';                              // skip draft pull requests
+  labels?:     { include: string[]; exclude: string[] }; // issues and pull requests
+};
+```
+
+- `branch` and `baseBranch` entries are globs with exactly two wildcards: `*` (within one path
+  segment) and `**` (across `/`), `\*` for a literal star. `? [ ] { } +` and a leading `!` are
+  rejected. Matching is case-insensitive and NFC-normalised, by a linear-time matcher; no
+  `RegExp` is built from input.
+- `actor` entries are exact GitHub logins (case-insensitive). The deleted-user placeholder
+  (`ghost`) cannot be put in a list, and an event from it always passes this filter.
+- `labels` entries are whole label names, case-insensitive.
+- Limits: 32 entries per list, 128 in total, 128 characters per glob, 64 per login, 100 per
+  label, 8 wildcards per glob, 8 KiB stored. Violations return `422` with dotted field paths
+  such as `filters.branch.allow[2]`; messages never echo the value.
+- `deny` wins over `allow`. An empty `allow` allows everything.
+- A fact GitHub did not send is unknown, never `false`. **Any configured filter that applies
+  to the event and cannot judge it holds the event back** (`unknown_fact`, `unknownFact: true`),
+  `allow` and `deny` alike, because a deny rule is often a privacy control. The one exception
+  is a deleted account (`ghost`), which an actor filter always passes.
+- A filter reads facts only from some event types (branch: push, pull requests, workflow runs,
+  releases and deployments; target branch, draft: pull requests; labels: issues, issue comments,
+  pull requests; people: all). On create and on every update the filters and the subscribed
+  `eventTypes` must fit together: an **"only" list** (`branch.allow`, `baseBranch.allow`,
+  `labels.include`) with a subscribed event type that cannot supply that fact is refused with
+  `422` on field `filters.coverage` (the message names the filters and catalog events, never the
+  typed values). A **"never" rule** on such event types is accepted, and the `201`/`200` body
+  carries `warnings: [{filter, eventTypes}]`. For releases and deployments the branch is read
+  from `target_commitish` / `deployment.ref` when it looks like a branch (not a SHA or tag ref).
+- `branch`, login and label comparison is case-insensitive (fail-safe for `deny`; an `allow`
+  list also admits a differently-cased name). `actor.bots: exclude` checks the **sender** of the
+  event, not a pull request's author.
+- Stored filters that are corrupt or no longer valid make `filtersInvalid: true`: events for the
+  integration are held back (`filtered`, filter `config`, reason `config_invalid`) until
+  `PATCH` replaces them. `filtersNewer: true` (written by a newer release) sends unfiltered.
+- The audit entry for a create or update lists the **ids** of the changed filters
+  (`filters: ["branch","labels"]`), never their values.
+
+Capability `integration.read`; another workspace's integration is `404`.
+
+| Method and path | Body | Success |
+| --- | --- | --- |
+| `GET /api/integrations/:id/routing-log?limit=&cursor=` | — | `200 {entries: [{id, eventType, outcome, filterId, reason, unknownFact, decidedAt}], nextCursor}`. `limit` 1–100 (default 50), newest first, keyset cursor. `400` for a bad `limit` or `cursor`. |
+| `POST /api/integrations/:id/filters/preview` | `{eventType, facts?, filters?}` | `200 {result: {outcome: 'delivered' \| 'filtered', filterId, reason, unknownFact}}`. Pure: no delivery, no write, no fetch. |
+
+- `outcome` is `delivered` or `filtered`. `filterId` is set when filtered. `reason` is one of a
+  closed vocabulary: `allowed`, `not_in_allow_list`, `in_deny_list`, `unknown_fact`,
+  `draft_excluded`, `bot_excluded`, `not_a_bot`, `ghost_exempt`, `config_invalid`,
+  `config_newer`. A routing-log row exists for every integration **with filters** that was
+  enabled, on the repository and subscribed to the event type; integrations without filters
+  write none (their delivery row is the record). It holds ids, the event type, the outcome and
+  the reason code, never field values or payload, is written best effort after (never inside)
+  the delivery transaction, is deleted with its integration, and is kept for 30 days.
+- `config_invalid` means the stored filters are corrupt or no longer valid, so the event was
+  **held back** (fail closed; `filterId` is `config`). `config_newer` means a newer release wrote
+  them, so the event was sent. Held-back events are not stored and cannot be replayed from Noti.
+- `preview` takes a **sample** facts object. Every key is optional and absent means unknown:
+  `{branch, baseBranch, actorLogin, actorIsBot, actorIsGhost, draft, labels}`. `eventType` must
+  be in the catalog. `filters` is an unsaved draft to try; omit it to test the saved filters.
+  It follows the mutation rules (our `Origin`, a JSON body) and is limited to 60 per user per
+  minute. It needs `integration.read` only, because nothing is written.
 
 ## GitHub connection
 

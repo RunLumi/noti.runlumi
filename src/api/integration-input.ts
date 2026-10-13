@@ -2,6 +2,8 @@ import { validateDestinationConfig, type ConfigValidation } from '../connectors/
 import { isGithubEventType, type GithubEventType } from '../connectors/sources/github/catalog';
 import { asRecord } from '../lib/json';
 import type { DestinationKind } from '../pipeline/allowlist';
+import { coverageIssue, parseFilters } from '../routing/filter-input';
+import type { FilterConfig } from '../routing/filters';
 
 /**
  * Validation for integration writes. Everything is checked before anything is sealed or
@@ -21,6 +23,8 @@ export interface CreateIntegrationInput {
   readonly destination: DestinationKind;
   readonly webhookUrl: string;
   readonly signingSecret: string | null;
+  /** Normalised routing filters; `{}` means none (ADR 0010). */
+  readonly filters: FilterConfig;
 }
 
 export interface UpdateIntegrationInput {
@@ -28,6 +32,8 @@ export interface UpdateIntegrationInput {
   readonly repo?: string;
   readonly eventTypes?: readonly GithubEventType[];
   readonly enabled?: boolean;
+  /** Replaces all filters; `{}` clears them. */
+  readonly filters?: FilterConfig;
   /** Present together: rotating credentials re-seals under fresh key material. */
   readonly credentials?: { readonly webhookUrl: string; readonly signingSecret: string | null };
 }
@@ -167,6 +173,17 @@ function parseCredentials(
   };
 }
 
+/** `filters` absent is "none"; `null` or `{}` clears. Errors carry dotted field paths. */
+function parseFilterField(r: Record<string, unknown>, errors: FieldError[]): FilterConfig | undefined {
+  if (r.filters === undefined) return undefined;
+  const parsed = parseFilters(r.filters);
+  if (!parsed.ok) {
+    errors.push(...parsed.errors);
+    return undefined;
+  }
+  return parsed.value;
+}
+
 export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationInput> {
   const r = asRecord(body);
   if (!r) return { ok: false, errors: [{ field: 'body', message: 'Expected a JSON object.' }] };
@@ -176,6 +193,11 @@ export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationI
   const eventTypes = parseEventTypes(r.eventTypes, errors);
   const destination = parseDestination(r.destination, errors);
   const credentials = parseCredentials(r, destination, errors);
+  const filters = parseFilterField(r, errors) ?? {};
+  if (eventTypes && errors.length === 0) {
+    const issue = coverageIssue(filters, eventTypes);
+    if (issue) errors.push(issue);
+  }
   if (errors.length || !name || !repo || !eventTypes || !destination || !credentials)
     return { ok: false, errors };
   return {
@@ -187,6 +209,7 @@ export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationI
       destination,
       webhookUrl: credentials.webhookUrl,
       signingSecret: credentials.signingSecret,
+      filters,
     },
   };
 }
@@ -203,6 +226,7 @@ export function parseUpdateIntegration(
     'repo',
     'eventTypes',
     'enabled',
+    'filters',
     'webhookUrl',
     'signingSecret',
     'triggerAuth',
@@ -220,6 +244,7 @@ export function parseUpdateIntegration(
     if (typeof r.enabled === 'boolean') out.enabled = r.enabled;
     else errors.push({ field: 'enabled', message: 'Must be true or false.' });
   }
+  if ('filters' in r) out.filters = parseFilterField(r, errors);
   if ('webhookUrl' in r) {
     const credentials = parseCredentials(r, destination, errors);
     if (credentials) out.credentials = credentials;

@@ -3,6 +3,7 @@ import { createAuth } from './auth/better-auth';
 import { api as githubApi, browser as githubBrowser } from './api/github';
 import deliveries from './api/deliveries';
 import integrations from './api/integrations';
+import routing from './api/routing';
 import workspaceLifecycle from './api/workspace-lifecycle';
 import workspace from './auth/workspace';
 import { githubWebhook } from './connectors/sources/github/route';
@@ -18,6 +19,7 @@ import { purgeExpiredRecords } from './pipeline/retention';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { purgeDueWorkspace } from './pipeline/purge';
 import { pruneRateLimits } from './security/rate-limit';
+import { purgeRoutingDecisions } from './routing/provenance';
 import { sweepStaleClaims } from './pipeline/sweep';
 import { correlation } from './platform/correlation';
 import { log } from './platform/log';
@@ -36,6 +38,7 @@ app.route('/api/workspace', workspaceLifecycle);
 app.route('/api/integrations', integrations);
 app.route('/api/deliveries', deliveries);
 app.route('/api/observability', observability);
+app.route('/api/integrations', routing);
 app.route('/api/github', githubApi);
 app.route('/github', githubBrowser);
 
@@ -84,6 +87,12 @@ async function purgeWorkspace(env: Bindings): Promise<void> {
   if (purge.organizationId) log('info', 'workspace_purge', { ...purge });
 }
 
+/** Routing provenance retention (ADR 0010): bounded rounds, isolated like every other job. */
+async function purgeRouting(env: Bindings): Promise<void> {
+  const deleted = await purgeRoutingDecisions(env.DB, Date.now());
+  if (deleted > 0) log('info', 'routing_decisions_purged', { deleted });
+}
+
 async function purgeRetention(env: Bindings): Promise<void> {
   const retention = await purgeExpiredRecords(env);
   if (retention.deliveries + retention.outbox + retention.audit > 0)
@@ -105,6 +114,7 @@ export default {
       { name: 'rate_limit_prune', run: () => pruneRateLimitWindows(env) },
       { name: 'workspace_purge', run: () => purgeWorkspace(env) },
       { name: 'retention_purge', run: () => purgeRetention(env) },
+      { name: 'routing_decisions_purge', run: () => purgeRouting(env) },
     ]);
   },
 

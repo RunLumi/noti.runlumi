@@ -9,13 +9,22 @@ import type { DestinationKind } from '../pipeline/allowlist';
 import { parseCreateIntegration, parseUpdateIntegration, type FieldError } from './integration-input';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
 import { isDeletionPending } from './workspace-lifecycle';
+import {
+  activeFilterIds,
+  changedFilterIds,
+  coverageIssue,
+  coverageWarnings,
+  readStoredFilters,
+  serializeFilters,
+} from '../routing/filter-input';
+import type { FilterConfig } from '../routing/filters';
 
 /**
  * Tenant-scoped integrations API (F26). Every query carries `organization_id = <resolved
  * workspace>`; a row in another workspace is indistinguishable from a missing one (404).
  * Responses never include a URL or a secret — only the destination hostname.
  */
-type Ctx = Context<{ Bindings: Bindings }>;
+export type Ctx = Context<{ Bindings: Bindings }>;
 
 const MAX_BODY_BYTES = 16 * 1024;
 const LIST_LIMIT = 200;
@@ -36,11 +45,12 @@ interface IntegrationRow {
   updated_at: string | null;
   credentials_quarantined_at: string | null;
   credentials_quarantine_reason: string | null;
+  filters_json: string | null;
   sealed: number;
 }
 
 const SELECT_COLUMNS = `id,name,repo,event_types,destination,destination_host,enabled,created_at,updated_at,
-  credentials_quarantined_at,credentials_quarantine_reason,(webhook_envelope IS NOT NULL) AS sealed`;
+  credentials_quarantined_at,credentials_quarantine_reason,filters_json,(webhook_envelope IS NOT NULL) AS sealed`;
 
 export interface IntegrationView {
   readonly id: string;
@@ -51,6 +61,15 @@ export interface IntegrationView {
   readonly destinationHost: string | null;
   readonly enabled: boolean;
   readonly credentials: 'ok' | 'legacy' | 'quarantined';
+  /** Routing filters; `{}` when none. A stored document that no longer validates reads as `{}`. */
+  readonly filters: FilterConfig;
+  /**
+   * True when the stored filters are corrupt or no longer valid. Events for this integration
+   * are HELD BACK (fail closed) until the filters are replaced.
+   */
+  readonly filtersInvalid: boolean;
+  /** True when the stored filters were written by a newer release (rollback): sent unfiltered. */
+  readonly filtersNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
 }
@@ -65,6 +84,7 @@ function eventTypesOf(json: string): string[] {
 }
 
 export function toView(row: IntegrationRow): IntegrationView {
+  const stored = readStoredFilters(row.filters_json);
   return {
     id: row.id,
     name: row.name ?? row.repo,
@@ -74,6 +94,9 @@ export function toView(row: IntegrationRow): IntegrationView {
     destinationHost: row.destination_host,
     enabled: row.enabled === 1,
     credentials: row.credentials_quarantined_at ? 'quarantined' : row.sealed ? 'ok' : 'legacy',
+    filters: stored.kind === 'ok' ? stored.config : {},
+    filtersInvalid: stored.kind === 'invalid',
+    filtersNewer: stored.kind === 'newer',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -83,7 +106,7 @@ export function toView(row: IntegrationRow): IntegrationView {
  * CSRF defence for cookie-authenticated mutations (F23): the browser's Origin must be ours
  * and the body must be JSON, which a cross-site form cannot send without a preflight.
  */
-function mutationRejected(c: Ctx): Response | null {
+export function mutationRejected(c: Ctx): Response | null {
   const origin = c.req.header('origin');
   if (!origin || origin !== new URL(c.env.APP_ORIGIN).origin) return c.json({ error: 'Forbidden' }, 403);
   if (!(c.req.header('content-type') ?? '').toLowerCase().startsWith('application/json'))
@@ -91,7 +114,9 @@ function mutationRejected(c: Ctx): Response | null {
   return null;
 }
 
-async function readJson(c: Ctx): Promise<{ ok: true; body: unknown } | { ok: false; response: Response }> {
+export async function readJson(
+  c: Ctx,
+): Promise<{ ok: true; body: unknown } | { ok: false; response: Response }> {
   // Refuse on the declared length before buffering; re-check the bytes actually read.
   if (Number(c.req.header('content-length') ?? 0) > MAX_BODY_BYTES)
     return { ok: false, response: c.json({ error: 'Too large' }, 413) };
@@ -105,11 +130,11 @@ async function readJson(c: Ctx): Promise<{ ok: true; body: unknown } | { ok: fal
   }
 }
 
-function invalid(c: Ctx, errors: FieldError[]): Response {
+export function invalid(c: Ctx, errors: FieldError[]): Response {
   return c.json({ error: 'Validation failed', fields: errors }, 422);
 }
 
-async function gate(c: Ctx, capability: Capability): Promise<Resolved | Response> {
+export async function gate(c: Ctx, capability: Capability): Promise<Resolved | Response> {
   const resolved = await authorize(c, capability);
   return isFailure(resolved) ? c.json({ error: resolved.error }, resolved.status) : resolved;
 }
@@ -118,16 +143,21 @@ async function gate(c: Ctx, capability: Capability): Promise<Resolved | Response
  * Fixed-window mutation limit per user. One UPSERT both counts and reads, so concurrent
  * requests cannot all observe a stale count.
  */
-async function rateLimited(c: Ctx, userId: string): Promise<Response | null> {
+export async function rateLimited(
+  c: Ctx,
+  userId: string,
+  scope = 'integrations',
+  limit = MUTATIONS_PER_MINUTE,
+): Promise<Response | null> {
   const windowStart = Math.floor(Date.now() / 60_000) * 60_000;
   const row = await c.env.DB.prepare(
     `INSERT INTO api_rate_limits(key,window_start,count) VALUES(?,?,1)
      ON CONFLICT(key,window_start) DO UPDATE SET count=count+1
      RETURNING count`,
   )
-    .bind(`integrations:${userId}`, windowStart)
+    .bind(`${scope}:${userId}`, windowStart)
     .first<{ count: number }>();
-  if ((row?.count ?? 0) <= MUTATIONS_PER_MINUTE) return null;
+  if ((row?.count ?? 0) <= limit) return null;
   const retryAfter = Math.ceil((windowStart + 60_000 - Date.now()) / 1000);
   return c.json({ error: 'Too many changes; try again shortly' }, 429, { 'retry-after': String(retryAfter) });
 }
@@ -145,7 +175,7 @@ async function mutationGate(c: Ctx, capability: Capability): Promise<Resolved | 
   return (await rateLimited(c, who.userId)) ?? who;
 }
 
-async function loadRow(c: Ctx, orgId: string, id: string): Promise<IntegrationRow | null> {
+export async function loadRow(c: Ctx, orgId: string, id: string): Promise<IntegrationRow | null> {
   return c.env.DB.prepare(`SELECT ${SELECT_COLUMNS} FROM integrations WHERE id=? AND organization_id=?`)
     .bind(id, orgId)
     .first<IntegrationRow>();
@@ -178,6 +208,12 @@ function audit(
 
 async function seal(c: Ctx, orgId: string, id: string, credentials: DestinationCredentials) {
   return sealCredentials({ organizationId: orgId, connectionId: id }, credentials, keyringFromEnv(c.env));
+}
+
+/** The filters currently stored, or `{}` when none or unreadable. */
+function currentFilters(row: IntegrationRow): FilterConfig {
+  const stored = readStoredFilters(row.filters_json);
+  return stored.kind === 'ok' ? stored.config : {};
 }
 
 const integrations = new Hono<{ Bindings: Bindings }>();
@@ -235,8 +271,8 @@ integrations.post('/', async (c) => {
     c.env.DB.prepare(
       `INSERT INTO integrations(id,organization_id,name,repo,event_types,destination,destination_host,
          webhook_ciphertext,key_salt,dek_wrapped,kek_version,webhook_envelope,lark_secret_envelope,
-         enabled,created_by,created_at,updated_at)
-       VALUES(?,?,?,?,?,?,?,'',?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+         enabled,created_by,created_at,updated_at,filters_json)
+       VALUES(?,?,?,?,?,?,?,'',?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)`,
     ).bind(
       id,
       who.orgId,
@@ -251,6 +287,7 @@ integrations.post('/', async (c) => {
       blob(sealed.webhookEnvelope),
       blob(sealed.signingSecretEnvelope),
       who.userId,
+      serializeFilters(input.filters),
     ),
     audit(
       c,
@@ -263,13 +300,18 @@ integrations.post('/', async (c) => {
         destinationHost: host,
         eventTypes: input.eventTypes,
         signed: input.signingSecret !== null,
+        // Ids only: filter values (branch names, logins, labels) never enter the audit log.
+        filters: activeFilterIds(input.filters),
       },
       false,
     ),
   ]);
 
   const row = await loadRow(c, who.orgId, id);
-  return c.json({ integration: row ? toView(row) : null }, 201);
+  return c.json(
+    { integration: row ? toView(row) : null, warnings: coverageWarnings(input.filters, input.eventTypes) },
+    201,
+  );
 });
 
 integrations.patch('/:id', async (c) => {
@@ -289,12 +331,21 @@ integrations.patch('/:id', async (c) => {
     input = { ...input, repo };
   }
 
+  // The filters and subscribed events that will be in force after this change must fit together.
+  const effectiveEvents = input.eventTypes ?? eventTypesOf(existing.event_types);
+  const effectiveFilters = input.filters ?? currentFilters(existing);
+  if (input.filters !== undefined || input.eventTypes !== undefined) {
+    const issue = coverageIssue(effectiveFilters, effectiveEvents);
+    if (issue) return invalid(c, [issue]);
+  }
+
   type SqlValue = string | number | ArrayBuffer | null;
   const assignments: [column: string, value: SqlValue][] = [];
   if (input.name !== undefined) assignments.push(['name', input.name]);
   if (input.repo !== undefined) assignments.push(['repo', input.repo]);
   if (input.eventTypes !== undefined) assignments.push(['event_types', JSON.stringify(input.eventTypes)]);
   if (input.enabled !== undefined) assignments.push(['enabled', input.enabled ? 1 : 0]);
+  if (input.filters !== undefined) assignments.push(['filters_json', serializeFilters(input.filters)]);
   const sets: string[] = ['updated_at=CURRENT_TIMESTAMP'];
   const values: SqlValue[] = [];
   for (const [column, value] of assignments) {
@@ -344,6 +395,7 @@ integrations.patch('/:id', async (c) => {
         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
         ...(input.eventTypes ? { eventTypes: input.eventTypes } : {}),
         ...(input.repo ? { repo: input.repo } : {}),
+        ...(input.filters ? { filters: changedFilterIds(currentFilters(existing), input.filters) } : {}),
       }),
     );
   }
@@ -360,7 +412,9 @@ integrations.patch('/:id', async (c) => {
   ]);
   if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
   const row = await loadRow(c, who.orgId, id);
-  return row ? c.json({ integration: toView(row) }) : c.json({ error: 'Not found' }, 404);
+  return row
+    ? c.json({ integration: toView(row), warnings: coverageWarnings(effectiveFilters, effectiveEvents) })
+    : c.json({ error: 'Not found' }, 404);
 });
 
 integrations.delete('/:id', async (c) => {
@@ -384,6 +438,11 @@ integrations.delete('/:id', async (c) => {
   // unrecoverable (crypto-shredding). Delivery history keeps ids and states only.
   const results = await c.env.DB.batch([
     audit(c, who, 'integration.delete', id, { repo: existing.repo, destination: existing.destination }),
+    // Routing provenance for this integration goes with it, in the same transaction.
+    c.env.DB.prepare('DELETE FROM routing_decisions WHERE integration_id=? AND organization_id=?').bind(
+      id,
+      who.orgId,
+    ),
     c.env.DB.prepare('DELETE FROM integrations WHERE id=? AND organization_id=?').bind(id, who.orgId),
   ]);
   if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);

@@ -7,6 +7,7 @@ import type { GithubInstallation, Integration, UpdateIntegrationBody } from '../
 import { t } from '../../i18n';
 import { fieldErrorsOf, formLevelError } from '../errors';
 import { EventPicker } from '../EventPicker';
+import { eventsCoverageError } from '../filters/model';
 import { isGithubEventType, sortEvents, type GithubEventType } from '../events';
 import { integrationKeys, useUpdateIntegration } from '../hooks';
 import { activeInstallations, allInstallationFor } from '../github/coverage';
@@ -102,7 +103,10 @@ export function DetailsForm({ orgId, integration }: DetailsFormProps) {
       name: validateName(values.name),
       // Coverage is checked only for a new choice; an unchanged repository is not re-sent.
       repo: values.repo === saved.repo ? undefined : validateRepoChoice(values.repo, installations),
-      eventTypes: validateEvents(values.eventTypes),
+      // Saved "only" filters must still fit the selected updates (the API refuses otherwise).
+      eventTypes:
+        validateEvents(values.eventTypes) ??
+        (patch.eventTypes ? eventsCoverageError(integration.filters, values.eventTypes) : undefined),
     });
     if (Object.keys(found).length > 0) {
       setErrors(found);

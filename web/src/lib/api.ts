@@ -1,3 +1,5 @@
+import { parseFilters } from '../../../src/routing/filter-input';
+import type { FilterConfig } from '../../../src/routing/filters';
 import { authClient, assertAuthSuccess } from './auth-client';
 
 export type Me = {
@@ -97,6 +99,12 @@ export interface Integration {
   readonly destinationHost: string | null;
   readonly enabled: boolean;
   readonly credentials: CredentialsState;
+  /** Routing filters, normalised by the server; `{}` when none. */
+  readonly filters: FilterConfig;
+  /** The stored filters could not be read, so every chosen update is being sent. */
+  readonly filtersInvalid: boolean;
+  /** Saved by a newer release: this one cannot read them and sends every chosen update. */
+  readonly filtersNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
 }
@@ -114,6 +122,7 @@ export interface CreateIntegrationBody {
   readonly destination: DestinationKind;
   readonly webhookUrl: string;
   readonly signingSecret?: string;
+  readonly filters?: FilterConfig;
 }
 
 export interface UpdateIntegrationBody {
@@ -121,6 +130,8 @@ export interface UpdateIntegrationBody {
   readonly repo?: string;
   readonly eventTypes?: readonly string[];
   readonly enabled?: boolean;
+  /** Replaces every filter; `{}` removes them all. */
+  readonly filters?: FilterConfig;
 }
 
 export interface RotateCredentialsBody {
@@ -129,6 +140,18 @@ export interface RotateCredentialsBody {
 }
 
 const nullableString = (v: unknown): v is string | null => v === null || typeof v === 'string';
+
+/** Re-validated with the server's own parser, so a malformed value reads as "no filters". */
+function filtersOf(
+  value: Record<string, unknown>,
+): Pick<Integration, 'filters' | 'filtersInvalid' | 'filtersNewer'> {
+  const parsed = parseFilters(value.filters ?? null);
+  return {
+    filters: parsed.ok ? parsed.value : {},
+    filtersInvalid: value.filtersInvalid === true,
+    filtersNewer: value.filtersNewer === true,
+  };
+}
 
 /** Narrow one API row. A malformed row is an error, never silently dropped (F225). */
 export function parseIntegration(value: unknown): Integration {
@@ -155,6 +178,7 @@ export function parseIntegration(value: unknown): Integration {
     destinationHost: value.destinationHost,
     enabled: value.enabled,
     credentials: value.credentials,
+    ...filtersOf(value),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   };
@@ -187,10 +211,55 @@ export const integrationsApi = {
     one(await request(withOrg(item(id), orgId), { method: 'PATCH', body: JSON.stringify(patch) })),
   rotateCredentials: async (orgId: string, id: string, input: RotateCredentialsBody): Promise<Integration> =>
     one(await request(withOrg(item(id), orgId), { method: 'PATCH', body: JSON.stringify(input) })),
+  routingLog: async (orgId: string, id: string, cursor: string | null): Promise<RoutingLogPage> => {
+    const query = `org=${encodeURIComponent(orgId)}&limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    return parseRoutingLog(await request(`${item(id)}/routing-log?${query}`));
+  },
   remove: async (orgId: string, id: string): Promise<void> => {
     await request(withOrg(item(id), orgId), { method: 'DELETE' });
   },
 };
+
+/** One row of "why was this sent or held back". Event type and a reason code, never content. */
+export interface RoutingLogEntry {
+  readonly id: string;
+  readonly eventType: string;
+  readonly outcome: 'delivered' | 'filtered';
+  readonly filterId: string | null;
+  readonly reason: string;
+  readonly unknownFact: boolean;
+  readonly decidedAt: string;
+}
+export interface RoutingLogPage {
+  readonly entries: readonly RoutingLogEntry[];
+  readonly nextCursor: string | null;
+}
+
+export function parseRoutingLog(body: unknown): RoutingLogPage {
+  if (!isRecord(body) || !Array.isArray(body.entries)) throw new ApiError('Unexpected response', 500);
+  const entries = body.entries.map((e: unknown): RoutingLogEntry => {
+    if (
+      !isRecord(e) ||
+      typeof e.id !== 'string' ||
+      typeof e.eventType !== 'string' ||
+      (e.outcome !== 'delivered' && e.outcome !== 'filtered') ||
+      !nullableString(e.filterId) ||
+      typeof e.reason !== 'string' ||
+      typeof e.decidedAt !== 'string'
+    )
+      throw new ApiError('Unexpected routing log entry', 500);
+    return {
+      id: e.id,
+      eventType: e.eventType,
+      outcome: e.outcome,
+      filterId: e.filterId,
+      reason: e.reason,
+      unknownFact: e.unknownFact === true,
+      decidedAt: e.decidedAt,
+    };
+  });
+  return { entries, nextCursor: typeof body.nextCursor === 'string' ? body.nextCursor : null };
+}
 
 // --- GitHub connection (docs/API.md "GitHub connection", ADR 0008) ------------------------
 

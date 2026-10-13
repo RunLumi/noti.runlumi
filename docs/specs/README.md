@@ -83,7 +83,8 @@ yet, and the release rule in `AGENTS.md` is unmet.
 | Dashboard: auth, onboarding, team, integrations list/wizard/settings, GitHub connection | 🟡 ([ADR 0007](../adr/0007-integrations-ux.md)); delivery log pending |
 | End-to-end tests of the delivery path over the real migrations (D13) | ✅ |
 | Toolchain: lockfile, format, lint, typecheck, tests, build, CI, worker bundle guard | ✅ |
-| Routing rules and filters, grouping and digests, observability dashboards, additional sources, extended destinations, AI | ⬜ not started |
+| Per-integration routing filters (branch, base branch, people and bots, drafts, labels) with provenance, API and dashboard | 🟡 ([ADR 0010](../adr/0010-routing-filters.md)); not the F121 rule engine |
+| Rule engine, grouping and digests, observability dashboards, additional sources, extended destinations, AI | ⬜ not started |
 
 **The release gate that opened this catalog** was F25 and F26: tenant isolation in *our*
 tables. Tenant resolution, the `organization_id` contract for new writes, and tenant-scoped
