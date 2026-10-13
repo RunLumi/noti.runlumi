@@ -56,7 +56,7 @@ const MAX_SECRET_LENGTH = 256;
 // A pasted secret never contains whitespace, control characters or bidi overrides; one that
 // does was copied wrongly and would fail every signed request (F96).
 // eslint-disable-next-line no-control-regex -- matching control characters is the point.
-const UNSAFE_SECRET = /[\s\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/;
+const UNSAFE_SECRET = /[\s\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 type Raw = Readonly<Record<string, unknown>>;
 

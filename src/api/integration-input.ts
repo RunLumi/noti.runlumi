@@ -39,7 +39,7 @@ const URL_MAX = 2048;
 // C0/C1 controls and bidi overrides/isolates, which can make a name display as something
 // else in the dashboard.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point.
-const CONTROL = /[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 function parseName(value: unknown, errors: FieldError[]): string | undefined {
   if (

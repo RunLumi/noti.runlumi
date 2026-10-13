@@ -61,7 +61,14 @@ export async function sendRequest(
       redirect: 'manual',
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_SEND_TIMEOUT_MS),
     });
-    const bodyText = await readBodyPrefix(res);
+    // The status is already known. A body that errors or stalls after a 2xx must not turn a
+    // delivered message into a retry (a duplicate), so the read is guarded on its own.
+    let bodyText = '';
+    try {
+      bodyText = await readBodyPrefix(res);
+    } catch {
+      bodyText = '';
+    }
     return classify({ status: res.status, headers: res.headers, bodyText }, now());
   } catch (e: unknown) {
     return classifyTransportError(e);
