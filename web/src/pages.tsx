@@ -1,6 +1,7 @@
 import lumiLogo from '../../brand/lumi-fulltext.svg';
 import { TeamManagement } from './team';
 import { PasskeysPanel } from './passkeys';
+import { IntegrationsStat } from './integrations/IntegrationsStat';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -20,15 +21,10 @@ import {
   IconBolt,
 } from '@tabler/icons-react';
 import { authApi } from './lib/api';
-import { Badge, Button, Card, Input } from './components/ui';
+import { Badge, Button, Card, Input, Notice } from './components/ui';
 const privatePaths = ['/', '/integrations', '/activity', '/team', '/settings', '/onboarding'];
-function Notice({ children, kind = 'info' }: { children: ReactNode; kind?: 'info' | 'error' }) {
-  return (
-    <div className={'notice notice-' + kind} role={kind === 'error' ? 'alert' : 'status'}>
-      {children}
-    </div>
-  );
-}
+/** `/integrations/new` and `/integrations/:id` live under the Integrations section. */
+const sectionOf = (pathname: string) => '/' + (pathname.split('/')[1] ?? '');
 function Logo() {
   return (
     <div className="brand">
@@ -39,7 +35,8 @@ function Logo() {
 }
 export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isPrivate = privatePaths.includes(pathname);
+  const section = sectionOf(pathname);
+  const isPrivate = privatePaths.includes(section);
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, retry: false, enabled: isPrivate });
   const nav = useNavigate();
   useEffect(() => {
@@ -92,7 +89,7 @@ export function AppShell() {
               to={item.to as '/'}
               activeOptions={{ exact: true }}
               aria-current={pathname === item.to ? 'page' : undefined}
-              className={'nav-link ' + (pathname === item.to ? 'selected' : '')}
+              className={'nav-link ' + (section === item.to ? 'selected' : '')}
             >
               <item.icon size={18} />
               {item.label}
@@ -110,7 +107,8 @@ export function AppShell() {
       <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <span>
-            Workspace <IconChevronRight size={14} /> {pathname === '/' ? 'Overview' : pathname.slice(1)}
+            Workspace <IconChevronRight size={14} aria-hidden="true" />{' '}
+            {section === '/' ? 'Overview' : section.slice(1)}
           </span>
           <Badge variant="neutral">Preview</Badge>
         </header>
@@ -151,17 +149,13 @@ export function Overview() {
         title="Your notifications, in one place"
         description="Connect your tools, reduce noise, and keep the right people in the loop."
         action={
-          <Link to="/integrations" className="btn btn-primary">
-            <IconPlus size={16} /> Explore integrations
+          <Link to="/integrations/new" className="btn btn-primary">
+            <IconPlus size={16} /> New integration
           </Link>
         }
       />
       <div className="stats">
-        <Card>
-          <span className="stat-label">Integrations</span>
-          <strong>—</strong>
-          <small>Not yet connected to live API</small>
-        </Card>
+        <IntegrationsStat />
         <Card>
           <span className="stat-label">Messages delivered</span>
           <strong>—</strong>
@@ -179,22 +173,25 @@ export function Overview() {
           <div className="step">
             <span>01</span>
             <div>
-              <b>Choose a source</b>
-              <p>GitHub events are supported by the backend prototype.</p>
+              <b>Choose a repository</b>
+              <p>Pick one of the GitHub repositories you allowed Noti to see.</p>
             </div>
           </div>
           <div className="step">
             <span>02</span>
             <div>
               <b>Choose a destination</b>
-              <p>Send notifications to Lark or Slack once securely configured.</p>
+              <p>Paste a Lark or Slack webhook URL in the integration setup. It is stored encrypted.</p>
             </div>
           </div>
           <div className="step">
             <span>03</span>
             <div>
-              <b>Test your connection</b>
-              <p>Interactive setup and test delivery are under development.</p>
+              <b>Connect GitHub</b>
+              <p>
+                Installing the Noti GitHub App from the dashboard and sending a test message are still in
+                development.
+              </p>
             </div>
           </div>
         </Card>
@@ -217,65 +214,6 @@ export function Overview() {
           </div>
         </Card>
       </div>
-    </>
-  );
-}
-const sources = [
-  { name: 'GitHub', desc: 'Issues, pull requests and CI events', icon: 'GH', state: 'Backend prototype' },
-  { name: 'Generic webhook', desc: 'Send events from any compatible system', icon: 'WH', state: 'Planned' },
-  { name: 'GitLab', desc: 'Repository and pipeline updates', icon: 'GL', state: 'Planned' },
-  { name: 'Sentry', desc: 'Error and incident notifications', icon: 'SE', state: 'Planned' },
-  { name: 'Stripe', desc: 'Payment and subscription events', icon: 'ST', state: 'Planned' },
-  { name: 'Cloudflare', desc: 'Infrastructure and deployment events', icon: 'CF', state: 'Planned' },
-];
-export function Integrations() {
-  return (
-    <>
-      <Header
-        eyebrow="CONNECTIONS"
-        title="Integrations"
-        description="Connect your systems and route events to your team."
-      />
-      <div className="section-title">
-        <h2>Sources</h2>
-        <p>Start with the system that generates your events.</p>
-      </div>
-      <div className="catalog">
-        {sources.map((s) => (
-          <Card key={s.name} className="catalog-card">
-            <span className="source-icon">{s.icon}</span>
-            <div>
-              <h3>{s.name}</h3>
-              <p>{s.desc}</p>
-              <Badge>{s.state}</Badge>
-            </div>
-          </Card>
-        ))}
-      </div>
-      <div className="section-title">
-        <h2>Destinations</h2>
-        <p>Deliver notifications in the tools your team already uses.</p>
-      </div>
-      <div className="catalog">
-        {[
-          { name: 'Lark', desc: 'Custom bot messages and rich cards', icon: 'LK' },
-          { name: 'Slack', desc: 'Incoming webhook messages', icon: 'SL' },
-          { name: 'Microsoft Teams', desc: 'Workflow notifications, planned', icon: 'MT' },
-        ].map((s) => (
-          <Card className="catalog-card" key={s.name}>
-            <span className="source-icon">{s.icon}</span>
-            <div>
-              <h3>{s.name}</h3>
-              <p>{s.desc}</p>
-              <Badge>{s.name === 'Microsoft Teams' ? 'Planned' : 'Backend prototype'}</Badge>
-            </div>
-          </Card>
-        ))}
-      </div>
-      <Notice>
-        Connection creation is not enabled yet. The backend currently lacks authenticated integration
-        management endpoints. No integration shown here is connected to your workspace.
-      </Notice>
     </>
   );
 }

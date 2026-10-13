@@ -1,11 +1,14 @@
-import type { ButtonHTMLAttributes, InputHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, InputHTMLAttributes, HTMLAttributes, ReactNode, Ref } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { cn } from '../lib/utils';
 export function Button({
   className,
   variant = 'primary',
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'outline' | 'ghost' | 'danger' }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: 'primary' | 'outline' | 'ghost' | 'danger';
+  ref?: Ref<HTMLButtonElement>;
+}) {
   return (
     <button
       className={cn(
@@ -34,9 +37,25 @@ export function Badge({
   variant = 'neutral',
 }: {
   children: ReactNode;
-  variant?: 'neutral' | 'success' | 'warning';
+  variant?: 'neutral' | 'success' | 'warning' | 'danger';
 }) {
   return <span className={'badge badge-' + variant}>{children}</span>;
+}
+/** Inline status or error message. Errors are announced (`role="alert"`), the rest politely. */
+export function Notice({
+  children,
+  kind = 'info',
+  className,
+}: {
+  children: ReactNode;
+  kind?: 'info' | 'error' | 'warning' | 'success';
+  className?: string;
+}) {
+  return (
+    <div className={cn('notice', 'notice-' + kind, className)} role={kind === 'error' ? 'alert' : 'status'}>
+      {children}
+    </div>
+  );
 }
 export function Modal({
   trigger,

@@ -54,7 +54,29 @@ that produced `00-current-state.md` D3.
 ## Pages
 
 `/signup` `/signin` `/forgot-password` `/verify` `/reset` ·
-`/` (overview) `/integrations` `/activity` `/team` `/settings` `/onboarding` `/invite`
+`/` (overview) `/integrations` `/integrations/new` `/integrations/:id` `/activity` `/team`
+`/settings` `/onboarding` `/invite`
+
+## Integrations feature (`web/src/integrations/`)
+
+Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
+
+| Path | Role |
+| --- | --- |
+| `IntegrationsPage.tsx`, `IntegrationCard.tsx`, `EnabledSwitch.tsx` | List, card, optimistic pause/resume with rollback |
+| `github/` | Connection panel, `?github=` return messages, repository picker, coverage rules |
+| `wizard/` | Five-step create flow; `draft.ts` holds the pure step logic |
+| `settings/` | Per-integration screen: details form, credential replacement, delete dialog |
+| `validation.ts` | Client checks mirroring `src/api/integration-input.ts` (imports the Worker allowlist) |
+| `events.ts` | Plain-language label map keyed by `src/connectors/sources/github/catalog.ts` |
+| `../i18n/` | Message catalogue and `t()`/`tp()`; new screens add ids, not literals |
+| `../components/form.tsx` | `Field` (label, hint, linked error), `SecretInput`, `focusFirstInvalid` |
+
+Rules this feature follows: webhook URLs and signing secrets are write-only (masked input with
+a show toggle, never pre-filled, never echoed); a failed query is an error state, not an
+empty list; field errors sit next to the field and the first invalid control takes focus;
+destructive confirmation focuses the cancel button. `npm test` runs
+`web/src/integrations/integrations.test.ts` with the Worker tests.
 
 ## Current truth
 
@@ -62,8 +84,12 @@ Signup, sign-in, verify, forgot/reset, sign-out, `/me`, onboarding, invitations 
 membership are wired to the Better Auth API. Email delivery is configured but unverified
 against real providers.
 
-**Not implemented:** integration CRUD, delivery history, replay, and the API behind the
-`/activity` table — those screens show explicit placeholders. Passkeys register and
+Integrations (list, create, edit, pause, credential replacement, delete) and the GitHub
+connection panel are wired to the real API and were exercised against a local Worker; see
+ADR 0007 for what that does and does not prove.
+
+**Not implemented:** delivery history, replay, test send, and the API behind the `/activity`
+table — those screens show explicit placeholders. Passkeys register and
 authenticate but have not been acceptance-tested for counter regression.
 
 Nothing on any screen claims a connector is production-ready, and no metric is invented to
@@ -78,6 +104,9 @@ and outbound transactional email before public use. **Do not use the Vite dev pr
 production gateway.**
 
 ## Not yet verified
+
+The integrations screens were checked in a real browser at 320, 375 and 1280 px against a
+local Worker (ADR 0007). The rest of the app has not had a browser pass in this record.
 
 Rendered 320px reflow, Vietnamese typography, and WCAG conformance were **inspected in source,
 not in a browser** — no browser was available in the environment that produced this document.

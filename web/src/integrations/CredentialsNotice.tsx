@@ -1,0 +1,48 @@
+import { Link } from '@tanstack/react-router';
+import { IconAlertTriangle, IconShieldLock } from '@tabler/icons-react';
+import type { Integration } from '../lib/api';
+import { t } from '../i18n';
+import { DESTINATIONS } from './destinations';
+
+interface CredentialsNoticeProps {
+  readonly integration: Integration;
+  /** On the settings page the fix is the form below, so no link is needed. */
+  readonly showFix?: boolean;
+}
+
+/**
+ * Explains a non-`ok` credentials state in plain words with the one action that fixes it.
+ * Quarantined is a stop (red rail): nothing is delivered. Legacy is advisory (amber rail).
+ */
+export function CredentialsNotice({ integration, showFix = true }: CredentialsNoticeProps) {
+  if (integration.credentials === 'ok') return null;
+  const quarantined = integration.credentials === 'quarantined';
+  const destination = t(DESTINATIONS[integration.destination].name);
+  return (
+    <div className={quarantined ? 'cred-notice cred-notice-stop' : 'cred-notice cred-notice-advice'}>
+      {quarantined ? (
+        <IconAlertTriangle size={20} aria-hidden="true" />
+      ) : (
+        <IconShieldLock size={20} aria-hidden="true" />
+      )}
+      <div>
+        <p className="cred-notice-title">
+          {t(quarantined ? 'credentials.quarantined.title' : 'credentials.legacy.title')}
+        </p>
+        <p className="cred-notice-body">
+          {t(quarantined ? 'credentials.quarantined.body' : 'credentials.legacy.body', { destination })}
+        </p>
+        {showFix && (
+          <Link
+            to="/integrations/$id"
+            params={{ id: integration.id }}
+            hash="credentials"
+            className="btn btn-outline cred-notice-action"
+          >
+            {t('credentials.fix')}
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
