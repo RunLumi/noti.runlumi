@@ -1,0 +1,32 @@
+/* Accessibility utilities (F221). Keep this file small: the preference media queries
+   (reduced motion, reduced transparency, increased contrast, forced colors) live next to the
+   styles they adjust in styles.css and are asserted by `preferences.test.ts`. */
+
+/* Text for assistive technology only. `clip-path` rather than `display: none`, so it is still
+   in the accessibility tree and a live region in it is still announced. */
+.visually-hidden {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Programmatic focus targets (the page heading and <main> after a route change or the skip
+   link) are not controls. Ringing a whole page region is noise, so the ring is dropped for
+   `tabindex="-1"` landmarks and headings only; every real control keeps the 2px ring from
+   `:focus-visible` in styles.css. */
+main[tabindex='-1']:focus,
+h1[tabindex='-1']:focus {
+  outline: none;
+}
+
+/* WCAG 2.4.11 Focus Not Obscured: if a sticky or fixed bar is ever added, a focused control
+   scrolls clear of it instead of landing underneath. */
+:is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  scroll-margin-block: 5rem;
+}

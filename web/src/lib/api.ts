@@ -1,6 +1,7 @@
 import { parseFilters } from '../../../src/routing/filter-input';
 import type { FilterConfig } from '../../../src/routing/filters';
 import { authClient, assertAuthSuccess } from './auth-client';
+import { t } from '../i18n';
 
 export type Me = {
   user: {
@@ -367,9 +368,7 @@ export const authApi = {
         callbackURL: window.location.origin + '/signin?verified=1',
       }),
     );
-    return {
-      message: 'Check your email for a verification link. Then sign in to create or join your workspace.',
-    };
+    return { message: t('auth.signup.sent') };
   },
   resendVerification: async (email: string) => {
     assertAuthSuccess(
@@ -378,7 +377,7 @@ export const authApi = {
         callbackURL: window.location.origin + '/signin?verified=1',
       }),
     );
-    return { message: 'If eligible, a new verification email has been sent.' };
+    return { message: t('auth.resend.sent') };
   },
   forgot: async (email: string) => {
     assertAuthSuccess(
@@ -387,7 +386,7 @@ export const authApi = {
         redirectTo: window.location.origin + '/reset',
       }),
     );
-    return { message: 'If the account exists, a reset link will be sent.' };
+    return { message: t('auth.forgot.sent') };
   },
   reset: async (token: string, password: string) => {
     assertAuthSuccess(await authClient.resetPassword({ token, newPassword: password }));

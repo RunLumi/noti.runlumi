@@ -1,0 +1,70 @@
+/* Language switcher and per-script typography (DESIGN.md §6.2, §16; F224).
+
+   Geist's Vietnamese subset ships with `@fontsource-variable/geist`, so tone marks come from
+   the real font, not a fallback. What the font cannot do alone is leave room for them:
+   stacked diacritics need more line height and a lighter negative tracking than Latin. These
+   rules are keyed on `:lang(vi)` (set on <html> by the locale module), never applied globally,
+   so English display type is unchanged. Body type is never shrunk. */
+
+.locale-switcher {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.locale-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--color-soft-slate);
+}
+
+.locale-select {
+  min-height: var(--touch-target);
+  width: 100%;
+  padding-inline: var(--space-3);
+}
+
+/* In the auth header the label is dropped visually but stays in the accessible name. */
+.locale-switcher-compact .locale-label-text {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.locale-switcher-compact .locale-select {
+  width: auto;
+  min-width: 9rem;
+}
+
+/* Vietnamese display type: line-height 1.14 (1.13 on mobile) and lighter tracking. */
+:lang(vi) h1,
+:lang(vi) h2,
+:lang(vi) h3 {
+  line-height: 1.2;
+  letter-spacing: -0.035em;
+}
+
+:lang(vi) .auth-hero h1 {
+  line-height: 1.14;
+  letter-spacing: -0.04em;
+}
+
+@media (max-width: 700px) {
+  :lang(vi) .auth-hero h1 {
+    line-height: 1.13;
+  }
+}
+
+.auth-locale {
+  display: flex;
+  justify-content: flex-end;
+  margin-block-end: var(--space-4);
+}

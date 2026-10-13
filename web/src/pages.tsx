@@ -25,6 +25,12 @@ import {
 } from '@tabler/icons-react';
 import { authApi } from './lib/api';
 import { Badge, Button, Card, Input, Notice } from './components/ui';
+import { t } from './i18n';
+import { LocaleSwitcher } from './i18n/LocaleSwitcher';
+import { RouteA11y } from './a11y/RouteA11y';
+import { SkipLink } from './a11y/SkipLink';
+import { routeTitleId } from './a11y/route-titles';
+import { roleLabel } from './lib/role-label';
 const privatePaths = ['/', '/integrations', '/sources', '/activity', '/team', '/settings', '/onboarding'];
 /** `/integrations/new` and `/integrations/:id` live under the Integrations section. */
 const sectionOf = (pathname: string) => '/' + (pathname.split('/')[1] ?? '');
@@ -37,6 +43,14 @@ function Logo() {
   );
 }
 export function AppShell() {
+  return (
+    <>
+      <RouteA11y />
+      <ShellContent />
+    </>
+  );
+}
+function ShellContent() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const section = sectionOf(pathname);
   const isPrivate = privatePaths.includes(section);
@@ -59,15 +73,13 @@ export function AppShell() {
     return (
       <div className="center-screen">
         <Logo />
-        <p>Loading your workspace…</p>
+        <p>{t('shell.loading')}</p>
       </div>
     );
   if (me.isError) return null;
   return (
     <div className="app">
-      <a className="skip-link" href="#main-content">
-        Skip to content
-      </a>
+      <SkipLink />
       <aside className="sidebar">
         <Link to="/" className="logo-link">
           <Logo />
@@ -75,18 +87,18 @@ export function AppShell() {
         <div className="workspace">
           <div className="workspace-icon">N</div>
           <div>
-            <b>{me.data.user.org_name || 'Setup workspace'}</b>
-            <small>Organization</small>
+            <b>{me.data.user.org_name || t('shell.workspaceFallback')}</b>
+            <small>{t('shell.workspaceKind')}</small>
           </div>
         </div>
-        <nav aria-label="Main navigation">
+        <nav aria-label={t('shell.navLabel')}>
           {[
-            { to: '/', icon: IconLayoutDashboard, label: 'Overview' },
-            { to: '/integrations', icon: IconWebhook, label: 'Integrations' },
-            { to: '/sources', icon: IconPlugConnected, label: 'Sources' },
-            { to: '/activity', icon: IconActivity, label: 'Activity' },
-            { to: '/team', icon: IconUsers, label: 'Team' },
-            { to: '/settings', icon: IconSettings, label: 'Settings' },
+            { to: '/', icon: IconLayoutDashboard, label: t('nav.overview') },
+            { to: '/integrations', icon: IconWebhook, label: t('nav.integrations') },
+            { to: '/sources', icon: IconPlugConnected, label: t('nav.sources') },
+            { to: '/activity', icon: IconActivity, label: t('nav.activity') },
+            { to: '/team', icon: IconUsers, label: t('nav.team') },
+            { to: '/settings', icon: IconSettings, label: t('nav.settings') },
           ].map((item) => (
             <Link
               key={item.to}
@@ -95,26 +107,31 @@ export function AppShell() {
               aria-current={pathname === item.to ? 'page' : undefined}
               className={'nav-link ' + (section === item.to ? 'selected' : '')}
             >
-              <item.icon size={18} />
+              <item.icon size={18} aria-hidden="true" />
               {item.label}
             </Link>
           ))}
         </nav>
+        <div className="sidebar-locale">
+          <LocaleSwitcher />
+        </div>
         <div className="sidebar-bottom">
-          <div className="avatar">{me.data.user.email[0].toUpperCase()}</div>
+          <div className="avatar" aria-hidden="true">
+            {me.data.user.email[0].toUpperCase()}
+          </div>
           <div className="user-meta">
             <b>{me.data.user.email}</b>
-            <small>{me.data.user.role}</small>
+            <small>{roleLabel(me.data.user.role)}</small>
           </div>
         </div>
       </aside>
       <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
           <span>
-            Workspace <IconChevronRight size={14} aria-hidden="true" />{' '}
-            {section === '/' ? 'Overview' : section.slice(1)}
+            {t('shell.breadcrumbRoot')} <IconChevronRight size={14} aria-hidden="true" />{' '}
+            {t(routeTitleId(section))}
           </span>
-          <Badge variant="neutral">Preview</Badge>
+          <Badge variant="neutral">{t('shell.preview')}</Badge>
         </header>
         <div className="content">
           <Outlet />
@@ -149,12 +166,12 @@ export function Overview() {
   return (
     <>
       <Header
-        eyebrow="WORKSPACE"
-        title="Your notifications, in one place"
-        description="Connect your tools, reduce noise, and keep the right people in the loop."
+        eyebrow={t('home.eyebrow')}
+        title={t('home.title')}
+        description={t('home.description')}
         action={
           <Link to="/integrations/new" className="btn btn-primary">
-            <IconPlus size={16} /> New integration
+            <IconPlus size={16} aria-hidden="true" /> {t('home.newIntegration')}
           </Link>
         }
       />
@@ -164,49 +181,44 @@ export function Overview() {
       </div>
       <div className="two-col">
         <Card className="panel">
-          <h2>Get started</h2>
+          <h2>{t('home.start.title')}</h2>
           <div className="step">
             <span>01</span>
             <div>
-              <b>Choose a repository</b>
-              <p>Pick one of the GitHub repositories you allowed Noti to see.</p>
+              <b>{t('home.start.step1.title')}</b>
+              <p>{t('home.start.step1.body')}</p>
             </div>
           </div>
           <div className="step">
             <span>02</span>
             <div>
-              <b>Choose a destination</b>
-              <p>
-                Paste a Lark, Slack or Teams webhook URL in the integration setup. It is stored encrypted.
-              </p>
+              <b>{t('home.start.step2.title')}</b>
+              <p>{t('home.start.step2.body')}</p>
             </div>
           </div>
           <div className="step">
             <span>03</span>
             <div>
-              <b>Connect GitHub</b>
-              <p>
-                Installing the Noti GitHub App from the dashboard and sending a test message are still in
-                development.
-              </p>
+              <b>{t('home.start.step3.title')}</b>
+              <p>{t('home.start.step3.body')}</p>
             </div>
           </div>
         </Card>
         <Card className="panel">
-          <h2>Built for clarity</h2>
-          <p className="muted">Every event should reach the right team without flooding their channels.</p>
+          <h2>{t('home.clarity.title')}</h2>
+          <p className="muted">{t('home.clarity.body')}</p>
           <div className="benefit">
-            <IconShieldCheck size={20} />
+            <IconShieldCheck size={20} aria-hidden="true" />
             <div>
-              <b>Private by design</b>
-              <p>Workspace isolation and secure credentials are required for launch.</p>
+              <b>{t('home.clarity.private.title')}</b>
+              <p>{t('home.clarity.private.body')}</p>
             </div>
           </div>
           <div className="benefit">
-            <IconBell size={20} />
+            <IconBell size={20} aria-hidden="true" />
             <div>
-              <b>Useful, not noisy</b>
-              <p>Filter by event type and destination.</p>
+              <b>{t('home.clarity.useful.title')}</b>
+              <p>{t('home.clarity.useful.body')}</p>
             </div>
           </div>
         </Card>
@@ -233,23 +245,27 @@ export function Settings() {
   });
   return (
     <>
-      <Header eyebrow="PREFERENCES" title="Settings" description="Your account and workspace preferences." />
+      <Header
+        eyebrow={t('account.eyebrow')}
+        title={t('account.title')}
+        description={t('account.description')}
+      />
       <Card className="panel">
-        <h2>Account</h2>
+        <h2>{t('account.panel')}</h2>
         <div className="setting-row">
-          <span>Email address</span>
+          <span>{t('account.email')}</span>
           <b>{me.data?.user.email}</b>
         </div>
         <div className="setting-row">
-          <span>Role</span>
-          <Badge>{me.data?.user.role || 'member'}</Badge>
+          <span>{t('account.role')}</span>
+          <Badge>{roleLabel(me.data?.user.role)}</Badge>
         </div>
         <div className="setting-row">
-          <span>Authentication</span>
-          <span>Password and passkeys</span>
+          <span>{t('account.auth')}</span>
+          <span>{t('account.authValue')}</span>
         </div>
         <Button variant="outline" onClick={() => logout.mutate()} disabled={logout.isPending}>
-          <IconLogout size={16} /> Sign out
+          <IconLogout size={16} aria-hidden="true" /> {t('account.signOut')}
         </Button>
       </Card>
       <PasskeysPanel />
@@ -268,40 +284,41 @@ function AuthFrame({
 }) {
   return (
     <div className="auth-layout">
-      <div className="auth-brand">
+      <SkipLink />
+      <aside className="auth-brand" aria-label="Lumi Noti">
         <Logo />
         <div className="auth-hero">
-          <span className="hero-pill">NOTIFICATIONS, SIMPLIFIED</span>
+          <span className="hero-pill">{t('auth.hero.pill')}</span>
           <h1>
-            Less noise.
+            {t('auth.hero.line1')}
             <br />
-            More signal.
+            {t('auth.hero.line2')}
           </h1>
-          <p>
-            Route GitHub updates to your team. Lark and Slack delivery are in prototype; connection setup is
-            still in development.
-          </p>
-          <div className="hero-flow" aria-label="Illustrative notification route">
+          <p>{t('auth.hero.body')}</p>
+          <div className="hero-flow" role="group" aria-label={t('auth.hero.flowLabel')}>
             <span>GitHub</span>
-            <IconArrowRight size={18} />
+            <IconArrowRight size={18} aria-hidden="true" />
             <span className="flow-core">
-              <IconBolt size={16} /> Noti
+              <IconBolt size={16} aria-hidden="true" /> Noti
             </span>
-            <IconArrowRight size={18} />
+            <IconArrowRight size={18} aria-hidden="true" />
             <span>Lark · Slack</span>
           </div>
-          <p className="flow-caption">Illustrative route · Backend prototype</p>
+          <p className="flow-caption">{t('auth.hero.flowCaption')}</p>
         </div>
-        <small>Part of the Lumi ecosystem. Built to work on its own.</small>
-      </div>
-      <div className="auth-side">
+        <small>{t('auth.hero.ecosystem')}</small>
+      </aside>
+      <main className="auth-side" id="main-content" tabIndex={-1}>
+        <div className="auth-locale">
+          <LocaleSwitcher compact />
+        </div>
         <div className="auth-box">
           <h1>{title}</h1>
           <p className="muted">{description}</p>
           {children}
         </div>
-        <p className="auth-footer">© Lumi Noti · Secure workspace notifications</p>
-      </div>
+        <p className="auth-footer">{t('auth.footer')}</p>
+      </main>
     </div>
   );
 }
@@ -336,57 +353,53 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
         else await nav({ to: '/' });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong');
+      setError(e instanceof Error ? e.message : t('auth.error.generic'));
     } finally {
       setBusy(false);
     }
   }
   return (
     <AuthFrame
-      title={signup ? 'Create your account' : forgot ? 'Reset your password' : 'Welcome back'}
-      description={
-        signup
-          ? 'Get started with Lumi Noti. Verify your email before signing in.'
-          : forgot
-            ? 'We will send a reset link if an account exists.'
-            : 'Sign in to manage your notifications.'
-      }
+      title={t(signup ? 'auth.signup.title' : forgot ? 'auth.forgot.title' : 'auth.signin.title')}
+      description={t(
+        signup ? 'auth.signup.description' : forgot ? 'auth.forgot.description' : 'auth.signin.description',
+      )}
     >
       <form className="auth-form" onSubmit={(e) => void submit(e)}>
         {signup && (
           <label>
-            Your name
+            {t('auth.field.name')}
             <Input
               required
               maxLength={100}
               autoComplete="name"
-              placeholder="Your name"
+              placeholder={t('auth.field.namePlaceholder')}
               value={orgName}
               onChange={(e) => setOrgName(e.target.value)}
             />
           </label>
         )}
         <label>
-          Work email
+          {t('auth.field.email')}
           <Input
             required
             type="email"
             autoComplete="email"
-            placeholder="you@company.com"
+            placeholder={t('auth.field.emailPlaceholder')}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
         </label>
         {!forgot && (
           <label>
-            Password
+            {t('auth.field.password')}
             <Input
               required
               type="password"
               minLength={signup ? 12 : undefined}
               maxLength={128}
               autoComplete={signup ? 'new-password' : 'current-password'}
-              placeholder={signup ? 'At least 12 characters' : 'Your password'}
+              placeholder={t(signup ? 'auth.field.passwordNewPlaceholder' : 'auth.field.passwordPlaceholder')}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -395,8 +408,10 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
         {error && <Notice kind="error">{error}</Notice>}
         {message && <Notice>{message}</Notice>}
         <Button type="submit" disabled={busy}>
-          {busy ? 'Please wait…' : signup ? 'Create account' : forgot ? 'Send reset link' : 'Sign in'}{' '}
-          <IconArrowRight size={16} />
+          {busy
+            ? t('auth.busy')
+            : t(signup ? 'auth.submit.signup' : forgot ? 'auth.submit.forgot' : 'auth.submit.signin')}{' '}
+          <IconArrowRight size={16} aria-hidden="true" />
         </Button>
       </form>
       {!signup && !forgot && (
@@ -416,66 +431,65 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
                 if (back?.startsWith('/invite?id=')) window.location.assign(back);
                 else await nav({ to: '/' });
               } catch (e) {
-                setError(e instanceof Error ? e.message : 'Passkey sign-in failed');
+                setError(e instanceof Error ? e.message : t('auth.error.passkey'));
               } finally {
                 setBusy(false);
               }
             })();
           }}
         >
-          Sign in with passkey
+          {t('auth.passkey')}
         </button>
       )}
       {!signup && !forgot && (
         <div className="auth-links">
-          <Link to="/forgot-password">Forgot password?</Link>
+          <Link to="/forgot-password">{t('auth.forgotLink')}</Link>
           <span>
-            New to Noti? <Link to="/signup">Create account</Link>
+            {t('auth.newToNoti')} <Link to="/signup">{t('auth.createAccountLink')}</Link>
           </span>
         </div>
       )}
       {signup && (
         <p className="auth-switch">
-          Already have an account? <Link to="/signin">Sign in</Link>
+          {t('auth.haveAccount')} <Link to="/signin">{t('auth.signinLink')}</Link>
         </p>
       )}
       {forgot && (
         <p className="auth-switch">
-          <Link to="/signin">Back to sign in</Link>
+          <Link to="/signin">{t('auth.backToSignin')}</Link>
         </p>
       )}
       {!forgot && (
         <p className="passkey-note">
-          <IconShieldCheck size={16} /> Passkeys are available after registering one in Settings on a verified
-          account.
+          <IconShieldCheck size={16} aria-hidden="true" /> {t('auth.passkeyNote')}
         </p>
       )}
     </AuthFrame>
   );
 }
 export function VerifyPage() {
-  const [message, setMessage] = useState('Verifying your email…'),
+  const [message, setMessage] = useState(t('auth.verify.pending')),
     [error, setError] = useState(false);
   useEffect(() => {
     const token = new URLSearchParams(location.search).get('token');
     if (!token) {
       setError(true);
-      setMessage('Missing verification token');
+      setMessage(t('auth.verify.missingToken'));
       return;
     }
     void authApi
       .verify(token)
-      .then(() => setMessage('Email verified. You can now sign in.'))
+      .then(() => setMessage(t('auth.verify.done')))
       .catch((e) => {
         setError(true);
-        setMessage(e instanceof Error ? e.message : 'Verification failed');
+        setMessage(e instanceof Error ? e.message : t('auth.verify.failed'));
       });
   }, []);
   return (
-    <AuthFrame title="Email verification" description="Confirming your email address">
+    <AuthFrame title={t('auth.verify.title')} description={t('auth.verify.description')}>
       <Notice kind={error ? 'error' : 'info'}>{message}</Notice>
       <p className="auth-switch">
-        <Link to="/signin">Go to sign in</Link>
+        <Link to="/signin">{t('auth.verify.toSignin')}</Link>
       </p>
     </AuthFrame>
   );
@@ -492,18 +506,18 @@ export function ResetPage() {
     setError('');
     try {
       await authApi.reset(token, password);
-      setMessage('Password updated. Sign in with your new password.');
+      setMessage(t('auth.reset.done'));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Reset failed');
+      setError(e instanceof Error ? e.message : t('auth.reset.failed'));
     } finally {
       setBusy(false);
     }
   }
   return (
-    <AuthFrame title="Choose a new password" description="Use at least 12 characters.">
+    <AuthFrame title={t('auth.reset.title')} description={t('auth.reset.description')}>
       <form className="auth-form" onSubmit={(e) => void submit(e)}>
         <label>
-          New password
+          {t('auth.reset.field')}
           <Input
             type="password"
             required
@@ -517,11 +531,11 @@ export function ResetPage() {
         {error && <Notice kind="error">{error}</Notice>}
         {message && <Notice>{message}</Notice>}
         <Button disabled={!token || busy} type="submit">
-          Update password
+          {t('auth.reset.submit')}
         </Button>
       </form>
       <p className="auth-switch">
-        <Link to="/signin">Back to sign in</Link>
+        <Link to="/signin">{t('auth.backToSignin')}</Link>
       </p>
     </AuthFrame>
   );

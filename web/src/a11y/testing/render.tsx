@@ -1,0 +1,210 @@
+import type { ReactNode } from 'react';
+import { render, type RenderResult } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+} from '@tanstack/react-router';
+import { setFetchHandler } from './environment';
+import { AppShell, Overview, Activity, Team, Settings, AuthPage, VerifyPage, ResetPage } from '../../pages';
+import { OnboardingPage, InvitePage } from '../../onboarding';
+import { IntegrationsPage } from '../../integrations/IntegrationsPage';
+import { CreateWizard } from '../../integrations/wizard/CreateWizard';
+import { IntegrationSettings } from '../../integrations/settings/IntegrationSettings';
+import { validateActivitySearch } from '../../deliveries/search';
+import { LocaleProvider } from '../../i18n/LocaleProvider';
+import { setLocale, type Locale } from '../../i18n/locale';
+import { ADMIN, DELIVERIES, INSTALLATIONS, INTEGRATIONS, MEMBERS, ORG_ID, PASSKEYS } from './fixtures';
+import type { Me } from '../../lib/api';
+
+/**
+ * The application's route table, mirrored from `web/src/main.tsx` (which builds the router at
+ * import time and cannot be imported without mounting the app). `routes.test.tsx` fails if the
+ * two ever disagree, so a new route cannot ship without being added here and audited.
+ */
+export const ROUTE_PATHS = [
+  '/',
+  '/integrations',
+  '/integrations/new',
+  '/integrations/$id',
+  '/onboarding',
+  '/invite',
+  '/activity',
+  '/team',
+  '/settings',
+  '/signin',
+  '/signup',
+  '/forgot-password',
+  '/verify',
+  '/reset',
+] as const;
+
+function buildRouter(initialPath: string) {
+  const root = createRootRoute({ component: AppShell });
+  const route = (path: string, component: () => ReactNode) =>
+    createRoute({ getParentRoute: () => root, path, component });
+  const tree = root.addChildren([
+    route('/', Overview),
+    route('/integrations', IntegrationsPage),
+    route('/integrations/new', CreateWizard),
+    route('/integrations/$id', IntegrationSettings),
+    route('/onboarding', OnboardingPage),
+    route('/invite', InvitePage),
+    createRoute({
+      getParentRoute: () => root,
+      path: '/activity',
+      component: Activity,
+      validateSearch: validateActivitySearch,
+    }),
+    route('/team', Team),
+    route('/settings', Settings),
+    route('/signin', () => <AuthPage mode="signin" />),
+    route('/signup', () => <AuthPage mode="signup" />),
+    route('/forgot-password', () => <AuthPage mode="forgot" />),
+    route('/verify', VerifyPage),
+    route('/reset', ResetPage),
+  ]);
+  return createRouter({
+    routeTree: tree,
+    history: createMemoryHistory({ initialEntries: [initialPath] }),
+    defaultPreload: false,
+  });
+}
+
+// --- Mock API -------------------------------------------------------------------------------
+
+export interface ApiState {
+  me: Me | 'unauthenticated';
+  integrations: unknown[] | 'error';
+  deliveries: unknown[] | 'error';
+  installations: unknown[];
+  githubConfigured: boolean;
+  members: unknown[];
+  passkeys: unknown[];
+  deletion: unknown;
+}
+
+export const defaultApi = (): ApiState => ({
+  me: ADMIN,
+  integrations: [...INTEGRATIONS],
+  deliveries: [...DELIVERIES],
+  installations: [...INSTALLATIONS],
+  githubConfigured: true,
+  members: [...MEMBERS],
+  passkeys: [...PASSKEYS],
+  deletion: { scheduled: false },
+});
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+/** Requests a test made that no handler answered; asserted empty by the route-coverage test. */
+export const unhandled: string[] = [];
+
+export function installFetch(state: ApiState): void {
+  setFetchHandler((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(
+      typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+      'http://localhost',
+    );
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const path = url.pathname;
+    if (method === 'GET') {
+      if (path === '/api/workspace/me')
+        return Promise.resolve(
+          state.me === 'unauthenticated' ? json({ error: 'Sign in' }, 401) : json(state.me),
+        );
+      if (path === '/api/integrations')
+        return Promise.resolve(
+          state.integrations === 'error'
+            ? json({ error: 'boom' }, 500)
+            : json({ integrations: state.integrations, truncated: false }),
+        );
+      const one = /^\/api\/integrations\/([^/]+)$/.exec(path);
+      if (one && Array.isArray(state.integrations)) {
+        const found = (state.integrations as { id: string }[]).find((i) => i.id === one[1]);
+        return Promise.resolve(found ? json({ integration: found }) : json({ error: 'Not found' }, 404));
+      }
+      if (path === '/api/github/installations')
+        return Promise.resolve(
+          json({ configured: state.githubConfigured, installations: state.installations }),
+        );
+      if (path === '/api/deliveries/summary')
+        return Promise.resolve(
+          json({
+            counts: {
+              pending: 0,
+              claimed: 0,
+              sent: 12,
+              accepted: 3,
+              retrying: 1,
+              dead_lettered: 2,
+              suppressed: 0,
+            },
+          }),
+        );
+      if (path === '/api/deliveries')
+        return Promise.resolve(
+          state.deliveries === 'error'
+            ? json({ error: 'boom' }, 500)
+            : json({ deliveries: state.deliveries, nextCursor: null }),
+        );
+      const detail = /^\/api\/deliveries\/([^/]+)$/.exec(path);
+      if (detail && Array.isArray(state.deliveries)) {
+        const found = (state.deliveries as { id: string }[]).find((d) => d.id === detail[1]);
+        return Promise.resolve(
+          found
+            ? json({
+                delivery: found,
+                timeline: [
+                  { kind: 'created', at: '2026-10-13T08:00:00Z' },
+                  { kind: 'last_attempt', at: '2026-10-13T08:01:00Z' },
+                ],
+                replays: [],
+              })
+            : json({ error: 'Not found' }, 404),
+        );
+      }
+      if (path === '/api/workspace/team') return Promise.resolve(json({ members: state.members }));
+      if (path === '/api/workspace/deletion') return Promise.resolve(json(state.deletion));
+      if (path.endsWith('/passkey/list-user-passkeys')) return Promise.resolve(json(state.passkeys));
+    }
+    unhandled.push(`${method} ${path}`);
+    return Promise.resolve(json({ error: 'not mocked' }, 404));
+  });
+}
+
+// --- Rendering ------------------------------------------------------------------------------
+
+export interface RenderedApp extends RenderResult {
+  readonly router: ReturnType<typeof buildRouter>;
+}
+
+export interface RenderOptions {
+  readonly api?: Partial<ApiState>;
+  readonly locale?: Locale;
+}
+
+/** Mount the real routes at `path` against the mock API and wait for the first route to load. */
+export async function renderApp(path: string, options: RenderOptions = {}): Promise<RenderedApp> {
+  setLocale(options.locale ?? 'en', { persist: false });
+  // Pages such as /invite and /verify read the query string from `window.location`.
+  window.history.replaceState(null, '', path);
+  installFetch({ ...defaultApi(), ...options.api });
+  const router = buildRouter(path);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  await router.load();
+  const result = render(
+    <QueryClientProvider client={client}>
+      <LocaleProvider>
+        <RouterProvider router={router} />
+      </LocaleProvider>
+    </QueryClientProvider>,
+  );
+  return Object.assign(result, { router });
+}
+
+export { ORG_ID };

@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, HTMLAttributes, ReactNode, Ref } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { cn } from '../lib/utils';
+import { t } from '../i18n';
 export function Button({
   className,
   variant = 'primary',
@@ -76,8 +77,8 @@ export function Modal({
           {children}
           <Dialog.Close
             render={
-              <button className="modal-close" aria-label="Close dialog">
-                ×
+              <button className="modal-close" aria-label={t('dialog.close')}>
+                <span aria-hidden="true">×</span>
               </button>
             }
           />
