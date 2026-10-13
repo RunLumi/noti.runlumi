@@ -43,6 +43,10 @@ function retryAfter(res: ProviderResponse, now: number): number | undefined {
 /** Generic HTTP-status mapping for responses no provider-specific rule matched. */
 export function classifyHttpStatus(res: ProviderResponse, now: number): ClassifiedResponse {
   const { status } = res;
+  // `send.ts` uses `redirect: 'manual'`, so a redirect arrives here as 3xx (or as 0, the
+  // opaque-redirect status). A webhook endpoint that redirects is misconfigured or moved;
+  // following it would bypass the allowlist and retrying will not fix it.
+  if (status === 0 || (status >= 300 && status <= 399)) return permanent('destination_redirected');
   if (status === 429) return retryable('destination_rate_limited', { retryAfterMs: retryAfter(res, now) });
   if (status === 413) return permanent('payload_too_large');
   if (status === 401 || status === 403) return permanent('destination_unauthorized');
@@ -56,9 +60,8 @@ export function classifyHttpStatus(res: ProviderResponse, now: number): Classifi
 }
 
 /**
- * Classify an exception thrown by `fetch` (or by our own timeout). A redirect refused by
- * `redirect: 'error'` also surfaces as a `TypeError` and is indistinguishable from a network
- * failure, so both are retryable within the bounded retry budget.
+ * Classify an exception thrown by `fetch` (or by our own timeout). Redirects never reach this
+ * path because `send.ts` uses `redirect: 'manual'` and classifies the 3xx response itself.
  */
 export function classifyTransportError(e: unknown): ClassifiedResponse {
   if (e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')) {

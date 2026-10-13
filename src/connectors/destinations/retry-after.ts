@@ -27,7 +27,9 @@ export function parseRetryAfter(value: string | null, now: number): number | und
   // else is refused so `Date.parse` is never handed an arbitrary, engine-dependent string.
   if (!HTTP_DATE.some((re) => re.test(trimmed))) return undefined;
   const at = Date.parse(trimmed);
-  return Number.isNaN(at) ? undefined : clamp(at - now);
+  // A date already in the past carries no delay information; fall back to our own backoff.
+  if (Number.isNaN(at) || at <= now) return undefined;
+  return clamp(at - now);
 }
 
 /** Seconds-valued provider headers such as Lark's `x-ogw-ratelimit-reset`. */

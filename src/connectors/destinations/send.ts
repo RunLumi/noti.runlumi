@@ -4,7 +4,8 @@ import type { ClassifiedResponse, OutboundRequest, ProviderResponse } from './ty
 
 /**
  * The only place destination network I/O happens (F91). The URL policy is re-checked here
- * as defence in depth: a stored row can be altered after it was validated (F96).
+ * as defence in depth: a stored row can be altered after it was validated (F96). Redirects
+ * are never followed.
  */
 
 /** Classifiers only ever need a short code; reading more invites echoing secrets. */
@@ -55,7 +56,9 @@ export async function sendRequest(
       method: request.method,
       headers: request.headers,
       body: request.body,
-      redirect: 'error',
+      // 'manual' rather than 'error': the 3xx is returned unfollowed, so it can be classified
+      // as a permanent `destination_redirected` instead of an ambiguous network TypeError.
+      redirect: 'manual',
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_SEND_TIMEOUT_MS),
     });
     const bodyText = await readBodyPrefix(res);

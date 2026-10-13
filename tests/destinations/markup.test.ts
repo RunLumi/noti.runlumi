@@ -141,11 +141,12 @@ describe('Retry-After', () => {
   it('parses all three HTTP-date forms', () => {
     expect(parseRetryAfter('Tue, 13 Oct 2026 00:00:10 GMT', now)).toBe(10_000);
     expect(parseRetryAfter('Tuesday, 13-Oct-26 00:00:10 GMT', now)).toBe(10_000);
-    expect(parseRetryAfter('Tue Oct 13 00:00:10 2026', now)).toBeGreaterThanOrEqual(0);
+    expect(parseRetryAfter('Thu Oct 15 00:00:00 2026', now)).toBeGreaterThan(0);
   });
 
-  it('clamps past dates to zero and huge values to the cap', () => {
-    expect(parseRetryAfter('Mon, 12 Oct 2026 00:00:00 GMT', now)).toBe(0);
+  it('ignores past dates and clamps huge values to the cap', () => {
+    expect(parseRetryAfter('Mon, 12 Oct 2026 00:00:00 GMT', now)).toBeUndefined();
+    expect(parseRetryAfter('Tue, 13 Oct 2026 00:00:00 GMT', now)).toBeUndefined();
     expect(parseRetryAfter('9999999999', now)).toBe(MAX_RETRY_AFTER_MS);
   });
 

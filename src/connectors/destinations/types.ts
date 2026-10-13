@@ -123,6 +123,7 @@ export const DELIVERY_REASONS = [
   'destination_timeout',
   'network_error',
   'destination_revoked',
+  'destination_redirected',
   'destination_unauthorized',
   'destination_policy_blocked',
   'content_policy_blocked',

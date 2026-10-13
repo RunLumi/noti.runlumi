@@ -13,6 +13,11 @@ import type {
 export interface RenderOptions {
   /** Start lower on the degradation ladder, e.g. when the customer chose plain text. */
   readonly startAt?: RenderFormat;
+  /**
+   * Prefix titles with the status label. Defaults to true. Only the legacy Lark helpers set
+   * it to false, to keep the titles the current consumer already sends.
+   */
+  readonly statusInTitle?: boolean;
 }
 
 /**

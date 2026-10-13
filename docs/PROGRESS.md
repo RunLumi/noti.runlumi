@@ -286,7 +286,8 @@ uses the Lark compatibility exports.
     DLP masking.
   - `classify.ts` and `retry-after.ts` hold the closed `outcome`/`reason` taxonomy and the
     RFC 9110 `Retry-After` parser.
-  - `send.ts` is the only I/O. It re-checks the URL, uses `redirect: 'error'`, applies a
+  - `send.ts` is the only I/O. It re-checks the URL, never follows redirects (`redirect: 'manual'`, 3xx is a permanent
+    `destination_redirected`), applies a
     timeout and reads a bounded body.
   - `slack/`, `teams/` and `lark/` hold the renderer, classifier and adapter for each
     destination. `lark/webhook.ts` keeps `larkPayload`/`larkAccepted` for the current consumer.

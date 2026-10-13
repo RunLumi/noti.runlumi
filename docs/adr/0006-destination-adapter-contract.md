@@ -52,6 +52,15 @@ Slack was an inline `{ text }` string in the queue consumer, with every failure 
   `truncatedFields` and `redactedFields`. Until then Slack still uses the inline string.
 - Status is conveyed as text (`Failed: …`) as well as colour, for accessibility.
 - Facts marked `UNVERIFIED` in code are not claims; each names what to check.
+- Accepted risk: any Azure tenant can create a Logic App on `*.logic.azure.com`, so the Teams
+  allowlist does not stop a workspace member pointing notifications at an endpoint they own.
+  That is an exfiltration channel for that workspace's own event data, not SSRF: the host is
+  public Microsoft infrastructure, never our network. Workspace roles and audit logs govern who
+  may configure destinations.
+- Redirects are never followed (`redirect: 'manual'`); a 3xx is a permanent
+  `destination_redirected`. This meets the intent of the `redirect: 'error'` requirement in
+  specs 09/12/15 (no redirect is ever followed) while letting the outcome be classified; with
+  `'error'` a redirect is an indistinguishable network `TypeError` and would be retried.
 
 ## Revisit when
 

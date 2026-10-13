@@ -40,6 +40,9 @@ const KNOWN_CODES: ReadonlyMap<number, LarkRule> = new Map([
   [232009, p('destination_revoked')], // chat dissolved
 ]);
 
+/** Statuses whose meaning does not depend on the body. 400 is excluded: Lark throttles with it. */
+const TERMINAL_HTTP: ReadonlySet<number> = new Set([401, 403, 404, 410]);
+
 function readCode(bodyText: string): number | undefined {
   let parsed: unknown;
   try {
@@ -73,7 +76,11 @@ export function classifyLarkResponse(res: ProviderResponse, now: number): Classi
   const rule = code === undefined ? undefined : KNOWN_CODES.get(code);
   if (rule && code !== undefined) return applyRule(rule, code, res, now);
   if (res.status === 429 || res.status >= 500) return classifyHttpStatus(res, now);
-  // An unknown Lark code (or a 2xx without `code: 0`) is never guessed at.
+  if (code !== undefined && TERMINAL_HTTP.has(res.status)) {
+    // The code is unknown but the HTTP status is unambiguous: stop retrying, keep the flag.
+    return { ...classifyHttpStatus(res, now), unmapped: true };
+  }
+  // Any other unknown Lark code (or a 2xx without `code: 0`) is never guessed at.
   if (code !== undefined || (res.status >= 200 && res.status <= 299)) return unmapped(res.status);
   return classifyHttpStatus(res, now);
 }

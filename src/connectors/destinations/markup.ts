@@ -62,9 +62,15 @@ const DIALECT_ESCAPES: { readonly [D in MarkupDialect]: Readonly<Record<string, 
   plain: {},
 };
 
+/**
+ * Escape every code point of a grapheme cluster, not the cluster as a whole: `<` followed by
+ * a combining mark, ZWJ or variation selector is one cluster but still a `<` to the provider.
+ */
 function escapeGrapheme(dialect: MarkupDialect, g: string): string {
   const table = DIALECT_ESCAPES[dialect];
-  return Object.hasOwn(table, g) ? (table[g] ?? g) : g;
+  let out = '';
+  for (const cp of g) out += Object.hasOwn(table, cp) ? (table[cp] ?? cp) : cp;
+  return out;
 }
 
 /** Escaped atoms for untrusted text in the given dialect. */

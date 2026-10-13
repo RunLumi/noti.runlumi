@@ -144,14 +144,14 @@ describe('prepare, send and classify', () => {
     expect(classifyDeliveryResponse('lark', response(200, '{"code":0}'), NOW).outcome).toBe('delivered');
   });
 
-  it('sends with redirect: error and a timeout signal, and reads a bounded body', async () => {
+  it('sends with redirect: manual and a timeout signal, and reads a bounded body', async () => {
     let seen: RequestInit | undefined;
     const fetcher: Fetcher = (_url, init) => {
       seen = init;
       return Promise.resolve(new Response('ok' + 'x'.repeat(10_000), { status: 200 }));
     };
     const r = await deliver(validConfig('slack'), BASE, { fetch: fetcher, now: () => NOW });
-    expect(seen?.redirect).toBe('error');
+    expect(seen?.redirect).toBe('manual');
     expect(seen?.signal).toBeInstanceOf(AbortSignal);
     // The oversized body is not a bare `ok`, so it is not counted as delivered.
     expect(r.classification).toMatchObject({ outcome: 'retryable', unmapped: true });

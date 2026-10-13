@@ -30,6 +30,8 @@ interface HostRule {
   matches(hostname: string): boolean;
   /** Required path prefix, or `undefined` when the provider documents the URL as opaque. */
   readonly pathPrefix?: string;
+  /** Optional exact shape of the whole path, checked after the prefix. */
+  readonly pathPattern?: RegExp;
 }
 
 // A Map, not an object literal: `'constructor' in {}` is true, and `constructor` is a valid
@@ -53,7 +55,12 @@ const HOST_RULES: { readonly [K in DestinationKind]: HostRule } = {
   // not recorded in DESTINATION_API_REFERENCE.md, so GovSlack is rejected until verified.
   // UNVERIFIED: the reference's OAuth `incoming_webhook.url` example omits `/services/`;
   // confirm against a real OAuth install before relying on this prefix for OAuth URLs.
-  slack: { matches: (h) => h === 'hooks.slack.com', pathPrefix: '/services/' },
+  // `/services/T…/B…/<token>`: workspace id, webhook id, secret — three non-empty segments.
+  slack: {
+    matches: (h) => h === 'hooks.slack.com',
+    pathPrefix: '/services/',
+    pathPattern: /^\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+$/,
+  },
   // The Workflows trigger URL is opaque ("The callback URL of the trigger will be displayed
   // to you when you save the flow"), so the rule is host-pattern only (F104).
   // UNVERIFIED: Power Automate may issue trigger URLs on hosts other than
@@ -97,7 +104,8 @@ function hostRule(kind: DestinationKind, url: URL): UrlRejectionRule | undefined
   if (!rule.matches(url.hostname)) return 'host';
   if (rule.pathPrefix === undefined) return undefined;
   const path = url.pathname;
-  return path.startsWith(rule.pathPrefix) && path.length > rule.pathPrefix.length ? undefined : 'path';
+  if (!path.startsWith(rule.pathPrefix) || path.length === rule.pathPrefix.length) return 'path';
+  return rule.pathPattern && !rule.pathPattern.test(path) ? 'path' : undefined;
 }
 
 /** Validate a customer-supplied destination URL against the per-destination allowlist. */

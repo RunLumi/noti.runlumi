@@ -129,6 +129,6 @@ describe('Slack classifier', () => {
     const r = classify(404, 'https://hooks.slack.com/services/SECRET');
     expect(r).toEqual({ outcome: 'permanent', reason: 'destination_revoked' });
     expect(classify(400, 'some_new_error')).toEqual({ outcome: 'permanent', reason: 'payload_rejected' });
-    expect(classify(302, '')).toMatchObject({ unmapped: true });
+    expect(classify(302, '')).toEqual({ outcome: 'permanent', reason: 'destination_redirected' });
   });
 });

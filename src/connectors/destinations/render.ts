@@ -50,27 +50,58 @@ export interface PreparedNotification {
   readonly redactedFields: readonly RenderedField[];
 }
 
-/** Mask contact details in free-text fields when the destination requires it (F102). */
+/**
+ * Upper bound on any untrusted field before it is segmented, escaped or scanned. It is far
+ * above every render budget, so a bounded field is still truncated visibly later, but it
+ * caps the work any single event can cause.
+ */
+export const MAX_FIELD_INPUT_CHARS = 16_384;
+
+/** Cut to `MAX_FIELD_INPUT_CHARS` code units without leaving a lone high surrogate. */
+export function boundInput(text: string): string {
+  if (text.length <= MAX_FIELD_INPUT_CHARS) return text;
+  const cut = text.slice(0, MAX_FIELD_INPUT_CHARS);
+  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+}
+
+type TextField = 'title' | 'summary' | 'actor' | 'repo' | 'linkLabel';
+const TEXT_FIELDS: readonly TextField[] = ['title', 'summary', 'actor', 'repo', 'linkLabel'];
+const REPORTED_AS: { readonly [F in TextField]: RenderedField } = {
+  title: 'title',
+  summary: 'summary',
+  actor: 'meta',
+  repo: 'meta',
+  linkLabel: 'link',
+};
+
+function mapFields(n: CanonicalNotification, fn: (s: string) => string): CanonicalNotification {
+  const updates = Object.fromEntries(
+    TEXT_FIELDS.flatMap((f) => {
+      const v = n[f];
+      return typeof v === 'string' ? [[f, fn(v)]] : [];
+    }),
+  ) as Partial<Pick<CanonicalNotification, TextField>>;
+  return { ...n, ...updates };
+}
+
+/**
+ * Bound every free-text field, substitute an empty title, and mask contact details in every
+ * free-text field when the destination requires it (F102).
+ */
 export function prepareNotification(
   n: CanonicalNotification,
   caps: DestinationCapabilities,
 ): PreparedNotification {
-  const titled = n.title.trim() ? n : { ...n, title: STRINGS.untitled };
+  const bounded = mapFields(n, boundInput);
+  const titled = bounded.title.trim() ? bounded : { ...bounded, title: STRINGS.untitled };
   if (!caps.redactsContactDetails) return { notification: titled, redactedFields: [] };
   return redactNotification(titled);
 }
 
 function redactNotification(n: CanonicalNotification): PreparedNotification {
-  const title = redactContactDetails(n.title);
-  const summary = n.summary === undefined ? undefined : redactContactDetails(n.summary);
-  const redactedFields: RenderedField[] = [
-    ...(title.redacted ? (['title'] as const) : []),
-    ...(summary?.redacted ? (['summary'] as const) : []),
-  ];
-  return {
-    notification: { ...n, title: title.text, ...(summary ? { summary: summary.text } : {}) },
-    redactedFields,
-  };
+  const redacted = mapFields(n, (s) => redactContactDetails(s).text);
+  const changed = TEXT_FIELDS.filter((f) => redacted[f] !== n[f]).map((f) => REPORTED_AS[f]);
+  return { notification: redacted, redactedFields: uniqueFields(changed) };
 }
 
 /** `repo · by actor`, unescaped. */
@@ -96,9 +127,27 @@ export interface FittedField {
   readonly truncated: boolean;
 }
 
-export function fitTitle(n: CanonicalNotification, dialect: MarkupDialect, max: number): FittedField {
-  const label = statusLabel(n.status);
-  return fitText(label ? `${label}: ${n.title}` : n.title, dialect, max);
+export interface TitleOptions {
+  /** Prefix the status label (`Failed: …`) so status is not conveyed by colour alone. */
+  readonly withStatus?: boolean;
+  /** The title will be wrapped in `*`/`**` emphasis, so `*` must not appear inside it. */
+  readonly emphasised?: boolean;
+}
+
+/** Titles are single-line; inside emphasis a `*` would close the bold early. */
+function titleText(n: CanonicalNotification, options: TitleOptions): string {
+  const label = options.withStatus === false ? undefined : statusLabel(n.status);
+  const oneLine = (label ? `${label}: ${n.title}` : n.title).replace(/\s*[\r\n]+\s*/g, ' ').trim();
+  return options.emphasised ? oneLine.replace(/\*/g, '∗') : oneLine;
+}
+
+export function fitTitle(
+  n: CanonicalNotification,
+  dialect: MarkupDialect,
+  max: number,
+  options: TitleOptions = {},
+): FittedField {
+  return fitText(titleText(n, options), dialect, max);
 }
 
 export function fitMeta(n: CanonicalNotification, dialect: MarkupDialect): FittedField {
@@ -116,6 +165,7 @@ export interface ComposeOptions {
   /** `markup` renders `[label](url)`-style links; `bare` prints the URL itself. */
   readonly linkStyle: 'markup' | 'bare';
   readonly titleWrap?: readonly [string, string];
+  readonly withStatus?: boolean;
 }
 
 function linkLine(n: CanonicalNotification, opts: ComposeOptions): string | undefined {
@@ -131,7 +181,10 @@ function linkLine(n: CanonicalNotification, opts: ComposeOptions): string | unde
  */
 export function composeText(n: CanonicalNotification, opts: ComposeOptions): RungOutputText {
   const [pre, post] = opts.titleWrap ?? ['', ''];
-  const title = fitTitle(n, opts.dialect, opts.maxTitleChars);
+  const title = fitTitle(n, opts.dialect, opts.maxTitleChars, {
+    emphasised: opts.titleWrap !== undefined,
+    ...(opts.withStatus === false ? { withStatus: false } : {}),
+  });
   const meta = fitMeta(n, opts.dialect);
   const head = [pre + title.text + post, meta.text, linkLine(n, opts)]
     .filter((line): line is string => typeof line === 'string' && line.length > 0)
