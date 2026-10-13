@@ -214,6 +214,22 @@ describe('ingress tenant isolation', () => {
     for (const row of outbox) expect(row.payload_json).not.toMatch(/ciphertext|larksuite/);
   });
 
+  it('ignores event types outside the catalog without touching integrations (D16)', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    db.raw.prepare('UPDATE integrations SET event_types=\'["issues.transferred"]\'').run();
+    const res = await postWebhook({ ...issueEvent(100), action: 'transferred' });
+    expect(await res.json()).toEqual({ accepted: true, persisted: 0 });
+    expect(sent).toHaveLength(0);
+  });
+
+  it('matches the repository case-insensitively, as GitHub does', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A, 'Acme/Web');
+    await postWebhook(issueEvent(100, 'acme/web'));
+    expect(sent.map((m) => m.integrationId)).toEqual(['int-a']);
+  });
+
   it('accepts a redelivered GitHub event once', async () => {
     installation('org-a', '100');
     await integration('int-a', 'org-a', LARK_A);

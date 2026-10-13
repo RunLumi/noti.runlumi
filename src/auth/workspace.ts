@@ -2,11 +2,17 @@ import { Hono, type Context } from 'hono';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
+import { recordDenial, requestOrigin } from '../audit/audit';
 import { createAuth, type AuthBindings } from './better-auth';
+import { can, type Capability } from './permissions';
 
 const workspace = new Hono<{ Bindings: AuthBindings }>();
 
-type WorkspaceContext = Context<{ Bindings: AuthBindings }>;
+/**
+ * The parts of a request context these helpers use. Structural, so a route whose bindings
+ * extend `AuthBindings` (the integrations API) can call them too.
+ */
+type WorkspaceContext = Pick<Context<{ Bindings: AuthBindings }>, 'env' | 'req' | 'executionCtx'>;
 
 export type Membership = { orgId: string; role: string; orgName: string };
 
@@ -179,20 +185,54 @@ workspace.get('/team', async (c) => {
 });
 
 /**
- * Minimal capability check for workspace routes.
+ * The single authorization gate for domain routes (F24, F26).
  *
- * The capability set in permissions.ts covers Better Auth's own resources only;
- * domain capabilities (`integration.*`, `destination.*`, `replay`, `audit`) are not
- * defined yet (docs/specs/02 F24). Until they are, this helper is the single place
- * to add them, so a missing check is one edit rather than a hunt.
+ * Resolves the caller's workspace, then checks the capability against their role. Denials
+ * are audited here — not in individual routes — so a cross-tenant probe cannot be
+ * forgotten. A missing capability names itself in the 403 so support can diagnose it.
  */
-export async function authorize(c: WorkspaceContext, capability: string): Promise<Resolved | Failure> {
+export async function authorize(c: WorkspaceContext, capability: Capability): Promise<Resolved | Failure> {
   const resolved = await resolveWorkspace(c);
-  if (isFailure(resolved)) return resolved;
+  const origin = requestOrigin(c.req.raw.headers);
 
-  // Only owner/admin may mutate membership; everyone may read.
-  if (capability === 'member.write' && resolved.role !== 'admin') {
-    return { status: 403, error: 'Forbidden' };
+  if (isFailure(resolved)) {
+    if (resolved.status === 404) {
+      // A request for a workspace the caller is not a member of. Record it against that
+      // workspace when it exists, so its admins can see probes; never reveal which it was.
+      // Organization ids are short; anything longer is not one and is not stored verbatim.
+      const raw = c.req.query('org') ?? null;
+      const requested = raw && raw.length <= 64 ? raw : raw ? '(invalid)' : null;
+      const exists =
+        requested && requested !== '(invalid)'
+          ? await c.env.DB.prepare('SELECT 1 AS x FROM organization WHERE id=?').bind(requested).first()
+          : null;
+      const s = await current(c);
+      await recordDenial(c.env.DB, {
+        organizationId: exists ? requested : null,
+        actorId: s?.user.id ?? null,
+        action: 'access.denied',
+        subjectType: 'organization',
+        subjectId: requested,
+        outcome: 'denied',
+        ...origin,
+        metadata: { capability, reason: 'not_a_member' },
+      });
+    }
+    return resolved;
+  }
+
+  if (!can(resolved.role, capability)) {
+    await recordDenial(c.env.DB, {
+      organizationId: resolved.orgId,
+      actorId: resolved.userId,
+      action: 'access.denied',
+      subjectType: 'capability',
+      subjectId: capability,
+      outcome: 'denied',
+      ...origin,
+      metadata: { role: resolved.role },
+    });
+    return { status: 403, error: `Missing capability: ${capability}` };
   }
   return resolved;
 }

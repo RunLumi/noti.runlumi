@@ -281,7 +281,7 @@ display name. It is display data only.
 
 ## F61 — Event catalog and permission gating
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 closed catalog enforced at write and ingress (PR #9); permission gating needs the App (3b)
 
 **Acceptance**
 - [ ] V1 subscribes to: `issues`, `issue_comment`, `pull_request`, `pull_request_review`,

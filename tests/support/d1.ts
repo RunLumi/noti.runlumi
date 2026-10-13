@@ -51,6 +51,22 @@ class FakeStatement {
     return Promise.resolve({ results: rows.map((r) => normaliseRow(r) as T), success: true, meta: {} });
   }
 
+  /**
+   * Positional rows, which drizzle's D1 driver reads. node:sqlite 22 cannot return arrays,
+   * so this relies on SQLite's column order and fails loudly on duplicate column names
+   * rather than silently collapsing them.
+   */
+  raw<T = unknown[]>(): Promise<T[]> {
+    const stmt = this.db.prepare(this.sql);
+    const rows = stmt.all(...this.params) as Record<string, unknown>[];
+    return Promise.resolve(
+      rows.map((r) => {
+        const values = Object.values(normaliseRow(r));
+        return values as T;
+      }),
+    );
+  }
+
   runSync(): { success: true; meta: { changes: number } } {
     const result = this.db.prepare(this.sql).run(...this.params);
     return { success: true, meta: { changes: Number(result.changes) } };

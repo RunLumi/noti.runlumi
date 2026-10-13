@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import type { Bindings, DeliveryMessage } from '../../../env';
 import { asRecord, str } from '../../../lib/json';
 import { dispatchOutbox } from '../../../pipeline/outbox';
+import { isGithubEventType } from './catalog';
 import { classifyGithubEvent, verifyGithubSignature } from './events';
 import { resolveTenant } from './tenant';
 
@@ -76,10 +77,13 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   }
   const organizationId = tenant.organizationId;
   const eventType = classifyGithubEvent(c.req.header('x-github-event') || '', event);
+  // Outside the closed catalog nothing can be subscribed, so nothing is looked up (D16).
+  if (!isGithubEventType(eventType)) return c.json({ accepted: true, persisted: 0 }, 202);
 
-  // `repo` only narrows within the tenant. It is not authorization.
+  // `repo` only narrows within the tenant. It is not authorization. GitHub owner and
+  // repository names are case-insensitive, so the match is too.
   const rows = await c.env.DB.prepare(
-    'SELECT id,event_types FROM integrations WHERE organization_id=? AND repo=? AND enabled=1',
+    'SELECT id,event_types FROM integrations WHERE organization_id=? AND repo=? COLLATE NOCASE AND enabled=1',
   )
     .bind(organizationId, repo)
     .all<IntegrationRow>();

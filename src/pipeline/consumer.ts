@@ -2,24 +2,11 @@ import { larkAccepted, larkPayload } from '../connectors/destinations/lark/webho
 import { CryptoError, type Keyring } from '../crypto/envelope';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import type { Bindings, DeliveryMessage } from '../env';
+import { destinationAllowed, type DestinationKind } from './allowlist';
 import { CREDENTIAL_COLUMNS, openCredentials, type CredentialRow } from './credentials';
 import { parseDeliveryMessage } from './outbox';
 
-type Destination = 'lark' | 'slack';
-type IntegrationRow = CredentialRow & { destination: Destination };
-
-/**
- * Outbound SSRF guard. The platform does not provide egress filtering, so this allowlist
- * is ours to maintain. `redirect: 'error'` below is the second half of the control.
- */
-export function destinationAllowed(url: URL, destination: Destination): boolean {
-  if (url.protocol !== 'https:') return false;
-  if (url.username || url.password || url.port) return false;
-  return destination === 'slack'
-    ? url.hostname === 'hooks.slack.com' && url.pathname.startsWith('/services/')
-    : ['open.larksuite.com', 'open.feishu.cn'].includes(url.hostname) &&
-        url.pathname.startsWith('/open-apis/bot/v2/hook/');
-}
+type IntegrationRow = CredentialRow & { destination: DestinationKind };
 
 /** A failure that retrying cannot fix. The delivery is marked failed and acknowledged. */
 class PermanentFailure extends Error {}

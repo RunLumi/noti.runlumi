@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { createAuth } from './auth/better-auth';
+import integrations from './api/integrations';
 import workspace from './auth/workspace';
 import { githubWebhook } from './connectors/sources/github/route';
 import { keyringFromEnv, keyringProblem } from './crypto/keyring-env';
@@ -12,6 +13,7 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
 app.route('/api/workspace', workspace);
+app.route('/api/integrations', integrations);
 
 app.get('/health', (c) => {
   // Names the misconfigured binding, never its value (F04, F34).
