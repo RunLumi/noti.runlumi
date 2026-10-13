@@ -11,6 +11,19 @@ updates:
       # typescript-eslint release widens the peer range. See docs/PROGRESS.md "Toolchain majors".
       - dependency-name: typescript
         update-types: ['version-update:semver-major']
+      # Type definitions must match the runtime we ship on (engines.node >=22.12; the Worker
+      # runs workerd). @types/node 26 would allow APIs that do not exist on Node 22.
+      # Revisit when the supported Node floor moves to 26.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+      # jsdom 30 requires Node ^22.22.2 and was 10 days old on 2026-10-14, under the
+      # two-week rule. It only affects tests. Revisit on or after 2026-11-01.
+      - dependency-name: jsdom
+        update-types: ['version-update:semver-major']
+      # @tanstack/react-table 9 changed its API and fails the build (PR #38). Port the tables
+      # deliberately in a dedicated PR; revisit when a migration guide has been read.
+      - dependency-name: '@tanstack/react-table'
+        update-types: ['version-update:semver-major']
     groups:
       # One PR for routine bumps; a major version still arrives on its own.
       npm-minor-and-patch:
