@@ -1,6 +1,7 @@
+import { larkPayload, larkAccepted } from './connectors/destinations/lark/webhook';
 import { Hono } from 'hono';
 type Bindings = { DB: D1Database; DELIVERY_QUEUE: Queue<Delivery>; GITHUB_WEBHOOK_SECRET: string; ENCRYPTION_KEY: string };
-type Delivery = { id: string; integrationId: string; destination: 'lark'|'slack'; ciphertext: string; title: string; url: string };
+type Delivery = { id: string; integrationId: string; destination: 'lark'|'slack'; ciphertext: string; larkSecretCiphertext?: string | null; title: string; url: string };
 const app = new Hono<{Bindings: Bindings}>();
 const enc = new TextEncoder();
 function hex(bytes: ArrayBuffer) { return [...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
@@ -32,7 +33,7 @@ app.post('/webhooks/github',async c=>{
   const eventType=kind+'.'+action;
   const deliveryId=c.req.header('x-github-delivery');
   if (!repo||!deliveryId) return c.text('Invalid event',400);
-  const rows=await c.env.DB.prepare('SELECT id,destination,webhook_ciphertext,event_types FROM integrations WHERE repo=? AND enabled=1').bind(repo).all<{id:string;destination:'lark'|'slack';webhook_ciphertext:string;event_types:string}>();
+  const rows=await c.env.DB.prepare('SELECT id,destination,webhook_ciphertext,lark_secret_ciphertext,event_types FROM integrations WHERE repo=? AND enabled=1').bind(repo).all<{id:string;destination:'lark'|'slack';webhook_ciphertext:string;lark_secret_ciphertext:string|null;event_types:string}>();
   let queued=0;
   for(const row of rows.results) {
     let types:string[]; try {types=JSON.parse(row.event_types);}catch{continue;}
@@ -43,7 +44,7 @@ app.post('/webhooks/github',async c=>{
     const obj=event.issue||event.pull_request||event.workflow_run||event;
     const title=String(obj.title||obj.name||eventType).slice(0,300);
     const url=String(obj.html_url||event.repository.html_url||'');
-    await c.env.DELIVERY_QUEUE.send({id,integrationId:row.id,destination:row.destination,ciphertext:row.webhook_ciphertext,title,url});
+    await c.env.DELIVERY_QUEUE.send({id,integrationId:row.id,destination:row.destination,ciphertext:row.webhook_ciphertext,larkSecretCiphertext:row.lark_secret_ciphertext,title,url});
     queued++;
   }
   return c.json({accepted:true,queued},202);
@@ -56,10 +57,10 @@ export default {fetch:app.fetch,async queue(batch:MessageBatch<Delivery>,env:Bin
       const host=new URL(url);
       const valid=d.destination==='slack'?host.hostname==='hooks.slack.com'&&host.pathname.startsWith('/services/'):['open.larksuite.com','open.feishu.cn'].includes(host.hostname)&&host.pathname.startsWith('/open-apis/bot/v2/hook/');
       if(host.protocol!=='https:'||!valid||host.username||host.password)throw Error('Destination not allowed');
-      const payload=d.destination==='slack'?{text:d.title+'\n'+d.url}:{msg_type:'text',content:{text:d.title+'\n'+d.url}};
+      const payload=d.destination==='slack'?{text:d.title+'\n'+d.url}:await larkPayload({title:d.title,url:d.url},d.larkSecretCiphertext?await decrypt(d.larkSecretCiphertext,env.ENCRYPTION_KEY):undefined);
       const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload),redirect:'error'});
       if(!res.ok)throw Error('Provider HTTP '+res.status);
-      if(d.destination==='lark'){const reply:any=await res.json();if(reply.code!==0&&reply.StatusCode!==0)throw Error('Provider rejected message');}
+      if(d.destination==='lark'){const reply:any=await res.json();if(!larkAccepted(reply))throw Error('Provider rejected message');}
       await env.DB.prepare("UPDATE deliveries SET state='sent',attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(d.id).run();
       msg.ack();
     }catch(e) {
