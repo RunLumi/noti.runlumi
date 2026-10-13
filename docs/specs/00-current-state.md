@@ -154,10 +154,10 @@ Status as of slice 4 (2026-10-13):
 | D5 | Secrets copied into queue bodies | ✅ messages carry ids only; consumer re-reads the row by `id AND organization_id` (PR #7) |
 | D6 | No envelope encryption, AAD or key version | ✅ envelope + AAD + versioned KEK + rewrap + v0 migration (PR #7, ADR 0004) |
 | D7 | Plaintext session tokens | 🟡 moot for Better Auth's `session`; ⬜ `0004`'s dead `auth_tokens` still plaintext (N1) |
-| D8 | Slack has no adapter | 🟡 Slack/Teams/Lark adapters + capability model shipped as pure modules (ADR 0006); consumer wiring pending slice 4 |
+| D8 | Slack has no adapter | 🟡 Slack/Teams/Lark adapters + capability model shipped (ADR 0006) and wired into the delivery consumer; Teams is a destination kind; no real-provider test, so not ✅ |
 | D9 | Allowlist runs too late | ✅ enforced at write time by the integrations API and again before every send (PR #9) |
 | D10 | Delivery-id collisions | ✅ delivery id is SHA-256 over 0x00-separated `(dedup_key, destination)`; rows with legacy ids are still served (slice 4) |
-| D11 | No error classification | 🟡 F13 taxonomy, bounded two-tier retry, terminal `dead_lettered`; provider mappings beyond Lark and generic HTTP wait for slice 5 (slice 4) |
+| D11 | No error classification | 🟡 F13 taxonomy, bounded two-tier retry, terminal `dead_lettered`; provider mappings now come from the slice 5 adapters; unverified against real providers (slices 4 and 5) |
 | D12 | `event_types` unvalidated JSON | ✅ validated against the closed catalog on every write (PR #9) |
 | D13 | No integration test of the delivery path | ✅ `tests/pipeline/delivery-path.test.ts` runs ingress → outbox → queue → consumer over the real migrations (PR #7) |
 | D14 | CI does not enforce the documented workflow | 🟡 `npm ci`, format, lint, typecheck, build, tests and bundle guard enforced; coverage threshold not yet |

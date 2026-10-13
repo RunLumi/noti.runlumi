@@ -12,7 +12,22 @@ export interface DeliveryMessage {
   readonly organizationId: string;
   readonly title: string;
   readonly url: string;
+  /**
+   * Canonical display fields (slice 5). All optional: rows and queue messages written before
+   * this slice lack them and still deliver, with defaults. Bounded, display-only text; never
+   * the provider payload.
+   */
+  readonly repo?: string;
+  /** The sender's login. */
+  readonly actor?: string;
+  readonly status?: 'success' | 'failure' | 'info';
+  /** Catalog event type, e.g. `workflow_run.failure`. */
+  readonly eventType?: string;
+  /** At most {@link SUMMARY_MAX_CHARS}; derived from a few scalar fields, not the body. */
+  readonly summary?: string;
 }
+
+export const SUMMARY_MAX_CHARS = 280;
 
 export type Bindings = AuthBindings & {
   DELIVERY_QUEUE: Queue<DeliveryMessage>;

@@ -292,6 +292,55 @@ describe('integrations API', () => {
   });
 });
 
+describe('Microsoft Teams integrations', () => {
+  const TEAMS =
+    'https://prod-12.westus.logic.azure.com/workflows/abc123/triggers/manual/paths/invoke?sig=TeamsSecretSig';
+  const teams = { destination: 'teams', webhookUrl: TEAMS };
+
+  it('creates a Teams integration, never returns the URL, and delivers it as accepted', async () => {
+    const res = await create('bob', teams);
+    expect(res.status).toBe(201);
+    const text = await res.text();
+    expect(text).not.toContain('TeamsSecretSig');
+    const { integration } = JSON.parse(text) as { integration: View & { destination: string } };
+    expect(integration).toMatchObject({
+      destination: 'teams',
+      destinationHost: 'prod-12.westus.logic.azure.com',
+    });
+
+    const { consumeDeliveries } = await import('../../src/pipeline/consumer');
+    db.raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,organization_id,state) VALUES('d1',?,'org-a','pending')",
+      )
+      .run(integration.id);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    const msg = {
+      body: { id: 'd1', integrationId: integration.id, organizationId: 'org-a', title: 't', url: '' },
+      ack: vi.fn(),
+      retry: vi.fn(),
+    };
+    await consumeDeliveries({ messages: [msg], retryAll: vi.fn() } as unknown as MessageBatch<unknown>, env);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(TEAMS);
+    expect(db.raw.prepare("SELECT state FROM deliveries WHERE id='d1'").get()).toEqual({ state: 'accepted' });
+  });
+
+  it('answers 422 with field errors for unsupported trigger authentication, without echoing input', async () => {
+    const res = await create('bob', { ...teams, triggerAuth: 'tenant_users' });
+    expect(res.status).toBe(422);
+    const text = await res.text();
+    expect(text).not.toContain('TeamsSecretSig');
+    expect(JSON.parse(text)).toMatchObject({
+      error: 'Validation failed',
+      fields: [{ field: 'triggerAuth' }],
+    });
+  });
+
+  it('refuses a Slack URL for a Teams integration', async () => {
+    expect((await create('bob', { destination: 'teams' })).status).toBe(422);
+  });
+});
+
 describe('member capability limits', () => {
   it('lets a member manage integrations', async () => {
     expect((await create('bob')).status).toBe(201);

@@ -22,7 +22,7 @@ import {
   sqliteTimestamp,
   type Lease,
 } from '../delivery/claim';
-import type { Bindings, DeliveryMessage } from '../env';
+import { SUMMARY_MAX_CHARS, type Bindings, type DeliveryMessage } from '../env';
 import { asRecord, str } from '../lib/json';
 import { log } from '../platform/log';
 
@@ -39,7 +39,30 @@ export function parseDeliveryMessage(value: unknown): DeliveryMessage | null {
   const title = typeof r.title === 'string' ? r.title : '';
   const url = typeof r.url === 'string' ? r.url : '';
   if (!id || !integrationId || !organizationId) return null;
-  return { id, integrationId, organizationId, title, url };
+  return { id, integrationId, organizationId, title, url, ...optionalDisplayFields(r) };
+}
+
+const STATUSES: ReadonlySet<unknown> = new Set(['success', 'failure', 'info']);
+
+/** A bounded, non-empty string, or nothing: a malformed optional field never blocks delivery. */
+function bounded(value: unknown, max: number): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value.slice(0, max) : undefined;
+}
+
+/** Fields added in slice 5. Absent or malformed values are dropped, so legacy rows deliver. */
+function optionalDisplayFields(r: Record<string, unknown>): Partial<DeliveryMessage> {
+  const repo = bounded(r.repo, 200);
+  const actor = bounded(r.actor, 100);
+  const eventType = bounded(r.eventType, 100);
+  const summary = bounded(r.summary, SUMMARY_MAX_CHARS);
+  const status = STATUSES.has(r.status) ? (r.status as DeliveryMessage['status']) : undefined;
+  return {
+    ...(repo ? { repo } : {}),
+    ...(actor ? { actor } : {}),
+    ...(eventType ? { eventType } : {}),
+    ...(summary ? { summary } : {}),
+    ...(status ? { status } : {}),
+  };
 }
 
 export interface DispatchDeps {

@@ -24,7 +24,7 @@ const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
  * legitimate place in a notification and bidi overrides can disguise a link or a name.
  */
 // eslint-disable-next-line no-control-regex
-const STRIP = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+const STRIP = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 
 export function sanitizeText(raw: string): string {
   return raw.replace(/\r\n?/g, '\n').replace(STRIP, '');

@@ -24,7 +24,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 3a | Tenant-scoped integrations API; domain capabilities; audit log; closed GitHub event catalog; write-time allowlist; DB-enforced tenant contract | F24, F26, F28, F61 (catalog), F72 (write-time) | D9, D12, D16, D2 (contract for new writes) | ✅ | #9 |
 | 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ✅ | #11 |
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F11–F13, F170, F172–F180, F182, F184, F189 (partial; see section) | D4, D10, D11 (partial) | 🟡 | #10 |
-| 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending) | F91–F104 | D8 | 🟡 | #8 |
+| 5 | Destination capability model; Slack, Teams and Lark adapters, wired into the delivery consumer; Teams as a destination kind | F91–F104 | D8 | ✅ (no real-provider test) | #8, wiring PR |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
 | 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
 | 6a | Dashboard: integrations list, guided create wizard, settings (edit, pause, rotate, delete), GitHub connection panel and repository picker | F206 (partial), F210 (partial), F211, F216 (partial), F217 (partial), F220 (partial), F221, F223, F224 (structure), F225 | — | 🟡 | #13 |
@@ -271,11 +271,49 @@ covered by tests:
 - Reconciliation (F69), permission reads (F61), the unbind action, and the dashboard's
   "Connect GitHub" button. The button belongs to the UI slice.
 
-## Slice 5 — destination capability model and adapters (🟡)
+## Slice 5 — destination capability model and adapters (✅, no real-provider test)
 
-Adapters shipped as pure modules; consumer wiring is pending slice 4, which owns
-`src/pipeline/consumer.ts`. Until then the consumer still sends Slack as an inline string and
-uses the Lark compatibility exports.
+The adapters shipped in #8 as pure modules; the wiring change puts them in the slice 4
+delivery path. **Nothing here has been run against a real Slack, Teams or Lark endpoint**:
+every provider response in the tests is a fixture written from
+`docs/DESTINATION_API_REFERENCE.md`. Per the release rule, slice 5 is complete in code, not
+production-ready.
+
+**Wiring (completion)**
+
+- `src/pipeline/consumer.ts` renders with `prepareDelivery`, sends with `sendRequest` and
+  classifies with `classifyDeliveryResponse`. The inline Slack `{text}` and the legacy Lark
+  builder are gone, along with `lark/webhook.ts`.
+- One classification layer: `src/delivery/classify.ts` now only maps adapter reasons onto F13
+  codes (`REASON_CODES`) and the retry policy's `AttemptOutcome`. Teams `accepted` is stored
+  as ledger state `accepted`. See ADR 0006, "Wiring".
+- `DeliveryMessage` carries optional `repo`, `actor`, `status`, `eventType`, `summary`
+  (<= 280 characters, no payload); the GitHub route populates them. Legacy messages deliver.
+- Teams is a destination kind in the API, `DestinationKind` and the `integrations` CHECK
+  (migration `0012_teams_destination.sql`). `triggerAuth` is an optional validated field
+  (`anyone` only).
+- The integrations API uses `validateDestinationConfig` as its only URL/secret validator.
+
+**Verified by (wiring)**
+
+- `tests/pipeline/destinations.test.ts`: Slack, Teams and Lark over the fake D1 through the
+  real consumer: delivered vs accepted, truncation, Retry-After to queue delay, permanent
+  classifications to `dead_lettered`, redirects, the unmapped flag in the log, legacy messages.
+- `tests/delivery/classify.test.ts`, `tests/api/*.test.ts` (Teams create, 422 shape, no echo),
+  `tests/pipeline/delivery-path.test.ts` (ingress fields, privacy) and
+  `tests/migrations.test.ts` (0012 preserves every row, column, index and trigger).
+
+**UNVERIFIED (wiring)**
+
+- Real-provider behaviour for all three destinations (no real-provider test was run).
+- That Teams, Slack and Lark accept our rendered payloads in a real tenant (Adaptive Card 1.2,
+  Block Kit, Lark card 2.0).
+- Our reason -> F13 code mapping for destination policy and content blocks (ADR 0006); it is
+  a product decision, not a provider fact.
+- Treating an unreadable 2xx as `accepted` rather than retrying (ADR 0006).
+- Migration 0012 ran on the Node SQLite fake, not on a real D1 database or a copy of
+  production data; rehearse it with `wrangler d1 migrations apply` against staging.
+- Teams trigger hosts other than `*.logic.azure.com` and Logic Apps error codes (ADR 0006).
 
 **What changed**
 
@@ -312,8 +350,9 @@ uses the Lark compatibility exports.
 
 **Known gaps**
 
-- The adapters are not yet wired into the consumer. The delivery row does not yet store
-  `format`, `degradedFrom`, `truncatedFields`, `redactedFields` or `reason`.
+- The delivery row stores the F13 code and a minted diagnostic, but not `format`,
+  `degradedFrom`, `truncatedFields`, `redactedFields` or the adapter `reason`.
+- `triggerAuth` is validated but not stored, and no UI exists for it.
 - Slack OAuth install (F103), test delivery (F98), the UI capability surface (F92/F93) and the
   Lark app-bot mode (F101) are not started.
 - Several provider facts are `UNVERIFIED` and listed in ADR 0006. They need real-tenant checks.
@@ -403,7 +442,7 @@ Decisions and their rationale are in [ADR 0005](adr/0005-delivery-reliability.md
 - No circuit breaker, client-side dedup window or per-destination rate limiting.
 - No `outbox_stalled` or reconciler-failure alert, and no metric for unmapped provider
   errors.
-- Per-provider classification for Slack API, Teams and Discord waits for slice 5.
+- Per-provider classification for Slack, Teams and Lark now comes from the slice 5 adapters (wired); Slack API and Discord remain out of scope.
 - No real-provider validation.
 
 **Review fixes (PR #10 review of 5d7d5cb)**

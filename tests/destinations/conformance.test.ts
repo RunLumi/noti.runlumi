@@ -178,6 +178,21 @@ describe('prepare, send and classify', () => {
     expect(r).toEqual({ outcome: 'permanent', reason: 'destination_url_rejected' });
   });
 
+  it('does not retry a 2xx whose body then errors, which would duplicate the message', async () => {
+    const broken = new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error('stream reset');
+      },
+    });
+    const fetcher: Fetcher = () => Promise.resolve(new Response(broken, { status: 200 }));
+    const r = await sendRequest(
+      { kind: 'slack', url: SLACK_URL, method: 'POST', headers: {}, body: '{}' },
+      (res) => ({ outcome: res.status === 200 ? 'delivered' : 'retryable', reason: 'ok' }),
+      { fetch: fetcher },
+    );
+    expect(r.outcome).toBe('delivered');
+  });
+
   it('classifies transport failures', async () => {
     const fetcher: Fetcher = () => Promise.reject(new TypeError('network down'));
     const r = await deliver(validConfig('lark'), BASE, { fetch: fetcher });

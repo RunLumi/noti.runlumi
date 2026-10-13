@@ -41,15 +41,17 @@ Slack was an inline `{ text }` string in the queue consumer, with every failure 
    `plain_text` objects; Lark headers use `plain_text`.
 7. **Lark DLP.** Lark masks emails and phone-like strings in titles and summaries before render
    (error 230028), and records `redactedFields`. Lark cards now set `config.summary.content`.
-8. **Compatibility.** `lark/webhook.ts` keeps `larkPayload`, `larkAccepted`, `larkCard` and
-   `larkSignature` for the current consumer in `src/pipeline/consumer.ts`, which this slice
-   deliberately does not edit (slice 4 owns it).
+8. **Compatibility (retired).** `lark/webhook.ts` kept `larkPayload`, `larkAccepted` and
+   `larkCard` for the slice 4 consumer. The consumer now uses the adapters (see "Wiring"
+   below), so the file, `larkAccepted` and the legacy test were deleted. `larkSignature`
+   remains in `lark/sign.ts`.
 
 ## Consequences
 
-- The consumer (`src/pipeline/consumer.ts`, owned by slice 4) must switch to `prepareDelivery` / `sendRequest` / `classifyDeliveryResponse` (or
-  `deliver`) and persist `outcome`, `reason`, `retryAfterMs`, `format`, `degradedFrom`,
-  `truncatedFields` and `redactedFields`. Until then Slack still uses the inline string.
+- Done in the wiring change below: the consumer calls `prepareDelivery` / `sendRequest` /
+  `classifyDeliveryResponse`. Still open: persisting `format`, `degradedFrom`,
+  `truncatedFields`, `redactedFields` and the adapter `reason` on the delivery row (only the
+  F13 code and a minted diagnostic are stored).
 - Status is conveyed as text (`Failed: …`) as well as colour, for accessibility.
 - Facts marked `UNVERIFIED` in code are not claims; each names what to check.
 - Accepted risk: any Azure tenant can create a Logic App on `*.logic.azure.com`, so the Teams
@@ -61,6 +63,52 @@ Slack was an inline `{ text }` string in the queue consumer, with every failure 
   `destination_redirected`. This meets the intent of the `redirect: 'error'` requirement in
   specs 09/12/15 (no redirect is ever followed) while letting the outcome be classified; with
   `'error'` a redirect is an indistinguishable network `TypeError` and would be retried.
+
+## Wiring into the delivery path (slice 5 completion)
+
+- **One classification layer.** The adapters classify provider responses.
+  `src/delivery/classify.ts` no longer reads responses; it only translates a
+  `ClassifiedResponse` into slice 4's vocabulary: `REASON_CODES` maps every adapter `reason`
+  onto exactly one F13 `ErrorCode`, and `attemptFromClassification` produces the
+  `AttemptOutcome` the retry policy and ledger already consume. The old Lark/HTTP/redirect/
+  thrown classifiers and their tests were deleted; the equivalent cases are covered by
+  `tests/delivery/classify.test.ts` and `tests/pipeline/destinations.test.ts`. A test asserts
+  that, for every reason, the retryable/permanent split agrees with `isRetryable` of the
+  mapped code, and the translation refuses to let the two disagree at run time.
+- **Mapping choices that are ours** (product decisions, not provider facts):
+  `destination_redirected` -> `destination_url_rejected`; `destination_policy_blocked` ->
+  `destination_unauthorized`; `content_policy_blocked` and `payload_rejected` ->
+  `render_failed`; `signature_rejected` -> `destination_credentials_invalid`;
+  `network_error` -> `destination_unavailable`; `unmapped_response` -> `internal_error`
+  (retryable, bounded, flagged `unmapped`).
+- **Retry-After.** `retryAfterMs` becomes whole seconds (rounded up) and feeds slice 4's
+  `decideRetry`, which clamps it and prefers it to computed backoff (F178).
+- **Delivered vs accepted.** Teams 2xx is `accepted`; the ledger state machine
+  (`claimed` -> `accepted`, terminal) stores `deliveries.state = 'accepted'`, never `sent`.
+- **Deliberate deviation from the adapters.** A 2xx the adapter cannot interpret (Slack body
+  not `ok`; Lark body without a numeric `code`) is retryable-and-unmapped in the adapter, but
+  retrying would re-send a message the provider may already have shown. The consumer records
+  it as `accepted` (diagnostic `provider_reply_unreadable`, flagged unmapped) and does not
+  retry, preserving slice 4's F100 behaviour. A Lark 2xx carrying an unknown numeric `code`
+  stays retryable.
+- **Canonical notification.** `DeliveryMessage` gained optional `repo`, `actor`, `status`,
+  `eventType` and `summary` (<= 280 characters). The GitHub route fills them from scalar
+  fields only, never a PR/issue body or the payload. Messages and outbox rows written before
+  this change lack them and deliver with defaults (`eventType` `notification`). Status:
+  `workflow_run.failure|timed_out` -> failure; `workflow_run.success` and
+  `pull_request.merged` -> success; everything else info.
+- **Teams end to end.** `teams` is accepted by the integrations API and the `integrations`
+  CHECK (migration `0012_teams_destination.sql`, a table rebuild preserving every column,
+  index and trigger). `triggerAuth` is an optional API field validated by
+  `validateDestinationConfig`: only `anyone` is accepted, other values are `422`. It is not
+  stored, because `anyone` is the only value that can exist.
+- **Single validator.** The integrations API calls `validateDestinationConfig`; the
+  duplicate allowlist in `src/pipeline/allowlist.ts` is gone (the file only exports the kind
+  type). The consumer re-validates the decrypted URL with the same function before every
+  send, and `sendRequest` checks it once more. The signing-secret whitespace/control check
+  moved into `config.ts`.
+- **Not verified against any real provider.** Every response in the tests is a fixture. See
+  `docs/PROGRESS.md`, slice 5, for the UNVERIFIED list.
 
 ## Revisit when
 

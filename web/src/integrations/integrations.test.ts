@@ -104,7 +104,7 @@ describe('client validation mirrors the server', () => {
     expect(validateRepo(repo) === undefined).toBe(server({ repo }).ok);
   });
 
-  const names = ['Ops', 'x'.repeat(80), 'x'.repeat(81), '   ', 'line\nbreak', 'bidi‮evil', 'c1\u0085'];
+  const names = ['Ops', 'x'.repeat(80), 'x'.repeat(81), '   ', 'line\nbreak', 'bidi\u202eevil', 'c1\u0085'];
   it.each(names)('name %j', (name) => {
     expect(validateName(name) === undefined).toBe(server({ name }).ok);
   });
