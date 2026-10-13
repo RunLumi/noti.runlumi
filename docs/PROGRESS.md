@@ -26,6 +26,9 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F11–F13, F170, F172–F180, F182, F184, F189 (partial; see section) | D4, D10, D11 (partial) | 🟡 | #10 |
 | 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending) | F91–F104 | D8 | 🟡 | #8 |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
+| 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
+| 6a | Dashboard: integrations list, guided create wizard, settings (edit, pause, rotate, delete), GitHub connection panel and repository picker | F206 (partial), F210 (partial), F211, F216 (partial), F217 (partial), F220 (partial), F221, F223, F224 (structure), F225 | — | 🟡 | #13 |
+| 6b | Dashboard: delivery log, test send, setup-progress model | F207, F213–F215, F218 | — | ⬜ | — |
 | 7 | Routing rules and filters | F119–F140 | — | ⬜ | — |
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
 | 9 | Observability and runbook | F191–F204 | — | ⬜ | — |
@@ -490,3 +493,55 @@ Also fixed:
   faster than that. `SECURITY.md` says so.
 - The dashboard has no deletion or export screen yet.
 - Deleting individual member accounts is Better Auth's job and is not covered here.
+
+## Slice 6a — integrations dashboard (this PR)
+
+**What changed**
+
+- `/integrations` replaces the placeholder catalogue with the real list from
+  `GET /api/integrations`: name, repository, destination and host, subscribed updates in plain
+  language, a pause/resume switch, and the credential state. A failed query renders an error
+  with a retry, never an empty list (F225). `truncated` lists say so.
+- **GitHub connection panel** (`GET /api/github/installations`, `POST /api/github/install`):
+  each installation with account, all vs selected repositories, status (suspended and
+  uninstalled explained) and a reconnect action when `needsResync`. An unconfigured server
+  shows "GitHub App not configured on this server" and **no button**. The
+  `?github=<status>` return shows a plain-language message for all 15 codes and is stripped
+  with `history.replaceState`.
+- **Create wizard** at `/integrations/new`, five steps: repository (a picker over the
+  connection: listed repositories for `selected`, owner-fixed typed name for `all`),
+  destination, webhook URL (with where-to-find-it steps and the provider's official guide),
+  updates (grouped catalog, failures-only default), review. With no active installation, step
+  1 is "Connect GitHub". Client checks mirror the server; the server's 422 field errors are
+  shown inline and send the person back to the step that owns the field.
+- **Settings** at `/integrations/:id`: status (pause/resume), repository and updates (explicit
+  save, unsaved-changes guard), destination and webhook URL (write-only; a separate
+  **Replace** action that clears quarantine), and delete with a typed confirmation in a Base
+  UI `AlertDialog` that focuses *Keep integration* first.
+- Overview's integrations figure is read from the API; the two delivery figures stay `—` with
+  their reason.
+- `web/src/lib/api.ts` has typed, runtime-checked clients; every mutation sends
+  `Content-Type: application/json` (DELETE sends none, matching the server's Origin-only
+  check). 409 (quota) and 429 (`Retry-After`) have their own messages.
+- Strings for these screens live in `web/src/i18n/messages.en.ts` with `t()`/`tp()`
+  (`Intl.PluralRules`); event labels are keyed by the server's closed catalog, so a new event
+  type without a label fails the web type check.
+
+**Verified by**
+
+- `web/src/integrations/integrations.test.ts` (69 cases): client URL, repository, name and
+  secret checks compared case by case against the real server parser; catalog label and
+  grouping coverage; repository coverage rules; wizard step routing for server errors; every
+  `?github=` code; 409/429 copy; response parsing never carries a URL.
+- A browser pass against `wrangler dev` with local D1 and the real Worker, recorded in
+  [ADR 0007](adr/0007-integrations-ux.md): create, edit, pause/resume, rotate, delete, the
+  real 422 path, keyboard focus, and 320/375/1280 px reflow.
+
+**Known gaps**
+
+- Not exercised against a real GitHub App, Slack or Lark. The local GitHub App settings were
+  placeholders and the installation rows were inserted into the local database; the
+  **Connect GitHub** button's redirect to github.com was not followed.
+- Delivery log, test send and the setup-progress model (F207, F213–F215) are slice 6b.
+- No automated axe scan or screen-reader pass yet; only the strings on these screens are in
+  the catalogue.

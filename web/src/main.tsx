@@ -2,25 +2,27 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider, createRouter, createRootRoute, createRoute } from '@tanstack/react-router';
-import {
-  AppShell,
-  Overview,
-  Integrations,
-  Activity,
-  Team,
-  Settings,
-  AuthPage,
-  VerifyPage,
-  ResetPage,
-} from './pages';
+import { AppShell, Overview, Activity, Team, Settings, AuthPage, VerifyPage, ResetPage } from './pages';
 import { OnboardingPage, InvitePage } from './onboarding';
+import { IntegrationsPage } from './integrations/IntegrationsPage';
+import { CreateWizard } from './integrations/wizard/CreateWizard';
+import { IntegrationSettings } from './integrations/settings/IntegrationSettings';
 import '@fontsource-variable/geist';
 import './styles.css';
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 30_000 } } });
 const root = createRootRoute({ component: AppShell });
 const routes = [
   createRoute({ getParentRoute: () => root, path: '/', component: Overview }),
-  createRoute({ getParentRoute: () => root, path: '/integrations', component: Integrations }),
+  createRoute({ getParentRoute: () => root, path: '/integrations', component: IntegrationsPage }),
+  createRoute({ getParentRoute: () => root, path: '/integrations/new', component: CreateWizard }),
+  createRoute({
+    getParentRoute: () => root,
+    path: '/integrations/$id',
+    component: IntegrationSettings,
+    // `created` only selects a confirmation message; nothing sensitive is ever in the URL.
+    validateSearch: (search: Record<string, unknown>): { created?: boolean } =>
+      search.created === true || search.created === 'true' ? { created: true } : {},
+  }),
   createRoute({ getParentRoute: () => root, path: '/onboarding', component: OnboardingPage }),
   createRoute({ getParentRoute: () => root, path: '/invite', component: InvitePage }),
   createRoute({ getParentRoute: () => root, path: '/activity', component: Activity }),
