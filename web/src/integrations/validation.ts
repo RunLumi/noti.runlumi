@@ -1,4 +1,4 @@
-import { destinationAllowed } from '../../../src/pipeline/allowlist';
+import { checkDestinationUrl } from '../../../src/connectors/destinations/url-policy';
 import { t } from '../i18n';
 import type { DestinationKind, FieldError } from '../lib/api';
 import { DESTINATIONS } from './destinations';
@@ -8,7 +8,8 @@ import { DESTINATIONS } from './destinations';
  * mistake before a round trip. They are a convenience, not the rule: the server validates
  * every write again and its 422 field errors are what the form finally shows.
  *
- * The URL allowlist is imported from the Worker, not re-implemented, so the two cannot drift.
+ * The URL policy is imported from the Worker (`url-policy.ts`, pure TypeScript), not
+ * re-implemented, so the two cannot drift.
  */
 export type FormField = 'name' | 'repo' | 'eventTypes' | 'webhookUrl' | 'signingSecret';
 export type FieldErrors = Partial<Record<FormField, string>>;
@@ -49,14 +50,13 @@ export function validateWebhookUrl(value: string, destination: DestinationKind):
   const name = t(DESTINATIONS[destination].name);
   if (value.trim().length === 0) return t('validation.webhookUrl.empty', { destination: name });
   if (value.length > URL_MAX) return t('validation.webhookUrl.invalid');
-  let url: URL;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    return t('validation.webhookUrl.invalid');
-  }
-  if (!destinationAllowed(url, destination)) return t(DESTINATIONS[destination].wrongHost);
-  return undefined;
+  const result = checkDestinationUrl(destination, value.trim());
+  if (result.ok) return undefined;
+  // A string that is not a URL at all gets the generic message; a URL on the wrong host,
+  // scheme or path gets the destination-specific hint.
+  return result.rule === 'malformed'
+    ? t('validation.webhookUrl.invalid')
+    : t(DESTINATIONS[destination].wrongHost);
 }
 
 export function validateSigningSecret(value: string): string | undefined {
