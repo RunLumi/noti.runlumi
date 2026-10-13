@@ -1,4 +1,5 @@
 import { checkResolvedHost, type DnsFetcher } from '../connectors/destinations/dns-check';
+import { checkDestinationUrl, type UrlPolicyOptions } from '../connectors/destinations/url-policy';
 import type { DestinationKind } from '../pipeline/allowlist';
 import type { FieldError } from './integration-input';
 
@@ -20,9 +21,13 @@ const MESSAGES = {
 export async function hostVerificationError(
   destination: DestinationKind,
   webhookUrl: string,
+  urlPolicy?: UrlPolicyOptions,
   fetcher?: DnsFetcher,
 ): Promise<FieldError | null> {
   if (destination !== 'generic_webhook') return null;
-  const result = await checkResolvedHost(new URL(webhookUrl).hostname, fetcher);
+  // The shape policy again (own hosts may have changed since the row was written).
+  if (!checkDestinationUrl('generic_webhook', webhookUrl, urlPolicy).ok)
+    return { field: 'webhookUrl', message: MESSAGES.blocked_address };
+  const result = await checkResolvedHost(new URL(webhookUrl).hostname, fetcher, urlPolicy);
   return result.ok ? null : { field: 'webhookUrl', message: MESSAGES[result.reason] };
 }

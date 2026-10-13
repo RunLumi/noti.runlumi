@@ -24,7 +24,7 @@ export const sourcesVi = {
   'sources.eyebrow': 'KẾT NỐI',
   'sources.title': 'Nguồn',
   'sources.description':
-    'Nguồn là hệ thống của riêng bạn gửi sự kiện đến Noti. Mỗi nguồn có một signing secret riêng tư để chứng minh sự kiện thật sự đến từ bạn, và mọi sự kiện nguồn đó nhận được đều có thể được gửi đến một chat Lark, Slack hoặc Microsoft Teams.',
+    'Nguồn là hệ thống của riêng bạn gửi sự kiện đến Noti. Mỗi nguồn có một signing secret riêng tư để chứng minh sự kiện thật sự đến từ bạn, và mọi sự kiện nguồn đó nhận được đều có thể được gửi đến một chat Lark, Slack, Microsoft Teams hoặc Discord, hoặc đến webhook của riêng bạn.',
   'sources.loading': 'Đang tải danh sách nguồn…',
   'sources.count': { other: '{count} nguồn' },
   'sources.listLabel': 'Các nguồn trong không gian làm việc này',

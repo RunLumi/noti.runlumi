@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { IconKey } from '@tabler/icons-react';
 import { Button, Notice } from '../components/ui';
 import { t } from '../i18n';
+import { useLocale } from '../i18n/LocaleProvider';
 import { CopyButton } from '../sources/CopyButton';
 import '../sources/sources.css';
 
@@ -21,6 +22,7 @@ interface IssuedSecretProps {
  * Focus moves here when it appears so keyboard and screen-reader users land on it.
  */
 export function IssuedSecret({ name, secret, kind, doneLabel, onDone }: IssuedSecretProps) {
+  useLocale();
   const region = useRef<HTMLElement>(null);
   useEffect(() => region.current?.focus(), []);
   return (

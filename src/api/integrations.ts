@@ -7,8 +7,16 @@ import { keyringFromEnv } from '../crypto/keyring-env';
 import type { Bindings } from '../env';
 import { sealCredentials, blob, type DestinationCredentials } from '../pipeline/credentials';
 import type { DestinationKind } from '../pipeline/allowlist';
+import { genericWebhookEnabled } from '../connectors/destinations/features';
+import { ownHostsOf } from '../connectors/destinations/url-policy';
 import { hostVerificationError } from './destination-host';
-import { parseCreateIntegration, parseUpdateIntegration, type FieldError } from './integration-input';
+import {
+  DESTINATION_UNAVAILABLE,
+  parseCreateIntegration,
+  parseUpdateIntegration,
+  type FieldError,
+  type ParseOptions,
+} from './integration-input';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
 import { isDeletionPending } from './workspace-lifecycle';
 import {
@@ -34,6 +42,13 @@ const LIST_LIMIT = 200;
 export const MAX_INTEGRATIONS_PER_WORKSPACE = 100;
 /** Abuse limit on mutations, per user, per minute. */
 export const MUTATIONS_PER_MINUTE = 30;
+/** Custom webhooks are the highest-risk destination, so a workspace gets few of them (ADR 0014). */
+export const MAX_GENERIC_WEBHOOKS_PER_WORKSPACE = 10;
+
+/** Deployment context for the pure input parsers: feature flag and our own hosts. */
+export function parseOptions(env: Bindings): ParseOptions {
+  return { genericWebhook: genericWebhookEnabled(env), ownHosts: ownHostsOf(env.APP_ORIGIN) };
+}
 
 /**
  * A source integration may select event types only from the catalogue of its source's kind.
@@ -256,6 +271,8 @@ integrations.get('/', async (c) => {
     organizationId: who.orgId,
     integrations: rows.results.slice(0, LIST_LIMIT).map(toView),
     truncated,
+    // Which gated destination kinds this deployment offers; the dashboard hides the rest.
+    capabilities: { genericWebhook: genericWebhookEnabled(c.env) },
   });
 });
 
@@ -271,7 +288,7 @@ integrations.post('/', async (c) => {
   if (who instanceof Response) return who;
   const read = await readJson(c);
   if (!read.ok) return read.response;
-  const parsed = parseCreateIntegration(read.body);
+  const parsed = parseCreateIntegration(read.body, parseOptions(c.env));
   if (!parsed.ok) return invalid(c, parsed.errors);
 
   let repo: string | null;
@@ -293,8 +310,20 @@ integrations.post('/', async (c) => {
     if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
   }
   const input = { ...parsed.value, repo };
-  const unverified = await hostVerificationError(input.destination, input.webhookUrl);
+  const unverified = await hostVerificationError(input.destination, input.webhookUrl, parseOptions(c.env));
   if (unverified) return invalid(c, [unverified]);
+  if (input.destination === 'generic_webhook') {
+    const hooks = await c.env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM integrations WHERE organization_id=? AND destination='generic_webhook'",
+    )
+      .bind(who.orgId)
+      .first<{ n: number }>();
+    if ((hooks?.n ?? 0) >= MAX_GENERIC_WEBHOOKS_PER_WORKSPACE)
+      return c.json(
+        { error: `A workspace can have at most ${MAX_GENERIC_WEBHOOKS_PER_WORKSPACE} custom webhooks.` },
+        409,
+      );
+  }
   const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM integrations WHERE organization_id=?')
     .bind(who.orgId)
     .first<{ n: number }>();
@@ -372,7 +401,12 @@ integrations.patch('/:id', async (c) => {
   if (!existing) return c.json({ error: 'Not found' }, 404);
   const read = await readJson(c);
   if (!read.ok) return read.response;
-  const parsed = parseUpdateIntegration(read.body, existing.destination, existing.source_id !== null);
+  const parsed = parseUpdateIntegration(
+    read.body,
+    existing.destination,
+    existing.source_id !== null,
+    parseOptions(c.env),
+  );
   if (!parsed.ok) return invalid(c, parsed.errors);
   if (existing.source_id && (parsed.value.repo !== undefined || parsed.value.filters !== undefined))
     return invalid(c, [
@@ -390,8 +424,31 @@ integrations.patch('/:id', async (c) => {
       return invalid(c, [typeError ?? { field: 'eventTypes', message: 'This source no longer exists.' }]);
   }
   let input = parsed.value;
-  if (input.credentials) {
-    const unverified = await hostVerificationError(existing.destination, input.credentials.webhookUrl);
+  const options = parseOptions(c.env);
+  if (existing.destination === 'generic_webhook' && (input.credentials || input.enabled === true)) {
+    // Gated kind: no new credentials and no re-enabling while the feature is off. (Pausing,
+    // renaming and deleting stay possible.) The refusal says nothing about why.
+    if (options.genericWebhook !== true)
+      return invalid(c, [
+        { field: input.credentials ? 'webhookUrl' : 'enabled', message: DESTINATION_UNAVAILABLE },
+      ]);
+    // Re-enabling is a new decision to send to this host: resolve it again, because the record
+    // may have changed since it was saved (the check at save time is a point in time).
+    const target = input.credentials
+      ? input.credentials.webhookUrl
+      : existing.destination_host
+        ? `https://${existing.destination_host}/`
+        : null;
+    const unverified = target
+      ? await hostVerificationError(existing.destination, target, options)
+      : ({ field: 'enabled', message: DESTINATION_UNAVAILABLE } satisfies FieldError);
+    if (unverified) return invalid(c, [unverified]);
+  } else if (input.credentials) {
+    const unverified = await hostVerificationError(
+      existing.destination,
+      input.credentials.webhookUrl,
+      options,
+    );
     if (unverified) return invalid(c, [unverified]);
   }
   if (input.repo !== undefined) {

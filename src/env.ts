@@ -48,6 +48,11 @@ export type Bindings = AuthBindings & {
   KMS_ACTIVE_VERSION: string;
   /** Delivery ledger retention in days (30..365, default 90). See src/pipeline/retention.ts. */
   DELIVERY_RETENTION_DAYS?: string;
+  /**
+   * `"true"` turns on the custom-webhook destination (create, re-enable and send). Off by
+   * default; see ADR 0014 for the criteria that must be met first.
+   */
+  GENERIC_WEBHOOK_ENABLED?: string;
   /** Audit event retention in days (30..3650, default 365). */
   AUDIT_RETENTION_DAYS?: string;
 };

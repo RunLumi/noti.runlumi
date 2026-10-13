@@ -1,4 +1,10 @@
-import { checkDestinationUrl, larkDomainOf, type LarkDomain, type UrlRejectionRule } from './url-policy';
+import {
+  checkDestinationUrl,
+  larkDomainOf,
+  type LarkDomain,
+  type UrlPolicyOptions,
+  type UrlRejectionRule,
+} from './url-policy';
 import { isSigningSecret } from '../sources/generic/encoding';
 import { DESTINATION_KINDS, type DestinationKind } from './types';
 
@@ -155,16 +161,20 @@ function validateGenericWebhook(raw: Raw, webhookUrl: string): ConfigValidation 
 }
 
 /** As `validateDestinationConfig`, but only accepts input of the given kind. */
-export function validateConfigFor(kind: DestinationKind, raw: unknown): ConfigValidation {
+export function validateConfigFor(
+  kind: DestinationKind,
+  raw: unknown,
+  options: UrlPolicyOptions = {},
+): ConfigValidation {
   if (!isRecord(raw) || raw.kind !== kind) return invalid('kind');
-  return validateDestinationConfig(raw);
+  return validateDestinationConfig(raw, options);
 }
 
 /** Validate untrusted configuration input. Rejections never echo the submitted URL. */
-export function validateDestinationConfig(raw: unknown): ConfigValidation {
+export function validateDestinationConfig(raw: unknown, options: UrlPolicyOptions = {}): ConfigValidation {
   if (!isRecord(raw) || !isKind(raw.kind)) return invalid('kind');
   if (typeof raw.webhookUrl !== 'string') return invalid('webhookUrl');
-  const checked = checkDestinationUrl(raw.kind, raw.webhookUrl);
+  const checked = checkDestinationUrl(raw.kind, raw.webhookUrl, options);
   if (!checked.ok) return checked;
   const webhookUrl = checked.url.href;
   switch (raw.kind) {

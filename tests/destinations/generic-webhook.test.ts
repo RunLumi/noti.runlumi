@@ -7,7 +7,7 @@ import {
 } from '../../src/connectors/destinations/config';
 import { checkResolvedHost, type DnsFetcher } from '../../src/connectors/destinations/dns-check';
 import { genericWebhookAdapter } from '../../src/connectors/destinations/generic-webhook/adapter';
-import { checkDestinationUrl } from '../../src/connectors/destinations/url-policy';
+import { checkDestinationUrl, ownHostsOf } from '../../src/connectors/destinations/url-policy';
 import { fromBase64, generateSigningSecret } from '../../src/connectors/sources/generic/encoding';
 import { verifyStandardWebhook } from '../../src/connectors/sources/generic/signature';
 import { BASE, GENERIC_URL, NOW, response } from './fixtures';
@@ -110,9 +110,50 @@ describe('customer URL policy (F115): shape rules, before any DNS', () => {
     'https://anything.lvh.me/x',
     'https://noti.runlumi.app/webhooks/generic/abc', // our own ingress: no loops
     'https://runlumi.app/x',
+    'https://svc.account.workers.dev/x', // Cloudflare-hosted infrastructure
+    'https://workers.dev/x',
+    'https://site.pages.dev/x',
+    'https://pages.dev/x',
+    'https://abc.cfargotunnel.com/x',
+    'https://a.b.cfargotunnel.com/x',
   ])('rejects the internal or self-referential host %s', (url) => {
     const r = checkDestinationUrl('generic_webhook', url);
     expect(r.ok).toBe(false);
+  });
+
+  it('also blocks the host of APP_ORIGIN and its parent domain, whatever the deployment is called', () => {
+    const own = ownHostsOf('https://noti.example.org');
+    expect(own).toEqual(['noti.example.org', 'example.org']);
+    for (const url of [
+      'https://noti.example.org/x',
+      'https://api.noti.example.org/x',
+      'https://example.org/x',
+      'https://www.example.org/x',
+    ])
+      expect(checkDestinationUrl('generic_webhook', url, { ownHosts: own })).toMatchObject({
+        ok: false,
+        rule: 'internal_host',
+      });
+    // Without the option these are ordinary public hosts, so the option is what blocks them.
+    expect(checkDestinationUrl('generic_webhook', 'https://noti.example.org/x').ok).toBe(true);
+    expect(checkDestinationUrl('generic_webhook', 'https://notexample.org/x', { ownHosts: own }).ok).toBe(
+      true,
+    );
+    expect(ownHostsOf('https://localhost:8787')).toEqual(['localhost']);
+    expect(ownHostsOf(undefined)).toEqual([]);
+    expect(ownHostsOf('not a url')).toEqual([]);
+  });
+
+  it('applies the own-host rule through validateDestinationConfig (save time and send time)', () => {
+    const r = validateDestinationConfig(
+      {
+        kind: 'generic_webhook',
+        webhookUrl: 'https://noti.example.org/x',
+        signingSecret: generateSigningSecret(),
+      },
+      { ownHosts: ownHostsOf('https://noti.example.org') },
+    );
+    expect(r).toMatchObject({ ok: false, reason: 'destination_url_rejected', rule: 'internal_host' });
   });
 
   it('does not treat look-alikes of blocked domains as blocked', () => {
@@ -297,6 +338,45 @@ describe('save-time DNS verification', () => {
         doh({ 'x.example.com/A': { status: 3 }, 'x.example.com/AAAA': { status: 3 } }),
       ),
     ).toEqual({ ok: false, reason: 'unresolvable' });
+  });
+
+  it('refuses a public name that is an alias for an internal or own-infrastructure name', async () => {
+    const aliasTo =
+      (target: string): DnsFetcher =>
+      (input) => {
+        const isA = new URL(input).searchParams.get('type') === 'A';
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              Status: 0,
+              Answer: [
+                { name: 'x', type: 5, TTL: 1, data: target },
+                ...(isA ? [{ name: target, type: 1, TTL: 1, data: '93.184.216.34' }] : []),
+              ],
+            }),
+          ),
+        );
+      };
+    for (const target of [
+      'db.internal.',
+      'metadata.google.internal.',
+      'printer.local.',
+      'localhost.',
+      'intranet.',
+      'svc.workers.dev.',
+      'abc.cfargotunnel.com.',
+      'x.nip.io.',
+      'noti.example.org.',
+      '127.0.0.1.',
+    ]) {
+      expect(
+        await checkResolvedHost('x.example.com', aliasTo(target), {
+          ownHosts: ownHostsOf('https://noti.example.org'),
+        }),
+        target,
+      ).toEqual({ ok: false, reason: 'blocked_address' });
+    }
+    expect(await checkResolvedHost('x.example.com', aliasTo('cdn.example.net.'))).toMatchObject({ ok: true });
   });
 
   it('ignores CNAME records and does not follow redirects or trust a non-200', async () => {

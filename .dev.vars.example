@@ -39,6 +39,11 @@ AUTH_FROM_EMAIL=noreply@runlumi.app
 # fails closed with 403 — which is the intended behaviour, not a misconfiguration.
 GITHUB_APP_ID=000000
 
+# Custom-webhook destination (a URL the customer chooses; ADR 0014). Off by default, in
+# wrangler.jsonc and here. Set to `true` locally only to work on it; production stays false
+# until the release criteria in the ADR are met.
+GENERIC_WEBHOOK_ENABLED=false
+
 # --- Notes -----------------------------------------------------------------
 # `AUTH_EMAIL` is a Cloudflare Email Sending binding declared in wrangler.jsonc,
 # not an environment variable, so it does not belong in this file. Local email

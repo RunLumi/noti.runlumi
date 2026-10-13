@@ -62,7 +62,7 @@ export const appVi = {
   'home.start.step1.body': 'Chọn một trong các repository GitHub mà bạn đã cho phép Noti thấy.',
   'home.start.step2.title': 'Chọn nơi nhận',
   'home.start.step2.body':
-    'Dán webhook URL của Lark, Slack hoặc Teams vào phần thiết lập tích hợp. URL được lưu dưới dạng mã hóa.',
+    'Dán webhook URL của Lark, Slack, Teams hoặc Discord vào phần thiết lập tích hợp. URL được lưu dưới dạng mã hóa.',
   'home.start.step3.title': 'Kết nối GitHub',
   'home.start.step3.body':
     'Việc cài Noti GitHub App từ bảng điều khiển và gửi tin nhắn thử vẫn đang được phát triển.',

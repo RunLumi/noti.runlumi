@@ -38,7 +38,7 @@ interface HostRule {
   /** When set, the query string must satisfy it; when absent any query is allowed. */
   readonly queryAllowed?: (params: URLSearchParams) => boolean;
   /** A host rule that needs a more specific rejection than `host`. */
-  readonly hostRejection?: (hostname: string) => UrlRejectionRule | undefined;
+  readonly hostRejection?: (hostname: string, options: UrlPolicyOptions) => UrlRejectionRule | undefined;
 }
 
 // A Map, not an object literal: `'constructor' in {}` is true, and `constructor` is a valid
@@ -95,8 +95,36 @@ const BLOCKED_DOMAINS: readonly string[] = [
   'vcap.me',
   'lacolhost.com',
   'traefik.me',
+  // Our own domain (also derived from APP_ORIGIN at runtime, see `ownHostsOf`).
   'runlumi.app',
+  // Cloudflare-hosted infrastructure we or a neighbour run on: a Worker, a Pages site or a
+  // tunnel is reachable from a Worker by a route that skips public-internet semantics, and a
+  // tenant must not be able to aim a destination at our own deployment.
+  'workers.dev',
+  'pages.dev',
+  'cfargotunnel.com',
 ];
+
+/** Extra, deployment-specific blocked hosts: today, the host of `APP_ORIGIN`. */
+export interface UrlPolicyOptions {
+  readonly ownHosts?: readonly string[];
+}
+
+/**
+ * The hosts a customer webhook must never target, derived from `APP_ORIGIN`: that host and its
+ * parent domain (`noti.example.com` blocks `noti.example.com` and `example.com`, with every
+ * subdomain of each). Empty when the origin is missing or not a URL.
+ */
+export function ownHostsOf(appOrigin: string | undefined): readonly string[] {
+  if (!appOrigin) return [];
+  try {
+    const host = new URL(appOrigin).hostname.toLowerCase();
+    const labels = host.split('.');
+    return labels.length >= 3 ? [host, labels.slice(1).join('.')] : [host];
+  } catch {
+    return [];
+  }
+}
 
 const MAX_HOSTNAME_LENGTH = 253;
 // A public top-level label: letters only (ICANN TLDs), or punycode for an IDN TLD. A numeric
@@ -107,7 +135,10 @@ function isUnder(hostname: string, domain: string): boolean {
   return hostname === domain || hostname.endsWith('.' + domain);
 }
 
-function customerHostRejection(hostname: string): UrlRejectionRule | undefined {
+function customerHostRejection(
+  hostname: string,
+  options: UrlPolicyOptions = {},
+): UrlRejectionRule | undefined {
   // Every IP notation was already normalised to dotted-quad by the WHATWG parser (decimal,
   // octal, hex, short forms, percent-encoded and fullwidth digits) and caught as `ip_literal`.
   if (hostname.length > MAX_HOSTNAME_LENGTH) return 'host';
@@ -121,7 +152,17 @@ function customerHostRejection(hostname: string): UrlRejectionRule | undefined {
   if (!PUBLIC_TLD.test(last)) return 'host';
   if (INTERNAL_SUFFIXES.includes(last)) return 'internal_host';
   if (BLOCKED_DOMAINS.some((d) => isUnder(hostname, d))) return 'internal_host';
+  if ((options.ownHosts ?? []).some((d) => isUnder(hostname, d))) return 'internal_host';
   return undefined;
+}
+
+/**
+ * Whether a hostname (for example a CNAME target found while resolving a customer's host)
+ * fails the same shape policy as the host itself. A trailing root dot is tolerated here.
+ */
+export function isBlockedCustomerHostname(hostname: string, options: UrlPolicyOptions = {}): boolean {
+  const bare = hostname.toLowerCase().replace(/\.$/, '');
+  return IPV4_LITERAL.test(bare) || bare.includes(':') || customerHostRejection(bare, options) !== undefined;
 }
 
 /** Discord accepts `thread_id` on Execute Webhook; `wait=true` is ours and added at send time. */
@@ -200,10 +241,10 @@ function genericRule(raw: string, url: URL): UrlRejectionRule | undefined {
   return undefined;
 }
 
-function hostRule(kind: DestinationKind, url: URL): UrlRejectionRule | undefined {
+function hostRule(kind: DestinationKind, url: URL, options: UrlPolicyOptions): UrlRejectionRule | undefined {
   const rule = HOST_RULES[kind];
   if (!rule.matches(url.hostname)) return 'host';
-  const rejected = rule.hostRejection?.(url.hostname);
+  const rejected = rule.hostRejection?.(url.hostname, options);
   if (rejected) return rejected;
   if (rule.queryAllowed && !rule.queryAllowed(url.searchParams)) return 'query';
   if (rule.pathPrefix === undefined) return undefined;
@@ -213,12 +254,16 @@ function hostRule(kind: DestinationKind, url: URL): UrlRejectionRule | undefined
 }
 
 /** Validate a customer-supplied destination URL against the per-destination allowlist. */
-export function checkDestinationUrl(kind: DestinationKind, raw: string): UrlPolicyResult {
+export function checkDestinationUrl(
+  kind: DestinationKind,
+  raw: string,
+  options: UrlPolicyOptions = {},
+): UrlPolicyResult {
   if (raw.length > MAX_DESTINATION_URL_LENGTH) return reject('too_long');
   if (WHITESPACE_OR_CONTROL.test(raw)) return reject('whitespace_or_control');
   const url = parse(raw);
   if (!url) return reject('malformed');
-  const failed = genericRule(raw, url) ?? hostRule(kind, url);
+  const failed = genericRule(raw, url) ?? hostRule(kind, url, options);
   return failed ? reject(failed) : { ok: true, url };
 }
 

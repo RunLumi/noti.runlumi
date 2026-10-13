@@ -121,6 +121,11 @@ export interface Integration {
 export interface IntegrationList {
   readonly integrations: readonly Integration[];
   readonly truncated: boolean;
+  /**
+   * Whether this deployment offers the custom webhook (ADR 0014). Absent or false hides it:
+   * the screen never offers what the server would refuse.
+   */
+  readonly genericWebhook: boolean;
 }
 
 export interface CreateIntegrationBody {
@@ -237,7 +242,11 @@ export const integrationsApi = {
   list: async (orgId: string): Promise<IntegrationList> => {
     const body = await request(withOrg(base, orgId));
     if (!isRecord(body) || !Array.isArray(body.integrations)) throw new ApiError('Unexpected response', 500);
-    return { integrations: body.integrations.map(parseIntegration), truncated: body.truncated === true };
+    return {
+      integrations: body.integrations.map(parseIntegration),
+      truncated: body.truncated === true,
+      genericWebhook: isRecord(body.capabilities) && body.capabilities.genericWebhook === true,
+    };
   },
   get: async (orgId: string, id: string): Promise<Integration> =>
     one(await request(withOrg(item(id), orgId))),

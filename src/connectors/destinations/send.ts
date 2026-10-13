@@ -1,5 +1,5 @@
 import { classifyTransportError, permanent } from './classify';
-import { checkDestinationUrl } from './url-policy';
+import { checkDestinationUrl, type UrlPolicyOptions } from './url-policy';
 import type { ClassifiedResponse, OutboundRequest, ProviderResponse } from './types';
 
 /**
@@ -19,6 +19,8 @@ export interface SendOptions {
   readonly fetch?: Fetcher;
   readonly now?: () => number;
   readonly timeoutMs?: number;
+  /** Deployment-specific URL policy, re-applied here exactly as at write time. */
+  readonly urlPolicy?: UrlPolicyOptions;
 }
 
 /** Read at most `maxBytes` of the body, then cancel the rest of the stream. */
@@ -48,7 +50,8 @@ export async function sendRequest(
   classify: ResponseClassifier,
   options: SendOptions = {},
 ): Promise<ClassifiedResponse> {
-  if (!checkDestinationUrl(request.kind, request.url).ok) return permanent('destination_url_rejected');
+  if (!checkDestinationUrl(request.kind, request.url, options.urlPolicy).ok)
+    return permanent('destination_url_rejected');
   const doFetch = options.fetch ?? ((input, init) => fetch(input, init));
   const now = options.now ?? Date.now;
   try {

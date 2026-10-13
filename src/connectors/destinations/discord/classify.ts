@@ -1,4 +1,4 @@
-import { classifyHttpStatus, retryable } from '../classify';
+import { classifyHttpStatus, permanent, retryable } from '../classify';
 import { MAX_RETRY_AFTER_MS, parseRetryAfter } from '../retry-after';
 import type { ClassifiedResponse, ProviderResponse } from '../types';
 
@@ -11,6 +11,12 @@ import type { ClassifiedResponse, ProviderResponse } from '../types';
  *  - `404`: "you should not attempt to use it again - repeated attempts to do so will result
  *    in a temporary restriction". Permanent with zero retries (the generic mapping already
  *    does this; it is asserted by a test because it is the most consequential row here).
+ *  - A `401`/`403` is only treated as a dead webhook when the JSON body carries Discord's own
+ *    code for one: `10015` (Unknown Webhook) or `50027` (Invalid Webhook Token). Any other
+ *    `401`/`403` (a restriction on our egress, an edge block, a transient auth fault) is
+ *    retryable here, and the consumer caps how often (`DISCORD_UNAUTHORIZED_MAX_ATTEMPTS`)
+ *    because those statuses spend the shared invalid-request budget; it never pauses the
+ *    integration for them.
  *  - `401`/`403`/`429` count toward a shared invalid-request budget, so `401`/`403` are
  *    permanent on the first occurrence and `429` is never retried before `retry_after`.
  *  - Rate limits are read from the response, never hard-coded: the `429` body's
@@ -53,5 +59,36 @@ export function classifyDiscordResponse(res: ProviderResponse, now: number): Cla
       ...(body.global ? { providerCode: 'global' } : {}),
     });
   }
+  if (res.status === 401 || res.status === 403) return classifyAuthFailure(res);
   return classifyHttpStatus(res, now);
+}
+
+/** Discord JSON error codes for a webhook that is gone or whose token is wrong. UNVERIFIED in the reference. */
+const WEBHOOK_GONE_CODES: ReadonlyMap<number, ClassifiedResponse> = new Map([
+  [10015, permanent('destination_revoked', 'unknown_webhook')],
+  [50027, permanent('destination_unauthorized', 'invalid_webhook_token')],
+]);
+
+function classifyAuthFailure(res: ProviderResponse): ClassifiedResponse {
+  try {
+    const parsed: unknown = JSON.parse(res.bodyText);
+    const code =
+      typeof parsed === 'object' && parsed !== null ? (parsed as { code?: unknown }).code : undefined;
+    const known = typeof code === 'number' ? WEBHOOK_GONE_CODES.get(code) : undefined;
+    if (known) return known;
+  } catch {
+    // Not JSON (an edge block page, for instance): fall through, and never read it further.
+  }
+  return retryable('destination_unavailable', { providerCode: `http_${res.status}` });
+}
+
+/** Statuses and codes that mean the webhook itself is gone; the only ones that pause an integration. */
+export function isDeadWebhook(status: number, c: ClassifiedResponse): boolean {
+  if (c.outcome !== 'permanent') return false;
+  return (
+    status === 404 ||
+    status === 410 ||
+    c.providerCode === 'unknown_webhook' ||
+    c.providerCode === 'invalid_webhook_token'
+  );
 }

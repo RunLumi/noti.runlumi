@@ -178,3 +178,34 @@ describe('Microsoft Teams destination (ADR 0006)', () => {
     expect(parseUpdateIntegration({ triggerAuth: 'anyone' }, 'teams').ok).toBe(false);
   });
 });
+
+describe('gated destination and own hosts', () => {
+  const hook = {
+    ...valid,
+    destination: 'generic_webhook',
+    webhookUrl: 'https://hooks.example.com/noti',
+  };
+
+  it('refuses the custom webhook unless the deployment enables it, before looking at the URL', () => {
+    for (const options of [undefined, {}, { genericWebhook: false }]) {
+      const r = parseCreateIntegration({ ...hook, webhookUrl: 'https://127.0.0.1/x' }, options);
+      expect(r.ok).toBe(false);
+      expect(r.ok ? [] : r.errors).toEqual([
+        { field: 'destination', message: 'This destination type is not available yet.' },
+      ]);
+    }
+    expect(parseCreateIntegration(hook, { genericWebhook: true }).ok).toBe(true);
+  });
+
+  it('blocks the host of APP_ORIGIN through the options', () => {
+    const r = parseCreateIntegration(
+      { ...hook, webhookUrl: 'https://noti.example.org/x' },
+      { genericWebhook: true, ownHosts: ['noti.example.org', 'example.org'] },
+    );
+    expect(r.ok).toBe(false);
+    expect(
+      parseCreateIntegration({ ...hook, webhookUrl: 'https://noti.example.org/x' }, { genericWebhook: true })
+        .ok,
+    ).toBe(true);
+  });
+});

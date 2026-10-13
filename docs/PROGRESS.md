@@ -965,7 +965,7 @@ recorded refusal, not a gap.
   `url-policy.ts` (Discord host/path/query, customer-host shape rules), `config.ts`,
   `capabilities.ts`, `markup.ts` (Discord dialects), `index.ts` (dispatch, `DeliveryMeta`).
 - Consumer: passes `DeliveryMeta`, the signing secret for the custom webhook, and pauses a
-  Discord integration after a permanent 401/403/404/410 (`integration.auto_pause` audit).
+  Discord integration after a 404/410 or Discord code 10015/50027 (`integration.auto_pause` audit).
 - API: the two kinds, server-generated one-time signing secret, DNS verification on create and
   rotation (`src/api/destination-host.ts`).
 - Dashboard: two destination entries, `IssuedSecret`, copy in `messages.destinations.en.ts`.
@@ -980,6 +980,22 @@ recorded refusal, not a gap.
   same verifier the generic source uses; fixtures are built at runtime.
 - A live DNS-over-HTTPS query from a developer machine confirmed the response shape the check
   parses. No real Discord webhook, customer endpoint or Worker egress was exercised.
+
+**Review round (SSRF review of PR #30, rebased on PR #28/#29)**
+
+- `GENERIC_WEBHOOK_ENABLED` (default `"false"`) gates the custom webhook in the API validator
+  (one message, before the URL is examined), on re-enable and rotation, in the consumer (stored
+  rows are refused unsent), and in the dashboard (`capabilities` on the list response); the
+  enabling criteria are in ADR 0014 decision 18.
+- `global_fetch_strictly_public` researched: documented as routing semantics, not an
+  address filter; **not added**, marked UNVERIFIED.
+- Blocked: `workers.dev`, `pages.dev`, `cfargotunnel.com`, and the `APP_ORIGIN` host and parent
+  (passed to the policy at save and send); `workers_dev: false`; CNAME targets in the DNS check;
+  DNS re-run on re-enable; at most 10 custom webhooks per workspace; connection failures shown
+  as one reason.
+- Discord pause: only for 404/410 or Discord code 10015/50027, tied to the credential used, in
+  one batch with its audit row; other 401/403 retry at most once more and never pause.
+- Vietnamese catalogue for the new copy; `IssuedSecret` calls `useLocale()`.
 
 **Not done**
 

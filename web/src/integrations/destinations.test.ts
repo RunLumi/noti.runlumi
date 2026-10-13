@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DESTINATION_KINDS } from '../../../src/connectors/destinations/types';
-import { en } from '../i18n/messages.en';
+import { en } from '../i18n';
 import { isDestinationKind } from '../lib/api';
 import { DESTINATIONS, DESTINATION_ORDER } from './destinations';
 
@@ -35,6 +35,10 @@ describe('destination catalogue', () => {
     expect(en['destination.generic_webhook.noteChecked']).toMatch(/cannot re-check/);
     expect(en['destination.generic_webhook.noteEvidence']).toMatch(/only evidence/);
     expect(en['destination.discord.noteDeleted']).toMatch(/pauses/);
+  });
+
+  it('gates only the custom webhook behind the server flag', () => {
+    expect(DESTINATION_ORDER.filter((k) => DESTINATIONS[k].gated)).toEqual(['generic_webhook']);
   });
 
   it('does not accept a kind the server cannot store', () => {

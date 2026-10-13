@@ -61,14 +61,17 @@ describe('event catalog labels', () => {
 describe('client validation mirrors the server', () => {
   // Each case is checked against the real server parser so the two cannot silently diverge.
   const server = (overrides: Record<string, unknown>) =>
-    parseCreateIntegration({
-      name: 'Ops',
-      repo: 'acme/web',
-      eventTypes: ['push'],
-      destination: 'slack',
-      webhookUrl: SLACK,
-      ...overrides,
-    });
+    parseCreateIntegration(
+      {
+        name: 'Ops',
+        repo: 'acme/web',
+        eventTypes: ['push'],
+        destination: 'slack',
+        webhookUrl: SLACK,
+        ...overrides,
+      },
+      { genericWebhook: true },
+    );
 
   const urls: [string, 'slack' | 'lark' | 'teams' | 'discord' | 'generic_webhook'][] = [
     ['https://discord.com/api/webhooks/123456789012345678/Tok', 'discord'],

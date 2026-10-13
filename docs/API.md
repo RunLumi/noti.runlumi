@@ -112,12 +112,20 @@ Rules enforced at write time:
   - Discord: `https://discord.com/api/webhooks/{id}/{token}` (or the `/api/v10/` form), with at
     most a `?thread_id=<digits>` query. `discordapp.com`, `canary.` and `ptb.` hosts and any
     other query parameter are `422`. The stored URL is normalised.
-  - Custom webhook (`generic_webhook`): any **public https** hostname on port 443. Refused with
+  - Custom webhook (`generic_webhook`): **off unless the deployment sets
+    `GENERIC_WEBHOOK_ENABLED` to `true`** (ADR 0014). While off, create (also for a source) is
+    `422` on `destination` with "This destination type is not available yet." and nothing else,
+    checked before the URL is looked at; re-enabling or rotating the credentials of an existing
+    one is the same `422`, while pause, rename and delete still work. `GET /api/integrations`
+    reports `capabilities: {genericWebhook: boolean}`. At most 10 per workspace (`409`).
+    When on: any **public https** hostname on port 443. Refused with
     `422` on `webhookUrl`: `http`, userinfo, a fragment, another port, an IP address in any
     notation, a single-label or trailing-dot name, `localhost`/`.local`/`.internal`/`.lan`/
     `.home`/`.corp`/`.test`/`.example`/… names, known wildcard-DNS names (`nip.io`, …), and
-    `runlumi.app`. After that shape check the API resolves the host (DNS-over-HTTPS, A and
-    AAAA) and refuses it if any address is private or reserved (`422`: "resolves to a private
+    `runlumi.app`, the host of `APP_ORIGIN` and its parent domain, `workers.dev`, `pages.dev`
+    and `cfargotunnel.com`. After that shape check the API resolves the host (DNS-over-HTTPS, A and
+    AAAA) and refuses it if any address, or any CNAME target in the answer, is private, reserved
+    or internal; it runs again when the integration is re-enabled (`422`: "resolves to a private
     or reserved address"), if it does not resolve, or if the lookup fails ("try again": it
     fails closed). This is a save-time check only: it does **not** stop DNS rebinding (ADR
     0014, AR-30). Messages never echo the URL or an address.
@@ -135,10 +143,13 @@ Rules enforced at write time:
   url?, repo?, actor?, status?, summary?}}`. A `2xx` from the customer is the only evidence we
   have: `202` is recorded `accepted`, any other `2xx` `sent`; 3xx and most 4xx are permanent,
   `408`/`425`/`429`/`5xx` are retried; redirects are never followed.
-- Discord delivery uses `wait=true`: a `200` is `sent`, a `204` is `accepted`. A permanent
-  `401`, `403`, `404` or `410` from Discord also **pauses the integration** (`enabled: false`,
-  audit action `integration.auto_pause`, actor `null`) so the next event does not repeat the
-  request; replace the URL and re-enable it.
+- Discord delivery uses `wait=true`: a `200` is `sent`, a `204` is `accepted`. A `404`, a
+  `410`, or a `401`/`403` whose body carries Discord's code `10015` or `50027` also **pauses the
+  integration** (`enabled: false`, audit action `integration.auto_pause`, actor `null`, written
+  in the same batch and only if that credential is still the stored one) so the next event
+  does not repeat the request; replace the URL and re-enable it. Any other `401`/`403` is
+  retried at most once more and never pauses it. Connection failures to a custom webhook are
+  all recorded as `destination_unreachable`.
 - `triggerAuth` is Teams only and optional. Only `"anyone"` is accepted (the default);
   `"tenant_users"`, `"specific_users"` and anything else return `422` on `triggerAuth`,
   because those triggers need an Entra token Noti does not send. It is validated, not stored.

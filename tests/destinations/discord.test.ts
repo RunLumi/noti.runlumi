@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { discordAdapter } from '../../src/connectors/destinations/discord/adapter';
+import { isDeadWebhook } from '../../src/connectors/destinations/discord/classify';
 import {
   DISCORD_CONTENT_MAX,
   DISCORD_EMBED_TOTAL_MAX,
@@ -209,9 +210,43 @@ describe('Discord classifier', () => {
     expect(classify(410).outcome).toBe('permanent');
   });
 
-  it('401 and 403 are permanent on the first occurrence', () => {
-    expect(classify(401)).toMatchObject({ outcome: 'permanent', reason: 'destination_unauthorized' });
-    expect(classify(403)).toMatchObject({ outcome: 'permanent', reason: 'destination_unauthorized' });
+  it('401 and 403 are a dead webhook only when Discord says so in its own error code', () => {
+    expect(classify(404, '{"code":10015}')).toMatchObject({ outcome: 'permanent' });
+    expect(classify(403, '{"message":"Unknown Webhook","code":10015}')).toEqual({
+      outcome: 'permanent',
+      reason: 'destination_revoked',
+      providerCode: 'unknown_webhook',
+    });
+    expect(classify(401, '{"message":"Invalid Webhook Token","code":50027}')).toEqual({
+      outcome: 'permanent',
+      reason: 'destination_unauthorized',
+      providerCode: 'invalid_webhook_token',
+    });
+  });
+
+  it('any other 401 or 403 is retryable (not a dead webhook) and carries only our own code', () => {
+    for (const body of ['', '<html>blocked</html>', '{"code":40333}', '{"code":"10015"}', 'null']) {
+      for (const status of [401, 403]) {
+        expect(classify(status, body)).toEqual({
+          outcome: 'retryable',
+          reason: 'destination_unavailable',
+          providerCode: `http_${status}`,
+        });
+      }
+    }
+  });
+
+  it('only a missing webhook pauses an integration', () => {
+    const c = (status: number, body = '') => classify(status, body);
+    expect(isDeadWebhook(404, c(404))).toBe(true);
+    expect(isDeadWebhook(410, c(410))).toBe(true);
+    expect(isDeadWebhook(403, c(403, '{"code":10015}'))).toBe(true);
+    expect(isDeadWebhook(401, c(401, '{"code":50027}'))).toBe(true);
+    expect(isDeadWebhook(403, c(403))).toBe(false);
+    expect(isDeadWebhook(401, c(401))).toBe(false);
+    expect(isDeadWebhook(400, c(400))).toBe(false);
+    expect(isDeadWebhook(429, c(429))).toBe(false);
+    expect(isDeadWebhook(500, c(500))).toBe(false);
   });
 
   it('429 honours retry_after from the body (seconds, float) before the header', () => {

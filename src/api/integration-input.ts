@@ -1,4 +1,5 @@
 import { validateDestinationConfig, type ConfigValidation } from '../connectors/destinations';
+import type { UrlPolicyOptions } from '../connectors/destinations/url-policy';
 import { generateSigningSecret } from '../connectors/sources/generic/encoding';
 import { isGithubEventType, type GithubEventType } from '../connectors/sources/github/catalog';
 import { asRecord } from '../lib/json';
@@ -49,6 +50,18 @@ export interface UpdateIntegrationInput {
   /** Present together: rotating credentials re-seals under fresh key material. */
   readonly credentials?: { readonly webhookUrl: string; readonly signingSecret: string | null };
 }
+
+/**
+ * Deployment context the pure parsers need. The defaults are the safe ones: the custom webhook
+ * is off, and no extra hosts are blocked.
+ */
+export interface ParseOptions extends UrlPolicyOptions {
+  /** `GENERIC_WEBHOOK_ENABLED` (ADR 0014). Off by default. */
+  readonly genericWebhook?: boolean;
+}
+
+/** One message for every refusal of a gated kind, so it reveals nothing about why. */
+export const DESTINATION_UNAVAILABLE = 'This destination type is not available yet.';
 
 const NAME_MAX = 80;
 // GitHub owner: 1–39 alphanumerics or single hyphens; repo: 1–100 of [A-Za-z0-9._-].
@@ -108,7 +121,11 @@ function parseSourceEventTypes(value: unknown, errors: FieldError[]): string[] |
   return [...new Set(value as string[])];
 }
 
-function parseDestination(value: unknown, errors: FieldError[]): DestinationKind | undefined {
+function parseDestination(
+  value: unknown,
+  errors: FieldError[],
+  options: ParseOptions,
+): DestinationKind | undefined {
   if (
     value !== 'lark' &&
     value !== 'slack' &&
@@ -120,6 +137,12 @@ function parseDestination(value: unknown, errors: FieldError[]): DestinationKind
       field: 'destination',
       message: 'Choose Lark, Slack, Microsoft Teams, Discord or a custom webhook.',
     });
+    return undefined;
+  }
+  if (value === 'generic_webhook' && options.genericWebhook !== true) {
+    // Refused before the URL or anything else about it is looked at: a gated kind must not
+    // double as an oracle for what its policy accepts.
+    errors.push({ field: 'destination', message: DESTINATION_UNAVAILABLE });
     return undefined;
   }
   return value;
@@ -199,6 +222,7 @@ function parseCredentials(
   r: Record<string, unknown>,
   destination: DestinationKind | undefined,
   errors: FieldError[],
+  options: ParseOptions = {},
 ): Credentials | undefined {
   const before = errors.length;
   // Trimming is leniency for a pasted value, not a policy rule: the policy sees the result.
@@ -218,17 +242,20 @@ function parseCredentials(
     errors.push({ field: 'triggerAuth', message: 'Trigger authentication applies only to Microsoft Teams.' });
   }
   if (errors.length > before || destination === undefined || url === undefined) return undefined;
-  const checked = validateDestinationConfig({
-    kind: destination,
-    webhookUrl: url,
-    // A custom webhook is always signed, with a secret we generate (and show once).
-    ...(destination === 'generic_webhook'
-      ? { signingSecret: generateSigningSecret() }
-      : hasSecret
-        ? { signingSecret: secret }
-        : {}),
-    ...(r.triggerAuth !== undefined ? { triggerAuth: r.triggerAuth } : {}),
-  });
+  const checked = validateDestinationConfig(
+    {
+      kind: destination,
+      webhookUrl: url,
+      // A custom webhook is always signed, with a secret we generate (and show once).
+      ...(destination === 'generic_webhook'
+        ? { signingSecret: generateSigningSecret() }
+        : hasSecret
+          ? { signingSecret: secret }
+          : {}),
+      ...(r.triggerAuth !== undefined ? { triggerAuth: r.triggerAuth } : {}),
+    },
+    options,
+  );
   if (!checked.ok) {
     errors.push(configFailure(checked, destination));
     return undefined;
@@ -259,7 +286,10 @@ const SOURCE_ID = /^[A-Za-z0-9-]{8,64}$/;
  * receives every event its source sends unless `eventTypes` selects some of the source kind's
  * catalogue (GitLab, Stripe); the generic kind has no catalogue, which the handler enforces.
  */
-function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegrationInput> {
+function parseSourceIntegration(
+  r: Record<string, unknown>,
+  options: ParseOptions,
+): Parsed<CreateIntegrationInput> {
   const errors: FieldError[] = [];
   if (typeof r.sourceId !== 'string' || !SOURCE_ID.test(r.sourceId))
     errors.push({ field: 'sourceId', message: 'Choose one of your sources.' });
@@ -268,8 +298,8 @@ function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegr
       errors.push({ field, message: 'Not used with a source: it receives every event the source sends.' });
   const sourceEventTypes = 'eventTypes' in r ? parseSourceEventTypes(r.eventTypes, errors) : [];
   const name = parseName(r.name, errors);
-  const destination = parseDestination(r.destination, errors);
-  const credentials = parseCredentials(r, destination, errors);
+  const destination = parseDestination(r.destination, errors, options);
+  const credentials = parseCredentials(r, destination, errors, options);
   if (errors.length || !name || !destination || !credentials || typeof r.sourceId !== 'string')
     return { ok: false, errors };
   return {
@@ -288,16 +318,19 @@ function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegr
   };
 }
 
-export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationInput> {
+export function parseCreateIntegration(
+  body: unknown,
+  options: ParseOptions = {},
+): Parsed<CreateIntegrationInput> {
   const r = asRecord(body);
   if (!r) return { ok: false, errors: [{ field: 'body', message: 'Expected a JSON object.' }] };
-  if ('sourceId' in r) return parseSourceIntegration(r);
+  if ('sourceId' in r) return parseSourceIntegration(r, options);
   const errors: FieldError[] = [];
   const name = parseName(r.name, errors);
   const repo = parseRepo(r.repo, errors);
   const eventTypes = parseEventTypes(r.eventTypes, errors);
-  const destination = parseDestination(r.destination, errors);
-  const credentials = parseCredentials(r, destination, errors);
+  const destination = parseDestination(r.destination, errors, options);
+  const credentials = parseCredentials(r, destination, errors, options);
   const filters = parseFilterField(r, errors) ?? {};
   if (eventTypes && errors.length === 0) {
     const issue = coverageIssue(filters, eventTypes);
@@ -324,6 +357,7 @@ export function parseUpdateIntegration(
   body: unknown,
   destination: DestinationKind,
   isSource = false,
+  options: ParseOptions = {},
 ): Parsed<UpdateIntegrationInput> {
   const r = asRecord(body);
   if (!r) return { ok: false, errors: [{ field: 'body', message: 'Expected a JSON object.' }] };
@@ -355,7 +389,7 @@ export function parseUpdateIntegration(
   }
   if ('filters' in r) out.filters = parseFilterField(r, errors);
   if ('webhookUrl' in r) {
-    const credentials = parseCredentials(r, destination, errors);
+    const credentials = parseCredentials(r, destination, errors, options);
     if (credentials) out.credentials = credentials;
   } else if ('signingSecret' in r || 'triggerAuth' in r) {
     errors.push({

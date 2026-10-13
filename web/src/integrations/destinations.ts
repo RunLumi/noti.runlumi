@@ -23,6 +23,8 @@ export interface DestinationInfo {
    * chosen by the person, so there is no input for it; the one-time reveal follows a save.
    */
   readonly issuesSigningSecret: boolean;
+  /** Offered only when the server reports it available (a deployment flag; ADR 0014). */
+  readonly gated: boolean;
   /** Extra provider-specific caveats shown under the steps (Teams: trigger access, orphaned flows, accepted ≠ delivered). */
   readonly notes?: readonly MessageId[];
 }
@@ -46,6 +48,7 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsUrl: 'https://open.larksuite.com/document/client-docs/bot-v3/add-custom-bot',
     supportsSigningSecret: true,
     issuesSigningSecret: false,
+    gated: false,
   },
   slack: {
     kind: 'slack',
@@ -64,6 +67,7 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsUrl: 'https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks',
     supportsSigningSecret: false,
     issuesSigningSecret: false,
+    gated: false,
   },
   teams: {
     kind: 'teams',
@@ -84,6 +88,7 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
       'https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498',
     supportsSigningSecret: false,
     issuesSigningSecret: false,
+    gated: false,
     notes: ['destination.teams.noteOwner', 'destination.teams.noteAccepted'],
   },
   discord: {
@@ -103,6 +108,7 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsUrl: 'https://discord.com/developers/docs/resources/webhook',
     supportsSigningSecret: false,
     issuesSigningSecret: false,
+    gated: false,
     notes: ['destination.discord.noteMentions', 'destination.discord.noteDeleted'],
   },
   generic_webhook: {
@@ -123,6 +129,7 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsUrl: 'https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md',
     supportsSigningSecret: false,
     issuesSigningSecret: true,
+    gated: true,
     notes: ['destination.generic_webhook.noteChecked', 'destination.generic_webhook.noteEvidence'],
   },
 };

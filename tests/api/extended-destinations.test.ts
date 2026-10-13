@@ -64,6 +64,7 @@ function setUp(): void {
     GITHUB_APP_ID: '1',
     GITHUB_WEBHOOK_SECRET: 'x',
     DELIVERY_QUEUE: { send: (_m: DeliveryMessage) => Promise.resolve() },
+    GENERIC_WEBHOOK_ENABLED: 'true',
   } as unknown as Bindings;
 }
 
@@ -344,4 +345,202 @@ describe('custom webhook integrations', () => {
     expect(res.status).toBe(201);
     expect((await res.json<Created>()).signingSecret).toMatch(/^whsec_/);
   });
+});
+
+/** Set (or unset) the deployment flag on the env the Worker runs with. */
+function setFlag(value: string | undefined): void {
+  const { GENERIC_WEBHOOK_ENABLED: _previous, ...rest } = env;
+  env = value === undefined ? rest : { ...rest, GENERIC_WEBHOOK_ENABLED: value };
+}
+
+async function deliver(integrationId: string, deliveryId: string): Promise<void> {
+  const { consumeDeliveries } = await import('../../src/pipeline/consumer');
+  db.raw
+    .prepare("INSERT INTO deliveries(id,integration_id,organization_id,state) VALUES(?,?,'org-a','pending')")
+    .run(deliveryId, integrationId);
+  const msg = {
+    body: { id: deliveryId, integrationId, organizationId: 'org-a', title: 't', url: '' },
+    ack: vi.fn(),
+    retry: vi.fn(),
+  };
+  await consumeDeliveries({ messages: [msg], retryAll: vi.fn() } as unknown as MessageBatch<unknown>, env);
+}
+
+const enabledOf = (id: string): number =>
+  (db.raw.prepare('SELECT enabled FROM integrations WHERE id=?').get(id) as { enabled: number }).enabled;
+
+describe('Discord auto-pause on a sealed credential', () => {
+  const gone = () => Promise.resolve(new Response('{"code":10015}', { status: 404 }));
+
+  it('pauses the integration, with its audit row, when the sealed webhook it used is gone', async () => {
+    const { integration } = await (
+      await create({ destination: 'discord', webhookUrl: DISCORD })
+    ).json<Created>();
+    fetchMock.mockImplementationOnce(gone);
+    await deliver(integration.id, 'd1');
+    expect(enabledOf(integration.id)).toBe(0);
+    expect(
+      db.raw.prepare("SELECT actor_id FROM audit_events WHERE action='integration.auto_pause'").all(),
+    ).toEqual([{ actor_id: null }]);
+  });
+
+  it('does not pause a webhook that was rotated while the failing request was in flight', async () => {
+    const { integration } = await (
+      await create({ destination: 'discord', webhookUrl: DISCORD })
+    ).json<Created>();
+    fetchMock.mockImplementationOnce(async () => {
+      const rotated = await call('PATCH', `/api/integrations/${integration.id}`, {
+        webhookUrl: 'https://discord.com/api/webhooks/223456789012345678/ReplacedApiToken',
+      });
+      expect(rotated.status).toBe(200);
+      return new Response('{"code":10015}', { status: 404 });
+    });
+    await deliver(integration.id, 'd1');
+    expect(db.raw.prepare("SELECT state FROM deliveries WHERE id='d1'").get()).toEqual({
+      state: 'dead_lettered',
+    });
+    expect(enabledOf(integration.id)).toBe(1);
+    expect(
+      db.raw.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='integration.auto_pause'").get(),
+    ).toEqual({ n: 0 });
+  });
+});
+
+describe('custom webhook is off unless the deployment turns it on (ADR 0014)', () => {
+  beforeEach(() => {
+    setFlag(undefined);
+  });
+
+  it('refuses to create one, with one message that reveals nothing about the URL policy', async () => {
+    const messages = new Set<string>();
+    for (const webhookUrl of [HOOK, 'https://127.0.0.1/x', 'http://localhost/x', 'nonsense', '']) {
+      const res = await create({ destination: 'generic_webhook', webhookUrl });
+      expect(res.status).toBe(422);
+      const body = await res.json<Failed>();
+      expect(body.fields).toEqual([
+        { field: 'destination', message: 'This destination type is not available yet.' },
+      ]);
+      messages.add(JSON.stringify(body));
+    }
+    expect(messages.size).toBe(1);
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM integrations').get()).toEqual({ n: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('is refused for a source integration too, and Discord is unaffected', async () => {
+    const res = await call('POST', '/api/integrations', {
+      name: 'x',
+      sourceId: 'src-aaaaaaaa',
+      destination: 'generic_webhook',
+      webhookUrl: HOOK,
+    });
+    expect(res.status).toBe(422);
+    expect((await res.json<Failed>()).fields).toEqual([
+      { field: 'destination', message: 'This destination type is not available yet.' },
+    ]);
+    expect((await create({ destination: 'discord', webhookUrl: DISCORD })).status).toBe(201);
+  });
+
+  it('reports availability on the list so the dashboard can hide it', async () => {
+    const off = await (
+      await call('GET', '/api/integrations')
+    ).json<{ capabilities: { genericWebhook: boolean } }>();
+    expect(off.capabilities).toEqual({ genericWebhook: false });
+    for (const flag of ['false', 'TRUE', '']) {
+      setFlag(flag);
+      const r = await (
+        await call('GET', '/api/integrations')
+      ).json<{ capabilities: { genericWebhook: boolean } }>();
+      expect(r.capabilities.genericWebhook).toBe(false);
+    }
+    setFlag('true');
+    const on = await (
+      await call('GET', '/api/integrations')
+    ).json<{ capabilities: { genericWebhook: boolean } }>();
+    expect(on.capabilities).toEqual({ genericWebhook: true });
+  });
+
+  it('refuses to re-enable or re-credential a stored one, but still lets it be paused and deleted', async () => {
+    setFlag('true');
+    const { integration } = await (
+      await create({ destination: 'generic_webhook', webhookUrl: HOOK })
+    ).json<Created>();
+    setFlag(undefined);
+    expect((await call('PATCH', `/api/integrations/${integration.id}`, { enabled: false })).status).toBe(200);
+    const enable = await call('PATCH', `/api/integrations/${integration.id}`, { enabled: true });
+    expect(enable.status).toBe(422);
+    expect((await enable.json<Failed>()).fields[0]?.message).toBe(
+      'This destination type is not available yet.',
+    );
+    const rotate = await call('PATCH', `/api/integrations/${integration.id}`, { webhookUrl: HOOK });
+    expect(rotate.status).toBe(422);
+    expect(
+      await (await call('PATCH', `/api/integrations/${integration.id}`, { name: 'Renamed' })).text(),
+    ).not.toContain('whsec_');
+    expect((await call('DELETE', `/api/integrations/${integration.id}`)).status).toBe(204);
+  });
+});
+
+describe('custom webhook limits and re-verification', () => {
+  it('caps custom webhooks per workspace', async () => {
+    for (let i = 0; i < 10; i++) {
+      expect(
+        (await create({ destination: 'generic_webhook', webhookUrl: HOOK, name: `Hook ${i}` })).status,
+      ).toBe(201);
+      // Stay under the per-user mutation limit while filling the workspace.
+      db.raw.prepare('DELETE FROM api_rate_limits').run();
+    }
+    const eleventh = await create({ destination: 'generic_webhook', webhookUrl: HOOK });
+    expect(eleventh.status).toBe(409);
+    expect((await eleventh.json<{ error: string }>()).error).toContain('at most 10 custom webhooks');
+    // The cap is for custom webhooks only.
+    expect((await create({ destination: 'discord', webhookUrl: DISCORD })).status).toBe(201);
+  });
+
+  it('re-resolves the host when the integration is turned back on', async () => {
+    const { integration } = await (
+      await create({ destination: 'generic_webhook', webhookUrl: HOOK })
+    ).json<Created>();
+    expect((await call('PATCH', `/api/integrations/${integration.id}`, { enabled: false })).status).toBe(200);
+    // The zone now answers with a private address.
+    dns['hooks.example.com'] = ['10.0.0.9'];
+    const blocked = await call('PATCH', `/api/integrations/${integration.id}`, { enabled: true });
+    expect(blocked.status).toBe(422);
+    expect(await blocked.text()).not.toContain('10.0.0.9');
+    expect(enabledOf(integration.id)).toBe(0);
+    // And a public one turns it back on.
+    dns['hooks.example.com'] = ['93.184.216.34'];
+    expect((await call('PATCH', `/api/integrations/${integration.id}`, { enabled: true })).status).toBe(200);
+    expect(enabledOf(integration.id)).toBe(1);
+  });
+
+  it('refuses a public name that is an alias for an internal one', async () => {
+    fetchMock.mockImplementation((input: string) => {
+      const url = new URL(String(input));
+      const isA = url.searchParams.get('type') === 'A';
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            Status: 0,
+            Answer: [
+              { name: 'x', type: 5, TTL: 1, data: 'db.internal.' },
+              ...(isA ? [{ name: 'db.internal.', type: 1, TTL: 1, data: '93.184.216.34' }] : []),
+            ],
+          }),
+        ),
+      );
+    });
+    const res = await create({ destination: 'generic_webhook', webhookUrl: 'https://alias.example.com/x' });
+    expect(res.status).toBe(422);
+    expect(await res.text()).not.toContain('db.internal');
+  });
+
+  it.each(['https://svc.workers.dev/x', 'https://site.pages.dev/x', 'https://abc.cfargotunnel.com/x'])(
+    'refuses Cloudflare-hosted %s',
+    async (webhookUrl) => {
+      const res = await create({ destination: 'generic_webhook', webhookUrl });
+      expect(res.status).toBe(422);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });

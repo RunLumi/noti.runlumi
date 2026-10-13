@@ -134,6 +134,8 @@ beforeEach(() => {
     KEK_V1: '11'.repeat(32),
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',
+    APP_ORIGIN: 'https://noti.test',
+    GENERIC_WEBHOOK_ENABLED: 'true',
   } as Bindings;
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
@@ -206,12 +208,85 @@ describe('Discord end to end', () => {
     expect(row('d2')).toMatchObject({ state: 'dead_lettered', last_error: 'integration_unavailable' });
   });
 
-  it.each([401, 403])('HTTP %i opens the pause on the first occurrence', async (status) => {
+  it.each([
+    [
+      403,
+      '{"message":"Unknown Webhook","code":10015}',
+      'destination_revoked',
+      'provider_discord_unknown_webhook',
+    ],
+    [
+      401,
+      '{"message":"Invalid Webhook Token","code":50027}',
+      'destination_unauthorized',
+      'provider_discord_invalid_webhook_token',
+    ],
+  ] as const)(
+    'HTTP %i with Discord code in the body pauses on the first occurrence',
+    async (status, body, code, diagnostic) => {
+      const { id } = await integration('discord');
+      fetchMock.mockResolvedValueOnce(new Response(body, { status }));
+      await consume(enqueue('d1', id));
+      expect(row('d1')).toMatchObject({
+        state: 'dead_lettered',
+        last_error: diagnostic,
+        last_error_code: code,
+      });
+      expect(enabled(id)).toBe(0);
+    },
+  );
+
+  it('a plain 403 does NOT pause: it is retried once more, then stops, never paused', async () => {
     const { id } = await integration('discord');
-    fetchMock.mockResolvedValueOnce(new Response('{"message":"401: Unauthorized"}', { status }));
-    await consume(enqueue('d1', id));
+    fetchMock.mockResolvedValue(new Response('<html>blocked</html>', { status: 403 }));
+    const m = enqueue('d1', id);
+    expect((await consume(m)).retried).not.toBeNull();
+    expect(row('d1')).toMatchObject({ state: 'retrying', last_error: 'provider_discord_http_403' });
+    expect(enabled(id)).toBe(1);
+    db.raw.prepare("UPDATE deliveries SET next_attempt_at=NULL WHERE id='d1'").run();
+    const second = await consume(m, 2);
+    // The shared invalid-request budget is not spent a third time.
+    expect(second).toMatchObject({ acked: true, retried: null });
     expect(row('d1')).toMatchObject({ state: 'dead_lettered', last_error_code: 'destination_unauthorized' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(enabled(id)).toBe(1);
+    expect(
+      db.raw.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='integration.auto_pause'").get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('does not pause a webhook the customer replaced while the failing request was in flight', async () => {
+    const { id } = await integration('discord');
+    fetchMock.mockImplementationOnce(async () => {
+      // The customer pastes a new webhook URL after our request left, before the 404 returns.
+      db.raw
+        .prepare('UPDATE integrations SET webhook_ciphertext=? WHERE id=?')
+        .run(
+          await legacySeal('https://discord.com/api/webhooks/223456789012345678/ReplacedToken', K_LEGACY),
+          id,
+        );
+      return new Response('{"code":10015}', { status: 404 });
+    });
+    await consume(enqueue('d1', id));
+    expect(row('d1')).toMatchObject({ state: 'dead_lettered', last_error_code: 'destination_revoked' });
+    expect(enabled(id)).toBe(1);
+    expect(
+      db.raw.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='integration.auto_pause'").get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('pauses a legacy-format credential, pinned by its ciphertext', async () => {
+    const { id } = await integration('discord');
+    const before = db.raw.prepare('SELECT webhook_envelope FROM integrations WHERE id=?').get(id) as {
+      webhook_envelope: Uint8Array | null;
+    };
+    expect(before.webhook_envelope).toBeNull(); // legacy row: pinned by its ciphertext
+    fetchMock.mockResolvedValueOnce(new Response('{"code":10015}', { status: 404 }));
+    await consume(enqueue('d1', id));
     expect(enabled(id)).toBe(0);
+    expect(
+      db.raw.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='integration.auto_pause'").get(),
+    ).toEqual({ n: 1 });
   });
 
   it('429 honours the body retry_after and does not pause; 5xx retries and does not pause', async () => {
@@ -381,5 +456,84 @@ describe('signed customer webhook end to end', () => {
     await consume(enqueue('d1', id));
     expect(fetchMock).not.toHaveBeenCalled();
     expect(row('d1').state).toBe('dead_lettered');
+  });
+});
+
+describe('custom webhook: feature flag, own hosts and tenant-visible reasons (ADR 0014)', () => {
+  it('refuses to send to a stored row while the feature is off, with no network call', async () => {
+    const { id } = await integration('generic_webhook');
+    for (const flag of [undefined, '', 'false', 'TRUE', '1', 'yes']) {
+      env = { ...env, GENERIC_WEBHOOK_ENABLED: flag };
+      await consume(enqueue(`d-${String(flag)}`, id));
+      expect(row(`d-${String(flag)}`)).toMatchObject({
+        state: 'dead_lettered',
+        last_error: 'destination_type_disabled',
+        last_error_code: 'config_invalid',
+      });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('delivers again once the flag is on (redelivery after enabling works)', async () => {
+    const { id } = await integration('generic_webhook');
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 200 }));
+    await consume(enqueue('d1', id));
+    expect(row('d1').state).toBe('sent');
+  });
+
+  it('the flag does not affect Discord', async () => {
+    env = { ...env, GENERIC_WEBHOOK_ENABLED: 'false' };
+    const { id } = await integration('discord');
+    fetchMock.mockResolvedValueOnce(new Response('{}', { status: 200 }));
+    await consume(enqueue('d1', id));
+    expect(row('d1').state).toBe('sent');
+  });
+
+  it.each([
+    'https://noti.test/webhooks/generic/abc', // APP_ORIGIN host itself
+    'https://x.noti.test/x',
+    'https://svc.workers.dev/x',
+    'https://site.pages.dev/x',
+    'https://abc.cfargotunnel.com/x',
+  ])('a stored row pointing at %s is refused at send time', async (url) => {
+    const { id } = await integration('generic_webhook', { url });
+    await consume(enqueue('d1', id));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(row('d1')).toMatchObject({
+      last_error: 'destination_not_allowed',
+      last_error_code: 'destination_url_rejected',
+    });
+  });
+
+  it('refuses a stored legacy row whose host was never valid, at send time', async () => {
+    const { id } = await integration('generic_webhook', { url: 'https://10.0.0.8/hook' });
+    await consume(enqueue('d1', id));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(row('d1').last_error).toBe('destination_not_allowed');
+  });
+
+  it('shows every connection failure to the tenant as the same thing', async () => {
+    const { id } = await integration('generic_webhook');
+    const failures = [
+      new DOMException('timed out', 'TimeoutError'),
+      new TypeError('connect ECONNREFUSED 10.0.0.8:443'),
+      new TypeError('Network connection lost.'),
+    ];
+    for (const [i, failure] of failures.entries()) {
+      fetchMock.mockRejectedValueOnce(failure);
+      await consume(enqueue(`u${i}`, id));
+      expect(row(`u${i}`)).toMatchObject({
+        state: 'retrying',
+        last_error: 'destination_unreachable',
+        last_error_code: 'destination_unavailable',
+      });
+    }
+  });
+
+  it('keeps HTTP statuses visible: the customer needs them to fix their endpoint', async () => {
+    const { id } = await integration('generic_webhook');
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }));
+    await consume(enqueue('s1', id));
+    expect(row('s1').last_error).toBe('provider_http_503');
   });
 });

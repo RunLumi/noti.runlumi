@@ -5,7 +5,8 @@ import { Input } from '../../components/ui';
 import type { DestinationKind, GithubInstallation } from '../../lib/api';
 import { RepoPicker } from '../github/RepoPicker';
 import { t } from '../../i18n';
-import { DESTINATION_ORDER, DESTINATIONS } from '../destinations';
+import { DESTINATIONS } from '../destinations';
+import { useAvailableDestinations, useOrgId } from '../hooks';
 import { EventList } from '../EventList';
 import { EventPicker } from '../EventPicker';
 import type { GithubEventType } from '../events';
@@ -25,6 +26,7 @@ export interface StepProps {
 
 export function DestinationStep({ draft, errors, update }: StepProps) {
   useLocale();
+  const available = useAvailableDestinations(useOrgId());
   const base = useId();
   const errorId = base + '-error';
   return (
@@ -40,7 +42,7 @@ export function DestinationStep({ draft, errors, update }: StepProps) {
         </p>
       )}
       <div className="destination-options">
-        {DESTINATION_ORDER.map((kind) => {
+        {available.map((kind) => {
           const info = DESTINATIONS[kind];
           return (
             <label key={kind} className="destination-option">

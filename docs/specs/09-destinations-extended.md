@@ -343,7 +343,7 @@ supply, not values from the event body.
 
 ## F108 — Discord failure semantics and the shared-egress budget
 
-**Priority** P0 · **Status** partial (slice 8a) — `404`/`401`/`403`/`410` are permanent with zero retries; the integration is paused and an `integration.auto_pause` audit event written so the next event makes no request; `429` honours body `retry_after` then `Retry-After`. **Not built:** the global, persisted, cross-workspace breaker and customer notification, `X-RateLimit-*` pacing. **UNVERIFIED:** per-route numeric limit (none invented) · **This is the highest-consequence destination bug
+**Priority** P0 · **Status** partial (slice 8a) — `404`/`410` (and `401`/`403` carrying Discord code `10015`/`50027`) are permanent with zero retries and pause the integration with an `integration.auto_pause` audit event (same batch, tied to the credential used) so the next event makes no request; any other `401`/`403` retries at most once more and never pauses; `429` honours body `retry_after` then `Retry-After`. **Not built:** the global, persisted, cross-workspace breaker and customer notification, `X-RateLimit-*` pacing. **UNVERIFIED:** per-route numeric limit (none invented) · **This is the highest-consequence destination bug
 available**
 
 **Story** As an operator, I want one customer's dead Discord webhook to not degrade everyone

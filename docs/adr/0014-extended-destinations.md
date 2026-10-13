@@ -1,6 +1,6 @@
 # ADR 0014: Extended destinations (Discord and the signed customer webhook)
 
-Status: Accepted · Date: 2026-10-13 · Implements slice 8a (F107, F109 in part; F108 in part;
+Status: Accepted (custom webhook **off by default**, see decision 18) · Date: 2026-10-13 · Implements slice 8a (F107, F109 in part; F108 in part;
 F115, F116, F117 in part), as listed under "Deliberately not done"
 
 ## Context
@@ -69,13 +69,25 @@ is unverified here, and the code comments say so.
    `/api/v10/` form, with at most `?thread_id=<digits>`. `discordapp.com`, `canary.` and `ptb.`
    are rejected because the reference does not record them (UNVERIFIED, not guessed). The
    stored URL is normalised (no version, no `wait`).
-9. **A dead webhook pauses the integration.** On a `404`, `401`, `403` or `410` the delivery
-   is permanent with zero retries (this is the generic mapping; asserted because it is the
-   most consequential row in the spec), and the consumer also sets `integrations.enabled = 0`
-   and writes an `integration.auto_pause` audit event (actor `null`). That is what stops the
-   *next* event for the same dead webhook from making the same request, which is the
-   behaviour Discord's "temporary restriction" warning is about. The customer sees a paused
-   integration with the failure in the delivery log, replaces the URL and turns it back on.
+9. **A webhook that is gone pauses the integration; nothing else does.** A `404` or `410` is
+   permanent with zero retries (the generic mapping; asserted because it is the most
+   consequential row in the spec). A `401` or `403` is a dead webhook **only** if the JSON body
+   carries Discord's own code for one, `10015` (Unknown Webhook) or `50027` (Invalid Webhook
+   Token); the classifier parses the 2 KB prefix `send.ts` already read, keeps only the code
+   (our own table, never the body) and nothing reaches a log. Any other `401`/`403` (an egress
+   restriction, an edge block page, a transient auth fault) is **retryable** with our own
+   provider code `http_401`/`http_403`, capped at two attempts
+   (`DISCORD_UNAUTHORIZED_MAX_ATTEMPTS`) because each spends the shared invalid-request budget,
+   and never pauses anything. For a dead webhook the consumer sets `enabled = 0` and writes
+   `integration.auto_pause` (actor `null`) in **one `batch`**, the audit row guarded on the
+   update having changed a row, and the update is tied to the credential the failed delivery
+   used (`webhook_envelope IS ?` and `webhook_ciphertext = ?` with the bytes it opened). If the
+   customer replaced the webhook while the request was in flight, nothing is paused and nothing
+   is audited. That is what stops the *next* event for the same dead webhook from making the
+   same request, which is what Discord's "temporary restriction" warning is about. Tests cover
+   the in-flight rotation race on both a legacy-format and a sealed credential, and a plain
+   `403` that must not pause. (UNVERIFIED: that `10015` and `50027` are the codes Discord
+   returns for these cases; they are not in the reference.)
 10. **Rate limits are read from the response.** `429` uses the body's `retry_after` (float
     seconds), then `Retry-After`, clamped to one hour; `global: true` is recorded as a
     provider code. Nothing but the documented global 50 requests/second is a number in code,
@@ -96,16 +108,35 @@ is unverified here, and the code comments say so.
     - public wildcard-DNS services that exist to turn a name into an IP (`nip.io`, `sslip.io`,
       `xip.io`, `localtest.me`, `lvh.me`, `vcap.me`, `lacolhost.com`, `traefik.me`), a
       best-effort and incomplete list;
-    - our own domain (`runlumi.app`), so a destination cannot loop back into our ingress.
+    - our own domain: `runlumi.app`, **and** the host of `APP_ORIGIN` plus its parent domain
+      with every subdomain (`ownHostsOf`), passed into the policy at save time (API), at send
+      time (`sendRequest`'s `urlPolicy`) and by the consumer, so a destination cannot loop back
+      into our ingress whatever the deployment is called;
+    - Cloudflare-hosted infrastructure: `workers.dev`, `pages.dev` and `cfargotunnel.com`
+      with every subdomain. A tenant's Worker or tunnel is not an excuse to aim a destination
+      at infrastructure that Cloudflare routes differently from the public internet, and a
+      sibling tenant's or our own `*.workers.dev` hostname is exactly that. `workers_dev` is
+      also set to `false` in `wrangler.jsonc`, so the default `*.workers.dev` URL does not
+      expose our own Worker on a second hostname (nothing in the docs or config depends on it;
+      production is served from the custom domain in `APP_ORIGIN`; `wrangler dev` is
+      unaffected).
 12. **No redirect is ever followed** (`redirect: 'manual'`, 3xx is a permanent
     `destination_url_rejected`), requests are bounded by the 10-second outbound timeout, the
-    body by a 64,000-byte budget, and customers cannot add headers.
+    body by a 64,000-byte budget, and customers cannot add headers. `send.ts` reads at most a
+    2 KB prefix of the response body for every destination kind (to let classifiers read a
+    short code); the custom-webhook classifier ignores it entirely, nothing from it is stored
+    or logged, and it is cancelled after the prefix.
 13. **Save-time DNS verification, honestly scoped.** On create and credential rotation the API
     resolves the host's A and AAAA records through Cloudflare's DNS-over-HTTPS JSON endpoint
     and refuses it if any address is private or reserved (`address-policy.ts`: RFC 6890 IPv4,
     and IPv6 deny-by-default outside `2000::/3`, including IPv4-mapped, NAT64, 6to4 and
     Teredo). It fails closed: a failed lookup refuses the save with "try again". A blocked
-    address is decisive even if the other family failed.
+    address is decisive even if the other family failed. A public name whose answer chain
+    contains a CNAME to a blocked name (internal suffix, wildcard-DNS service, Cloudflare
+    infrastructure, our own host, an IP literal) is refused on the alias, whatever it finally
+    resolves to. The same shape and DNS checks run again when a custom webhook is **re-enabled**
+    (`PATCH enabled: true`), against the stored host, because the record may have changed since
+    it was saved.
     **This does not defeat DNS rebinding.** Workers `fetch` resolves at the edge and cannot be
     pinned to an address; the answer we check is a point-in-time answer from a different
     resolver path. A customer who controls their zone can answer with a public address now and
@@ -143,6 +174,47 @@ is unverified here, and the code comments say so.
     configured as success turns a broken endpoint into a silent black hole) is reason enough
     to ship without it.
 
+### Release gate, quotas and what a tenant sees
+
+18. **`GENERIC_WEBHOOK_ENABLED` (default `"false"`) gates the custom webhook.** Declared in
+    `wrangler.jsonc` and `.dev.vars.example` (the configuration-contract test covers both).
+    Only the exact string `true` enables it. While it is off:
+    - the API refuses to create one (also from a source) with the single message
+      "This destination type is not available yet." on `destination`, checked in
+      `parseDestination` **before** anything about the URL is looked at, so the gate is not an
+      oracle for what the policy accepts;
+    - the API refuses to re-enable one or rotate its credentials (the same message), while
+      pausing, renaming and deleting still work;
+    - the consumer refuses to send to a stored row: permanent `config_invalid`, diagnostic
+      `destination_type_disabled`, no network call, even for a row that was stored while the
+      flag was on (turning it on and redelivering sends);
+    - `GET /api/integrations` returns `capabilities: {genericWebhook: boolean}` and the
+      dashboard wizard hides the option (and treats an unloaded list as "off").
+    **Criteria to turn it on in production**, all of them: (1) the per-workspace host
+    allowlist, prompted for the first custom webhook in a workspace; (2) periodic
+    re-resolution of stored hosts with disable-and-alert on a change into a blocked range, and
+    recorded resolved addresses; (3) a canary test from a deployed Worker proving what its
+    egress can and cannot reach (a canary endpoint on a private address, `169.254.169.254`, and
+    a rebinding hostname) with the result recorded here; (4) a Worker-side check that the
+    DNS-over-HTTPS lookup works as designed; (5) the threat-model review of AR-30 repeated with
+    those in place. Until then it is a feature that exists in the code and cannot be reached.
+19. **`global_fetch_strictly_public` was researched and is NOT added.** It exists
+    (https://developers.cloudflare.com/workers/configuration/compatibility-flags/, read
+    2026-10-13; disable flag `global_fetch_private_origin`), but the documented behaviour is
+    that `fetch()` "will strictly route requests as if they were made on the public Internet",
+    so that a request to the Worker's own zone loops back to Cloudflare's front door instead of
+    going to the origin. That is a routing semantic, not a documented restriction of
+    `fetch()` to public IP addresses, and the page lists no flag that is. It must not be
+    counted as an SSRF control, and it changes how same-zone requests are routed for the whole
+    Worker, so it is left out. UNVERIFIED: whether it has any effect on private-address
+    reachability; test it in the canary (criterion 3) before relying on it.
+20. **Caps and the tenant-visible reason.** A workspace may have at most 10 custom webhooks
+    (`MAX_GENERIC_WEBHOOKS_PER_WORKSPACE`, `409`), on top of the per-user mutation limit.
+    Connection failures to a customer endpoint (timeout, refused, DNS, TLS, reset) are all
+    recorded as `destination_unavailable` with the diagnostic `destination_unreachable`, so a
+    tenant cannot tell what answers on a private address by choosing hosts and reading the
+    reason. HTTP statuses stay visible (the customer needs them to fix their own endpoint).
+
 ### Dashboard
 
 17. Two new entries in `DESTINATIONS` with numbered steps, notes and a docs link; copy in a
@@ -169,7 +241,8 @@ is unverified here, and the code comments say so.
   `X-RateLimit-Remaining` to delay the next send; update-in-place and message-id capture
   (F109, F156); `username`, `avatar_url` and programmatic webhook creation; a numeric
   per-route limit (UNVERIFIED in the reference, so none is invented).
-- **Customer webhook**: the workspace host allowlist, periodic re-resolution, recording of
+- **Customer webhook**: the *enabling criteria* of decision 18 (the host allowlist, periodic
+  re-resolution, a Worker egress canary); the workspace host allowlist, periodic re-resolution, recording of
   resolved addresses, the payload template (`GenericMapping`, F78 is not built), multi-secret
   rotation overlap (F77), `x-noti-event-id` and `x-noti-correlation-id` headers (the queued
   message carries neither), a "send a test" action (F98), the optional response-body excerpt,
@@ -185,19 +258,22 @@ is unverified here, and the code comments say so.
   (accepted loosely: 15-25 digits, 1-256 of `[A-Za-z0-9._-]`); which markdown subset embed
   titles and footers render; the exact `400` body for an over-limit embed; that `404` still
   carries the restriction behaviour described in the docs (taken from the docs, not tested).
+- Whether `global_fetch_strictly_public` restricts anything about private addresses
+  (decision 19: documented only as routing; not added).
+- Discord: that `10015` and `50027` are the error codes for a deleted webhook and a wrong token.
 - Cloudflare: that `cloudflare-dns.com/dns-query` answers a Worker the way it answered a
   developer machine on 2026-10-13 (the response shape was confirmed there only); Workers
   egress reachability of metadata and private ranges; whether a Worker may `fetch` a
-  `workers.dev` or same-zone customer endpoint (not blocked by policy; Cloudflare's own rules
-  apply).
+  customer endpoint on the same zone (blocked now by the own-host rule; `workers.dev`,
+  `pages.dev` and `cfargotunnel.com` are blocked outright).
 - No real Discord webhook or customer endpoint was contacted; every response is a fixture.
 
 ## Consequences
 
 - A customer can send to Discord and to their own signed endpoint end to end, with tests over
   the real migrations and consumer.
-- The customer webhook is the largest new attack surface in the product and ships with a
-  stated residual risk (AR-30), not a claim of safety. The next security step is the
+- The customer webhook is the largest new attack surface in the product. It ships **disabled**
+  (decision 18) with a stated residual risk (AR-30), not a claim of safety. The next security step is the
   workspace host allowlist plus periodic re-resolution.
 - Rolling the Worker back keeps working against the new schema but cannot deliver the new kinds;
   disable them first (the migration's header says how to restore the old CHECK).
