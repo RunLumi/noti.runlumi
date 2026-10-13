@@ -30,6 +30,12 @@ registrations with separate keys.
 | Actions | Read | Tell you when a workflow run fails or succeeds. |
 | Contents | Read | Tell you about pushes and published releases. GitHub gates these events on this permission, which technically allows reading files. Noti makes no API call that reads them. |
 | Deployments | Read | Tell you about deployment status changes. |
+| Organization → Members | Read | Confirm that the person connecting an organization is one of its admins, so a regular member cannot route the whole organization's events into their own workspace. |
+
+⚠️ UNVERIFIED: whether `GET /user/memberships/orgs/{org}` needs **Members: Read** for a
+GitHub App user token. GitHub's REST page does not name a permission. Check it on the staging
+App. If the call returns 403, the flow refuses with `installation_admin_required`, which
+fails closed.
 
 **Never request write access.** A notification router that can write to a repository is a
 supply-chain risk. GitHub's install screen always says the App can read public

@@ -243,8 +243,26 @@ HTTP endpoints mocked:
 
 The integrations API tests also cover the new repository-scope rule.
 
+**Review.** A security review found 1 HIGH, 5 MEDIUM and 6 LOW issues. All are fixed and
+covered by tests:
+
+- An installation could be claimed by anyone able to *see* it. Binding now requires an
+  active org admin or the account holder, matched by numeric id.
+- Membership and role are re-checked at every step.
+- Repository sync is chunked and bounded: `all` installations skip it, and an oversized
+  installation is refused rather than silently truncated.
+- A switch from `all` to `selected` fails closed and sets `needsResync`.
+- Lifecycle transitions are guarded and replay-safe. `uninstalled` is terminal, and a delete
+  that arrives before the bind is tombstoned.
+- Account renames are followed by numeric id.
+- The client secret moves to the form body, and the PKCE verifier is cleared after use.
+- Unexpected failures redirect instead of returning a 500.
+- Refused binds record the claimed id for correlation.
+
 **Known gaps**
 
 - No real GitHub App has been registered or exercised.
+- ⚠️ UNVERIFIED: whether `GET /user/memberships/orgs/{org}` needs the **Members: Read**
+  permission for an App user token. If it returns 403, the flow fails closed.
 - Reconciliation (F69), permission reads (F61), the unbind action, and the dashboard's
   "Connect GitHub" button. The button belongs to the UI slice.

@@ -100,7 +100,7 @@ See [ADR 0008](adr/0008-github-install-verification.md) and [GITHUB_APP.md](GITH
 | Method and path | Capability | Result |
 | --- | --- | --- |
 | `POST /api/github/install` | `integration.create` | `200 {url}`. Navigate the browser to `url`. Returns `503` when the App is not configured and `403` without our `Origin`. |
-| `GET /api/github/installations` | `integration.read` | `200 {configured, installations: [{id, account, accountType, repositorySelection, status, updatedAt, repositories: string[]}]}` |
+| `GET /api/github/installations` | `integration.read` | `200 {configured, installations: [{id, account, accountType, repositorySelection, status, updatedAt, needsResync, repositories: string[]}]}` |
 | `GET /github/setup` | session | GitHub's setup redirect. Continues to GitHub OAuth. |
 | `GET /github/callback` | session | GitHub's OAuth redirect. Verifies and binds, then redirects to `/integrations?github=<status>`. |
 
@@ -112,6 +112,11 @@ See [ADR 0008](adr/0008-github-install-verification.md) and [GITHUB_APP.md](GITH
 - `installation_id_invalid`
 - `oauth_failed`
 - `installation_not_accessible`
+- `installation_admin_required`
+- `installation_deleted`
+- `installation_too_large`
+- `workspace_access_lost`
+- `unexpected_error`
 - `installation_bound_elsewhere`
 - `github_unavailable`
 - `not_configured`

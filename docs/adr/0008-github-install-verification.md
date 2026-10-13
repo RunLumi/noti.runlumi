@@ -37,18 +37,52 @@ check GitHub recommends is impossible.
      never stored.
    - This amends F55: "Request user authorization during installation" stays **off**, so the
      Setup URL keeps working, but the App has a Callback URL and a client secret.
-3. **Bind once.**
+3. **Require installer authority, not just visibility.**
+   - `/user/installations` also lists an org installation to ordinary members.
+   - Binding requires an **active org admin** (`GET /user/memberships/orgs/{org}` with
+     `role=admin` and `state=active`), or, for a personal account, the account holder
+     (`GET /user` login matches, compared case-insensitively).
+   - Otherwise the result is `installation_admin_required`, which is audited. This mirrors the
+     authority GitHub requires to install the App in the first place.
+   - For a personal account, the user's **numeric** id is compared, because a login can be
+     renamed and then re-registered by someone else.
+   - Workspace membership and the `integration.create` capability are re-checked at the setup
+     step and again at the callback. A user removed mid-flow gets `workspace_access_lost`.
+4. **Bind once.**
    - An installation already bound to a different workspace is refused and audited.
    - The `github_installations_no_rebind` trigger makes a silent rebind impossible even for
      code that forgets this check.
    - Unbinding will be an explicit, audited, admin-only action (not built).
-4. **Lifecycle events are state changes, never routes (F68).**
+5. **Lifecycle events are guarded state changes, never routes (F68).** Webhooks arrive
+   unordered and can be redelivered, so each transition is guarded on its starting state:
+   - `suspend` applies only from `active`, and `unsuspend` only from `suspended`.
+   - `uninstalled` is terminal, because GitHub issues a new id on reinstall. A `created` for a
+     row we already hold is recorded but changes nothing.
+   - A `deleted` event for an installation that is not yet bound is tombstoned, and a later
+     bind of that id is refused (`installation_deleted`). This closes the race between
+     verification and bind.
+   - `installation_target.renamed` updates the login only if the numeric account id matches.
+   - A failed lifecycle write returns `500`, so GitHub's delivery log shows it and it can be
+     redelivered. A revocation is never dropped silently.
    - `installation.suspend|unsuspend|deleted|created|new_permissions_accepted` and
      `installation_repositories.added|removed` update status or the repository set in one
      batch, together with an audit row.
    - Events for installations nobody has bound are acknowledged and ignored.
    - `ping` is acknowledged.
-5. **Repository scope (F67).**
+6. **Repository sync is bounded and honest.**
+   - `all` installations need no repository list, so none is fetched or stored.
+   - `selected` lists are paged up to 1,000. Beyond that, the result is
+     `installation_too_large` rather than a silently truncated scope.
+   - Inserts are chunked: 25 rows per statement, keeping each statement under 100 bound
+     parameters.
+   - A switch from `all` to `selected` delivers only a delta. The installation is flagged
+     `repositories_complete = 0`, ingress keeps failing closed against the stored set, and the
+     API reports `needsResync` so the dashboard can ask the user to reconnect.
+7. **Credentials in transit.** The token exchange sends the client secret, code and PKCE
+   verifier in a form body, never the URL. The verifier is cleared once it has been read.
+   Unexpected failures redirect to the dashboard with `unexpected_error`, never to a blank
+   500.
+8. **Repository scope (F67).**
    - For `selected` installations, ingress refuses and audits a repository outside the synced
      set.
    - Integrations may only name a repository an active installation covers. For a `selected`

@@ -13,6 +13,8 @@
  * is used for the check only, then revoked; we never store it.
  */
 
+import { insertRepositories } from './repos';
+
 export const STATE_TTL_MS = 10 * 60 * 1000;
 const GITHUB_API = 'https://api.github.com';
 const GITHUB_WEB = 'https://github.com';
@@ -33,11 +35,20 @@ export type InstallError =
   | 'installation_id_invalid'
   | 'oauth_failed'
   | 'installation_not_accessible'
+  | 'installation_admin_required'
+  | 'installation_deleted'
+  | 'installation_too_large'
+  | 'workspace_access_lost'
+  | 'unexpected_error'
   | 'installation_bound_elsewhere'
   | 'github_unavailable';
 
 export class InstallFlowError extends Error {
-  constructor(readonly code: InstallError) {
+  constructor(
+    readonly code: InstallError,
+    /** Set on refusals after the claim is known, for audit correlation only. */
+    readonly claimedInstallationId?: string,
+  ) {
     super(code);
     this.name = 'InstallFlowError';
   }
@@ -159,8 +170,11 @@ export async function continueFromSetup(
   params: { state: string | undefined; installationId: string | undefined },
   userId: string,
   now: number,
+  mayConnect: WorkspaceCheck,
 ): Promise<string> {
   const install = await consumeState(db, params.state, 'install', userId, now);
+  if (!(await mayConnect(install.organization_id, userId)))
+    throw new InstallFlowError('workspace_access_lost');
   if (!params.installationId || !/^[1-9][0-9]{0,15}$/.test(params.installationId))
     throw new InstallFlowError('installation_id_invalid');
 
@@ -188,6 +202,8 @@ export async function continueFromSetup(
 
 export interface VerifiedInstallation {
   readonly installationId: string;
+  /** GitHub's numeric account id; stable across renames. */
+  readonly accountId: string;
   readonly accountLogin: string;
   readonly accountType: 'User' | 'Organization';
   readonly repositorySelection: 'all' | 'selected';
@@ -212,21 +228,28 @@ async function exchangeCode(
   code: string,
   verifier: string,
 ): Promise<string> {
-  const url = new URL(`${GITHUB_WEB}/login/oauth/access_token`);
-  url.searchParams.set('client_id', config.clientId);
-  url.searchParams.set('client_secret', config.clientSecret);
-  url.searchParams.set('code', code);
-  url.searchParams.set('redirect_uri', callbackUrl(config));
-  url.searchParams.set('code_verifier', verifier);
+  // Credentials in a form body, not the query string, so they never land in access logs.
+  const body = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    code,
+    redirect_uri: callbackUrl(config),
+    code_verifier: verifier,
+  });
   let res: Response;
   try {
-    res = await f(url, { method: 'POST', headers: { accept: 'application/json' }, redirect: 'error' });
+    res = await f(`${GITHUB_WEB}/login/oauth/access_token`, {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+      redirect: 'error',
+    });
   } catch {
     throw new InstallFlowError('github_unavailable');
   }
   if (!res.ok) throw new InstallFlowError(res.status >= 500 ? 'github_unavailable' : 'oauth_failed');
-  const body: unknown = await res.json().catch(() => null);
-  const token = (body as { access_token?: unknown } | null)?.access_token;
+  const reply: unknown = await res.json().catch(() => null);
+  const token = (reply as { access_token?: unknown } | null)?.access_token;
   if (typeof token !== 'string' || token.length === 0) throw new InstallFlowError('oauth_failed');
   return token;
 }
@@ -264,11 +287,14 @@ export function pickInstallation(
     const account = record(r.account);
     const login = account?.login;
     const type = account?.type;
+    const accountId = account?.id;
     const selection = r.repository_selection;
     if (typeof login !== 'string' || (type !== 'User' && type !== 'Organization')) return null;
+    if (typeof accountId !== 'number' || !Number.isSafeInteger(accountId)) return null;
     if (selection !== 'all' && selection !== 'selected') return null;
     return {
       installationId,
+      accountId: String(accountId),
       accountLogin: login,
       accountType: type,
       repositorySelection: selection,
@@ -289,6 +315,39 @@ export function pickRepositories(body: unknown): { id: string; fullName: string 
   });
 }
 
+/**
+ * Seeing an installation is not the same as owning it: `/user/installations` also lists an
+ * organization's installation to ordinary members who can access any covered repository.
+ * Binding routes the WHOLE installation's events into a workspace, so we require the
+ * authority GitHub itself requires to install: an active admin of the organization, or the
+ * account holder for a personal account.
+ */
+async function verifyAuthority(
+  f: Fetch,
+  token: string,
+  installation: Omit<VerifiedInstallation, 'repositories'>,
+): Promise<void> {
+  if (installation.accountType === 'User') {
+    // Compare numeric ids, not logins: a login can be renamed and then re-registered.
+    const me = record(await getJson(f, '/user', token));
+    if (typeof me?.id !== 'number' || String(me.id) !== installation.accountId)
+      throw new InstallFlowError('installation_admin_required');
+    return;
+  }
+  let membership: Record<string, unknown> | null;
+  try {
+    membership = record(
+      await getJson(f, `/user/memberships/orgs/${encodeURIComponent(installation.accountLogin)}`, token),
+    );
+  } catch (e) {
+    if (e instanceof InstallFlowError && e.code === 'installation_not_accessible')
+      throw new InstallFlowError('installation_admin_required');
+    throw e;
+  }
+  if (membership?.state !== 'active' || membership.role !== 'admin')
+    throw new InstallFlowError('installation_admin_required');
+}
+
 async function verifyAccess(
   f: Fetch,
   config: GithubAppConfig,
@@ -303,9 +362,15 @@ async function verifyAccess(
     if (count < 100) break;
   }
   if (!found) throw new InstallFlowError('installation_not_accessible');
+  await verifyAuthority(f, token, found);
+
+  // An 'all' installation's scope is its account; the repository list is never consulted
+  // (tenant.ts), so it is not fetched or stored.
+  if (found.repositorySelection === 'all') return { ...found, repositories: [] };
 
   const repositories: { id: string; fullName: string }[] = [];
-  for (let page = 1; page <= MAX_PAGES; page++) {
+  for (let page = 1; ; page++) {
+    if (page > MAX_PAGES) throw new InstallFlowError('installation_too_large');
     const batch = pickRepositories(
       await getJson(f, `/user/installations/${installationId}/repositories?per_page=100&page=${page}`, token),
     );
@@ -341,6 +406,9 @@ export interface BindResult {
   readonly installationRowId: string;
 }
 
+/** May this user still connect GitHub for this workspace? Re-checked at every step. */
+export type WorkspaceCheck = (organizationId: string, userId: string) => Promise<boolean>;
+
 /** OAuth callback: verify the claim, then bind. */
 export async function completeVerification(
   db: D1Database,
@@ -348,33 +416,50 @@ export async function completeVerification(
   params: { state: string | undefined; code: string | undefined },
   userId: string,
   now: number,
+  mayConnect: WorkspaceCheck,
   f: Fetch = fetch,
 ): Promise<BindResult> {
   const verify = await consumeState(db, params.state, 'verify', userId, now);
+  // The PKCE verifier has done its job once read; do not leave it at rest.
+  await db
+    .prepare('UPDATE github_auth_states SET pkce_verifier=NULL WHERE state_hash=?')
+    .bind(await sha256Base64url(params.state ?? ''))
+    .run();
   if (!params.code || params.code.length > 256 || !verify.claimed_installation_id || !verify.pkce_verifier)
     throw new InstallFlowError('oauth_failed');
+  // Membership or role may have changed since the flow started (10-minute window).
+  if (!(await mayConnect(verify.organization_id, userId)))
+    throw new InstallFlowError('workspace_access_lost');
 
+  const claimed = verify.claimed_installation_id;
   const token = await exchangeCode(f, config, params.code, verify.pkce_verifier);
-  let installation: VerifiedInstallation;
   try {
-    installation = await verifyAccess(f, config, token, verify.claimed_installation_id);
-  } finally {
-    await revokeToken(f, config, token);
+    let installation: VerifiedInstallation;
+    try {
+      installation = await verifyAccess(f, config, token, claimed);
+    } finally {
+      await revokeToken(f, config, token);
+    }
+    const installationRowId = await bindInstallation(
+      db,
+      config.appId,
+      verify.organization_id,
+      userId,
+      installation,
+    );
+    return { organizationId: verify.organization_id, installation, installationRowId };
+  } catch (e) {
+    // Attach the claimed id to refusals so the audit row can correlate repeated attempts.
+    if (e instanceof InstallFlowError && !e.claimedInstallationId)
+      throw new InstallFlowError(e.code, claimed);
+    throw e;
   }
-  const installationRowId = await bindInstallation(
-    db,
-    config.appId,
-    verify.organization_id,
-    userId,
-    installation,
-  );
-  return { organizationId: verify.organization_id, installation, installationRowId };
 }
 
 /**
  * Insert or refresh the installation for this workspace. A row bound to another workspace
- * is refused (the trigger in 0010 would also refuse it). Repositories are replaced in the
- * same batch.
+ * is refused (the trigger in 0010 would also refuse it), as is an installation GitHub has
+ * already told us was deleted. The repository set is replaced in the same batch.
  */
 export async function bindInstallation(
   db: D1Database,
@@ -383,6 +468,12 @@ export async function bindInstallation(
   userId: string,
   installation: VerifiedInstallation,
 ): Promise<string> {
+  const tombstone = await db
+    .prepare('SELECT 1 AS x FROM github_installation_tombstones WHERE installation_id=? AND app_id=?')
+    .bind(installation.installationId, appId)
+    .first();
+  if (tombstone) throw new InstallFlowError('installation_deleted');
+
   const existing = await db
     .prepare('SELECT id,organization_id FROM github_installations WHERE installation_id=? AND app_id=?')
     .bind(installation.installationId, appId)
@@ -395,11 +486,13 @@ export async function bindInstallation(
   const upsert = existing
     ? db
         .prepare(
-          `UPDATE github_installations SET account_login=?,account_type=?,repository_selection=?,status=?,
-             updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+          `UPDATE github_installations SET account_login=?,account_id=?,account_type=?,repository_selection=?,status=?,
+             repositories_complete=1,updated_at=CURRENT_TIMESTAMP
+           WHERE id=? AND organization_id=? AND status<>'uninstalled'`,
         )
         .bind(
           installation.accountLogin,
+          installation.accountId,
           installation.accountType,
           installation.repositorySelection,
           status,
@@ -408,9 +501,9 @@ export async function bindInstallation(
         )
     : db
         .prepare(
-          `INSERT INTO github_installations(id,organization_id,installation_id,app_id,account_login,account_type,
-             repository_selection,status,bound_by,created_at,updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+          `INSERT INTO github_installations(id,organization_id,installation_id,app_id,account_login,account_id,account_type,
+             repository_selection,status,bound_by,repositories_complete,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
         )
         .bind(
           rowId,
@@ -418,22 +511,20 @@ export async function bindInstallation(
           installation.installationId,
           appId,
           installation.accountLogin,
+          installation.accountId,
           installation.accountType,
           installation.repositorySelection,
           status,
           userId,
         );
 
-  await db.batch([
+  const results = await db.batch([
     upsert,
     db.prepare('DELETE FROM github_installation_repositories WHERE installation_row_id=?').bind(rowId),
-    ...installation.repositories.map((r) =>
-      db
-        .prepare(
-          'INSERT INTO github_installation_repositories(installation_row_id,repository_id,full_name) VALUES(?,?,?)',
-        )
-        .bind(rowId, r.id, r.fullName),
-    ),
+    ...insertRepositories(db, rowId, installation.repositories),
   ]);
+  // An uninstalled installation is never revived by a late bind; GitHub issues a new id on
+  // reinstall.
+  if (results[0]?.meta.changes !== 1) throw new InstallFlowError('installation_deleted');
   return rowId;
 }

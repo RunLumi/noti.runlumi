@@ -27,11 +27,26 @@ CREATE TABLE IF NOT EXISTS github_installation_repositories (
   PRIMARY KEY (installation_row_id, repository_id)
 );
 CREATE INDEX IF NOT EXISTS github_installation_repositories_name
-  ON github_installation_repositories(installation_row_id, full_name);
+  ON github_installation_repositories(installation_row_id, full_name COLLATE NOCASE);
 
 ALTER TABLE github_installations ADD COLUMN suspended_at TEXT;
 ALTER TABLE github_installations ADD COLUMN updated_at TEXT;
 ALTER TABLE github_installations ADD COLUMN bound_by TEXT;
+-- GitHub's numeric account id: stable across renames, unlike account_login.
+ALTER TABLE github_installations ADD COLUMN account_id TEXT;
+-- 0 when the stored repository set may be incomplete (e.g. the selection switched from
+-- 'all' to 'selected' and GitHub's event listed only the delta). Ingress still checks the
+-- stored set — failing closed — and the dashboard asks for a reconnect to resync.
+ALTER TABLE github_installations ADD COLUMN repositories_complete INTEGER NOT NULL DEFAULT 1;
+
+-- Installations GitHub told us were deleted before any workspace bound them. A bind of a
+-- tombstoned installation is refused, closing the verify→bind race with 'deleted'.
+CREATE TABLE IF NOT EXISTS github_installation_tombstones (
+  installation_id TEXT NOT NULL,
+  app_id TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (installation_id, app_id)
+);
 
 -- An installation is bound to exactly one workspace, forever, unless an explicit audited
 -- action unbinds it (F56). The database refuses a silent rebind.

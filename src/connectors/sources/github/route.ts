@@ -65,8 +65,15 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   if (kind === 'ping') return c.json({ accepted: true, ping: true }, 202);
   // Lifecycle events change installation state and never route a notification (F68).
   if (LIFECYCLE_EVENTS.has(kind)) {
-    const outcome = await handleLifecycle(c.env.DB, c.env.GITHUB_APP_ID, kind, event);
-    return c.json({ accepted: true, lifecycle: outcome.kind }, 202);
+    try {
+      const outcome = await handleLifecycle(c.env.DB, c.env.GITHUB_APP_ID, kind, event);
+      return c.json({ accepted: true, lifecycle: outcome.kind }, 202);
+    } catch {
+      // A 5xx makes the failure visible in GitHub's delivery log, where it can be
+      // redelivered; a revocation must never be silently dropped. No payload is logged.
+      console.error(JSON.stringify({ event: 'github_lifecycle_failed', kind }));
+      return c.text('Lifecycle update failed', 500);
+    }
   }
 
   const repository = asRecord(event.repository);

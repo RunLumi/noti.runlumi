@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { recordAudit, requestOrigin } from '../audit/audit';
+import { can } from '../auth/permissions';
 import { authorize, currentSession, isFailure } from '../auth/workspace';
 import { githubAppConfig } from '../connectors/sources/github/app-config';
 import {
@@ -23,6 +24,17 @@ type Ctx = Context<{ Bindings: Bindings }>;
 
 export const api = new Hono<{ Bindings: Bindings }>();
 export const browser = new Hono<{ Bindings: Bindings }>();
+
+/** Membership and role are re-read at each browser step; they may change mid-flow. */
+function mayConnect(db: D1Database) {
+  return async (organizationId: string, userId: string): Promise<boolean> => {
+    const row = await db
+      .prepare('SELECT role FROM member WHERE organization_id=? AND user_id=?')
+      .bind(organizationId, userId)
+      .first<{ role: string }>();
+    return row !== null && can(row.role, 'integration.create');
+  };
+}
 
 function backToDashboard(
   c: Ctx,
@@ -57,13 +69,14 @@ interface InstallationRow {
   repository_selection: string;
   status: string;
   updated_at: string | null;
+  repositories_complete: number;
 }
 
 api.get('/installations', async (c) => {
   const who = await authorize(c, 'integration.read');
   if (isFailure(who)) return c.json({ error: who.error }, who.status);
   const installations = await c.env.DB.prepare(
-    `SELECT id,installation_id,account_login,account_type,repository_selection,status,updated_at
+    `SELECT id,installation_id,account_login,account_type,repository_selection,status,updated_at,repositories_complete
      FROM github_installations WHERE organization_id=? ORDER BY account_login`,
   )
     .bind(who.orgId)
@@ -84,6 +97,8 @@ api.get('/installations', async (c) => {
       repositorySelection: i.repository_selection,
       status: i.status,
       updatedAt: i.updated_at,
+      // The stored repository set may be incomplete; reconnecting resyncs it.
+      needsResync: i.repositories_complete === 0,
       repositories: repos.results.filter((r) => r.installation_row_id === i.id).map((r) => r.full_name),
     })),
   });
@@ -101,11 +116,13 @@ browser.get('/setup', async (c) => {
       { state: c.req.query('state'), installationId: c.req.query('installation_id') },
       session.user.id,
       Date.now(),
+      mayConnect(c.env.DB),
     );
     return c.redirect(next, 302);
   } catch (e) {
     if (e instanceof InstallFlowError) return backToDashboard(c, e.code);
-    throw e;
+    console.error(JSON.stringify({ event: 'github_setup_failed' }));
+    return backToDashboard(c, 'unexpected_error');
   }
 });
 
@@ -122,6 +139,7 @@ browser.get('/callback', async (c) => {
       { state: c.req.query('state'), code: c.req.query('code') },
       session.user.id,
       Date.now(),
+      mayConnect(c.env.DB),
     );
     await recordAudit(c.env.DB, {
       organizationId: bound.organizationId,
@@ -139,8 +157,16 @@ browser.get('/callback', async (c) => {
     });
     return backToDashboard(c, 'connected');
   } catch (e) {
-    if (!(e instanceof InstallFlowError)) throw e;
-    if (e.code === 'installation_bound_elsewhere' || e.code === 'installation_not_accessible') {
+    if (!(e instanceof InstallFlowError)) {
+      // Never a blank 500 from a browser redirect: the user lands back on the dashboard.
+      console.error(JSON.stringify({ event: 'github_callback_failed' }));
+      return backToDashboard(c, 'unexpected_error');
+    }
+    if (
+      e.code === 'installation_bound_elsewhere' ||
+      e.code === 'installation_not_accessible' ||
+      e.code === 'installation_admin_required'
+    ) {
       // The attempt is recorded against no workspace's data: the claimed installation may
       // belong to someone else, and we do not reveal which workspace holds it.
       await recordAudit(c.env.DB, {
@@ -151,7 +177,9 @@ browser.get('/callback', async (c) => {
         subjectId: null,
         outcome: 'denied',
         ...origin,
-        metadata: { reason: e.code },
+        // The claimed id is GitHub's public identifier, not a secret; it lets an operator
+        // correlate repeated attempts against the same installation.
+        metadata: { reason: e.code, claimedInstallationId: e.claimedInstallationId ?? null },
       });
     }
     return backToDashboard(c, e.code);

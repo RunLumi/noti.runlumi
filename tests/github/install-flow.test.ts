@@ -41,6 +41,8 @@ let github: {
   installations: unknown[];
   repositories: unknown[];
   exchangeStatus: number;
+  membership: { status: number; body: unknown };
+  user: { login: string; id: number };
   calls: { method: string; url: string; body?: string }[];
 };
 
@@ -154,13 +156,15 @@ beforeEach(() => {
       {
         id: INSTALLATION,
         app_id: 1,
-        account: { login: 'acme', type: 'Organization' },
+        account: { login: 'acme', type: 'Organization', id: 9001 },
         repository_selection: 'selected',
         suspended_at: null,
       },
     ],
     repositories: [{ id: 7, full_name: 'acme/web' }],
     exchangeStatus: 200,
+    membership: { status: 200, body: { state: 'active', role: 'admin' } },
+    user: { login: 'bob-gh', id: 4242 },
     calls: [],
   };
   vi.stubGlobal(
@@ -184,6 +188,11 @@ beforeEach(() => {
         return Promise.resolve(new Response(JSON.stringify({ repositories: github.repositories })));
       if (url.pathname.startsWith('/applications/'))
         return Promise.resolve(new Response(null, { status: 204 }));
+      if (url.pathname.startsWith('/user/memberships/orgs/'))
+        return Promise.resolve(
+          new Response(JSON.stringify(github.membership.body), { status: github.membership.status }),
+        );
+      if (url.pathname === '/user') return Promise.resolve(new Response(JSON.stringify(github.user)));
       return Promise.resolve(new Response(JSON.stringify({ code: 0 })));
     }),
   );
@@ -219,7 +228,7 @@ describe('install flow', () => {
     await callback(authorize.searchParams.get('state') ?? '');
 
     const exchange = github.calls.find((c) => c.url.includes('/login/oauth/access_token'));
-    const verifier = new URL(exchange?.url ?? '').searchParams.get('code_verifier') ?? '';
+    const verifier = new URLSearchParams(String(exchange?.body)).get('code_verifier') ?? '';
     expect(await sha256Base64url(verifier)).toBe(challenge);
     expect(
       github.calls.some((c) => c.method === 'DELETE' && c.url.includes('/applications/Iv1.client/token')),
@@ -239,6 +248,122 @@ describe('install flow', () => {
     expect(done.searchParams.get('github')).toBe('installation_not_accessible');
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM github_installations').get()).toEqual({ n: 0 });
     expect(audits('github.installation.bind_refused')).toHaveLength(1);
+  });
+
+  it('refuses an organization member who is not an admin', async () => {
+    github.membership = { status: 200, body: { state: 'active', role: 'member' } };
+    expect((await connect()).searchParams.get('github')).toBe('installation_admin_required');
+    expect(installationRow()).toBeUndefined();
+    expect(audits('github.installation.bind_refused')).toHaveLength(1);
+  });
+
+  it('refuses a pending admin and a user without a visible membership', async () => {
+    github.membership = { status: 200, body: { state: 'pending', role: 'admin' } };
+    expect((await connect()).searchParams.get('github')).toBe('installation_admin_required');
+    github.membership = { status: 404, body: { message: 'Not Found' } };
+    expect((await connect()).searchParams.get('github')).toBe('installation_admin_required');
+  });
+
+  it('requires the account holder for a personal-account installation', async () => {
+    github.installations = [
+      { ...(github.installations[0] as object), account: { login: 'bob-gh', type: 'User', id: 4242 } },
+    ];
+    expect((await connect()).searchParams.get('github')).toBe('connected');
+  });
+
+  it('refuses someone else’s personal-account installation', async () => {
+    github.installations = [
+      { ...(github.installations[0] as object), account: { login: 'bob-gh', type: 'User', id: 7777 } },
+    ];
+    expect((await connect()).searchParams.get('github')).toBe('installation_admin_required');
+  });
+
+  it('refuses a user who loses workspace access mid-flow', async () => {
+    const authorize = await setup(await startInstall());
+    // Another admin removes bob after he started the flow (the last-admin trigger needs one).
+    user('carol');
+    member('carol', 'org-a');
+    db.raw.exec("DELETE FROM member WHERE user_id='bob'");
+    expect((await callback(authorize.searchParams.get('state') ?? '')).searchParams.get('github')).toBe(
+      'workspace_access_lost',
+    );
+    expect(installationRow()).toBeUndefined();
+  });
+
+  it('refuses to bind an installation GitHub reported deleted before the bind', async () => {
+    db.raw
+      .prepare('INSERT INTO github_installation_tombstones(installation_id,app_id) VALUES(?,?)')
+      .run(String(INSTALLATION), '1');
+    expect((await connect()).searchParams.get('github')).toBe('installation_deleted');
+    expect(installationRow()).toBeUndefined();
+  });
+
+  it('does not fetch or store repositories for an all-repositories installation', async () => {
+    github.installations = [{ ...(github.installations[0] as object), repository_selection: 'all' }];
+    expect((await connect()).searchParams.get('github')).toBe('connected');
+    expect(github.calls.some((c) => c.url.includes('/repositories'))).toBe(false);
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM github_installation_repositories').get()).toEqual({
+      n: 0,
+    });
+  });
+
+  it('refuses rather than truncates an installation with more repositories than it can sync', async () => {
+    github.repositories = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, full_name: `acme/r${i}` }));
+    expect((await connect()).searchParams.get('github')).toBe('installation_too_large');
+    expect(installationRow()).toBeUndefined();
+  });
+
+  it('stores a 900-repository installation in chunked statements', async () => {
+    const all = Array.from({ length: 900 }, (_, i) => ({ id: i + 1, full_name: `acme/r${i}` }));
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith('/repositories')) {
+        const page = Number(url.searchParams.get('page'));
+        return Promise.resolve(
+          new Response(JSON.stringify({ repositories: all.slice((page - 1) * 100, page * 100) })),
+        );
+      }
+      return base(input, init);
+    });
+    expect((await connect()).searchParams.get('github')).toBe('connected');
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM github_installation_repositories').get()).toEqual({
+      n: 900,
+    });
+  });
+
+  it('sends the client secret in the form body, never the URL', async () => {
+    await connect();
+    const exchange = github.calls.find((c) => c.url.includes('/login/oauth/access_token'));
+    expect(exchange?.url).toBe('https://github.com/login/oauth/access_token');
+    expect(String(exchange?.body)).toContain('client_secret=');
+  });
+
+  it('stores no PKCE verifier once the flow completes', async () => {
+    await connect();
+    expect(
+      db.raw.prepare('SELECT COUNT(*) AS n FROM github_auth_states WHERE pkce_verifier IS NOT NULL').get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('records the claimed installation id on a refused bind', async () => {
+    github.membership = { status: 200, body: { state: 'active', role: 'member' } };
+    await connect();
+    const row = audits('github.installation.bind_refused')[0];
+    expect(JSON.parse(String(row?.metadata_json))).toEqual({
+      reason: 'installation_admin_required',
+      claimedInstallationId: String(INSTALLATION),
+    });
+  });
+
+  it('lands on the dashboard, not a blank error, when something unexpected fails', async () => {
+    const authorize = await setup(await startInstall());
+    vi.stubGlobal('fetch', () => Promise.reject(new Error('boom')));
+    env = makeEnv({
+      DB: { ...db.d1, batch: () => Promise.reject(new Error('d1 down')) } as unknown as D1Database,
+    });
+    const done = await callback(authorize.searchParams.get('state') ?? '');
+    expect(done.pathname).toBe('/integrations');
   });
 
   it('refuses an installation of a different App with the same id', async () => {
@@ -463,6 +588,72 @@ describe('lifecycle and repository scope', () => {
     const res = await signedWebhook('ping', { zen: 'Keep it logically awesome.', hook_id: 1 });
     expect(res.status).toBe(202);
     expect(sent).toHaveLength(0);
+  });
+
+  it('never revives an uninstalled installation from a late or replayed event', async () => {
+    await signedWebhook('installation', { action: 'deleted', installation: installationBlock });
+    await signedWebhook('installation', { action: 'unsuspend', installation: installationBlock });
+    await signedWebhook('installation', { action: 'created', installation: installationBlock });
+    expect(installationRow()?.status).toBe('uninstalled');
+  });
+
+  it('ignores an unsuspend for an installation that was never suspended', async () => {
+    await signedWebhook('installation', { action: 'unsuspend', installation: installationBlock });
+    expect(installationRow()).toMatchObject({ status: 'active', suspended_at: null });
+  });
+
+  it('tombstones a deletion that arrives before anyone bound the installation', async () => {
+    await signedWebhook('installation', { action: 'deleted', installation: { id: 999, app_id: 1 } });
+    expect(db.raw.prepare('SELECT installation_id FROM github_installation_tombstones').all()).toEqual([
+      { installation_id: '999' },
+    ]);
+  });
+
+  it('fails closed and flags a resync when the selection switches from all to selected', async () => {
+    db.raw.exec("UPDATE github_installations SET repository_selection='all'");
+    await signedWebhook('installation_repositories', {
+      action: 'removed',
+      installation: installationBlock,
+      repository_selection: 'selected',
+      repositories_added: [],
+      repositories_removed: [{ id: 99, full_name: 'acme/other' }],
+    });
+    expect(installationRow()).toMatchObject({ repository_selection: 'selected', repositories_complete: 0 });
+    // acme/web (id 7) is still in the stored set from the bind; anything else is refused
+    // until a reconnect resyncs the full set.
+    expect((await signedWebhook('issues', issue(7, 'acme/web'))).status).toBe(202);
+    expect((await signedWebhook('issues', issue(123, 'acme/new'))).status).toBe(403);
+  });
+
+  it('follows an account rename', async () => {
+    await signedWebhook('installation_target', {
+      action: 'renamed',
+      installation: installationBlock,
+      account: { login: 'acme-corp', id: 9001 },
+    });
+    expect(installationRow()?.account_login).toBe('acme-corp');
+  });
+
+  it('ignores a rename that names a different account id', async () => {
+    await signedWebhook('installation_target', {
+      action: 'renamed',
+      installation: installationBlock,
+      account: { login: 'evil', id: 1 },
+    });
+    expect(installationRow()?.account_login).toBe('acme');
+  });
+
+  it('returns a retryable 500 when a lifecycle update cannot be stored', async () => {
+    env = makeEnv({
+      DB: {
+        ...db.d1,
+        prepare: db.d1.prepare.bind(db.d1),
+        batch: () => Promise.reject(new Error('down')),
+      } as unknown as D1Database,
+    });
+    expect(
+      (await signedWebhook('installation', { action: 'suspend', installation: installationBlock })).status,
+    ).toBe(500);
   });
 
   it('never accepts an unsigned lifecycle event', async () => {
