@@ -20,7 +20,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | # | Slice | Specs | Defects | State | PR |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Inbound tenant resolution from verified GitHub installation; multi-workspace membership | F15, F25 (expand), F59 | D2 (expand), D3, N6 (inbound) | ✅ | #6 |
-| 2 | Worker modularisation, envelope encryption with AAD and key version, queue messages carry ids not secrets | F33–F40 | D5, D6 | ⬜ | — |
+| 2 | Worker modularisation, envelope encryption with AAD and key version, queue messages carry ids not secrets, delivery-path integration tests | F33, F35–F37 (F34 tier 2) | D5, D6, D13 | ✅ | #7 |
 | 3 | Tenant-scoped integrations API with write-time validation; GitHub App install flow; `organization_id` NOT NULL contract | F26–F29, F56–F58, F72 | D2 (contract), D9, D12, D16, N6 | ⬜ | — |
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F169–F190 | D4, D10, D11 | ⬜ | — |
 | 5 | Destination capability model; Slack and Teams adapters | F91–F104 | D8 | ⬜ | — |
@@ -72,3 +72,43 @@ AI features (F243–F262) stay out of scope until the delivery ledger is trustwo
   need a backfill before the NOT NULL contract migration.
 - The queue consumer does not yet re-check `organization_id` against the integration. That
   arrives with slice 2, when messages carry ids instead of ciphertext.
+
+## Slice 2 — envelope encryption and id-only queue messages (PR #7)
+
+**What changed**
+
+- `src/index.ts` is now a thin entry point. Responsibilities moved to:
+  - `connectors/sources/github/{route,tenant}.ts`
+  - `pipeline/{outbox,consumer,credentials}.ts`
+  - `crypto/{envelope,keyring-env}.ts`
+  - `env.ts` and `lib/json.ts`
+- Envelope encryption follows [ADR 0004](adr/0004-envelope-encryption.md): an HKDF tenant key
+  wraps a per-connection DEK, the DEK seals each field, and the AAD binds every ciphertext to
+  org, connection, field and purpose. The envelope format is versioned and stored as a `BLOB`.
+- `migrations/0007` adds the envelope and quarantine columns. It also rebuilds
+  `notification_outbox` to allow `state='invalid'`.
+- The cron job re-seals v0 rows into v1 and rewraps DEKs that are on an old KEK. Each row is
+  one guarded `UPDATE`, and a row that fails is quarantined.
+- Queue messages are `{id, integrationId, organizationId, title, url}`. The consumer re-reads
+  the row scoped to the organization. A crypto failure, a missing row or a disallowed host is
+  a permanent `failed` delivery and no provider call is made. `last_error` only holds codes we
+  minted.
+- `/health` returns `503` and names the misconfigured key binding.
+
+**Verified by**
+
+- `tests/crypto/envelope.test.ts` (24 cases). They cover byte layout, strict parsing, a fresh IV
+  per seal, the size cap, AAD row binding, url/secret non-interchangeability, DEK unwrap
+  refused across tenant or connection, version pinning, rewrap, and the legacy v0 reader.
+- `tests/pipeline/delivery-path.test.ts` (16 cases). These are end-to-end tests over the real
+  migrations, using a `node:sqlite` D1 fake (`tests/support/d1.ts`). They cover cross-tenant
+  routing with the same repo name, a credential-free queue, idempotent redelivery, delivery
+  for v0 and then v1, refusal of a row-swap attack, the consumer's tenant re-check, the
+  allowlist, provider 5xx, URL-echo redaction, quarantine, and full KEK rotation with the old
+  KEK removed.
+
+**Known gaps**
+
+- The KEK is a Worker secret, which is F34 tier 2. The Secrets Store binding (tier 1),
+  environment-mismatch detection, audited key destruction and crypto-shredding (F40) are
+  still open.

@@ -37,3 +37,6 @@ Thumbs.db
 *~
 
 # Commit package-lock.json, DESIGN.md, brand/ and shared tool configuration.
+
+# Claude Code agent worktrees and local settings
+.claude/

@@ -41,5 +41,8 @@
     // Used to reject payloads that claim a different App, alongside the webhook secret.
     // Replace with the real App ID; until then, webhook ingress fails closed.
     "GITHUB_APP_ID": "REPLACE_WITH_GITHUB_APP_ID",
+    // Which KEK version (secret KEK_V<n>) wraps new connection keys. Not a secret.
+    // Flip only after the new KEK secret is deployed; see docs/IMPLEMENTATION.md.
+    "KMS_ACTIVE_VERSION": "1",
   },
 }

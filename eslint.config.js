@@ -15,6 +15,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '.wrangler/**',
+      '.claude/**',
       'coverage/**',
       'playwright-report/**',
       // This file is config, not product code; it cannot provide type information.

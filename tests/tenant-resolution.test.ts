@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readInstallationBlock } from '../src/index';
+import { readInstallationBlock } from '../src/connectors/sources/github/tenant';
 
 /**
  * The inbound tenant resolver.

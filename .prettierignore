@@ -8,3 +8,4 @@ package-lock.json
 docs/specs/
 docs/DESTINATION_API_REFERENCE.md
 *.md
+.claude/
