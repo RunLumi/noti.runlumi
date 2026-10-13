@@ -4,6 +4,7 @@ import { t, tp } from '../i18n';
 import { useOrgId } from '../integrations/hooks';
 import './deliveries.css';
 import { useDeliverySummary } from './hooks';
+import { useLocale } from '../i18n/LocaleProvider';
 
 /**
  * The Overview's two delivery figures, read from `GET /api/deliveries/summary` (F206: no
@@ -11,6 +12,7 @@ import { useDeliverySummary } from './hooks';
  * zero is only ever a real count from the server.
  */
 export function DeliveryStats() {
+  useLocale();
   const orgId = useOrgId();
   const summary = useDeliverySummary(orgId);
   const counts = summary.data;

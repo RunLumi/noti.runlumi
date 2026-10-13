@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Notice } from '../../components/ui';
 import { t, type MessageId } from '../../i18n';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 /** Every status the server's `/github/callback` and `/github/setup` can return (docs/API.md). */
 const RETURN_MESSAGES = {
@@ -39,6 +40,7 @@ export function returnMessage(code: string | null): { id: MessageId; ok: boolean
  * bar (`history.replaceState`) so a reload or a shared link does not repeat it.
  */
 export function GithubReturnStatus({ orgId }: { orgId: string }) {
+  useLocale();
   const qc = useQueryClient();
   const [message] = useState(() => returnMessage(new URLSearchParams(window.location.search).get('github')));
   useEffect(() => {

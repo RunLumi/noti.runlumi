@@ -5,6 +5,7 @@ import { t } from '../../i18n';
 import type { FilterConfig } from '../../../../src/routing/filters';
 import { EVENT_LABEL, GITHUB_EVENT_TYPES, isGithubEventType } from '../events';
 import { describeDecision, EMPTY_SAMPLE, runSample, type SampleDraft, type Tri } from './model';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface FilterTesterProps {
   /** The parsed filters on screen, or null while they contain errors. */
@@ -19,6 +20,7 @@ const TRI_LABEL = {
 } as const;
 
 function TriSelect({ label, value, onChange }: { label: string; value: Tri; onChange: (next: Tri) => void }) {
+  useLocale();
   return (
     <Field label={label}>
       {(ids) => (
@@ -45,6 +47,7 @@ function TriSelect({ label, value, onChange }: { label: string; value: Tri; onCh
  * nothing and stores nothing, and it says so.
  */
 export function FilterTester({ config }: FilterTesterProps) {
+  useLocale();
   const [sample, setSample] = useState<SampleDraft>(EMPTY_SAMPLE);
   const [result, setResult] = useState<{ pass: boolean; text: string } | null>(null);
   const set = <K extends keyof SampleDraft>(key: K, value: SampleDraft[K]) => {

@@ -4,12 +4,14 @@ import '../deliveries/deliveries.css';
 import '../integrations/integrations.css';
 import { DangerZone } from './DangerZone';
 import { ExportPanel } from './ExportPanel';
+import { useLocale } from '../i18n/LocaleProvider';
 
 /**
  * Admin-only workspace controls on Settings. Members see the panels, disabled, with the
  * reason — a hidden control would leave them guessing where it went.
  */
 export function WorkspaceDataPanel() {
+  useLocale();
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
   const user = me.data?.user;
   if (!user?.org_id || !user.org_name) return null;

@@ -4,6 +4,7 @@ import { t } from '../../i18n';
 import type { MessageId } from '../../i18n';
 import { BOT_MODES } from '../../../../src/routing/filters';
 import type { CoverageNotes, FilterControl, FilterDraft, FilterErrors } from './model';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface FiltersEditorProps {
   readonly draft: FilterDraft;
@@ -24,6 +25,7 @@ function LinesField({
   errors,
   onChange,
 }: FiltersEditorProps & { field: ListField; label: MessageId; hint: MessageId }) {
+  useLocale();
   return (
     <Field label={t(label)} hint={t(hint)} error={errors[field as FilterControl]}>
       {(ids) => (
@@ -55,6 +57,7 @@ function Group({
   appliesTo: MessageId;
   children: ReactNode;
 }) {
+  useLocale();
   return (
     <fieldset className="filter-group">
       <legend>{t(title)}</legend>
@@ -77,6 +80,7 @@ const BOT_LABEL: Readonly<Record<(typeof BOT_MODES)[number], MessageId>> = {
  * are real fieldsets with legends (F220, F221).
  */
 export function FiltersEditor(props: FiltersEditorProps) {
+  useLocale();
   const { draft, errors, onChange, notes } = props;
   return (
     <div className="filters-editor">

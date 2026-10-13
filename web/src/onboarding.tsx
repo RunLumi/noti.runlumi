@@ -5,6 +5,8 @@ import { IconBuilding, IconUserPlus } from '@tabler/icons-react';
 import { authClient, assertAuthSuccess } from './lib/auth-client';
 import { authApi } from './lib/api';
 import { Card, Button, Input } from './components/ui';
+import { t } from './i18n';
+import { useLocale } from './i18n/LocaleProvider';
 
 function slug(name: string): string {
   return (
@@ -17,6 +19,7 @@ function slug(name: string): string {
   );
 }
 export function OnboardingPage() {
+  useLocale();
   const nav = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState('');
@@ -36,7 +39,7 @@ export function OnboardingPage() {
       await qc.invalidateQueries({ queryKey: ['me'] });
       await nav({ to: '/' });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create workspace');
+      setError(e instanceof Error ? e.message : t('onboarding.error'));
     } finally {
       setBusy(false);
     }
@@ -44,23 +47,21 @@ export function OnboardingPage() {
   return (
     <div className="onboarding">
       <Card className="panel">
-        <div className="empty-icon">
+        <div className="empty-icon" aria-hidden="true">
           <IconBuilding />
         </div>
-        <h1>Create your workspace</h1>
-        <p className="muted">
-          Each person belongs to one organization at a time. You can invite more people after setup.
-        </p>
+        <h1>{t('onboarding.title')}</h1>
+        <p className="muted">{t('onboarding.body')}</p>
         <form onSubmit={(e) => void submit(e)} className="auth-form">
           <label>
-            Organization name
+            {t('onboarding.field')}
             <Input
               required
               minLength={2}
               maxLength={80}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Your company or team"
+              placeholder={t('onboarding.placeholder')}
             />
           </label>
           {error && (
@@ -69,18 +70,17 @@ export function OnboardingPage() {
             </p>
           )}
           <Button disabled={busy || name.trim().length < 2} type="submit">
-            {busy ? 'Creating…' : 'Create workspace'}
+            {busy ? t('onboarding.submitting') : t('onboarding.submit')}
           </Button>
         </form>
-        <p className="muted">
-          Joining an existing team? Open the invitation link you received by email instead.
-        </p>
+        <p className="muted">{t('onboarding.joinHint')}</p>
       </Card>
     </div>
   );
 }
 
 export function InvitePage() {
+  useLocale();
   const id = new URLSearchParams(window.location.search).get('id');
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, retry: false });
   const nav = useNavigate();
@@ -97,7 +97,7 @@ export function InvitePage() {
       await qc.invalidateQueries({ queryKey: ['me'] });
       await nav({ to: '/' });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to join organization');
+      setError(e instanceof Error ? e.message : t('invite.error'));
     } finally {
       setBusy(false);
     }
@@ -105,38 +105,31 @@ export function InvitePage() {
   return (
     <div className="invite-screen">
       <Card className="panel">
-        <div className="empty-icon">
+        <div className="empty-icon" aria-hidden="true">
           <IconUserPlus />
         </div>
-        <h1>Team invitation</h1>
+        <h1>{t('invite.title')}</h1>
         {!id ? (
-          <p role="alert">Invitation link is missing an ID.</p>
+          <p role="alert">{t('invite.missingId')}</p>
         ) : me.isPending ? (
-          <p>Checking your account…</p>
+          <p>{t('invite.checking')}</p>
         ) : me.isError ? (
           <>
-            <p>
-              Sign in with the email address that received this invitation. Verify that email before
-              accepting.
-            </p>
+            <p>{t('invite.signinBody')}</p>
             <a className="btn btn-primary" href={loginRedirect}>
-              Sign in to accept
+              {t('invite.signinAction')}
             </a>
             <p>
-              <Link to="/signup">New to Lumi Noti? Create an account</Link>
+              <Link to="/signup">{t('invite.signupLink')}</Link>
             </p>
           </>
         ) : me.data.user.org_id ? (
-          <p role="alert">
-            You already belong to an organization. Leave it before accepting this invitation.
-          </p>
+          <p role="alert">{t('invite.alreadyMember')}</p>
         ) : (
           <>
-            <p className="muted">
-              You're signed in as {me.data.user.email}. Accepting joins the inviting organization.
-            </p>
+            <p className="muted">{t('invite.signedInAs', { email: me.data.user.email })}</p>
             <Button disabled={busy} onClick={() => void accept()}>
-              {busy ? 'Joining…' : 'Accept invitation'}
+              {busy ? t('invite.accepting') : t('invite.accept')}
             </Button>
           </>
         )}

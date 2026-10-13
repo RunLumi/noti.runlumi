@@ -1,6 +1,8 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, HTMLAttributes, ReactNode, Ref } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { cn } from '../lib/utils';
+import { t } from '../i18n';
+import { useLocale } from '../i18n/LocaleProvider';
 export function Button({
   className,
   variant = 'primary',
@@ -9,6 +11,7 @@ export function Button({
   variant?: 'primary' | 'outline' | 'ghost' | 'danger';
   ref?: Ref<HTMLButtonElement>;
 }) {
+  useLocale();
   return (
     <button
       className={cn(
@@ -27,9 +30,11 @@ export function Button({
   );
 }
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
+  useLocale();
   return <input className={cn('input', className)} {...props} />;
 }
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
+  useLocale();
   return <div className={cn('card', className)} {...props} />;
 }
 export function Badge({
@@ -39,6 +44,7 @@ export function Badge({
   children: ReactNode;
   variant?: 'neutral' | 'success' | 'warning' | 'danger';
 }) {
+  useLocale();
   return <span className={'badge badge-' + variant}>{children}</span>;
 }
 /** Inline status or error message. Errors are announced (`role="alert"`), the rest politely. */
@@ -51,6 +57,7 @@ export function Notice({
   kind?: 'info' | 'error' | 'warning' | 'success';
   className?: string;
 }) {
+  useLocale();
   return (
     <div className={cn('notice', 'notice-' + kind, className)} role={kind === 'error' ? 'alert' : 'status'}>
       {children}
@@ -66,6 +73,7 @@ export function Modal({
   title: string;
   children: ReactNode;
 }) {
+  useLocale();
   return (
     <Dialog.Root>
       <Dialog.Trigger render={<span className="inline-trigger" />}>{trigger}</Dialog.Trigger>
@@ -76,8 +84,8 @@ export function Modal({
           {children}
           <Dialog.Close
             render={
-              <button className="modal-close" aria-label="Close dialog">
-                ×
+              <button className="modal-close" aria-label={t('dialog.close')}>
+                <span aria-hidden="true">×</span>
               </button>
             }
           />

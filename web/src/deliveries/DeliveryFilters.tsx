@@ -6,6 +6,7 @@ import { t } from '../i18n';
 import { DELIVERY_STATES, isDeliveryState } from './api';
 import { STATE_LABEL } from './copy';
 import { hasFilters, type ActivitySearch } from './search';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface DeliveryFiltersProps {
   readonly search: ActivitySearch;
@@ -21,6 +22,7 @@ function without(search: ActivitySearch, key: keyof ActivitySearch): ActivitySea
 }
 
 export function DeliveryFilters({ search, integrations, onChange }: DeliveryFiltersProps) {
+  useLocale();
   const base = useId();
   const set = (key: keyof ActivitySearch, value: string) =>
     onChange(value ? { ...search, [key]: value } : without(search, key));

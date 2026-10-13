@@ -3,6 +3,7 @@ import { IconDownload } from '@tabler/icons-react';
 import { Button, Card, Notice } from '../components/ui';
 import { t } from '../i18n';
 import { downloadExport } from './api';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface ExportPanelProps {
   readonly orgId: string;
@@ -10,6 +11,7 @@ interface ExportPanelProps {
 }
 
 export function ExportPanel({ orgId, isAdmin }: ExportPanelProps) {
+  useLocale();
   const exporter = useMutation({ mutationFn: () => downloadExport(orgId), gcTime: 0 });
   return (
     <Card className="panel workspace-panel" aria-labelledby="export-title" role="region">

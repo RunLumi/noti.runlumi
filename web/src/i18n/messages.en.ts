@@ -111,7 +111,7 @@ export const en = {
   // --- Wizard -------------------------------------------------------------
   'wizard.eyebrow': 'NEW INTEGRATION',
   'wizard.title': 'Set up an integration',
-  'wizard.description': 'Six short steps. Nothing is saved until you choose Create integration.',
+  'wizard.description': 'A few short steps. Nothing is saved until you choose Create integration.',
   'wizard.progress': 'Setup steps',
   'wizard.stepOf': 'Step {current} of {total}: {title}',
   'wizard.step.github': 'Connect GitHub',

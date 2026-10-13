@@ -1,0 +1,52 @@
+/* Accessibility utilities (F221). Keep this file small: the preference media queries
+   (reduced motion, reduced transparency, increased contrast, forced colors) live next to the
+   styles they adjust in styles.css and are asserted by `preferences.test.ts`. */
+
+/* Text for assistive technology only. `clip-path` rather than `display: none`, so it is still
+   in the accessibility tree and a live region in it is still announced. */
+.visually-hidden {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Programmatic focus targets (the page heading and <main> after a route change or the skip
+   link) are not controls. Ringing a whole page region is noise, so the ring is dropped for
+   `tabindex="-1"` landmarks and headings only; every real control keeps the 2px ring from
+   `:focus-visible` in styles.css. */
+main[tabindex='-1']:focus,
+h1[tabindex='-1']:focus {
+  outline: none;
+}
+
+/* WCAG 2.4.11 Focus Not Obscured: if a sticky or fixed bar is ever added, a focused control
+   scrolls clear of it instead of landing underneath. */
+:is(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  scroll-margin-block: 5rem;
+}
+
+/* Reflow (WCAG 1.4.10), found in the browser pass at 1024px and at 200% zoom.
+   The wizard shows the sidebar, a 240px stepper and the sheet side by side. Between about
+   700px and 1100px the sheet is only ~350px wide, and a fixed 180px label column and two-up
+   option cards left a few characters per line ("Slac / k"). The review rows now stack below
+   1100px and the option cards fill however many columns fit (`auto-fit`). Doubled class
+   selectors win over integrations.css whatever the stylesheet order. */
+@media (max-width: 1100px) {
+  .review .review-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .review .review-row dt {
+    grid-column: 1 / -1;
+  }
+}
+
+.destination-choice .destination-options {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}

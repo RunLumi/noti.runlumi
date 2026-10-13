@@ -7,6 +7,7 @@ import type { DeliveryItem } from './api';
 import { STATE_LABEL, destinationName } from './copy';
 import { StateChip } from './StateChip';
 import { Time } from './Time';
+import { useLocale } from '../i18n/LocaleProvider';
 
 const column = createColumnHelper<DeliveryItem>();
 
@@ -20,6 +21,7 @@ interface DeliveryTableProps {
  * with CSS `display`, which would otherwise drop table semantics in some browsers.
  */
 export function DeliveryTable({ rows, onOpen }: DeliveryTableProps) {
+  useLocale();
   const columns = useMemo(
     () => [
       column.accessor('state', {

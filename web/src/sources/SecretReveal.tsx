@@ -3,6 +3,7 @@ import { IconKey } from '@tabler/icons-react';
 import { Button, Notice } from '../components/ui';
 import { t } from '../i18n';
 import { CopyButton } from './CopyButton';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface SecretRevealProps {
   readonly sourceName: string;
@@ -17,6 +18,7 @@ interface SecretRevealProps {
  * Focus moves here when it appears so keyboard and screen-reader users land on it.
  */
 export function SecretReveal({ sourceName, secret, kind, onDismiss }: SecretRevealProps) {
+  useLocale();
   const region = useRef<HTMLElement>(null);
   useEffect(() => region.current?.focus(), []);
   return (

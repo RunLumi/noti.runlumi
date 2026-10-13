@@ -3,6 +3,7 @@ import { Input } from '../../components/ui';
 import type { GithubInstallation } from '../../lib/api';
 import { t } from '../../i18n';
 import { activeInstallations, isCovered, repoName } from './coverage';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface RepoPickerProps {
   readonly installations: readonly GithubInstallation[];
@@ -22,6 +23,7 @@ const TYPED = 'all:';
  * <account>…", which reveals a name field with the owner fixed to that account.
  */
 export function RepoPicker({ installations, repo, repoAccount, onChange, error }: RepoPickerProps) {
+  useLocale();
   const active = activeInstallations(installations);
   const value = repoAccount !== null ? TYPED + repoAccount : repo ? LISTED + repo : '';
   // An existing integration may name a repository Noti can no longer see; keep it visible.

@@ -10,6 +10,7 @@ import { useDeliveryDetail } from './hooks';
 import { RedeliverPanel } from './RedeliverPanel';
 import { StateChip } from './StateChip';
 import { Time, absoluteTime } from './Time';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface DeliveryDetailProps {
   readonly orgId: string;
@@ -22,6 +23,7 @@ interface DeliveryDetailProps {
 }
 
 function Explanation({ delivery }: { readonly delivery: DeliveryItem }) {
+  useLocale();
   const { error } = delivery;
   if (delivery.state !== 'dead_lettered' && delivery.state !== 'retrying') return null;
   const copy = error ? failureCopy(error, delivery.integration.destination) : null;
@@ -49,6 +51,7 @@ function Explanation({ delivery }: { readonly delivery: DeliveryItem }) {
 }
 
 function Facts({ delivery }: { readonly delivery: DeliveryItem }) {
+  useLocale();
   return (
     <section className="detail-section" aria-labelledby="detail-facts">
       <h3 id="detail-facts">{t('delivery.detail.facts')}</h3>
@@ -90,6 +93,7 @@ function Facts({ delivery }: { readonly delivery: DeliveryItem }) {
 }
 
 export function DeliveryDetail({ orgId, id, initial, returnFocus, onClose, onShowNew }: DeliveryDetailProps) {
+  useLocale();
   const query = useDeliveryDetail(orgId, id);
   const delivery = query.data?.delivery ?? initial;
   const name = delivery

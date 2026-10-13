@@ -9,6 +9,7 @@ import { SourcesPage } from './sources/SourcesPage';
 import { CreateWizard } from './integrations/wizard/CreateWizard';
 import { IntegrationSettings } from './integrations/settings/IntegrationSettings';
 import { validateActivitySearch } from './deliveries/search';
+import { LocaleProvider } from './i18n/LocaleProvider';
 import '@fontsource-variable/geist';
 import './styles.css';
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 30_000 } } });
@@ -59,7 +60,9 @@ if (!rootElement) throw new Error('Missing app root');
 createRoot(rootElement).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
-      <RouterProvider router={router} />
+      <LocaleProvider>
+        <RouterProvider router={router} />
+      </LocaleProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 );

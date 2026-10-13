@@ -11,6 +11,7 @@ import {
 import { t } from '../i18n';
 import type { DeliveryState } from './api';
 import { STATE_LABEL } from './copy';
+import { useLocale } from '../i18n/LocaleProvider';
 
 type Tone = 'success' | 'neutral' | 'warning' | 'danger';
 
@@ -28,6 +29,7 @@ const CHIP: Readonly<
 };
 
 export function StateChip({ state }: { readonly state: DeliveryState }) {
+  useLocale();
   const { icon: Icon, tone } = CHIP[state];
   return (
     <span className={`badge state-chip badge-${tone}`}>

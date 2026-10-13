@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { REASON_CODES, evaluateFilters, type FilterConfig } from '../../../../src/routing/filters';
 import { parseCreateIntegration } from '../../../../src/api/integration-input';
 import { parseIntegration, parseRoutingLog, ApiError } from '../../lib/api';
-import { en } from '../../i18n/messages.en';
-import { t } from '../../i18n';
+import { en, t } from '../../i18n';
 import { fromServer } from '../validation';
 import {
   EMPTY_DRAFT,

@@ -9,8 +9,10 @@ import { IntegrationCard } from './IntegrationCard';
 import { GithubPanel } from './github/GithubPanel';
 import { GithubReturnStatus } from './github/ReturnStatus';
 import './integrations.css';
+import { useLocale } from '../i18n/LocaleProvider';
 
 function NewIntegrationLink() {
+  useLocale();
   return (
     <Link to="/integrations/new" className="btn btn-primary">
       <IconPlus size={18} aria-hidden="true" />
@@ -21,6 +23,7 @@ function NewIntegrationLink() {
 
 /** Shape-matched placeholder rows; the container carries `aria-busy` (F225). */
 function ListSkeleton() {
+  useLocale();
   return (
     <div className="integration-list" aria-busy="true" aria-label={t('integrations.loading')}>
       {[0, 1].map((i) => (
@@ -35,6 +38,7 @@ function ListSkeleton() {
 }
 
 function EmptyState() {
+  useLocale();
   return (
     <section className="empty integrations-empty" aria-labelledby="integrations-empty-title">
       <div className="empty-icon">
@@ -51,6 +55,7 @@ function EmptyState() {
 }
 
 export function IntegrationsPage() {
+  useLocale();
   const orgId = useOrgId();
   const list = useIntegrations(orgId);
   const integrations = list.data?.integrations ?? [];

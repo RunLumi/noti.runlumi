@@ -17,11 +17,13 @@ import {
   type ConnectErrors,
 } from './connect';
 import { useConnectChat } from './hooks';
+import { useLocale } from '../i18n/LocaleProvider';
 
 const EMPTY = (): ConnectDraft => ({ destination: null, name: '', webhookUrl: '', signingSecret: '' });
 
 /** Connect one chat to a source: pick the app, paste its webhook URL, name it, done. */
 export function ConnectChat({ orgId, source }: { readonly orgId: string; readonly source: Source }) {
+  useLocale();
   const connect = useConnectChat(orgId);
   const formRef = useRef<HTMLFormElement>(null);
   const [draft, setDraft] = useState<ConnectDraft>(EMPTY);

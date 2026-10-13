@@ -3,8 +3,7 @@ import { parseCreateIntegration } from '../../../src/api/integration-input';
 import { ApiError, parseInstallation, parseIntegration, type GithubInstallation } from '../lib/api';
 import { allInstallationFor, isCovered, repoName } from './github/coverage';
 import { returnMessage } from './github/ReturnStatus';
-import { en } from '../i18n/messages.en';
-import { t, tp } from '../i18n';
+import { en, t, tp } from '../i18n';
 import { DEFAULT_EVENTS, EVENT_GROUPS, EVENT_LABEL, GITHUB_EVENT_TYPES, sortEvents } from './events';
 import { describeError } from './errors';
 import {

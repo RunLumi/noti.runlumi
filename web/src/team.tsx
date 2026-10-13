@@ -5,6 +5,9 @@ import { IconUserPlus, IconUsers, IconLogout } from '@tabler/icons-react';
 import { authClient, assertAuthSuccess } from './lib/auth-client';
 import { api, authApi } from './lib/api';
 import { Badge, Button, Card, Input } from './components/ui';
+import { t } from './i18n';
+import { roleLabel } from './lib/role-label';
+import { useLocale } from './i18n/LocaleProvider';
 
 type Member = {
   id: string;
@@ -15,6 +18,7 @@ type Member = {
   createdAt: string;
 };
 export function TeamManagement() {
+  useLocale();
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
   const team = useQuery({
     queryKey: ['team'],
@@ -47,9 +51,9 @@ export function TeamManagement() {
         }),
       );
       setEmail('');
-      setMessage('Invitation sent. The recipient must verify their email to join.');
+      setMessage(t('team.invite.sent'));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Invite failed');
+      setError(e instanceof Error ? e.message : t('team.invite.error'));
     } finally {
       setBusy(false);
     }
@@ -68,11 +72,11 @@ export function TeamManagement() {
       await refresh();
       await qc.invalidateQueries({ queryKey: ['me'] });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Role change rejected');
+      setError(e instanceof Error ? e.message : t('team.members.roleError'));
     }
   }
   async function remove(memberId: string) {
-    if (!orgId || !window.confirm('Remove this person from your organization?')) return;
+    if (!orgId || !window.confirm(t('team.members.removeConfirm'))) return;
     setError('');
     try {
       assertAuthSuccess(
@@ -83,27 +87,27 @@ export function TeamManagement() {
       );
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Cannot remove member');
+      setError(e instanceof Error ? e.message : t('team.members.removeError'));
     }
   }
   async function leave() {
-    if (!orgId || !window.confirm('Leave this organization? The last admin cannot leave.')) return;
+    if (!orgId || !window.confirm(t('team.membership.leaveConfirm'))) return;
     setError('');
     try {
       assertAuthSuccess(await authClient.organization.leave({ organizationId: orgId }));
       await qc.invalidateQueries({ queryKey: ['me'] });
       await navigate({ to: '/onboarding' });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Cannot leave the organization');
+      setError(e instanceof Error ? e.message : t('team.membership.leaveError'));
     }
   }
   return (
     <div className="team-management">
       <header className="page-header">
         <div>
-          <p className="eyebrow">ORGANIZATION</p>
-          <h1>Team</h1>
-          <p className="muted">Manage your team and access permissions.</p>
+          <p className="eyebrow">{t('team.eyebrow')}</p>
+          <h1>{t('team.title')}</h1>
+          <p className="muted">{t('team.description')}</p>
         </div>
       </header>
       {error && (
@@ -119,68 +123,74 @@ export function TeamManagement() {
       {isAdmin && (
         <Card className="panel">
           <h2>
-            <IconUserPlus size={19} /> Invite someone
+            <IconUserPlus size={19} aria-hidden="true" /> {t('team.invite.title')}
           </h2>
           <form className="invite-form" onSubmit={(e) => void invite(e)}>
             <label className="grow">
-              Email
+              {t('team.invite.email')}
               <Input
                 required
                 type="email"
                 value={email}
-                placeholder="colleague@company.com"
+                placeholder={t('team.invite.emailPlaceholder')}
                 onChange={(e) => setEmail(e.target.value)}
               />
             </label>
             <label>
-              Role
+              {t('team.invite.role')}
               <select
                 className="input"
                 value={role}
                 onChange={(e) => setRole(e.target.value as 'admin' | 'member')}
               >
-                <option value="member">Member</option>
-                <option value="admin">Admin</option>
+                <option value="member">{t('role.member')}</option>
+                <option value="admin">{t('role.admin')}</option>
               </select>
             </label>
             <Button disabled={busy || !email.trim()} type="submit">
-              {busy ? 'Sending…' : 'Send invitation'}
+              {busy ? t('team.invite.sending') : t('team.invite.submit')}
             </Button>
           </form>
         </Card>
       )}
       <Card className="panel" style={{ marginTop: 20 }}>
         <h2>
-          <IconUsers size={19} /> Members
+          <IconUsers size={19} aria-hidden="true" /> {t('team.members.title')}
         </h2>
         {team.isLoading ? (
-          <p>Loading members…</p>
+          <p>{t('team.members.loading')}</p>
         ) : team.isError ? (
-          <p role="alert">Unable to load team members.</p>
+          <p role="alert">{t('team.members.error')}</p>
         ) : (
           team.data?.members.map((m) => (
             <div className="team-entry" key={m.id}>
-              <div className="avatar">{(m.name || m.email)[0].toUpperCase()}</div>
+              <div className="avatar" aria-hidden="true">
+                {(m.name || m.email)[0].toUpperCase()}
+              </div>
               <div className="grow">
                 <strong>{m.name || m.email}</strong>
                 <p className="muted">{m.email}</p>
               </div>
               {isAdmin && m.userId !== me.data?.user.id ? (
                 <select
-                  aria-label={'Role for ' + m.email}
+                  aria-label={t('team.members.roleFor', { email: m.email })}
                   className="role-select"
                   value={m.role}
                   onChange={(e) => void changeRole(m.id, e.target.value as 'admin' | 'member')}
                 >
-                  <option value="member">Member</option>
-                  <option value="admin">Admin</option>
+                  <option value="member">{t('role.member')}</option>
+                  <option value="admin">{t('role.admin')}</option>
                 </select>
               ) : (
-                <Badge>{m.role}</Badge>
+                <Badge>{roleLabel(m.role)}</Badge>
               )}
               {isAdmin && m.userId !== me.data?.user.id && (
-                <Button variant="ghost" onClick={() => void remove(m.id)}>
-                  Remove
+                <Button
+                  variant="ghost"
+                  aria-label={t('team.members.removeFor', { email: m.email })}
+                  onClick={() => void remove(m.id)}
+                >
+                  {t('team.members.remove')}
                 </Button>
               )}
             </div>
@@ -188,10 +198,10 @@ export function TeamManagement() {
         )}
       </Card>
       <Card className="panel" style={{ marginTop: 20 }}>
-        <h2>Membership</h2>
-        <p className="muted">You may leave when another admin remains in the organization.</p>
+        <h2>{t('team.membership.title')}</h2>
+        <p className="muted">{t('team.membership.body')}</p>
         <Button variant="outline" onClick={() => void leave()}>
-          <IconLogout size={16} /> Leave organization
+          <IconLogout size={16} aria-hidden="true" /> {t('team.membership.leave')}
         </Button>
       </Card>
     </div>

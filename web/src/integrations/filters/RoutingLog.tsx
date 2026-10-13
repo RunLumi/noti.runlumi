@@ -4,10 +4,12 @@ import type { RoutingLogEntry } from '../../lib/api';
 import { EVENT_LABEL, isGithubEventType } from '../events';
 import { useRoutingLog } from './hooks';
 import { describeDecision } from './model';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 const WHEN = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' });
 
 function Entry({ entry }: { entry: RoutingLogEntry }) {
+  useLocale();
   const sent = entry.outcome === 'delivered';
   const event = isGithubEventType(entry.eventType) ? t(EVENT_LABEL[entry.eventType]) : entry.eventType;
   const when = WHEN.format(new Date(entry.decidedAt));
@@ -39,6 +41,7 @@ function Entry({ entry }: { entry: RoutingLogEntry }) {
  * and a reason, never the content of an event, because Noti does not keep it.
  */
 export function RoutingLog({ orgId, integrationId }: { orgId: string; integrationId: string }) {
+  useLocale();
   const log = useRoutingLog(orgId, integrationId);
   const entries = log.data?.pages.flatMap((p) => p.entries) ?? [];
   return (

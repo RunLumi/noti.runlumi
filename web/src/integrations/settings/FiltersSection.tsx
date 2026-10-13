@@ -18,6 +18,7 @@ import {
   type FilterDraft,
   type FilterErrors,
 } from '../filters/model';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 /**
  * Routing filters for one integration (ADR 0010). Saved on their own, like the other sections,
@@ -29,6 +30,7 @@ import {
  * silently overwritten by an empty form.
  */
 export function FiltersSection({ orgId, integration }: { orgId: string; integration: Integration }) {
+  useLocale();
   const save = useUpdateIntegration(orgId, integration.id);
   const saved = draftFromConfig(integration.filters);
   const [draft, setDraft] = useState<FilterDraft>(saved);

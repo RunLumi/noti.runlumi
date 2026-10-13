@@ -46,10 +46,57 @@ ring, 320px reflow without horizontal scroll, `prefers-reduced-motion` honoured.
 `npm run check` runs, in order: `format:check` → `lint` → `typecheck` → `typecheck:web` →
 `test` → `build:web` → `verify:worker-bundle`. CI runs the same set with `npm ci`.
 
+The web tests run inside the same `vitest run`. Pure-logic files run in Node; component and
+page tests opt into jsdom with a `// @vitest-environment jsdom` docblock and import
+`web/src/a11y/testing/environment.ts` first (it stubs the few browser APIs jsdom lacks and
+installs the `fetch` hook that the Better Auth client captures at import time).
+
 ESLint is **type-aware**. The web rules set `no-unsafe-*` to `warn` because dashboard APIs that
 do not exist yet still return loosely-typed shapes; the Worker rules set them to `error`,
 because a webhook body is untrusted input and `JSON.parse` returning `any` is the defect class
 that produced `00-current-state.md` D3.
+
+## Accessibility and localization (`web/src/a11y/`, `web/src/i18n/`)
+
+Decisions and verification: [ADR 0013](adr/0013-accessibility-localization.md).
+
+| Path | Role |
+| --- | --- |
+| `a11y/RouteA11y.tsx`, `route-titles.ts` | After a path change: `document.title`, a polite `role="status"` announcement, focus to the page `<h1>` |
+| `a11y/SkipLink.tsx` | First tab stop on the shell and sign-in screens; focuses `<main id="main-content">` |
+| `a11y/a11y.css` | `.visually-hidden`, programmatic-focus outline rule, 1.4.10 reflow fixes for the wizard |
+| `a11y/contrast.ts`, `contrast.test.ts` | WCAG ratios for the DESIGN.md palette pairs; known gaps pinned to exact ratios |
+| `a11y/css.ts`, `stylesheet.test.ts` | Reads the stylesheets: glass / reduced motion / transparency / forced colours / focus ring / target size / Vietnamese type / bundled font coverage |
+| `a11y/testing/` | jsdom environment, mock API, fixtures, the real route table, the axe adapter |
+| `a11y/pages.a11y.test.tsx`, `dialogs.a11y.test.tsx` | axe-core on every route, wizard step, dialog and error state, in `en` and `vi` |
+| `a11y/keyboard.test.tsx` | Skip link, tab order, no trap, route-change focus and announcement, language switch |
+| `i18n/locale.ts`, `LocaleProvider.tsx`, `LocaleSwitcher.tsx` | Active locale (saved choice, `navigator.languages`, English), `<html lang>`, the `<select>` |
+| `i18n/format.ts` | `Intl` dates and relative times in the active locale (numbers: `formatNumber` in `i18n/index.ts`) |
+| `i18n/messages.en.ts`, `messages.app.en.ts` | English source catalogue (two files, merged in `i18n/index.ts`) |
+| `i18n/messages.vi.ts`, `messages.app.vi.ts`, `messages.filters.vi.ts`, `messages.sources.vi.ts` | Vietnamese catalogue, typed against English (one file per English file) |
+| `i18n/catalogue*.ts`, `hardcoded-strings.test.ts`, `literal-scan.ts` | Completeness, placeholder, plural and literal-string checks |
+
+Rules for new UI:
+
+- **No literal user-visible text in a component.** Add an id to `messages.en.ts` (or
+  `messages.app.en.ts`) *and* a Vietnamese string to the matching `messages.vi.ts` file;
+  `npm test` fails on a missing id, a changed `{placeholder}`, or JSX text, a rendered string
+  literal or a `placeholder` / `aria-label` / `title` / `alt` that is not a `t()` call. Brand
+  names and symbols are exempt; anything else needs an entry in the allow-list in
+  `hardcoded-strings.test.ts` with a reason (it is empty today).
+- **Dates, relative times and numbers go through `i18n/format.ts` / `formatNumber`**, never a
+  hard-coded locale or `toLocaleDateString()`.
+- **A new route** goes in `main.tsx` *and* in `ROUTE_PATHS` / the router in
+  `a11y/testing/render.tsx` plus an axe scenario in `pages.a11y.test.tsx`; a route test fails
+  until all three agree. It also needs a title in `a11y/route-titles.ts`.
+- **A new dialog** needs an axe scan with it open and the focus contract: focus on the safe
+  control, Tab cannot leave, Escape closes, focus returns to the trigger (see
+  `dialogs.a11y.test.tsx`).
+- **Text-field edges use `--color-control-border`** (Soft Slate, 3:1); the archival border is
+  for sheets and rows.
+- **Every component calls `useLocale()` first** (`i18n/LocaleProvider`), so a language switch
+  re-renders in place and keeps focus, open dialogs and typed values; `locale-reactivity.test.ts`
+  fails for a component that forgets.
 
 ## Pages
 
@@ -145,6 +192,11 @@ Routing filters (settings section, create-wizard step, "Try it", recent decision
 the real API. They have **not** had a browser pass: reflow at 320 px, keyboard order, contrast
 and Vietnamese diacritics are open.
 
+Accessibility and Vietnamese (slice 6c, ADR 0013): every route, wizard step, dialog and error
+state is scanned by axe-core in the tests and in a real browser; the shell announces route
+changes and manages focus; the interface can be switched between English and Vietnamese. No
+screen reader has been run and no conformance level is claimed.
+
 **Not implemented:** test send, the setup-progress model, per-attempt history and bulk replay.
 Passkeys register and authenticate but have not been acceptance-tested for counter
 regression.
@@ -162,9 +214,14 @@ production gateway.**
 
 ## Not yet verified
 
-The integrations screens were checked in a real browser at 320, 375 and 1280 px against a
-local Worker (ADR 0007). The rest of the app has not had a browser pass in this record.
+The integrations, delivery log and workspace screens were checked in a real browser at 320, 375
+and 1280 px (ADR 0007, 0009). Slice 6c re-ran axe-core in a real browser (colour contrast
+included) on the shell, wizard, settings, activity, team and sign-in screens in English and
+Vietnamese, walked the wizard by keyboard, and checked 320 px and an emulated 200% zoom (ADR
+0013).
 
-Rendered 320px reflow, Vietnamese typography, and WCAG conformance were **inspected in source,
-not in a browser** — no browser was available in the environment that produced this document.
-Treat those as open. See the ADR for the full verification record.
+Still open: **no screen reader pass**; reduced-motion, reduced-transparency, increased-contrast
+and forced-colours were **tested in the stylesheet only, not seen in a browser**; one Chromium
+build only; native select pop-ups were not keyboard-driven; the delivery detail dialog was
+scanned in jsdom but not in a browser pass; the Vietnamese copy has had no native-speaker
+review. See the ADR for the full record.

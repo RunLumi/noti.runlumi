@@ -7,6 +7,7 @@ import { Button, Input, Notice } from '../components/ui';
 import { t } from '../i18n';
 import { describeError } from '../integrations/errors';
 import { workspaceApi } from './api';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface DeleteWorkspaceDialogProps {
   readonly orgId: string;
@@ -26,6 +27,7 @@ function failure(error: unknown): string {
  * on the cancel button, so a stray Enter cannot schedule a deletion (F221).
  */
 export function DeleteWorkspaceDialog({ orgId, orgName, onScheduled }: DeleteWorkspaceDialogProps) {
+  useLocale();
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const cancelRef = useRef<HTMLButtonElement>(null);

@@ -6,6 +6,7 @@ import { t, tp } from '../i18n';
 import { describeError } from '../integrations/errors';
 import type { Source, SourceWithSecret } from './api';
 import { useDeleteSource, useRotateSource } from './hooks';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface DialogProps {
   readonly orgId: string;
@@ -13,6 +14,7 @@ interface DialogProps {
 }
 
 function Failure({ error, title }: { readonly error: unknown; readonly title: string }) {
+  useLocale();
   const described = describeError(error);
   return (
     <Notice kind="error">
@@ -32,6 +34,7 @@ export function RotateDialog({
   source,
   onRotated,
 }: DialogProps & { readonly onRotated: (result: SourceWithSecret) => void }) {
+  useLocale();
   const rotate = useRotateSource(orgId);
   const [open, setOpen] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -85,6 +88,7 @@ export function RotateDialog({
 
 /** Delete destroys the secret and the connected chats, so the name is typed to confirm. */
 export function DeleteSourceDialog({ orgId, source }: DialogProps) {
+  useLocale();
   const remove = useDeleteSource(orgId);
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');

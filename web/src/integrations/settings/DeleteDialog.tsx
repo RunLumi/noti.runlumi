@@ -8,6 +8,7 @@ import { t } from '../../i18n';
 import { DESTINATIONS } from '../destinations';
 import { describeError } from '../errors';
 import { useDeleteIntegration } from '../hooks';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface DeleteDialogProps {
   readonly orgId: string;
@@ -19,6 +20,7 @@ interface DeleteDialogProps {
  * credentials. Focus starts on the cancel button so a stray Enter cannot delete (F221).
  */
 export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
+  useLocale();
   const remove = useDeleteIntegration(orgId, integration.id);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);

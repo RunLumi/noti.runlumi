@@ -5,6 +5,7 @@ import { t, tp } from '../../i18n';
 import { describeError } from '../errors';
 import { ConnectGithubButton } from './ConnectGithubButton';
 import { useGithubConnection } from './hooks';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 const STATUS_BADGE = { active: 'success', suspended: 'warning', uninstalled: 'danger' } as const;
 const STATUS_LABEL = {
@@ -14,6 +15,7 @@ const STATUS_LABEL = {
 } as const;
 
 function Installation({ orgId, installation }: { orgId: string; installation: GithubInstallation }) {
+  useLocale();
   const { account, status } = installation;
   const scope =
     installation.repositorySelection === 'all'
@@ -56,6 +58,7 @@ function Installation({ orgId, installation }: { orgId: string; installation: Gi
  * connected installation covers, so this panel comes first on the Integrations page.
  */
 export function GithubPanel({ orgId }: { orgId: string }) {
+  useLocale();
   const connection = useGithubConnection(orgId);
   return (
     <section className="github-panel" aria-labelledby="github-panel-title" aria-busy={connection.isPending}>

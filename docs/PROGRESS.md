@@ -29,6 +29,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
 | 6a | Dashboard: integrations list, guided create wizard, settings (edit, pause, rotate, delete), GitHub connection panel and repository picker | F206 (partial), F210 (partial), F211, F216 (partial), F217 (partial), F220 (partial), F221, F223, F224 (structure), F225 | — | 🟡 | #13 |
 | 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | #16 |
+| 6c | Dashboard: accessibility gate (axe-core on every route, wizard step and dialog), route-change title/announcement/focus, skip link, palette-contrast and stylesheet-preference tests, Vietnamese catalogue with a language switcher, hard-coded-string and catalogue-drift tests | F221 (part), F223 (part), F224 (part) | — | 🟡 | this PR |
 | 7 | Per-integration routing filters with provenance (backend, API, dashboard); the F121 rule engine is not started | F124, F125, F127, F128, F136–F140 (each in part) | — | 🟡 | #25 |
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
 | 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | #16 |
@@ -586,6 +587,65 @@ Also fixed:
 - Test send and the setup-progress model (F207, F215) are still open; the delivery log landed in slice 6b (ADR 0009).
 - No automated axe scan or screen-reader pass yet; only the strings on these screens are in
   the catalogue.
+
+## Slice 6c — accessibility and Vietnamese (this PR)
+
+**What changed**
+
+- **axe-core in the test suite.** Every route, every wizard step, the three confirmation
+  dialogs, the delivery detail drawer and the main error states are mounted against a mock
+  API in jsdom and scanned; the build fails on any serious or critical violation, in English
+  and Vietnamese. New dev dependencies, exact-pinned: `axe-core`, `jsdom`,
+  `@testing-library/react`, `@testing-library/dom`, `@testing-library/user-event`.
+- **Contrast.** A pure test computes WCAG ratios for 34 palette pairs read from `styles.css`
+  and checked against `DESIGN.md` §5. Fixed: the opaque glass fallback token was Soft Slate;
+  text-field edges were 1.35:1 (now `--color-control-border`, Soft Slate, 5.76:1). Two
+  non-text gaps are accepted and pinned to their exact ratios (switch track edge 1.55:1,
+  warning rail 2.03:1); see ADR 0013.
+- **Keyboard and focus.** `RouteA11y` (title, live-region announcement, focus to `<h1>` on a
+  path change), `SkipLink` (first stop, focuses `<main>`, no hash in the URL), a real `<main>`
+  and labelled `<aside>` on the sign-in screens. Tests: skip link, tab order of the shell, no
+  keyboard trap, route-change focus in both languages, dialog focus trap and restore.
+- **Preference media queries** are asserted from the stylesheets (reduced motion, reduced
+  transparency, increased contrast, forced colours, 2px focus ring, 44px controls, 12px
+  floor). One gap fixed: the modal scrim's blur had no fallback.
+- **Vietnamese.** `messages.vi.ts` + `messages.app.vi.ts` cover every message; the shell,
+  sign-in, overview, team, onboarding, passkey and dialog-close strings that were literals are
+  now catalogue ids. `LocaleSwitcher` (`<select>`), saved choice in `localStorage` (guarded),
+  `navigator.languages` default, `<html lang>`, `Intl` dates, relative times, numbers and
+  plurals in the active locale, `:lang(vi)` display metrics. Tests fail on a missing id, a
+  changed `{placeholder}`, an untranslated copy or any hard-coded visible string (allow-list
+  empty).
+- Review follow-up: a language switch now re-renders in place (every component subscribes via
+  `useLocale()`, enforced by a test) instead of remounting, so focus, open dialogs and typed
+  values survive; route focus waits (bounded) for a late `<h1>`, skips redirects, and the
+  duplicate navigation announcement is gone; the string scan covers plain `.ts` helpers and
+  more attributes; Vietnamese wording corrected (Thành viên, sự kiện, and others).
+- Layout fixes found in the browser at 1024px and 200% zoom: wizard review rows and
+  destination cards.
+- Rebased over routing filters and generic sources: their copy is translated
+  (`messages.filters.vi.ts`, `messages.sources.vi.ts`), `/sources`, the filters editor and the
+  six-step wizard are in the axe and keyboard tests.
+
+**Verified by**
+
+- 197 new tests (1,747 in total on the rebased branch), `npm run format && npm run check` green.
+- A browser pass against `wrangler dev` with local D1 (ADR 0013): axe-core with colour
+  contrast on in the page, zero violations on nine screens in English and Vietnamese and with
+  a dialog open; keyboard-only sign-in and wizard; 320px with no overflow; emulated 200% zoom;
+  Vietnamese rendering from the bundled Geist subset. Screenshots in `docs/screenshots/a11y-*`.
+
+**Known gaps**
+
+- **No screen reader was run.** No conformance level is claimed anywhere.
+- Reduced-motion, reduced-transparency, increased-contrast and forced-colours are tested in
+  the stylesheet only, not seen in a browser; one Chromium build; no touch or real zoom.
+- The Vietnamese copy has not been edited by a native speaker. Server-supplied text (Better
+  Auth errors) is still English. Locale is not in the URL; browser
+  Back/Forward does not restore the previously focused element.
+- Found and filed separately: `GET /api/workspace/me` answers 403 for a user with no
+  workspace, so the dashboard sends a new user back to `/signin` and `/onboarding` is
+  unreachable.
 
 ## Slice S — security hardening (PR #16)
 

@@ -6,6 +6,7 @@ import { describeError } from '../integrations/errors';
 import { absoluteTime } from '../deliveries/Time';
 import { workspaceApi } from './api';
 import { DeleteWorkspaceDialog } from './DeleteWorkspaceDialog';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface DangerZoneProps {
   readonly orgId: string;
@@ -16,6 +17,7 @@ interface DangerZoneProps {
 const deletionKey = (orgId: string) => ['workspace', orgId, 'deletion'] as const;
 
 function Explainer() {
+  useLocale();
   return (
     <>
       <p className="muted">{t('workspace.danger.intro')}</p>
@@ -30,6 +32,7 @@ function Explainer() {
 }
 
 export function DangerZone({ orgId, orgName, isAdmin }: DangerZoneProps) {
+  useLocale();
   const qc = useQueryClient();
   // Only an admin may ask: the endpoint is admin-only, and a member's 403 is not a status.
   const status = useQuery({

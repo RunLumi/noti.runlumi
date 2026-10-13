@@ -4,6 +4,7 @@ import { t } from '../i18n';
 import { Notice } from '../components/ui';
 import { describeError } from './errors';
 import { useToggleIntegration } from './hooks';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface EnabledSwitchProps {
   readonly orgId: string;
@@ -15,6 +16,7 @@ interface EnabledSwitchProps {
  * rolls back, the switch returns to the saved state and the reason is announced beside it.
  */
 export function EnabledSwitch({ orgId, integration }: EnabledSwitchProps) {
+  useLocale();
   const toggle = useToggleIntegration(orgId);
   const stateId = useId();
   const on = integration.enabled;
