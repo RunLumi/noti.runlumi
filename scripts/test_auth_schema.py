@@ -54,8 +54,5 @@ with tempfile.TemporaryDirectory() as temp:
     must_fail(lambda: con.execute("UPDATE member SET organization_id='org-b' WHERE id='member-b'"),
               "Remaining admin moved out of organization")
     join("member-c", "carol", "org-b", "admin")
-    con.execute("UPDATE member SET role='member' WHERE id='member-b'") if False else None
-    con.execute("DELETE FROM member WHERE id='member-b'") if False else None
-    con.execute("PRAGMA foreign_key_check")
     assert not con.execute("PRAGMA foreign_key_check").fetchall()
     print("D1 schema and organization integrity constraints: PASS")
