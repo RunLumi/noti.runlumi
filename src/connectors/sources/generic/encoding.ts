@@ -35,3 +35,10 @@ export function generateEndpointId(): string {
     .replaceAll('+', '-')
     .replaceAll('/', '_');
 }
+
+/** True for a well-formed `whsec_` secret: strict base64 of at least 32 bytes (Standard Webhooks). */
+export function isSigningSecret(secret: string): boolean {
+  if (!secret.startsWith(SECRET_PREFIX) || secret.length > 256) return false;
+  const bytes = fromBase64(secret.slice(SECRET_PREFIX.length));
+  return bytes !== null && bytes.length >= SECRET_BYTES;
+}

@@ -82,7 +82,8 @@ export function useCreateIntegration(orgId: string) {
     mutationFn: (input: CreateIntegrationBody) => integrationsApi.create(orgId, input),
     // The variables hold the webhook URL and secret; do not keep them in the mutation cache.
     gcTime: 0,
-    onSuccess: (created) => {
+    // `signingSecret` (custom webhook) stays in the mutation result only; the cache gets the row.
+    onSuccess: ({ integration: created }) => {
       qc.setQueryData<IntegrationList>(
         integrationKeys.list(orgId),
         (list) => list && { ...list, integrations: [created, ...list.integrations] },
@@ -106,7 +107,7 @@ export function useRotateCredentials(orgId: string, id: string) {
   return useMutation({
     mutationFn: (input: RotateCredentialsBody) => integrationsApi.rotateCredentials(orgId, id, input),
     gcTime: 0,
-    onSuccess: (saved) => putIntegration(qc, orgId, saved),
+    onSuccess: ({ integration: saved }) => putIntegration(qc, orgId, saved),
   });
 }
 

@@ -1,4 +1,6 @@
+import { auditStatement } from '../audit/audit';
 import {
+  type ClassifiedResponse,
   classifyDeliveryResponse,
   prepareDelivery,
   sendRequest,
@@ -87,8 +89,9 @@ async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage
   const checked = validateDestinationConfig({
     kind: row.destination,
     webhookUrl: credentials.webhookUrl,
-    // Only Lark has a signing secret; a stray value on a Slack or Teams row is ignored.
-    ...(row.destination === 'lark' && credentials.signingSecret
+    // Only Lark and the custom webhook have a signing secret; a stray value on another row
+    // is ignored. A custom webhook with no secret fails validation and is never sent.
+    ...((row.destination === 'lark' || row.destination === 'generic_webhook') && credentials.signingSecret
       ? { signingSecret: credentials.signingSecret }
       : {}),
   });
@@ -122,7 +125,10 @@ async function attemptDelivery(
   const target = await resolveTarget(env, keyring, d);
   if ('outcome' in target) return target;
   const { config } = target;
-  const prepared = await prepareDelivery(config, toNotification(d), { now: deps.now() });
+  const prepared = await prepareDelivery(config, toNotification(d), {
+    now: deps.now(),
+    meta: { deliveryId: d.id, organizationId: d.organizationId },
+  });
   if (!prepared.ok) {
     // Permanent by construction: the same text re-renders to the same failure.
     return prepared.reason === 'payload_too_large'
@@ -138,7 +144,52 @@ async function attemptDelivery(
     },
     { timeoutMs: OUTBOUND_TIMEOUT_MS, now: deps.now },
   );
+  if (config.kind === 'discord') {
+    try {
+      await pauseDeadDiscordWebhook(env, d, classification, seen.res);
+    } catch (e) {
+      // The pause is a safeguard on top of an outcome that is already permanent; a D1 fault
+      // here must not turn that outcome into a retry. The next failure pauses it instead.
+      log('error', 'discord_auto_pause_failed', { delivery_id: d.id, error: e });
+    }
+  }
   return attemptFromClassification(classification, config.kind, seen.res);
+}
+
+/**
+ * Discord says a webhook that returned 404 must not be used again ("repeated attempts to do so
+ * will result in a temporary restriction"), and 401/403 count toward an invalid-request budget
+ * shared by every Discord delivery from our egress (spec 09 F108). This delivery is already
+ * permanent; pausing the integration is what stops the NEXT event from making the same
+ * request. It is an audited, visible pause the customer lifts after fixing the webhook.
+ *
+ * Not built: the global, cross-workspace circuit breaker F108 describes. One dead webhook
+ * costs one request per workspace that uses it, then the pause takes over.
+ */
+const DISCORD_DEAD_STATUSES: ReadonlySet<number> = new Set([401, 403, 404, 410]);
+
+async function pauseDeadDiscordWebhook(
+  env: Bindings,
+  d: DeliveryMessage,
+  classification: ClassifiedResponse,
+  res: ProviderResponse | null,
+): Promise<void> {
+  if (classification.outcome !== 'permanent' || !res || !DISCORD_DEAD_STATUSES.has(res.status)) return;
+  const paused = await env.DB.prepare(
+    "UPDATE integrations SET enabled=0,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND organization_id=?2 AND destination='discord' AND enabled=1",
+  )
+    .bind(d.integrationId, d.organizationId)
+    .run();
+  if (paused.meta.changes !== 1) return;
+  await auditStatement(env.DB, {
+    organizationId: d.organizationId,
+    actorId: null,
+    action: 'integration.auto_pause',
+    subjectType: 'integration',
+    subjectId: d.integrationId,
+    outcome: 'success',
+    metadata: { destination: 'discord', providerStatus: res.status, reason: classification.reason },
+  }).run();
 }
 
 export interface ConsumerDeps {

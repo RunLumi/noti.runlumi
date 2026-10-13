@@ -952,3 +952,47 @@ source fixtures carry the new fields. Details: ADR 0015.
 health model, Stripe thin events, enrichment, semantic dedup and reconciliation, Linear, Cloudflare,
 fixtures captured from real providers, merging the two webhook fan-out paths). Sentry is a
 recorded refusal, not a gap.
+## Slice 8a — Discord and the signed customer webhook (this PR)
+
+**What changed**
+
+- `migrations/0018_extended_destinations.sql`: `integrations` rebuilt to widen the destination
+  CHECK to `discord` and `generic_webhook`; everything else (all columns, `filters_json` and its
+  CHECK, `source_id`, four indexes, four triggers, and the `sources` trigger that names the
+  table) is carried over and diffed by `tests/migration-0018.test.ts`.
+- `src/connectors/destinations/discord/` and `generic-webhook/` (render, classify, adapter);
+  `address-policy.ts` (private-range table), `dns-check.ts` (save-time DNS-over-HTTPS);
+  `url-policy.ts` (Discord host/path/query, customer-host shape rules), `config.ts`,
+  `capabilities.ts`, `markup.ts` (Discord dialects), `index.ts` (dispatch, `DeliveryMeta`).
+- Consumer: passes `DeliveryMeta`, the signing secret for the custom webhook, and pauses a
+  Discord integration after a permanent 401/403/404/410 (`integration.auto_pause` audit).
+- API: the two kinds, server-generated one-time signing secret, DNS verification on create and
+  rotation (`src/api/destination-host.ts`).
+- Dashboard: two destination entries, `IssuedSecret`, copy in `messages.destinations.en.ts`.
+- Docs: ADR 0014, API.md, FRONTEND.md, threat model (AR-30, AR-31), specs 07 and 09 statuses.
+
+**Verified by**
+
+- Unit and end-to-end tests over the real migrations and fake D1 (`tests/destinations/discord`,
+  `generic-webhook`, `tests/pipeline/extended-destinations`, `tests/api/extended-destinations`,
+  `tests/migration-0018`, `web/src/integrations/destinations.test.ts`) and
+  `npm run format && npm run check`. The custom-webhook tests verify the signature with the
+  same verifier the generic source uses; fixtures are built at runtime.
+- A live DNS-over-HTTPS query from a developer machine confirmed the response shape the check
+  parses. No real Discord webhook, customer endpoint or Worker egress was exercised.
+
+**Not done**
+
+- Telegram (spec recommends against) and email (spec rejects Cloudflare Email Sending for
+  notifications; the recommended provider, recipient verification and unsubscribe do not exist).
+- The workspace host allowlist, periodic re-resolution and recorded addresses; **DNS rebinding
+  is not defeated** (AR-30). Whether Workers egress can reach metadata/RFC 1918 space is untested.
+- Discord: persisted cross-workspace breaker (AR-31), message-id capture and update-in-place,
+  rate-limit pacing, identity fields, programmatic webhook creation.
+- Custom webhook: payload template, secret rotation overlap, event and correlation id headers,
+  send-a-test, expected-status setting, rate limiting and breaker, the source chat picker.
+- No browser pass of the new screens.
+
+**UNVERIFIED**: see the list in ADR 0014 (Discord per-route limit, legacy and canary hosts, token
+shapes, embed-title markdown, the Worker-side DoH answer, egress reachability).
+

@@ -100,7 +100,7 @@ describe('create validation', () => {
   });
 
   it('reports every invalid field at once', () => {
-    expect(fields(parseCreateIntegration({ destination: 'discord' })).sort()).toEqual(
+    expect(fields(parseCreateIntegration({ destination: 'telegram' })).sort()).toEqual(
       ['destination', 'eventTypes', 'name', 'repo', 'webhookUrl'].sort(),
     );
     expect(fields(parseCreateIntegration([]))).toEqual(['body']);

@@ -2,6 +2,7 @@ import type { ConfigValidation, ValidatedDestinationConfig } from './config';
 import type {
   CanonicalNotification,
   ClassifiedResponse,
+  DeliveryMeta,
   DestinationCapabilities,
   OutboundRequest,
   ProviderResponse,
@@ -33,7 +34,12 @@ export interface DestinationAdapter<C extends ValidatedDestinationConfig> {
   validateConfig(raw: unknown): ConfigValidation;
   /** Pure and deterministic: no clock, no I/O, no memory of previous messages. */
   render(n: CanonicalNotification, caps: DestinationCapabilities, options?: RenderOptions): RenderResult;
-  buildRequest(message: RenderedMessage, config: C, now: number): Promise<OutboundRequest>;
+  buildRequest(
+    message: RenderedMessage,
+    config: C,
+    now: number,
+    meta?: DeliveryMeta,
+  ): Promise<OutboundRequest>;
   /** Total: every response maps to exactly one outcome and reason. */
   classifyResponse(res: ProviderResponse, now: number): ClassifiedResponse;
 }

@@ -5,6 +5,7 @@
  * Copy rules (F220, DESIGN.md §12/§14): plain verbs, one claim at a time, say what happened
  * and what to do next, never blame the reader, never claim a success the system has not seen.
  */
+import { destinationsEn } from './messages.destinations.en';
 import { filtersEn } from './messages.filters.en';
 import { providersEn } from './messages.providers.en';
 
@@ -13,12 +14,13 @@ export type PluralMessage = { readonly one?: string; readonly other: string };
 export const en = {
   ...filtersEn,
   ...providersEn,
+  ...destinationsEn,
 
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'CONNECTIONS',
   'integrations.title': 'Integrations',
   'integrations.description':
-    'Each integration sends chosen GitHub updates from one repository to one Lark, Slack or Microsoft Teams chat.',
+    'Each integration sends chosen GitHub updates from one repository to one Lark, Slack, Microsoft Teams or Discord chat, or to your own webhook.',
   'integrations.new': 'New integration',
   'integrations.loading': 'Loading integrations…',
   'integrations.count': { one: '{count} integration', other: '{count} integrations' },
@@ -172,7 +174,7 @@ export const en = {
   'field.hideLabel': 'Hide {field}',
 
   // --- Client-side validation (mirrors src/api/integration-input.ts) -------
-  'validation.destination': 'Choose Lark, Slack or Microsoft Teams.',
+  'validation.destination': 'Choose where updates should go.',
   'validation.name': 'Use 1–80 characters, without line breaks.',
   'validation.repo': 'Use the form owner/repository, for example acme/website.',
   'validation.events': 'Choose at least one update.',
@@ -569,7 +571,7 @@ export const en = {
   'sources.eyebrow': 'CONNECTIONS',
   'sources.title': 'Sources',
   'sources.description':
-    'A source is your own system sending events to Noti. Each source has a private signing secret that proves an event really came from you, and every event it accepts can be sent to a Lark, Slack or Microsoft Teams chat.',
+    'A source is your own system sending events to Noti. Each source has a private signing secret that proves an event really came from you, and every event it accepts can be sent to a Lark, Slack, Microsoft Teams or Discord chat, or to your own webhook.',
   'sources.loading': 'Loading sources…',
   'sources.count': { one: '{count} source', other: '{count} sources' },
   'sources.listLabel': 'Sources in this workspace',

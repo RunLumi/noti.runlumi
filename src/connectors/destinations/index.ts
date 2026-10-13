@@ -1,5 +1,7 @@
 import type { DestinationAdapter, RenderOptions } from './adapter';
 import type { ValidatedDestinationConfig } from './config';
+import { discordAdapter } from './discord/adapter';
+import { genericWebhookAdapter } from './generic-webhook/adapter';
 import { larkAdapter } from './lark/adapter';
 import { sendRequest, type SendOptions } from './send';
 import { slackAdapter } from './slack/adapter';
@@ -7,6 +9,7 @@ import { teamsAdapter } from './teams/adapter';
 import type {
   CanonicalNotification,
   ClassifiedResponse,
+  DeliveryMeta,
   DestinationCapabilities,
   DestinationKind,
   OutboundRequest,
@@ -38,15 +41,19 @@ export {
   type SlackDestinationConfig,
   type TeamsDestinationConfig,
   type LarkDestinationConfig,
+  type DiscordDestinationConfig,
+  type GenericWebhookDestinationConfig,
   type TeamsTriggerAuth,
 } from './config';
 export { classifyTransportError } from './classify';
 export { sendRequest, readBodyPrefix, type SendOptions, type Fetcher } from './send';
 export type { DestinationAdapter, RenderOptions } from './adapter';
-export { slackAdapter, teamsAdapter, larkAdapter };
+export { slackAdapter, teamsAdapter, larkAdapter, discordAdapter, genericWebhookAdapter };
 
 export interface PrepareOptions extends RenderOptions {
   readonly now: number;
+  /** Per-delivery facts for destinations whose wire format carries them (generic webhook). */
+  readonly meta?: DeliveryMeta;
 }
 
 export type PreparedDelivery =
@@ -67,7 +74,7 @@ async function prepareWith<C extends ValidatedDestinationConfig>(
   const capabilities = adapter.capabilities(config);
   const rendered = adapter.render(n, capabilities, options.startAt ? { startAt: options.startAt } : {});
   if (!rendered.ok) return rendered;
-  const request = await adapter.buildRequest(rendered.message, config, options.now);
+  const request = await adapter.buildRequest(rendered.message, config, options.now, options.meta);
   return { ok: true, capabilities, message: rendered.message, request };
 }
 
@@ -84,6 +91,10 @@ export function prepareDelivery(
       return prepareWith(teamsAdapter, config, n, options);
     case 'lark':
       return prepareWith(larkAdapter, config, n, options);
+    case 'discord':
+      return prepareWith(discordAdapter, config, n, options);
+    case 'generic_webhook':
+      return prepareWith(genericWebhookAdapter, config, n, options);
   }
 }
 
@@ -100,6 +111,10 @@ export function classifyDeliveryResponse(
       return teamsAdapter.classifyResponse(res, now);
     case 'lark':
       return larkAdapter.classifyResponse(res, now);
+    case 'discord':
+      return discordAdapter.classifyResponse(res, now);
+    case 'generic_webhook':
+      return genericWebhookAdapter.classifyResponse(res, now);
   }
 }
 
@@ -115,11 +130,12 @@ export type DeliveryResult =
 export async function deliver(
   config: ValidatedDestinationConfig,
   n: CanonicalNotification,
-  options: SendOptions & RenderOptions = {},
+  options: SendOptions & RenderOptions & { readonly meta?: DeliveryMeta } = {},
 ): Promise<DeliveryResult> {
   const now = options.now ?? Date.now;
   const prepared = await prepareDelivery(config, n, {
     now: now(),
+    ...(options.meta ? { meta: options.meta } : {}),
     ...(options.startAt ? { startAt: options.startAt } : {}),
   });
   if (!prepared.ok) {

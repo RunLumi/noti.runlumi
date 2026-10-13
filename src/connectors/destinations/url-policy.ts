@@ -18,7 +18,10 @@ export type UrlRejectionRule =
   | 'fragment'
   | 'ip_literal'
   | 'host'
-  | 'path';
+  /** A customer-chosen host that is internal, reserved, or known to resolve to a private address. */
+  | 'internal_host'
+  | 'path'
+  | 'query';
 
 export type LarkDomain = 'larksuite' | 'feishu';
 
@@ -32,6 +35,10 @@ interface HostRule {
   readonly pathPrefix?: string;
   /** Optional exact shape of the whole path, checked after the prefix. */
   readonly pathPattern?: RegExp;
+  /** When set, the query string must satisfy it; when absent any query is allowed. */
+  readonly queryAllowed?: (params: URLSearchParams) => boolean;
+  /** A host rule that needs a more specific rejection than `host`. */
+  readonly hostRejection?: (hostname: string) => UrlRejectionRule | undefined;
 }
 
 // A Map, not an object literal: `'constructor' in {}` is true, and `constructor` is a valid
@@ -47,6 +54,85 @@ function isSubdomainOf(hostname: string, suffix: string): boolean {
   if (!hostname.endsWith('.' + suffix)) return false;
   const labels = hostname.slice(0, -(suffix.length + 1)).split('.');
   return labels.every((label) => DNS_LABEL.test(label));
+}
+
+// --- Customer-chosen hosts (generic webhook destination, F115) --------------------------
+// This is the one destination where the customer picks the host, so an allowlist is not
+// possible and the policy is shape-based. It cannot see DNS: Workers `fetch` resolves at the
+// edge and we cannot pin the address, so a public name whose record points at a private
+// address is NOT stopped here (see `dns-check.ts` and docs/adr/0014).
+
+/** Final labels that name internal or reserved space (RFC 6761, RFC 6762, RFC 8375, common LAN usage). */
+const INTERNAL_SUFFIXES: readonly string[] = [
+  'localhost',
+  'local',
+  'localdomain',
+  'internal',
+  'intranet',
+  'private',
+  'home',
+  'lan',
+  'corp',
+  'test',
+  'example',
+  'invalid',
+  'onion',
+  'arpa',
+];
+
+/**
+ * Public wildcard-DNS services that exist to resolve `anything.<service>` to an IP address
+ * embedded in the name, which turns a hostname into a disguised IP literal. A best-effort,
+ * incomplete list: the DNS check at save time is what covers the rest.
+ * Also our own domain, so a destination cannot loop back into our own ingress.
+ */
+const BLOCKED_DOMAINS: readonly string[] = [
+  'nip.io',
+  'sslip.io',
+  'xip.io',
+  'localtest.me',
+  'lvh.me',
+  'vcap.me',
+  'lacolhost.com',
+  'traefik.me',
+  'runlumi.app',
+];
+
+const MAX_HOSTNAME_LENGTH = 253;
+// A public top-level label: letters only (ICANN TLDs), or punycode for an IDN TLD. A numeric
+// last label would make the whole name an IPv4 literal in some notations.
+const PUBLIC_TLD = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
+
+function isUnder(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith('.' + domain);
+}
+
+function customerHostRejection(hostname: string): UrlRejectionRule | undefined {
+  // Every IP notation was already normalised to dotted-quad by the WHATWG parser (decimal,
+  // octal, hex, short forms, percent-encoded and fullwidth digits) and caught as `ip_literal`.
+  if (hostname.length > MAX_HOSTNAME_LENGTH) return 'host';
+  // A trailing dot is a legal FQDN but makes `localhost.` and `x.internal.` evade suffix checks.
+  if (hostname.endsWith('.')) return 'host';
+  const labels = hostname.split('.');
+  // A single label is an intranet name (`metadata`, `intranet`, `db`): public hosts have a TLD.
+  if (labels.length < 2) return 'internal_host';
+  if (!labels.every((label) => DNS_LABEL.test(label) || /^xn--[a-z0-9-]+$/.test(label))) return 'host';
+  const last = labels[labels.length - 1] ?? '';
+  if (!PUBLIC_TLD.test(last)) return 'host';
+  if (INTERNAL_SUFFIXES.includes(last)) return 'internal_host';
+  if (BLOCKED_DOMAINS.some((d) => isUnder(hostname, d))) return 'internal_host';
+  return undefined;
+}
+
+/** Discord accepts `thread_id` on Execute Webhook; `wait=true` is ours and added at send time. */
+function discordQueryAllowed(params: URLSearchParams): boolean {
+  const keys = [...params.keys()];
+  if (new Set(keys).size !== keys.length) return false;
+  return keys.every(
+    (k) =>
+      (k === 'thread_id' && /^\d{1,25}$/.test(params.get(k) ?? '')) ||
+      (k === 'wait' && params.get(k) === 'true'),
+  );
 }
 
 const HOST_RULES: { readonly [K in DestinationKind]: HostRule } = {
@@ -69,6 +155,21 @@ const HOST_RULES: { readonly [K in DestinationKind]: HostRule } = {
   teams: { matches: (h) => isSubdomainOf(h, 'logic.azure.com') },
   // https://open.larksuite.com/document/client-docs/bot-v3/add-custom-bot
   lark: { matches: (h) => LARK_HOSTS.has(h), pathPrefix: '/open-apis/bot/v2/hook/' },
+  // https://discord.com/developers/docs/resources/webhook (DESTINATION_API_REFERENCE.md section 4):
+  // `https://discord.com/api/webhooks/{id}/{token}`; the versioned form `/api/v10/webhooks/…` is
+  // what the docs show for Execute Webhook, so both are accepted.
+  // UNVERIFIED: the legacy `discordapp.com` and the `canary.`/`ptb.` hosts are not recorded in
+  // the reference, so they are rejected rather than guessed. The id/token character classes
+  // and lengths are not documented either, so they are deliberately loose.
+  discord: {
+    matches: (h) => h === 'discord.com',
+    pathPrefix: '/api/',
+    pathPattern: /^\/api\/(?:v\d{1,2}\/)?webhooks\/\d{15,25}\/[A-Za-z0-9._-]{1,256}$/,
+    queryAllowed: discordQueryAllowed,
+  },
+  // Any public hostname, at the host-shape level (`customerHostRejection`). The URL is a
+  // credential: customers embed secrets in the path or query, so both are free-form.
+  generic_webhook: { matches: () => true, hostRejection: customerHostRejection },
 };
 
 const IPV4_LITERAL = /^\d{1,3}(?:\.\d{1,3}){3}$/;
@@ -102,6 +203,9 @@ function genericRule(raw: string, url: URL): UrlRejectionRule | undefined {
 function hostRule(kind: DestinationKind, url: URL): UrlRejectionRule | undefined {
   const rule = HOST_RULES[kind];
   if (!rule.matches(url.hostname)) return 'host';
+  const rejected = rule.hostRejection?.(url.hostname);
+  if (rejected) return rejected;
+  if (rule.queryAllowed && !rule.queryAllowed(url.searchParams)) return 'query';
   if (rule.pathPrefix === undefined) return undefined;
   const path = url.pathname;
   if (!path.startsWith(rule.pathPrefix) || path.length === rule.pathPrefix.length) return 'path';

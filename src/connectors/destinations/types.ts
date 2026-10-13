@@ -3,7 +3,7 @@
  * F91–F104). Everything here is data: no I/O, no clock, no hidden state.
  */
 
-export const DESTINATION_KINDS = ['lark', 'slack', 'teams'] as const;
+export const DESTINATION_KINDS = ['lark', 'slack', 'teams', 'discord', 'generic_webhook'] as const;
 export type DestinationKind = (typeof DESTINATION_KINDS)[number];
 
 export type NotificationStatus = 'success' | 'failure' | 'warning' | 'info';
@@ -29,7 +29,14 @@ export interface CanonicalNotification {
 export type RenderFormat = 'card' | 'markdown' | 'plain';
 
 /** Markup dialect used for free text inside a destination payload. */
-export type MarkupDialect = 'slack_mrkdwn' | 'lark_md' | 'adaptive_card_md' | 'plain';
+export type MarkupDialect =
+  | 'slack_mrkdwn'
+  | 'lark_md'
+  | 'adaptive_card_md'
+  | 'discord_md'
+  /** Discord embed titles and footers: no markdown is interpreted, so nothing is escaped by backslash. */
+  | 'discord_text'
+  | 'plain';
 
 /**
  * What a provider's 2xx actually proves (F99/F100). Teams Workflows returns 202 with no
@@ -37,7 +44,7 @@ export type MarkupDialect = 'slack_mrkdwn' | 'lark_md' | 'adaptive_card_md' | 'p
  */
 export type SuccessSemantics = 'delivered' | 'accepted';
 
-export type SigningScheme = 'none' | 'lark_hmac_sha256';
+export type SigningScheme = 'none' | 'lark_hmac_sha256' | 'standard_webhooks_v1';
 
 export interface DestinationCapabilities {
   readonly kind: DestinationKind;
@@ -88,6 +95,16 @@ export type RenderFailureReason = 'payload_too_large' | 'render_failed';
 export type RenderResult =
   | { readonly ok: true; readonly message: RenderedMessage }
   | { readonly ok: false; readonly reason: RenderFailureReason };
+
+/**
+ * Facts about one delivery that the pure renderer cannot know. Only destinations whose wire
+ * format carries them (the signed customer webhook) read them; the others ignore them.
+ */
+export interface DeliveryMeta {
+  /** Stable across our own retries, so a customer can deduplicate on it. */
+  readonly deliveryId: string;
+  readonly organizationId: string;
+}
 
 /** A fully prepared HTTP request. The URL is a bearer secret: never log it. */
 export interface OutboundRequest {

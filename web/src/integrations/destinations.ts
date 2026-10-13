@@ -18,6 +18,11 @@ export interface DestinationInfo {
   /** Official provider documentation, the fallback when a provider screen changes (F212). */
   readonly docsUrl: string;
   readonly supportsSigningSecret: boolean;
+  /**
+   * Noti generates this destination's signing secret and shows it once (custom webhook). Never
+   * chosen by the person, so there is no input for it; the one-time reveal follows a save.
+   */
+  readonly issuesSigningSecret: boolean;
   /** Extra provider-specific caveats shown under the steps (Teams: trigger access, orphaned flows, accepted ≠ delivered). */
   readonly notes?: readonly MessageId[];
 }
@@ -40,6 +45,7 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsLabel: 'destination.lark.docs',
     docsUrl: 'https://open.larksuite.com/document/client-docs/bot-v3/add-custom-bot',
     supportsSigningSecret: true,
+    issuesSigningSecret: false,
   },
   slack: {
     kind: 'slack',
@@ -57,6 +63,7 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsLabel: 'destination.slack.docs',
     docsUrl: 'https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks',
     supportsSigningSecret: false,
+    issuesSigningSecret: false,
   },
   teams: {
     kind: 'teams',
@@ -76,8 +83,54 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsUrl:
       'https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498',
     supportsSigningSecret: false,
+    issuesSigningSecret: false,
     notes: ['destination.teams.noteOwner', 'destination.teams.noteAccepted'],
+  },
+  discord: {
+    kind: 'discord',
+    name: 'destination.discord',
+    where: 'destination.discord.where',
+    what: 'destination.discord.what',
+    urlHint: 'destination.discord.urlHint',
+    wrongHost: 'validation.webhookUrl.wrongHost.discord',
+    steps: [
+      'destination.discord.step1',
+      'destination.discord.step2',
+      'destination.discord.step3',
+      'destination.discord.step4',
+    ],
+    docsLabel: 'destination.discord.docs',
+    docsUrl: 'https://discord.com/developers/docs/resources/webhook',
+    supportsSigningSecret: false,
+    issuesSigningSecret: false,
+    notes: ['destination.discord.noteMentions', 'destination.discord.noteDeleted'],
+  },
+  generic_webhook: {
+    kind: 'generic_webhook',
+    name: 'destination.generic_webhook',
+    where: 'destination.generic_webhook.where',
+    what: 'destination.generic_webhook.what',
+    urlHint: 'destination.generic_webhook.urlHint',
+    wrongHost: 'validation.webhookUrl.wrongHost.generic_webhook',
+    steps: [
+      'destination.generic_webhook.step1',
+      'destination.generic_webhook.step2',
+      'destination.generic_webhook.step3',
+      'destination.generic_webhook.step4',
+      'destination.generic_webhook.step5',
+    ],
+    docsLabel: 'destination.generic_webhook.docs',
+    docsUrl: 'https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md',
+    supportsSigningSecret: false,
+    issuesSigningSecret: true,
+    notes: ['destination.generic_webhook.noteChecked', 'destination.generic_webhook.noteEvidence'],
   },
 };
 
-export const DESTINATION_ORDER: readonly DestinationKind[] = ['lark', 'slack', 'teams'];
+export const DESTINATION_ORDER: readonly DestinationKind[] = [
+  'lark',
+  'slack',
+  'teams',
+  'discord',
+  'generic_webhook',
+];

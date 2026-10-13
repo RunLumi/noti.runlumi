@@ -83,7 +83,7 @@ describe('write-time config validation', () => {
 
   it('rejects malformed input', () => {
     expect(validateDestinationConfig(null)).toMatchObject({ ok: false, field: 'kind' });
-    expect(validateDestinationConfig({ kind: 'discord', webhookUrl: SLACK })).toMatchObject({
+    expect(validateDestinationConfig({ kind: 'telegram', webhookUrl: SLACK })).toMatchObject({
       field: 'kind',
     });
     expect(validateDestinationConfig({ kind: 'slack' })).toMatchObject({ field: 'webhookUrl' });

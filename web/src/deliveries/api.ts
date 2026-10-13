@@ -1,4 +1,4 @@
-import { ApiError, api } from '../lib/api';
+import { ApiError, api, isDestinationKind, type DestinationKind } from '../lib/api';
 
 /** Delivery log client (docs/API.md "Deliveries"). The server never returns payloads or URLs. */
 
@@ -33,7 +33,7 @@ export interface DeliveryItem {
     readonly id: string;
     readonly name: string;
     readonly repo: string | null;
-    readonly destination: 'lark' | 'slack' | 'teams' | null;
+    readonly destination: DestinationKind | null;
     readonly destinationHost: string | null;
   };
   readonly integrationExists: boolean;
@@ -136,12 +136,7 @@ export function parseDelivery(value: unknown): DeliveryItem {
   )
     throw bad('delivery');
   const integration = value.integration;
-  const destination =
-    integration.destination === 'lark' ||
-    integration.destination === 'slack' ||
-    integration.destination === 'teams'
-      ? integration.destination
-      : null;
+  const destination = isDestinationKind(integration.destination) ? integration.destination : null;
   return {
     id: value.id,
     integration: {

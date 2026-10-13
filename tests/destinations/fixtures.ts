@@ -24,3 +24,5 @@ export const SLACK_URL = 'https://hooks.slack.com/services/T000/B000/XXXX';
 export const TEAMS_URL =
   'https://prod-12.westus.logic.azure.com/workflows/abc/triggers/manual/paths/invoke?sig=s';
 export const LARK_URL = 'https://open.larksuite.com/open-apis/bot/v2/hook/abc';
+export const DISCORD_URL = 'https://discord.com/api/webhooks/123456789012345678/DiscordFixtureToken';
+export const GENERIC_URL = 'https://hooks.example.com/noti/inbound?channel=ci';

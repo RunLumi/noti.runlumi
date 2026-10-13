@@ -19,7 +19,7 @@ unsupported feature **visible to the user** instead of silently degraded.
 
 ## F91 — Destination adapter contract
 
-**Priority** P0 · **Status** partial — contract, adapters and conformance suite in `src/connectors/destinations/` (ADR 0006); `validateConfig` is synchronous; the consumer re-validates and renders through the adapters (wired; fixture tests only, no real-provider test) · **Fixes** D8
+**Priority** P0 · **Status** partial — contract, adapters and conformance suite in `src/connectors/destinations/` (ADR 0006; Discord and the customer webhook added in ADR 0014, and `buildRequest` gained an optional `DeliveryMeta` argument); `validateConfig` is synchronous; the consumer re-validates and renders through the adapters (wired; fixture tests only, no real-provider test) · **Fixes** D8
 
 **Story** As a maintainer, I want one interface every destination implements, so that
 Slack stops being an inline string and starts being an adapter like Lark.
@@ -76,7 +76,7 @@ depth) because a row can be edited by migration or by an admin tool.
 
 ## F92 — Capability contract
 
-**Priority** P0 · **Status** partial — per-mode capability declarations with a golden-table test; no UI surface yet
+**Priority** P0 · **Status** partial — per-mode capability declarations with a golden-table test (now five kinds: Discord reports what the adapter does, not what the provider could do; see ADR 0014); no UI surface yet
 
 **Story** As a user, I want the UI to tell me what a destination can actually do, so that I
 choose it based on what I need rather than what a logo suggests.
@@ -179,7 +179,7 @@ rejected at save time with an explanation.
 
 ## F94 — Rendering safety
 
-**Priority** P0 · **Status** partial — per-dialect escaping/neutralisation, mentions off, https + length-capped links, visible `…` truncation for Slack/Teams/Lark; `truncated_fields` not persisted
+**Priority** P0 · **Status** partial — per-dialect escaping/neutralisation, mentions off, https + length-capped links, visible `…` truncation for Slack/Teams/Lark/Discord (Discord: backslash-escapes in content and descriptions, neutralisation in titles, `allowed_mentions` always empty); `truncated_fields` not persisted
 
 **Story** As a customer, I want a malicious commit message or branch name to be displayed as
 text, so that a `PR titled "@here fix login"` does not ping my entire team.
@@ -410,7 +410,7 @@ prove. `AGENTS.md` is explicit: *"No fabricated benchmarks... No silent loss."* 
 
 ## F100 — Provider acknowledgement semantics in the UI
 
-**Priority** P1 · **Status** partial — classifiers distinguish `accepted` (Teams) from `delivered`; UI not started
+**Priority** P1 · **Status** partial — classifiers distinguish `accepted` (Teams 202, Discord 204, customer webhook 202) from `delivered` (Discord `wait=true` 200); UI not started
 
 **Story** As a customer, I want the delivery log to tell me the truth about whether my
 notification arrived, so that I can trust it enough to delete my own alerting.

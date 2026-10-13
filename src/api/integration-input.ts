@@ -1,4 +1,5 @@
 import { validateDestinationConfig, type ConfigValidation } from '../connectors/destinations';
+import { generateSigningSecret } from '../connectors/sources/generic/encoding';
 import { isGithubEventType, type GithubEventType } from '../connectors/sources/github/catalog';
 import { asRecord } from '../lib/json';
 import type { DestinationKind } from '../pipeline/allowlist';
@@ -108,8 +109,17 @@ function parseSourceEventTypes(value: unknown, errors: FieldError[]): string[] |
 }
 
 function parseDestination(value: unknown, errors: FieldError[]): DestinationKind | undefined {
-  if (value !== 'lark' && value !== 'slack' && value !== 'teams') {
-    errors.push({ field: 'destination', message: 'Choose Lark, Slack or Microsoft Teams.' });
+  if (
+    value !== 'lark' &&
+    value !== 'slack' &&
+    value !== 'teams' &&
+    value !== 'discord' &&
+    value !== 'generic_webhook'
+  ) {
+    errors.push({
+      field: 'destination',
+      message: 'Choose Lark, Slack, Microsoft Teams, Discord or a custom webhook.',
+    });
     return undefined;
   }
   return value;
@@ -119,6 +129,28 @@ const URL_HINTS: Readonly<Record<DestinationKind, string>> = {
   slack: 'Slack incoming webhook URLs start with https://hooks.slack.com/services/.',
   lark: 'Lark custom bot URLs start with https://open.larksuite.com/open-apis/bot/v2/hook/ (or open.feishu.cn).',
   teams: 'Use the HTTP URL of your Teams Workflows trigger; it is on a *.logic.azure.com host.',
+  discord:
+    'Discord webhook URLs start with https://discord.com/api/webhooks/. Copy the URL from Server Settings, Integrations, Webhooks.',
+  generic_webhook:
+    'Use the public https address of your endpoint, for example https://hooks.example.com/noti.',
+};
+
+const GENERIC_HINTS: Readonly<Partial<Record<string, string>>> = {
+  scheme: 'Use an https:// address. Plain http is not accepted.',
+  port: 'Use the standard HTTPS port (443); a custom port is not accepted.',
+  userinfo: 'Remove the username and password from the address.',
+  fragment: 'Remove the # fragment from the address.',
+  ip_literal: 'Use a hostname, not an IP address.',
+  internal_host: 'Use a public hostname. Local, internal and private names are not accepted.',
+  host: 'Use a valid public hostname, for example hooks.example.com.',
+  too_long: 'The address is too long (2048 characters at most).',
+};
+
+const NO_SECRET_INPUT: Readonly<Partial<Record<DestinationKind, string>>> = {
+  slack: 'Slack incoming webhooks do not use a signing secret.',
+  teams: 'Teams Workflows do not use a signing secret.',
+  discord: 'Discord webhooks do not use a signing secret.',
+  generic_webhook: 'Noti generates the signing secret for a custom webhook; it cannot be supplied.',
 };
 
 /** Messages name the field and the rule. They never echo the URL or the secret. */
@@ -127,7 +159,10 @@ function configFailure(result: Extract<ConfigValidation, { ok: false }>, kind: D
     case 'destination_url_rejected':
       return {
         field: 'webhookUrl',
-        message: result.rule === 'malformed' ? 'This is not a valid URL.' : URL_HINTS[kind],
+        message:
+          result.rule === 'malformed'
+            ? 'This is not a valid URL.'
+            : ((kind === 'generic_webhook' ? GENERIC_HINTS[result.rule] : undefined) ?? URL_HINTS[kind]),
       };
     case 'config_unsupported':
       return {
@@ -176,7 +211,7 @@ function parseCredentials(
   if (hasSecret && destination !== undefined && destination !== 'lark') {
     errors.push({
       field: 'signingSecret',
-      message: `${destination === 'slack' ? 'Slack incoming webhooks do' : 'Teams Workflows do'} not use a signing secret.`,
+      message: NO_SECRET_INPUT[destination] ?? 'This destination does not use a signing secret.',
     });
   }
   if (r.triggerAuth !== undefined && destination !== undefined && destination !== 'teams') {
@@ -186,7 +221,12 @@ function parseCredentials(
   const checked = validateDestinationConfig({
     kind: destination,
     webhookUrl: url,
-    ...(hasSecret ? { signingSecret: secret } : {}),
+    // A custom webhook is always signed, with a secret we generate (and show once).
+    ...(destination === 'generic_webhook'
+      ? { signingSecret: generateSigningSecret() }
+      : hasSecret
+        ? { signingSecret: secret }
+        : {}),
     ...(r.triggerAuth !== undefined ? { triggerAuth: r.triggerAuth } : {}),
   });
   if (!checked.ok) {
@@ -196,7 +236,8 @@ function parseCredentials(
   const { config } = checked;
   return {
     webhookUrl: config.webhookUrl,
-    signingSecret: config.kind === 'lark' ? (config.signingSecret ?? null) : null,
+    signingSecret:
+      config.kind === 'lark' || config.kind === 'generic_webhook' ? (config.signingSecret ?? null) : null,
   };
 }
 

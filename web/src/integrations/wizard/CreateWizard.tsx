@@ -6,6 +6,7 @@ import { PageHeader } from '../../components/PageHeader';
 import { Button, Notice } from '../../components/ui';
 import { t } from '../../i18n';
 import { fieldErrorsOf, formLevelError } from '../errors';
+import { IssuedSecret } from '../IssuedSecret';
 import { useCreateIntegration, useOrgId } from '../hooks';
 import { activeInstallations } from '../github/coverage';
 import { useGithubConnection } from '../github/hooks';
@@ -61,6 +62,8 @@ export function CreateWizard() {
   const [errors, setErrors] = useState<WizardErrors>({});
   const [formNotice, setFormNotice] = useState<string[]>([]);
   const leaving = useRef(false);
+  // A custom webhook's signing secret, shown once after the save; see `IssuedSecret`.
+  const [issued, setIssued] = useState<{ id: string; name: string; secret: string } | null>(null);
 
   useBlocker({
     shouldBlockFn: () => !leaving.current && isDirty(draft) && !window.confirm(t('wizard.leaveConfirm')),
@@ -94,8 +97,15 @@ export function CreateWizard() {
     if (Object.keys(all).length > 0 || !draft.destination) return showErrors(all, earliestStep(all, 0));
     setFormNotice([]);
     try {
-      const created = await create.mutateAsync(toBody({ ...draft, destination: draft.destination }));
+      const { integration: created, signingSecret } = await create.mutateAsync(
+        toBody({ ...draft, destination: draft.destination }),
+      );
       leaving.current = true;
+      if (signingSecret) {
+        // Stay on this page until the person has copied it: it cannot be shown again.
+        setIssued({ id: created.id, name: created.name, secret: signingSecret });
+        return;
+      }
       await navigate({ to: '/integrations/$id', params: { id: created.id }, search: { created: true } });
     } catch (error) {
       const server = fromServer(fieldErrorsOf(error));
@@ -118,6 +128,22 @@ export function CreateWizard() {
     );
     goTo(step + 1);
   };
+
+  if (issued) {
+    return (
+      <div className="wizard">
+        <IssuedSecret
+          name={issued.name}
+          secret={issued.secret}
+          kind="created"
+          doneLabel="integration.secret.continue"
+          onDone={() =>
+            void navigate({ to: '/integrations/$id', params: { id: issued.id }, search: { created: true } })
+          }
+        />
+      </div>
+    );
+  }
 
   const editFromReview = (field: WizardField) => goTo(stepOf(field));
   const Body = STEP_BODIES[step];

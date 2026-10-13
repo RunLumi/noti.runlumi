@@ -5,6 +5,8 @@ import {
   classifyDeliveryResponse,
   classifyTransportError,
   deliver,
+  discordAdapter,
+  genericWebhookAdapter,
   larkAdapter,
   prepareDelivery,
   sendRequest,
@@ -15,13 +17,26 @@ import {
   type Fetcher,
 } from '../../src/connectors/destinations';
 import { runLadder } from '../../src/connectors/destinations/render';
-import { BASE, LARK_URL, NOW, SLACK_URL, TEAMS_URL, response } from './fixtures';
+import { generateSigningSecret } from '../../src/connectors/sources/generic/encoding';
+import { BASE, DISCORD_URL, GENERIC_URL, LARK_URL, NOW, SLACK_URL, TEAMS_URL, response } from './fixtures';
 
-const ADAPTERS = [slackAdapter, teamsAdapter, larkAdapter] as const;
-const URLS: Record<DestinationKind, string> = { slack: SLACK_URL, teams: TEAMS_URL, lark: LARK_URL };
+const ADAPTERS = [slackAdapter, teamsAdapter, larkAdapter, discordAdapter, genericWebhookAdapter] as const;
+const URLS: Record<DestinationKind, string> = {
+  slack: SLACK_URL,
+  teams: TEAMS_URL,
+  lark: LARK_URL,
+  discord: DISCORD_URL,
+  generic_webhook: GENERIC_URL,
+};
+const META = { deliveryId: 'delivery-fixture-1', organizationId: 'org-fixture-1' } as const;
 
 function validConfig(kind: DestinationKind) {
-  const r = validateDestinationConfig({ kind, webhookUrl: URLS[kind] });
+  const r = validateDestinationConfig({
+    kind,
+    webhookUrl: URLS[kind],
+    // A custom webhook has no unsigned mode, so its config needs a secret (built at runtime).
+    ...(kind === 'generic_webhook' ? { signingSecret: generateSigningSecret() } : {}),
+  });
   if (!r.ok) throw new Error('config');
   return r.config;
 }
@@ -29,7 +44,7 @@ function validConfig(kind: DestinationKind) {
 describe('capability matrix (DESTINATION_API_REFERENCE.md §7)', () => {
   it('matches the verified provider limits', () => {
     const golden = Object.fromEntries(
-      (['slack', 'teams', 'lark'] as const).map((k) => {
+      (['slack', 'teams', 'lark', 'discord', 'generic_webhook'] as const).map((k) => {
         const c = capabilitiesFor(k);
         return [
           k,
@@ -48,11 +63,13 @@ describe('capability matrix (DESTINATION_API_REFERENCE.md §7)', () => {
       slack: [40_000, 'delivered', false, false, false, 'none'],
       teams: [28_000, 'accepted', false, false, false, 'none'],
       lark: [20_000, 'delivered', false, false, false, 'lark_hmac_sha256'],
+      discord: [40_000, 'delivered', false, false, false, 'none'],
+      generic_webhook: [64_000, 'delivered', false, false, false, 'standard_webhooks_v1'],
     });
   });
 
   it('suppresses mentions and callbacks on every destination', () => {
-    for (const k of ['slack', 'teams', 'lark'] as const) {
+    for (const k of ['slack', 'teams', 'lark', 'discord', 'generic_webhook'] as const) {
       expect(capabilitiesFor(k).supportsMentions).toBe(false);
       expect(capabilitiesFor(k).supportsCallbacks).toBe(false);
     }
@@ -132,9 +149,15 @@ describe('degradation ladder', () => {
 
 describe('prepare, send and classify', () => {
   it('prepareDelivery builds a request for every kind', async () => {
-    for (const kind of ['slack', 'teams', 'lark'] as const) {
-      const r = await prepareDelivery(validConfig(kind), BASE, { now: NOW });
-      expect(r.ok && r.request.url).toBe(new URL(URLS[kind]).href);
+    for (const kind of ['slack', 'teams', 'lark', 'discord', 'generic_webhook'] as const) {
+      const r = await prepareDelivery(validConfig(kind), BASE, { now: NOW, meta: META });
+      // Discord's request URL is the documented versioned endpoint with `wait=true` added.
+      const expected = kind === 'discord' ? new URL(URLS[kind]) : new URL(URLS[kind]);
+      if (kind === 'discord') {
+        expected.pathname = expected.pathname.replace('/api/', '/api/v10/');
+        expected.searchParams.set('wait', 'true');
+      }
+      expect(r.ok && r.request.url).toBe(expected.href);
     }
   });
 
@@ -142,6 +165,8 @@ describe('prepare, send and classify', () => {
     expect(classifyDeliveryResponse('teams', response(202), NOW).outcome).toBe('accepted');
     expect(classifyDeliveryResponse('slack', response(200, 'ok'), NOW).outcome).toBe('delivered');
     expect(classifyDeliveryResponse('lark', response(200, '{"code":0}'), NOW).outcome).toBe('delivered');
+    expect(classifyDeliveryResponse('discord', response(200, '{}'), NOW).outcome).toBe('delivered');
+    expect(classifyDeliveryResponse('generic_webhook', response(202), NOW).outcome).toBe('accepted');
   });
 
   it('sends with redirect: manual and a timeout signal, and reads a bounded body', async () => {

@@ -7,6 +7,7 @@ import { keyringFromEnv } from '../crypto/keyring-env';
 import type { Bindings } from '../env';
 import { sealCredentials, blob, type DestinationCredentials } from '../pipeline/credentials';
 import type { DestinationKind } from '../pipeline/allowlist';
+import { hostVerificationError } from './destination-host';
 import { parseCreateIntegration, parseUpdateIntegration, type FieldError } from './integration-input';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
 import { isDeletionPending } from './workspace-lifecycle';
@@ -292,6 +293,8 @@ integrations.post('/', async (c) => {
     if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
   }
   const input = { ...parsed.value, repo };
+  const unverified = await hostVerificationError(input.destination, input.webhookUrl);
+  if (unverified) return invalid(c, [unverified]);
   const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM integrations WHERE organization_id=?')
     .bind(who.orgId)
     .first<{ n: number }>();
@@ -350,8 +353,14 @@ integrations.post('/', async (c) => {
 
   const row = await loadRow(c, who.orgId, id);
   return c.json(
-    { integration: row ? toView(row) : null, warnings: coverageWarnings(input.filters, input.eventTypes) },
+    {
+      integration: row ? toView(row) : null,
+      warnings: coverageWarnings(input.filters, input.eventTypes),
+      // A custom webhook's signing secret is generated here and shown exactly once.
+      ...(input.destination === 'generic_webhook' ? { signingSecret: input.signingSecret } : {}),
+    },
     201,
+    input.destination === 'generic_webhook' ? { 'cache-control': 'no-store' } : {},
   );
 });
 
@@ -381,6 +390,10 @@ integrations.patch('/:id', async (c) => {
       return invalid(c, [typeError ?? { field: 'eventTypes', message: 'This source no longer exists.' }]);
   }
   let input = parsed.value;
+  if (input.credentials) {
+    const unverified = await hostVerificationError(existing.destination, input.credentials.webhookUrl);
+    if (unverified) return invalid(c, [unverified]);
+  }
   if (input.repo !== undefined) {
     const repo = await canonicalRepository(c.env.DB, who.orgId, input.repo);
     if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
@@ -473,9 +486,19 @@ integrations.patch('/:id', async (c) => {
   ]);
   if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
   const row = await loadRow(c, who.orgId, id);
-  return row
-    ? c.json({ integration: toView(row), warnings: coverageWarnings(effectiveFilters, effectiveEvents) })
-    : c.json({ error: 'Not found' }, 404);
+  if (!row) return c.json({ error: 'Not found' }, 404);
+  // Rotating a custom webhook's credentials issues a new signing secret, shown once.
+  const issued =
+    existing.destination === 'generic_webhook' ? (input.credentials?.signingSecret ?? null) : null;
+  return c.json(
+    {
+      integration: toView(row),
+      warnings: coverageWarnings(effectiveFilters, effectiveEvents),
+      ...(issued ? { signingSecret: issued } : {}),
+    },
+    200,
+    issued ? { 'cache-control': 'no-store' } : {},
+  );
 });
 
 integrations.delete('/:id', async (c) => {
