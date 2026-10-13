@@ -31,17 +31,30 @@ app.post('/webhooks/github',async c=>{
     let types:string[]; try {types=JSON.parse(row.event_types);}catch{continue;}
     if(!types.includes(eventType))continue;
     const id=deliveryId+':'+row.id;
-    const claim=await c.env.DB.prepare("INSERT OR IGNORE INTO deliveries(id,integration_id,state) VALUES(?,?,'pending')").bind(id,row.id).run();
-    if(!claim.meta.changes)continue;
+    
     const obj=event.issue||event.pull_request||event.workflow_run||event;
     const title=String(obj.title||obj.name||eventType).slice(0,300);
     const url=String(obj.html_url||event.repository.html_url||'');
-    await c.env.DELIVERY_QUEUE.send({id,integrationId:row.id,destination:row.destination,ciphertext:row.webhook_ciphertext,larkSecretCiphertext:row.lark_secret_ciphertext,title,url});
-    queued++;
+    const payload:Delivery={id,integrationId:row.id,destination:row.destination,ciphertext:row.webhook_ciphertext,larkSecretCiphertext:row.lark_secret_ciphertext,title,url};
+    const results=await c.env.DB.batch([
+      c.env.DB.prepare("INSERT OR IGNORE INTO deliveries(id,integration_id,state) VALUES(?,?,'pending')").bind(id,row.id),
+      c.env.DB.prepare("INSERT OR IGNORE INTO notification_outbox(id,payload_json) VALUES(?,?)").bind(id,JSON.stringify(payload))
+    ]);
+    if(results[1].meta.changes)queued++;
   }
-  return c.json({accepted:true,queued},202);
+  return c.json({accepted:true,persisted:queued},202);
 });
-export default {fetch:app.fetch,async queue(batch:MessageBatch<Delivery>,env:Bindings) {
+async function dispatchOutbox(env:Bindings) {
+  const rows=await env.DB.prepare("SELECT id,payload_json FROM notification_outbox WHERE state='pending' ORDER BY created_at LIMIT 50").all<{id:string;payload_json:string}>();
+  for(const row of rows.results){
+    try {
+      const payload=JSON.parse(row.payload_json) as Delivery;
+      await env.DELIVERY_QUEUE.send(payload);
+      await env.DB.prepare("UPDATE notification_outbox SET state='dispatched',dispatched_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.id).run();
+    }catch { /* Leave pending for scheduled reconciliation. */ }
+  }
+}
+export default {fetch:app.fetch,async scheduled(_event:ScheduledEvent,env:Bindings){await dispatchOutbox(env);},async queue(batch:MessageBatch<Delivery>,env:Bindings) {
   for(const msg of batch.messages) {
     const d=msg.body;
     try {
