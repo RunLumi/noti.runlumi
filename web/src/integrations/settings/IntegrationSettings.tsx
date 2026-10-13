@@ -12,6 +12,7 @@ import { destinationLabel } from '../IntegrationCard';
 import { CredentialsSection } from './CredentialsSection';
 import { DeleteDialog } from './DeleteDialog';
 import { DetailsForm } from './DetailsForm';
+import { FiltersSection } from './FiltersSection';
 import '../integrations.css';
 
 function BackLink() {
@@ -48,7 +49,7 @@ function Section({
 
 /**
  * One screen per integration with a stable section order (F217): status, repository and
- * updates, destination and webhook URL, then delete. Each section saves on its own.
+ * updates, filters, destination and webhook URL, then delete. Each section saves on its own.
  */
 export function IntegrationSettings() {
   const { id = '' } = useParams({ strict: false });
@@ -130,6 +131,9 @@ export function IntegrationSettings() {
         </Section>
         <Section id="details" title={t('settings.details.title')}>
           <DetailsForm key={integration.id} orgId={orgId} integration={integration} />
+        </Section>
+        <Section id="filters" title={t('filters.title')}>
+          <FiltersSection orgId={orgId} integration={integration} />
         </Section>
         <Section id="credentials" title={t('settings.credentials.title')}>
           <CredentialsSection orgId={orgId} integration={integration} />

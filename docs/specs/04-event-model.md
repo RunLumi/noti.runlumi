@@ -167,7 +167,7 @@ strings that become routing keys.
 
 ## F43 — Identity fields
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `actorIsBot` and `actorIsGhost` are extracted as routing facts, `null` when GitHub sends no sender type (slice 7, [ADR 0010](../adr/0010-routing-filters.md)); there is no canonical envelope
 
 **Story** As a filter author, I want to say "not bots", so that I can route real humans'
 activity to a chat and machine activity to a ticketing system.

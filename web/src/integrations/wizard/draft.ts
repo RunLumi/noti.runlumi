@@ -3,6 +3,7 @@ import type { MessageId } from '../../i18n';
 import { t } from '../../i18n';
 import { DEFAULT_EVENTS, type GithubEventType } from '../events';
 import { isCovered } from '../github/coverage';
+import { EMPTY_FILTER_DRAFT, filterCount, validateFilterDraft, type FilterDraft } from '../filters/model';
 import {
   compact,
   validateEvents,
@@ -24,6 +25,8 @@ export interface Draft {
   readonly repoAccount: string | null;
   readonly name: string;
   readonly eventTypes: readonly GithubEventType[];
+  /** Optional routing filters, as typed. Empty means none. */
+  readonly filters: FilterDraft;
 }
 
 export type WizardField = FormField | 'destination';
@@ -37,6 +40,7 @@ export const EMPTY_DRAFT: Draft = {
   repoAccount: null,
   name: '',
   eventTypes: DEFAULT_EVENTS,
+  filters: EMPTY_FILTER_DRAFT,
 };
 
 /**
@@ -48,6 +52,7 @@ export const STEPS: readonly MessageId[] = [
   'wizard.step.destination',
   'wizard.step.webhook',
   'wizard.step.events',
+  'wizard.step.filters',
   'wizard.step.review',
 ];
 
@@ -59,6 +64,7 @@ const STEP_OF: Readonly<Record<WizardField, number>> = {
   webhookUrl: 2,
   signingSecret: 2,
   eventTypes: 3,
+  filters: 4,
 };
 
 export function stepOf(field: WizardField): number {
@@ -100,6 +106,11 @@ export function validateStep(
       });
     case 3:
       return compact({ eventTypes: validateEvents(draft.eventTypes) });
+    case 4: {
+      const checked = validateFilterDraft(draft.filters);
+      // The step shows each message beside its control; this carries only "has errors".
+      return checked.ok ? {} : { filters: Object.values(checked.errors)[0] ?? t('filters.error.generic') };
+    }
     default:
       return {};
   }
@@ -114,6 +125,12 @@ export function validateAll(draft: Draft, installations: readonly GithubInstalla
 
 const NAME_MAX = 80;
 
+/** Filters are sent only when there are some, so an untouched step changes nothing. */
+function filtersBody(draft: FilterDraft): Pick<CreateIntegrationBody, 'filters'> {
+  const checked = validateFilterDraft(draft);
+  return checked.ok && filterCount(checked.config) > 0 ? { filters: checked.config } : {};
+}
+
 /** The request body. A blank name falls back to the repository, cut to the name limit. */
 export function toBody(draft: Draft & { destination: DestinationKind }): CreateIntegrationBody {
   return {
@@ -125,6 +142,7 @@ export function toBody(draft: Draft & { destination: DestinationKind }): CreateI
     ...(draft.destination === 'lark' && draft.signingSecret !== ''
       ? { signingSecret: draft.signingSecret }
       : {}),
+    ...filtersBody(draft.filters),
   };
 }
 

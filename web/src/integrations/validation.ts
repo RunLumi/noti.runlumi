@@ -11,7 +11,7 @@ import { DESTINATIONS } from './destinations';
  * The URL policy is imported from the Worker (`url-policy.ts`, pure TypeScript), not
  * re-implemented, so the two cannot drift.
  */
-export type FormField = 'name' | 'repo' | 'eventTypes' | 'webhookUrl' | 'signingSecret';
+export type FormField = 'name' | 'repo' | 'eventTypes' | 'filters' | 'webhookUrl' | 'signingSecret';
 export type FieldErrors = Partial<Record<FormField, string>>;
 
 const NAME_MAX = 80;
@@ -28,6 +28,7 @@ const FORM_FIELDS: ReadonlySet<string> = new Set<FormField>([
   'name',
   'repo',
   'eventTypes',
+  'filters',
   'webhookUrl',
   'signingSecret',
 ]);
@@ -79,7 +80,9 @@ export function fromServer(fields: readonly FieldError[]): { fields: FieldErrors
   const out: FieldErrors = {};
   const other: string[] = [];
   for (const f of fields) {
-    if (FORM_FIELDS.has(f.field)) out[f.field as FormField] ??= f.message;
+    // Filter issues carry dotted paths (`filters.branch.allow[0]`); the step shows the first.
+    const field = f.field.startsWith('filters.') ? 'filters' : f.field;
+    if (FORM_FIELDS.has(field)) out[field as FormField] ??= f.message;
     else other.push(f.message);
   }
   return { fields: out, other };

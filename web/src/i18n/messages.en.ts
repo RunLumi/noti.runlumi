@@ -5,9 +5,13 @@
  * Copy rules (F220, DESIGN.md §12/§14): plain verbs, one claim at a time, say what happened
  * and what to do next, never blame the reader, never claim a success the system has not seen.
  */
+import { filtersEn } from './messages.filters.en';
+
 export type PluralMessage = { readonly one?: string; readonly other: string };
 
 export const en = {
+  ...filtersEn,
+
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'CONNECTIONS',
   'integrations.title': 'Integrations',
@@ -107,7 +111,7 @@ export const en = {
   // --- Wizard -------------------------------------------------------------
   'wizard.eyebrow': 'NEW INTEGRATION',
   'wizard.title': 'Set up an integration',
-  'wizard.description': 'Five short steps. Nothing is saved until you choose Create integration.',
+  'wizard.description': 'Six short steps. Nothing is saved until you choose Create integration.',
   'wizard.progress': 'Setup steps',
   'wizard.stepOf': 'Step {current} of {total}: {title}',
   'wizard.step.github': 'Connect GitHub',
@@ -115,6 +119,7 @@ export const en = {
   'wizard.step.webhook': 'Paste the webhook URL',
   'wizard.step.source': 'Choose the repository',
   'wizard.step.events': 'Choose what to send',
+  'wizard.step.filters': 'Add filters (optional)',
   'wizard.step.review': 'Review and create',
   'wizard.back': 'Back',
   'wizard.continue': 'Continue',

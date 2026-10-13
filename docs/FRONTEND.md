@@ -78,17 +78,24 @@ Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
 | --- | --- |
 | `IntegrationsPage.tsx`, `IntegrationCard.tsx`, `EnabledSwitch.tsx` | List, card, optimistic pause/resume with rollback |
 | `github/` | Connection panel, `?github=` return messages, repository picker, coverage rules |
-| `wizard/` | Five-step create flow; `draft.ts` holds the pure step logic |
-| `settings/` | Per-integration screen: details form, credential replacement, delete dialog |
+| `wizard/` | Six-step create flow (filters are optional); `draft.ts` holds the pure step logic |
+| `filters/` | Routing filters ([ADR 0010](adr/0010-routing-filters.md)): `model.ts` (lines to API shape, error mapping, "Try it"), `FiltersEditor`, `FilterTester`, `RoutingLog` |
+| `settings/` | Per-integration screen: details form, filters, credential replacement, delete dialog |
 | `validation.ts` | Client checks mirroring `src/api/integration-input.ts` (imports the Worker allowlist) |
 | `events.ts` | Plain-language label map keyed by `src/connectors/sources/github/catalog.ts` |
-| `../i18n/` | Message catalogue and `t()`/`tp()`; new screens add ids, not literals |
+| `../i18n/` | Message catalogue and `t()`/`tp()`; new screens add ids, not literals. Filter copy is in `messages.filters.en.ts`, merged into `en` |
 | `../components/form.tsx` | `Field` (label, hint, linked error), `SecretInput`, `focusFirstInvalid` |
 
 Rules this feature follows: webhook URLs and signing secrets are write-only (masked input with
 a show toggle, never pre-filled, never echoed); a failed query is an error state, not an
 empty list; field errors sit next to the field and the first invalid control takes focus;
-destructive confirmation focuses the cancel button. `npm test` runs
+destructive confirmation focuses the cancel button.
+
+Filters: one entry per line in labelled textareas inside fieldsets with legends; each error is
+attached to its control and line and announced. The form imports the Worker's own filter parser
+and evaluator, so it accepts exactly what the API accepts and "Try it" answers as ingress would;
+it sends nothing and says so. Bot handling is three radio choices; a deleted account is never
+skipped, and the copy says why. "Recent decisions" shows event type and reason, never content. `npm test` runs
 `web/src/integrations/integrations.test.ts` with the Worker tests.
 
 ## Current truth
@@ -103,6 +110,10 @@ ADR 0007 for what that does and does not prove.
 
 The delivery log (`/activity`), manual redelivery, workspace export and two-phase deletion are
 wired to the real API (ADR 0009). Microsoft Teams can be chosen in the create wizard.
+
+Routing filters (settings section, create-wizard step, "Try it", recent decisions) are wired to
+the real API. They have **not** had a browser pass: reflow at 320 px, keyboard order, contrast
+and Vietnamese diacritics are open.
 
 **Not implemented:** test send, the setup-progress model, per-attempt history and bulk replay.
 Passkeys register and authenticate but have not been acceptance-tested for counter

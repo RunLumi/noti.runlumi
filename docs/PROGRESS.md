@@ -29,7 +29,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
 | 6a | Dashboard: integrations list, guided create wizard, settings (edit, pause, rotate, delete), GitHub connection panel and repository picker | F206 (partial), F210 (partial), F211, F216 (partial), F217 (partial), F220 (partial), F221, F223, F224 (structure), F225 | — | 🟡 | #13 |
 | 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | this PR |
-| 7 | Routing rules and filters | F119–F140 | — | ⬜ | — |
+| 7 | Per-integration routing filters with provenance (backend, API, dashboard); the F121 rule engine is not started | F124, F125, F127, F128, F136–F140 (each in part) | — | 🟡 | PR_NUMBER |
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
 | 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | this PR |
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
@@ -699,3 +699,49 @@ Also fixed:
   UNVERIFIED.
 - Retention has not run against real data volumes; the per-tick bound is 2,500 rows per table, and real-D1 `meta.changes` semantics for the drain loops are unverified.
 
+## Slice 7 — per-integration routing filters (ADR 0010)
+
+**What changed**
+
+- `migrations/0015_routing_filters.sql`: `integrations.filters_json` (`ADD COLUMN`, no rebuild;
+  `CHECK` for valid JSON up to 8 KiB) and `routing_decisions`, with an index per tenant and
+  integration and one on `decided_at` for retention.
+- `src/routing/`: `glob.ts` (linear `*`/`**` matcher, no RegExp from input), `filters.ts` (the
+  registry: `branch`, `baseBranch`, `actor`, `draft`, `labels`, each versioned with a pure
+  `evaluate`), `filter-input.ts` (validation, normalisation, storage, sample-facts parser),
+  `provenance.ts` (decision rows, retention, keyset log). `connectors/sources/github/facts.ts`
+  extracts the seven facts from a verified payload.
+- Ingress (`github/route.ts`): each subscribed, enabled integration is evaluated; a filtered
+  event creates no delivery and records a reason, a delivered one records `delivered` in the
+  same batch as the delivery and outbox rows. Invalid stored filters fail open.
+- API: `filters` on create and update, strict validation, audit with filter ids only,
+  `GET /api/integrations/:id/routing-log`, `POST /api/integrations/:id/filters/preview`
+  ([API.md](API.md#routing-filters)). `purge.ts` lists the new table; the cron job applies a
+  30-day retention; the workspace export includes `filters_json`.
+- Dashboard: "Filters" section in settings (editor, "Try it", recent decisions) and an optional
+  wizard step; copy in `web/src/i18n/messages.filters.en.ts`
+  ([FRONTEND.md](FRONTEND.md)).
+
+**Verified by**
+
+- `tests/routing/*.test.ts`: glob syntax and adversarial inputs (under 1 s), table-driven filter
+  cases, validation and fact extraction, and the ingress path end to end over the real
+  migrations (filtered vs delivered, fan-out per integration, redelivery, fail-open,
+  cross-tenant, no payload in the table, retention, workspace purge).
+- `tests/api/routing.test.ts`: create/update/clear, audit ids only, dry run (pure, CSRF, authz,
+  rate limit), routing log (paging, tenant scoping). `tests/migration-0015.test.ts`.
+- `web/src/integrations/filters/*.test.*`: draft model, error mapping, parity with the server
+  parser and evaluator, wizard step, API parsing, server-rendered markup of the editor.
+
+**Not done (named, not hidden)**
+
+- The F121 rule object, priority and fan-out (F132), `all`/`any` groups (F123), path and number
+  filters (F129, F130), outcome conditions (F131), format overrides (F133), default rules and
+  templates (F134, F135), history-based impact preview, versioning and rollback (F139),
+  `deliveries.rule_id` and the evaluation trace (F137), the critical-event lock (F148), an
+  observed-label picker (F128), the "don't know" bot choice (F138).
+- Filters apply to GitHub events only.
+- No browser pass of the new screens (320 px reflow, keyboard order, contrast, Vietnamese
+  diacritics), no axe or screen-reader pass, and no test against real GitHub deliveries.
+- The routing log is not yet on the activity page; the deliveries API was not on this
+  branch's base.
