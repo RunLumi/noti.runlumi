@@ -1,17 +1,10 @@
+import {classifyGithubEvent,verifyGithubSignature} from './connectors/sources/github/events';
 import { larkPayload, larkAccepted } from './connectors/destinations/lark/webhook';
 import { Hono } from 'hono';
 type Bindings = { DB: D1Database; DELIVERY_QUEUE: Queue<Delivery>; GITHUB_WEBHOOK_SECRET: string; ENCRYPTION_KEY: string };
 type Delivery = { id: string; integrationId: string; destination: 'lark'|'slack'; ciphertext: string; larkSecretCiphertext?: string | null; title: string; url: string };
 const app = new Hono<{Bindings: Bindings}>();
 const enc = new TextEncoder();
-function hex(bytes: ArrayBuffer) { return [...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join(''); }
-async function verify(body: string, signature: string, secret: string) {
-  if (!/^sha256=[a-f0-9]{64}$/.test(signature)) return false;
-  const key = await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
-  const expected = new Uint8Array(await crypto.subtle.sign('HMAC',key,enc.encode(body)));
-  const given = new Uint8Array(signature.slice(7).match(/../g)!.map(x=>parseInt(x,16)));
-  return expected.length===given.length && expected.every((v,i)=>v===given[i]);
-}
 async function decrypt(ciphertext:string, keyHex:string) {
   if (!/^[a-f0-9]{64}$/i.test(keyHex)) throw Error('Invalid encryption key');
   const raw = Uint8Array.from(keyHex.match(/../g)!,x=>parseInt(x,16));
@@ -25,12 +18,11 @@ app.post('/webhooks/github',async c=>{
   if (Number(c.req.header('content-length')||0)>1024*1024) return c.text('Too large',413);
   const body=await c.req.text();
   if (enc.encode(body).length>1024*1024) return c.text('Too large',413);
-  if (!await verify(body,c.req.header('x-hub-signature-256')||'',c.env.GITHUB_WEBHOOK_SECRET)) return c.text('Unauthorized',401);
+  if (!await verifyGithubSignature(body,c.req.header('x-hub-signature-256')||'',c.env.GITHUB_WEBHOOK_SECRET)) return c.text('Unauthorized',401);
   let event: any; try {event=JSON.parse(body);} catch {return c.text('Invalid JSON',400);}
   const repo=event.repository?.full_name;
   const kind=c.req.header('x-github-event')||'';
-  const action=kind==='pull_request' && event.action==='closed' && event.pull_request?.merged===true?'merged':event.action||'';
-  const eventType=kind+'.'+action;
+  const eventType=classifyGithubEvent(kind,event);
   const deliveryId=c.req.header('x-github-delivery');
   if (!repo||!deliveryId) return c.text('Invalid event',400);
   const rows=await c.env.DB.prepare('SELECT id,destination,webhook_ciphertext,lark_secret_ciphertext,event_types FROM integrations WHERE repo=? AND enabled=1').bind(repo).all<{id:string;destination:'lark'|'slack';webhook_ciphertext:string;lark_secret_ciphertext:string|null;event_types:string}>();
