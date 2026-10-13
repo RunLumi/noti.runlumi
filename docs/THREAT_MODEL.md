@@ -41,7 +41,7 @@ Review this file whenever a source, a destination or a trust boundary is added (
 3. Tenant A to tenant B (every query, authorization path and queue message).
 4. Our database to a third-party destination (outbound `fetch`).
 5. Browser to Worker API (cookie-authenticated, same origin).
-6. Static SPA host to browser (separate deployment, see `web/public/_headers`).
+6. Dashboard to browser: the SPA shell and static assets, now served by the same Worker (ADR 0017; `src/web/shell.ts`, `web/public/_headers`).
 
 ## 4. STRIDE per entry point
 
@@ -97,7 +97,7 @@ Code: `src/api/*.ts`, `src/auth/*.ts`. Tests: `tests/api/*`, `tests/auth/permiss
 | S | Credential stuffing, signup abuse | Better Auth rate limits with D1 storage, per-route rules, `cf-connecting-ip` source (F22) | Per-IP; shared IPs and distributed attacks (AR-8) |
 | S | Stolen session token from a D1 read | 30-day expiry with daily refresh, no cookie cache, no read path | Tokens are stored in cleartext by Better Auth (AR-1) |
 | T | Cross-site request forgery | `trustedOrigins` is one exact origin; our own mutating routes require `Origin == APP_ORIGIN` and JSON content type; a static test fails if a route file with mutating verbs lacks an origin check | `SameSite` and `Secure` cookie attributes rely on Better Auth defaults, not verified for 1.7.7 (AR-14) |
-| T | Browser-side script injection | Strict nonce-free CSP on the SPA (`script-src 'self'`, no inline), React escaping; a static test fails if `dangerouslySetInnerHTML` or `innerHTML` appears in `web/src` or `src` | Markup from dependencies is not scanned |
+| T | Browser-side script injection | Strict CSP on the SPA (`script-src 'self'` plus the SHA-256 hash of each of Start's two inline bootstrap scripts, added per response by the Worker; no `'unsafe-inline'`, no nonce), React escaping; a static test fails if `dangerouslySetInnerHTML` or `innerHTML` appears in `web/src` or `src` | Markup from dependencies is not scanned |
 | R | Admin action disputed | Append-only `audit_events` (UPDATE refused by trigger; DELETE allowed for cascade and retention) | Not tamper-evident (stated in migration 0008) |
 | I | Cross-tenant read by guessing ids | Every query is `organization_id`-scoped; non-members get 404; capability model with audited denials (`authorize`) | Staging drill not run (RELEASE_GATES) |
 | D | Mutation spam | Per-user fixed-window limit, 429 with `Retry-After` (`integrations.ts`) | Limited to the integrations routes |
@@ -144,7 +144,9 @@ Code: `src/api/workspace-lifecycle.ts`, `src/pipeline/purge.ts`. Tests:
 
 | | Threat | Control | Residual |
 | --- | --- | --- | --- |
-| T | XSS, clickjacking, MIME sniffing | `web/public/_headers` (rendered from `src/security/headers.ts`, drift-tested): CSP with no inline script, no wildcard, `connect-src 'self'`, `frame-ancestors 'none'`; HSTS; `nosniff`; `Referrer-Policy`; `Permissions-Policy` | Verified only for the signed-out screens in a real browser; signed-in screens were not exercised under the CSP |
+| T | XSS, clickjacking, MIME sniffing | The shell is served by the Worker with `SPA_HEADERS` (`src/security/headers.ts`); its CSP adds only the hashes of the document's own inline scripts, computed from the served bytes as the browser parses them (`src/web/shell.ts`, `tests/web/shell.test.ts`). Static files use `web/public/_headers` (same source, drift-tested). No wildcard, `connect-src 'self'`, `frame-ancestors 'none'`; HSTS; `nosniff`; `Referrer-Policy`; `Permissions-Policy` | Verified in a real browser for sign-in, onboarding, overview and integrations on the production build; other signed-in screens were not exercised under the CSP. A hash allows a script with exactly that text, so a future Start release that changes its bootstrap script changes the hash automatically and is not a gap |
+| T/E | A TanStack Start server function, server route or middleware is reached in production and bypasses the central CSRF check (`src/security/csrf.ts`), or exploits a Start advisory (GHSA-qx66-fv34-fjm8, reflected XSS via server-function responses) | `src/worker.ts` sends only `/api`, `/webhooks`, `/github`, `/health` to Hono and answers everything else from the built shell. Start's renderer is callable only by `vite dev` or by the build's prerender request: header `X-TSS_SHELL: true` exactly, a loopback host, **and** no `/_shell.html` yet. A deployment always has the shell and a real hostname, so no path or header reaches it (`tests/web/worker.test.ts`: `/_serverFn/x`, `//x`, encoded paths, with and without the header). `@tanstack/react-start` is 1.168.60 (patched). `tests/web/start-boundary.test.ts` fails if `web/src` imports Start or defines server handlers. Rule: state-changing work goes through the Hono API | If the shell were ever missing from a deployment the Worker answers 503 and still does not render (loopback host required). Start's server bundle and an RC `h3` are inside the deployed Worker, unreachable but present (ADR 0017); not exercised on a real deployment (RELEASE_GATES section 3) |
+| I | A non-API path answered with HTML by mistake (a missing script served as the app) | Only known static extensions go to the assets layer; a miss is a 404 with the SPA baseline headers and `Cache-Control: no-store`; other dotted paths are client routes and get the shell | None known |
 | T | Worker response rendered as a page | Worker CSP `default-src 'none'` plus the same baseline headers on every response (`securityHeaders` middleware) | None known |
 
 ## 5. Supply chain and CI (adversary 6)

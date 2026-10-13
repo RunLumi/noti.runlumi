@@ -4,11 +4,13 @@
  * Two surfaces, two policies:
  *  - The Worker serves JSON, redirects and webhook acks. Nothing it returns should ever
  *    render, so its CSP is `default-src 'none'`.
- *  - The React SPA is a static build deployed separately (the Worker has no assets
- *    binding; see docs/FRONTEND.md "Deployment"). Its headers ship as
- *    `web/public/_headers`, which Vite copies into `web/dist`. The file is rendered from
- *    the constants below by `renderHeadersFile()`, and a test fails if it drifts, so there
- *    is one source of truth.
+ *  - The React SPA is a TanStack Start build in SPA mode, served by the same Worker (ADR 0017).
+ *    Two paths carry its headers: the Worker, which serves the HTML shell for every
+ *    navigation (src/web/shell.ts, with script hashes added to the CSP), and the static assets
+ *    layer, which serves fingerprinted files under /assets/* directly using
+ *    `web/public/_headers`, which Vite copies into `web/dist/client`. The file is rendered
+ *    from the constants below by `renderHeadersFile()`, and a test fails if it drifts, so
+ *    there is one source of truth.
  */
 import type { MiddlewareHandler } from 'hono';
 
@@ -32,10 +34,12 @@ const COMMON_HEADERS: Readonly<Record<string, string>> = {
 export const API_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /**
- * SPA policy. Nonce-free on purpose: the Vite build emits one external module script and
- * one external stylesheet, with self-hosted fonts and bundled SVGs, so nothing needs
- * `'unsafe-inline'` or a per-request nonce. React sets `style` through the CSSOM, which CSP
- * does not restrict. `connect-src 'self'` is correct because the API is same-origin.
+ * SPA policy. Nonce-free and `'unsafe-inline'`-free on purpose: the build emits external module
+ * scripts and stylesheets, with self-hosted fonts and bundled SVGs. TanStack Start adds two
+ * small inline bootstrap scripts to the shell document; the Worker allows exactly those by
+ * SHA-256 hash when it serves the document (src/web/shell.ts), so this base policy stays
+ * strict for every other response. React sets `style` through the CSSOM, which CSP does not
+ * restrict. `connect-src 'self'` is correct because the API is same-origin.
  */
 export const SPA_CSP = [
   "default-src 'self'",
@@ -91,6 +95,6 @@ export function renderHeadersFile(): string {
     '',
     block('/*', SPA_HEADERS),
     block('/assets/*', { 'Cache-Control': 'public, max-age=31536000, immutable' }),
-    block('/index.html', { 'Cache-Control': 'no-cache' }),
+    block('/_shell.html', { 'Cache-Control': 'no-cache' }),
   ].join('\n');
 }

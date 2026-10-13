@@ -41,7 +41,7 @@
 
 :root {
   /* --- §6 Typography -------------------------------------------------------
-     Geist is self-hosted via `@fontsource-variable/geist` (imported in main.tsx), which
+     Geist is self-hosted via `@fontsource-variable/geist` (imported in routes/__root.tsx), which
      ships the Latin and Vietnamese variable subsets with `font-display: swap` and the SIL
      Open Font License — satisfying DESIGN.md §6.1 with no font-CDN request.
 

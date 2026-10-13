@@ -9,3 +9,4 @@ docs/specs/
 docs/DESTINATION_API_REFERENCE.md
 *.md
 .claude/
+web/src/routeTree.gen.ts

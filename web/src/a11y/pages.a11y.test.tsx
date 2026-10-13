@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import './testing/environment';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -173,9 +173,17 @@ describe('every scenario really shows its state', () => {
 });
 
 describe('route coverage', () => {
-  it('mirrors the routes in main.tsx exactly, so a new route cannot skip the audit', () => {
-    const main = readFileSync(join(__dirname, '..', 'main.tsx'), 'utf8');
-    const declared = [...main.matchAll(/path:\s*'([^']+)'/g)].map((m) => m[1]);
+  it('mirrors the file routes in web/src/routes exactly, so a new route cannot skip the audit', () => {
+    const dir = join(__dirname, '..', 'routes');
+    const declared = readdirSync(dir)
+      .filter((file) => file.endsWith('.tsx') && !file.startsWith('__'))
+      .flatMap((file) =>
+        [...readFileSync(join(dir, file), 'utf8').matchAll(/createFileRoute\('([^']+)'\)/g)].map((m) => {
+          const path = m[1] ?? '';
+          // `/integrations/` is the index route of a folder-less path: the URL is `/integrations`.
+          return path.length > 1 ? path.replace(/\/$/, '') : path;
+        }),
+      );
     expect([...declared].sort()).toEqual([...ROUTE_PATHS].sort());
   });
 

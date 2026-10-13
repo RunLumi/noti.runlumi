@@ -9,7 +9,7 @@ This is an engineering alpha, not a production-ready multi-tenant product. It re
 4. Apply schema: `npx wrangler d1 migrations apply lumi-noti --remote`. Migration `0012_teams_destination.sql` rebuilds the `integrations` table to admit `teams`; rehearse it on a staging database first (it was only run on the Node SQLite test fake).
 5. Set secrets: `wrangler secret put GITHUB_WEBHOOK_SECRET`, `wrangler secret put KEK_V1` (`openssl rand -hex 32`), and — only if you have pre-envelope (v0) rows — `wrangler secret put ENCRYPTION_KEY`. `KMS_ACTIVE_VERSION` is a var in `wrangler.jsonc`. `GET /health` returns 503 and names the binding if the key ring is invalid.
 6. Integrations are created through the tenant-scoped API (slice 3, not yet shipped). Legacy v0 rows are re-sealed automatically by the cron job; see ADR 0004.
-7. Deploy with `npm run deploy`; configure GitHub repository webhook for `/webhooks/github`, content type JSON, shared signing secret.
+7. Deploy with `npm run deploy`. It runs the Vite build (dashboard assets, prerendered SPA shell and the Worker, ADR 0017) and then `wrangler deploy --config web/dist/server/wrangler.json`; a bare `wrangler deploy` or `wrangler dev` does not work because the Worker entry (`src/worker.ts`) imports Vite-built modules. Local: `npm run dev` serves the dashboard and API on http://localhost:5173 (`.dev.vars` `APP_ORIGIN` must match). Then configure GitHub repository webhook for `/webhooks/github`, content type JSON, shared signing secret.
 
 ## Explicit gaps before public release
 - No authenticated dashboard, workspace model, GitHub App installation verification, or safe credential onboarding yet. Do not accept arbitrary public users.

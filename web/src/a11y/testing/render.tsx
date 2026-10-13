@@ -32,9 +32,9 @@ import {
 import type { Me } from '../../lib/api';
 
 /**
- * The application's route table, mirrored from `web/src/main.tsx` (which builds the router at
- * import time and cannot be imported without mounting the app). `pages.a11y.test.tsx` fails if the
- * two ever disagree, so a new route cannot ship without being added here and audited.
+ * The application's route table, mirrored from the file routes in `web/src/routes` (the real router is built by
+ * TanStack Start and needs a browser or the Worker). `pages.a11y.test.tsx` fails if the two ever
+ * disagree, so a new route cannot ship without being added here and audited.
  */
 export const ROUTE_PATHS = [
   '/',

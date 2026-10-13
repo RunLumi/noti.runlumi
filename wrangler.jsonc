@@ -1,6 +1,9 @@
 {
   "name": "lumi-noti",
-  "main": "src/index.ts",
+  // The Worker entry composes the API (src/index.ts) with the dashboard (ADR 0017). It imports
+  // TanStack Start virtual modules, so it only builds through Vite: use `npm run dev` and
+  // `npm run deploy`, not `wrangler dev` or a bare `wrangler deploy`.
+  "main": "src/worker.ts",
   "compatibility_date": "2026-09-01",
   "queues": {
     "producers": [
@@ -47,6 +50,16 @@
   // workers.dev route is switched off. `wrangler dev` is unaffected. If a deployment ever
   // relied on workers.dev, give it a custom domain or route first.
   "workers_dev": false,
+  // The dashboard build (web/dist/client) is served from the Worker's own assets; the Vite
+  // plugin fills in `directory`. `html_handling: none` keeps `/_shell.html` addressable by the
+  // Worker, which serves it for every navigation (src/web/shell.ts); `not_found_handling: none`
+  // sends every miss to the Worker. Fingerprinted /assets/* and the shell are served directly,
+  // with the web/public/_headers rules.
+  "assets": {
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none",
+  },
   "send_email": [
     {
       "name": "AUTH_EMAIL",
