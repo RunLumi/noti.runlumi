@@ -3,21 +3,39 @@ on:
   pull_request:
   push:
     branches: [main]
+
+# Least privilege: nothing here writes to the repository. No `pull_request_target`, and no
+# repository secrets are referenced, so a fork PR cannot reach one (spec 15 F239).
 permissions:
   contents: read
+
+# A newer push to the same PR supersedes the running check. Pushes to main are never
+# cancelled, so every merged commit keeps a complete CI record.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Actions are pinned to a commit SHA, not a movable tag. Dependabot
+      # (.github/dependabot.yml) proposes bumps; the trailing comment keeps them readable.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
       - run: python3 scripts/test_auth_schema.py
       # `npm ci` installs exactly the committed lockfile. Never `npm install`: it
       # re-resolves ranges, so a passing local build would not imply a passing CI build.
       - run: npm ci --no-audit --no-fund
+      # Production-dependency advisories (F239). Same policy as
+      # `npm audit --omit=dev --audit-level=high`, plus a short dated exception list in
+      # scripts/audit-gate.mjs that is mirrored in docs/SECURITY.md.
+      - run: npm run audit:gate
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
@@ -27,3 +45,23 @@ jobs:
       # Guards the deployed Worker artifact against the pure-JS scrypt fallback, whose
       # digest comparison is not constant-time. Must run after install; see the script.
       - run: npm run verify:worker-bundle
+
+  dependency-review:
+    # Blocks a PR that introduces a dependency with a known high or critical advisory.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Needs the repository's dependency graph. If it is disabled the action errors; that
+    # must not block merges, so this job reports but does not gate until it is confirmed
+    # working (docs/RELEASE_GATES.md). Remove `continue-on-error` once it has run green.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/dependency-review-action@3c4e3dcb1aa7874d2c16be7d79418e9b7efd6261 # v4.8.2
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime

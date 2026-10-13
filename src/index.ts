@@ -14,8 +14,11 @@ import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { purgeDueWorkspace } from './pipeline/purge';
 import { sweepStaleClaims } from './pipeline/sweep';
 import { log } from './platform/log';
+import { securityHeaders } from './security/headers';
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+app.use('*', securityHeaders);
 
 app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
 app.route('/api/workspace', workspace);

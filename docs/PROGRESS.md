@@ -34,6 +34,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 9 | Observability and runbook | F191–F204 | — | ⬜ | — |
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
 | W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
+| S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (helper only), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | this PR |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
 [`specs/00-current-state.md` §5](specs/00-current-state.md#5-non-goals-this-audit-implies).
@@ -584,3 +585,59 @@ Also fixed:
 - Delivery log, test send and the setup-progress model (F207, F213–F215) are slice 6b.
 - No automated axe scan or screen-reader pass yet; only the strings on these screens are in
   the catalogue.
+
+## Slice S — security hardening (this PR)
+
+**What changed**
+
+- `src/security/headers.ts` and a one-line `app.use` in `src/index.ts`: HSTS, `nosniff`,
+  `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`, COOP and a `default-src 'none'`
+  CSP on every Worker response. The SPA is not served by the Worker (no assets binding), so
+  its headers ship as `web/public/_headers`, rendered from the same module and drift-tested.
+  The SPA CSP is nonce-free: `script-src 'self'`, `style-src 'self'`, `connect-src 'self'`.
+  The build has no inline script or style, so nothing needed `'unsafe-inline'`.
+- `src/security/rate-limit.ts`: `hit()` (D1 fixed-window UPSERT, shared with the existing
+  `api_rate_limits` table), `ingressLimiter(env, installationId)` (600 per minute per
+  installation, keyed `ingress:github:<id>`), and `pruneRateLimits()`.
+- CI: actions pinned to commit SHAs, `concurrency` cancel for PRs, per-job read-only
+  permissions, `npm run audit:gate`, a dependency-review job, Dependabot (npm and Actions,
+  weekly, grouped). Root `SECURITY.md`.
+- `scripts/audit-gate.mjs`: the `npm audit --omit=dev --audit-level=high` policy with a short
+  dated exception list. Today it excepts two tinypool advisories that reach the production
+  tree only because `better-auth` lists vitest as an optional peer (documented in
+  `docs/SECURITY.md`).
+- `docs/THREAT_MODEL.md` (STRIDE per entry point, risk register AR-1 to AR-16) and a
+  restructured `docs/RELEASE_GATES.md`.
+- `tests/security/`: headers and CSP parsing, limiter, audit gate, static guards (no
+  `console.log`, no console call passing bodies or headers, Origin check present in every
+  route file with mutating verbs, no secrets in `wrangler.jsonc` vars or
+  `.dev.vars.example`, no HTML-injection sinks, `cookieCache` stays off), CI hygiene, risk
+  register consistency.
+
+**Verified by**
+
+- The unit tests above, `npm run format && npm run check`.
+- The built SPA served with the exact `_headers` CSP by a local static server and opened in
+  the in-app browser: `/` and `/integrations` (which redirects to `/signin` when signed out)
+  rendered, the self-hosted font loaded, no `<style>` tags and no CSP violation messages in
+  the console. The only console errors were 401s from the stub API.
+
+**Not done / follow-ups**
+
+- **Wire the ingress limiter.** `src/connectors/sources/github/route.ts` was owned by another
+  slice. The integration is one call, placed after signature verification, after the
+  `ping` and lifecycle early returns, and before `resolveTenant`:
+  `const limit = await ingressLimiter(c.env, Number(asRecord(event.installation)?.id));`
+  then `if (limit.limited) return c.text('Too many requests', 429, { 'retry-after': String(limit.retryAfterSeconds) });`
+  It must stay off the lifecycle branch so a revocation is never delayed. Add a route test
+  asserting 429 with `Retry-After` and that a lifecycle event is never limited. Until this
+  lands, F29 is not met.
+- Call `pruneRateLimits(env.DB, Date.now() - 3_600_000)` from `scheduled()` (AR-16).
+- Signed-in SPA screens have not been checked under the CSP (no backend with a session was
+  available). Run a pass against `wrangler dev` and watch for violations.
+- Confirm the static host applies `web/public/_headers` and that GitHub private vulnerability
+  reporting is enabled in repository settings; neither could be verified from here.
+- F239: `npm audit signatures` on release builds, install-script review, OIDC deploy.
+- F231 abuse alerting, F233 audit rows for unknown-installation 403s and the staging
+  isolation drill, F237 retention matrix, F242 runbooks and `security.txt`.
+- The dependency-review job is `continue-on-error` until it has run green once.
