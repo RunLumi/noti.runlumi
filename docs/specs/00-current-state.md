@@ -88,10 +88,13 @@ passkey plan and `AUTH_EMAIL` setup — all superseded. It also carried an out-o
 that Cloudflare Email Sending cannot send to arbitrary recipients; that restriction was
 lifted once a sending domain is onboarded. Rewritten against the working tree on 2026-10-13.
 
-### N6 — No bridge from a GitHub installation to an organization ⛔ still open
-There is no `github_installations` table, no install flow, and no path from an inbound webhook
-to an `organization_id`. Identity (PR #2) and delivery (`src/index.ts`) still do not meet.
-This is the concrete form of the gap in `05-source-github.md`.
+### N6 — No bridge from a GitHub installation to an organization 🟡 inbound half resolved
+`migrations/0006` adds `github_installations` (unique per `(installation_id, app_id)`, cascades
+with the organization). `/webhooks/github` now resolves the tenant **only** from the verified
+payload's `installation.id`, scoped to our `GITHUB_APP_ID`, and rejects every other outcome
+with `403` — unknown installation, foreign App, missing block, suspended or uninstalled.
+Still open: the install/setup flow that *writes* that row (F56/F57), so today the registry is
+populated only by hand and ingress fails closed.
 
 ### N7 — Ambiguous membership selection would have leaked a tenant ✅ resolved
 Found while implementing N2 — the most valuable thing in this change.
@@ -139,13 +142,13 @@ GitHub → verify HMAC → classify → SELECT integrations WHERE repo=? AND ena
 
 ## 2. Verified defects
 
-Status at `86c9679`:
+Status as of PR #6 (2026-10-13):
 
 | # | Defect | Status |
 | --- | --- | --- |
-| D1 | Secret name mismatch | ⬜ **worse** — also missing `BETTER_AUTH_SECRET`, `APP_ORIGIN`, `AUTH_FROM_EMAIL` |
-| D2 | No tenant boundary in schema | ⬜ unchanged — **highest severity** |
-| D3 | Routing keys on `repo` from body | ⬜ unchanged |
+| D1 | Secret name mismatch | ✅ `.dev.vars.example` declares every binding the Worker reads; guarded by `tests/config.dev_vars.test.ts` |
+| D2 | No tenant boundary in schema | 🟡 expand phase: nullable `organization_id` on `integrations`, `deliveries`, `notification_outbox` (0006); NOT NULL contract migration pending backfill |
+| D3 | Routing keys on `repo` from body | ✅ tenant comes from the verified installation; `repo` only narrows within that tenant |
 | D4 | Queue publish not atomic with claim | ⬜ unchanged |
 | D5 | Secrets copied into queue bodies | ⬜ unchanged |
 | D6 | No envelope encryption, AAD or key version | ⬜ unchanged |
@@ -156,11 +159,11 @@ Status at `86c9679`:
 | D11 | No error classification | ⬜ unchanged |
 | D12 | `event_types` unvalidated JSON | ⬜ unchanged |
 | D13 | No integration test of the delivery path | 🟡 improved: schema-invariant smoke tests added (`scripts/test_auth_schema.py`); delivery path still untested |
-| D14 | CI does not enforce the documented workflow | 🟡 frontend gates added; still `npm install` not `npm ci`, still no lint/format/coverage |
+| D14 | CI does not enforce the documented workflow | 🟡 `npm ci`, format, lint, typecheck, build, tests and bundle guard enforced; coverage threshold not yet |
 | D15 | Magic 1 MiB webhook cap | ⬜ unchanged |
 | D16 | Unbounded event-type string space | ⬜ unchanged |
 
-New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N3 and N6 remain open.
+New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N6 is half resolved; N3 remains open.
 
 Each item below is reproducible from the code. Severity is our judgement.
 

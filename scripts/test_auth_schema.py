@@ -39,8 +39,11 @@ with tempfile.TemporaryDirectory() as temp:
         org(oid)
     join("member-a", "alice", "org-a", "admin")
     join("member-b", "bob", "org-a", "member")
-    must_fail(lambda: join("member-cross", "bob", "org-b", "member"),
-              "A user joined two organizations")
+    # Multi-workspace membership is intended (migration 0006). Isolation comes from
+    # organization_id predicates, never from membership cardinality.
+    join("member-cross", "bob", "org-b", "member")
+    must_fail(lambda: join("member-dup", "bob", "org-b", "member"),
+              "A user joined the same organization twice")
     must_fail(lambda: con.execute("UPDATE member SET role='member' WHERE id='member-a'"),
               "The final admin was demoted")
     must_fail(lambda: con.execute("DELETE FROM member WHERE id='member-a'"),
@@ -54,5 +57,16 @@ with tempfile.TemporaryDirectory() as temp:
     must_fail(lambda: con.execute("UPDATE member SET organization_id='org-b' WHERE id='member-b'"),
               "Remaining admin moved out of organization")
     join("member-c", "carol", "org-b", "admin")
+    # GitHub installations map to exactly one workspace and cascade with it.
+    con.execute(
+        "INSERT INTO github_installations(id,organization_id,installation_id,app_id,"
+        "account_login,account_type,repository_selection) VALUES(?,?,?,?,?,?,?)",
+        ("gi-1", "org-b", "42", "1", "acme", "Organization", "all"),
+    )
+    must_fail(lambda: con.execute(
+        "INSERT INTO github_installations(id,organization_id,installation_id,app_id,"
+        "account_login,account_type,repository_selection) VALUES(?,?,?,?,?,?,?)",
+        ("gi-2", "org-a", "42", "1", "acme", "Organization", "all"),
+    ), "One installation was claimed by two workspaces")
     assert not con.execute("PRAGMA foreign_key_check").fetchall()
     print("D1 schema and organization integrity constraints: PASS")

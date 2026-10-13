@@ -37,5 +37,9 @@
   "vars": {
     "APP_ORIGIN": "https://noti.runlumi.app",
     "AUTH_FROM_EMAIL": "noreply@runlumi.app",
+    // Public identifier of the GitHub App. Not a secret: it appears in install URLs.
+    // Used to reject payloads that claim a different App, alongside the webhook secret.
+    // Replace with the real App ID; until then, webhook ingress fails closed.
+    "GITHUB_APP_ID": "REPLACE_WITH_GITHUB_APP_ID",
   },
 }
