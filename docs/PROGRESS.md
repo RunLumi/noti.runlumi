@@ -1050,3 +1050,38 @@ because no Worker was running behind the preview proxy.
 **Not verified**: the dashboard behind sign-in against a running Worker, and the Vite 8 dev server
 (`npm run dev:web`) beyond starting the production build; CSS output is minified by Lightning CSS
 now, so a visual diff of the authenticated screens was not run.
+
+## TanStack Start (ADR 0017)
+
+The dashboard is now a TanStack Start app in SPA mode, built and served by the same Worker as the API.
+
+- File routes under `web/src/routes/` replace `web/src/main.tsx` and `web/index.html`; the page
+  components are unchanged.
+- `src/worker.ts` is the Worker entry: Hono for `/api`, `/webhooks`, `/github`, `/health`; the
+  prerendered shell for everything else; `scheduled` and `queue` exactly as before.
+- One `vite dev` process on :5173 serves both; the Vite proxy is gone. `npm run deploy` builds and
+  deploys `web/dist/server/wrangler.json`.
+- The CSP stays free of `'unsafe-inline'`: the Worker adds the SHA-256 of Start's inline scripts.
+- New tests: `tests/web/shell.test.ts`, `tests/web/start-boundary.test.ts`; the route-coverage and
+  font tests read the file routes.
+
+**Verified** in a real browser against the production build under `vite preview` and against
+`vite dev` (Chrome, Vietnamese locale): sign-in with cookies, onboarding, workspace creation (a
+same-origin POST through the CSRF check), deep-link reload of `/integrations`, cron via
+`/cdn-cgi/handler/scheduled` (heartbeat row written), strict CSP with no console errors.
+**Not verified**: a real Cloudflare deployment, the queue consumer processing a live message through
+the new entry (it is exported and type-checked), the CI run of the Vite build (it starts workerd to
+prerender), other signed-in screens under the CSP, and a 320px or keyboard pass on the routed shell.
+
+### TanStack Start: security review follow-up
+
+- Start's handler is now unreachable in a deployment (`X-TSS_SHELL: true` exactly, loopback host
+  and no built shell, or `vite dev`); `tests/web/worker.test.ts` drives `src/worker.ts`.
+- `@tanstack/react-start` 1.168.60 (patched for GHSA-qx66-fv34-fjm8) with `react-router` 1.170.41.
+- Four build-only packages are held back by `overrides`; the remaining age exceptions are listed in
+  ADR 0017 ("Dependency age"). `npm run audit:gate` passes.
+- Static extensions allow-list for the assets layer; assets misses carry the baseline headers.
+- `verify:worker-bundle` reads the built default export (fetch, queue, scheduled), the cron and both
+  queue consumers, `html_handling`/`not_found_handling` `none`, fails in CI if
+  `web/dist/server/.dev.vars` exists, and `npm run deploy` strips it first.
+- New explicit items in `RELEASE_GATES.md` section 3 for what is still unverified on a real deployment.

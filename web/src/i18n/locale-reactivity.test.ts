@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
  * `useLocale();` as the first line of the component (import from `i18n/LocaleProvider`).
  */
 const SRC = join(__dirname, '..');
-const EXEMPT = new Set(['i18n/LocaleProvider.tsx', 'main.tsx']);
+const EXEMPT = new Set(['i18n/LocaleProvider.tsx']);
 
 function walk(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

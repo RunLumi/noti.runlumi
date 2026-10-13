@@ -42,7 +42,7 @@ needs a named owner, a written rationale and an entry in the register in
 | Control | Status | Evidence |
 | --- | --- | --- |
 | Security headers on Worker responses | done | `src/security/headers.ts`, `tests/security/headers.test.ts` |
-| SPA headers and strict CSP | partly | `web/public/_headers`; signed-out screens loaded with no CSP violations in a real browser; signed-in screens not exercised. **Deployment of the `_headers` file to the static host is unconfirmed** |
+| SPA headers and strict CSP | partly | The Worker serves the shell with `SPA_HEADERS` plus script hashes (`src/web/shell.ts`, ADR 0017); static files use `web/public/_headers`. Sign-in, onboarding, overview and integrations loaded with no CSP violations on the production build in a real browser; other signed-in screens not exercised. **Whether the assets layer applies `_headers` to `/assets/*` on a real deployment is unconfirmed** |
 | Webhook ingress flood control (F29) | partly | `ingressLimiter` is implemented and unit-tested; it is **not wired into the route** (follow-up in PROGRESS) |
 | CI pinned actions, read-only permissions, concurrency | done | `ci.yml`, asserted by `tests/security/config-guards.test.ts` |
 | Production dependency audit gate | done | `npm run audit:gate`; exception list is empty (`docs/SECURITY.md`) |
@@ -55,6 +55,10 @@ needs a named owner, a written rationale and an entry in the register in
 | Abuse alerting, audit coverage of unknown-installation 403s | not done | F231, F233 |
 | Incident runbooks, `security.txt` | partly | Availability and delivery-loss runbook exists (`RUNBOOK.md`, never rehearsed, several Cloudflare behaviours UNVERIFIED). Security incident response and `security.txt` are not done (F242) |
 | Delivery SLIs, stall detection, retention (spec 13) | partly | `GET /api/observability/summary`, cron stall log line and bounded retention are tested against the Node SQLite fake only (ADR 0011). No paging, no `job_runs`, no ingress counter; nothing is measured against a real deployment, so no SLI may be published externally |
+| Assets layer with `html_handling: none` and `not_found_handling: none` serves only fingerprinted files and `/_shell.html`, and sends every other path to the Worker (ADR 0017) | not done | Checked in local workerd only. Verify on a staging deployment: `/signin`, `/x.js` (404 with the baseline headers, `no-store`) and `/_serverFn/x` all answer from the Worker |
+| `_headers` rules reach `/assets/*` on a real deployment (immutable cache, CSP, `nosniff`) | not done | Local workerd applies them; no deployed response has been inspected |
+| Live queue message and DLQ message processed through the Vite-built Worker entry (`src/worker.ts`) | not done | The bundle exports `fetch`, `scheduled` and `queue` (asserted by `verify:worker-bundle`) and both consumers are in the built config; no message has been consumed through this entry |
+| Production can never render through TanStack Start (ADR 0017 decision 5) | partly | Behavioural tests (`tests/web/worker.test.ts`) cover the Worker entry; not exercised against a real deployment. Start's server handler is also reachable only when the shell is absent, on a loopback host, with the exact build header |
 
 ## 4. Known limitations
 

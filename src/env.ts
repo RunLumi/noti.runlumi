@@ -30,6 +30,8 @@ export interface DeliveryMessage {
 export const SUMMARY_MAX_CHARS = 280;
 
 export type Bindings = AuthBindings & {
+  /** Static assets of the dashboard build (ADR 0017). Absent only under `vite dev`. */
+  ASSETS?: Fetcher;
   DELIVERY_QUEUE: Queue<DeliveryMessage>;
   GITHUB_WEBHOOK_SECRET: string;
   GITHUB_APP_ID: string;

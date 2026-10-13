@@ -259,7 +259,9 @@ describe('bundled Geist covers every Vietnamese character in the catalogue', () 
   });
 
   it('is imported by the app entry point', () => {
-    expect(readFileSync(join(SRC, 'main.tsx'), 'utf8')).toMatch(/import '@fontsource-variable\/geist'/);
+    expect(readFileSync(join(SRC, 'routes', '__root.tsx'), 'utf8')).toMatch(
+      /import '@fontsource-variable\/geist'/,
+    );
     expect(styles?.css).toMatch(/--font-sans:\s*'Geist Variable'/);
   });
 
