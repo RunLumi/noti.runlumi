@@ -369,8 +369,12 @@ describe('review hardening', () => {
       404,
     );
     expect((await call('DELETE', `${path}?org=org-a`, { as: 'alice' })).status).toBe(404);
-    // with two memberships and no selection, the request is refused rather than guessed
-    expect((await call('GET', '/api/integrations', { as: 'alice' })).status).toBe(403);
+    // with two memberships and no selection, the caller's earliest workspace is used
+    // (ties broken by id) — never anything they do not belong to
+    const settled = await json<{ organizationId: string }>(
+      await call('GET', '/api/integrations', { as: 'alice' }),
+    );
+    expect(settled.organizationId).toBe('org-a');
   });
 
   it('refuses a declared oversized body before reading it', async () => {

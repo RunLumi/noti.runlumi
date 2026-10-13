@@ -832,3 +832,21 @@ fault fails open and logs a redacted `rate_limit_error`. Covered by three tests 
   an `AFTER DELETE` trigger on `sources` leaves no orphan integrations. L5: the outbox insert
   is conditional on the delivery insert (`changes() > 0`); the GitHub route had the same
   defect (a redelivery after outbox retention sent again) and is fixed with a test.
+
+## Fix F — new users and multi-workspace sign-in
+
+Found by the accessibility agent while walking the app in a real browser.
+
+- `GET /api/workspace/me` answered 403 for a signed-in user with no workspace, and the
+  dashboard treats any `/me` failure as signed out. A new user was bounced to `/signin` and
+  could never reach onboarding. It now returns the user with `org_id: null`.
+- PR #5 allowed several workspaces per user, but the Better Auth organization hooks still
+  refused to create, add or accept a second one ("An account can belong to only one
+  organization"). They are removed; verified email is still required to accept an invitation.
+- A new session now starts in the user's earliest workspace, and a user left with several
+  workspaces and no valid active one (for example after a purge) is settled on the earliest
+  and that choice is stored on the session. An explicit `?org=` for a workspace the caller is
+  not in is still a 404.
+- Covered by `tests/api/workspace-me.test.ts`.
+- Not built: a workspace switcher in the dashboard. Users in several workspaces stay in the
+  active one until the switcher ships.

@@ -38,16 +38,6 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
     if (executionCtx) executionCtx.waitUntil(promise);
     else return promise;
   };
-  const ensureNotMember = async (userId: string) => {
-    const existing = await db
-      .select({ id: schema.member.id })
-      .from(schema.member)
-      .where(eq(schema.member.userId, userId))
-      .limit(1);
-    if (existing.length)
-      throw new APIError('FORBIDDEN', { message: 'An account can belong to only one organization' });
-  };
-
   return betterAuth({
     appName: 'Lumi Noti',
     baseURL: env.APP_ORIGIN,
@@ -86,6 +76,24 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
       },
     },
     session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
+    databaseHooks: {
+      session: {
+        create: {
+          // A new session starts in the user's earliest workspace, so a member of several
+          // is never left without an active one (every workspace route would answer 403).
+          before: async (session) => {
+            const first = await db
+              .select({ organizationId: schema.member.organizationId })
+              .from(schema.member)
+              .where(eq(schema.member.userId, session.userId))
+              .orderBy(schema.member.createdAt, schema.member.organizationId)
+              .limit(1);
+            const organizationId = first[0]?.organizationId;
+            return { data: organizationId ? { ...session, activeOrganizationId: organizationId } : session };
+          },
+        },
+      },
+    },
     advanced: {
       ipAddress: { ipAddressHeaders: ['cf-connecting-ip'] },
     },
@@ -129,15 +137,12 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
           });
         },
         organizationHooks: {
-          beforeCreateOrganization: async ({ user }) => {
-            await ensureNotMember(user.id);
-          },
-          beforeAddMember: async ({ user }) => {
-            await ensureNotMember(user.id);
-          },
+          // No one-workspace-per-user rule: an agency or operator belongs to many
+          // workspaces (docs/PRODUCT.md audience #4). Isolation is organization_id
+          // predicates on our own tables, never membership cardinality.
+          // eslint-disable-next-line @typescript-eslint/require-await -- hook contract requires a Promise.
           beforeAcceptInvitation: async ({ user }) => {
             if (!user.emailVerified) throw new APIError('FORBIDDEN', { message: 'Verify your email first' });
-            await ensureNotMember(user.id);
           },
           // These guards only validate the role name and have nothing to await, but the
           // organizationHooks contract requires a Promise return — a sync function fails to

@@ -122,8 +122,30 @@ async function resolveWorkspace(c: WorkspaceContext): Promise<Resolved | Failure
       return { status: 404, error: 'Not found' };
     case 'none':
       return { status: 403, error: 'Create or join an organization first' };
-    case 'ambiguous':
-      return { status: 403, error: 'Select a workspace' };
+    case 'ambiguous': {
+      // Several memberships and no valid active workspace (e.g. the active one was purged).
+      // Settle on the earliest membership the caller actually holds and remember it as the
+      // session's active workspace, so the choice is explicit state rather than a guess.
+      const earliest = await db
+        .select({
+          orgId: schema.member.organizationId,
+          role: schema.member.role,
+          orgName: schema.organization.name,
+        })
+        .from(schema.member)
+        .innerJoin(schema.organization, eq(schema.organization.id, schema.member.organizationId))
+        .where(eq(schema.member.userId, s.user.id))
+        .orderBy(schema.member.createdAt, schema.member.organizationId)
+        .limit(1);
+      const chosen = earliest[0];
+      if (!chosen) return { status: 403, error: 'Select a workspace' };
+      if (typeof s.session.id === 'string')
+        await db
+          .update(schema.session)
+          .set({ activeOrganizationId: chosen.orgId })
+          .where(eq(schema.session.id, s.session.id));
+      return { ...base, ...(chosen as Membership) };
+    }
   }
 }
 
@@ -133,7 +155,28 @@ function isFailure(value: Resolved | Failure): value is Failure {
 
 workspace.get('/me', async (c) => {
   const resolved = await resolveWorkspace(c);
-  if (isFailure(resolved)) return c.json({ error: resolved.error }, resolved.status);
+  if (isFailure(resolved)) {
+    // A signed-in user with no workspace yet is a normal state (they are about to create
+    // one), not an error: answering 403 here bounced new users to /signin forever.
+    if (resolved.status === 403 && resolved.error === 'Create or join an organization first') {
+      const session = await current(c);
+      if (session) {
+        return c.json({
+          user: {
+            id: session.user.id,
+            name: session.user.name,
+            email: session.user.email,
+            emailVerified: session.user.emailVerified,
+            org_id: null,
+            org_name: null,
+            role: null,
+            organizations: [],
+          },
+        });
+      }
+    }
+    return c.json({ error: resolved.error }, resolved.status);
+  }
 
   const db = drizzle(c.env.DB, { schema });
   const organizations = await db
