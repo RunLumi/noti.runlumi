@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { createAuth } from './auth/better-auth';
 import { api as githubApi, browser as githubBrowser } from './api/github';
 import integrations from './api/integrations';
+import workspaceLifecycle from './api/workspace-lifecycle';
 import workspace from './auth/workspace';
 import { githubWebhook } from './connectors/sources/github/route';
 import { keyringFromEnv, keyringProblem } from './crypto/keyring-env';
@@ -10,6 +11,7 @@ import { consumeDeliveries } from './pipeline/consumer';
 import { DEAD_LETTER_QUEUE, consumeDeadLetters } from './pipeline/dead-letter';
 import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
+import { purgeDueWorkspace } from './pipeline/purge';
 import { sweepStaleClaims } from './pipeline/sweep';
 import { log } from './platform/log';
 
@@ -17,6 +19,7 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
 app.route('/api/workspace', workspace);
+app.route('/api/workspace', workspaceLifecycle);
 app.route('/api/integrations', integrations);
 app.route('/api/github', githubApi);
 app.route('/github', githubBrowser);
@@ -58,6 +61,8 @@ export default {
     const purged = await purgeOutbox(env);
     log('info', 'outbox_reconcile', { ...dispatch, released_claims: releasedClaims, purged });
     await maintainCredentials(env);
+    const purge = await purgeDueWorkspace(env.DB, Date.now());
+    if (purge.organizationId) log('info', 'workspace_purge', { ...purge });
   },
 
   // One Worker consumes both queues. Wrapped so the runtime's third argument

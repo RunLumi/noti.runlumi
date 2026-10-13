@@ -54,8 +54,11 @@ describe('create validation', () => {
   });
 
   it('normalises harmless variants to the canonical host', () => {
-    const r = parseCreateIntegration({ ...valid, webhookUrl: 'HTTPS://HOOKS.SLACK.COM:443/services/T/B/x' });
-    expect(r.ok && r.value.webhookUrl).toBe('https://hooks.slack.com/services/T/B/x');
+    const r = parseCreateIntegration({
+      ...valid,
+      webhookUrl: 'HTTPS://HOOKS.SLACK.COM:443/services/T0/B0/x',
+    });
+    expect(r.ok && r.value.webhookUrl).toBe('https://hooks.slack.com/services/T0/B0/x');
   });
 
   it('rejects a Lark URL for a Slack destination', () => {

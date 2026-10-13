@@ -86,6 +86,11 @@ class FakeStatement {
     );
   }
 
+  allSync(): { results: unknown[]; success: true; meta: { changes: number } } {
+    const rows = this.db.prepare(this.sql).all(...this.params) as Record<string, unknown>[];
+    return { results: rows.map(normaliseRow), success: true, meta: { changes: 0 } };
+  }
+
   runSync(): { success: true; meta: { changes: number } } {
     const result = this.db.prepare(this.sql).run(...this.params);
     return { success: true, meta: { changes: Number(result.changes) } };
@@ -125,7 +130,10 @@ export function createFakeD1(options: { before?: string } = {}): FakeD1 {
     batch: (statements: FakeStatement[]) => {
       raw.exec('BEGIN');
       try {
-        const results = statements.map((s) => s.runSync());
+        // Like D1, a batch returns rows for statements that produce them.
+        const results = statements.map((s) =>
+          /^\s*(SELECT|WITH)\b/i.test(s.sql) || /\bRETURNING\b/i.test(s.sql) ? s.allSync() : s.runSync(),
+        );
         raw.exec('COMMIT');
         return Promise.resolve(results);
       } catch (e) {

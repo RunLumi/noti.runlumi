@@ -8,6 +8,7 @@ import { sealCredentials, blob, type DestinationCredentials } from '../pipeline/
 import type { DestinationKind } from '../pipeline/allowlist';
 import { parseCreateIntegration, parseUpdateIntegration, type FieldError } from './integration-input';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
+import { isDeletionPending } from './workspace-lifecycle';
 
 /**
  * Tenant-scoped integrations API (F26). Every query carries `organization_id = <resolved
@@ -136,6 +137,11 @@ async function mutationGate(c: Ctx, capability: Capability): Promise<Resolved | 
   if (rejected) return rejected;
   const who = await gate(c, capability);
   if (who instanceof Response) return who;
+  if (await isDeletionPending(c.env.DB, who.orgId))
+    return c.json(
+      { error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.' },
+      409,
+    );
   return (await rateLimited(c, who.userId)) ?? who;
 }
 

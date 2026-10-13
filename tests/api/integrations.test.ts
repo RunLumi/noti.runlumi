@@ -29,7 +29,7 @@ vi.mock('../../src/auth/better-auth', () => ({
 const { default: worker } = await import('../../src/index');
 
 const ORIGIN = 'https://noti.test';
-const SLACK = 'https://hooks.slack.com/services/T000/B000/secret-token-path';
+const SLACK = 'https://hooks.slack.com/services/T000/B000/SecretTokenPath';
 let db: FakeD1;
 let env: Bindings;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -148,7 +148,7 @@ describe('integrations API', () => {
     const res = await create('bob');
     expect(res.status).toBe(201);
     const text = await res.text();
-    expect(text).not.toContain('secret-token-path');
+    expect(text).not.toContain('SecretTokenPath');
     const { integration } = JSON.parse(text) as { integration: View };
     expect(integration).toMatchObject({
       credentials: 'ok',
@@ -162,7 +162,7 @@ describe('integrations API', () => {
     >;
     expect(row.organization_id).toBe('org-a');
     expect(row.webhook_ciphertext).toBe('');
-    expect(JSON.stringify(Object.values(row).map(String))).not.toContain('secret-token-path');
+    expect(JSON.stringify(Object.values(row).map(String))).not.toContain('SecretTokenPath');
     expect(auditActions('org-a')).toEqual(['integration.create']);
   });
 
@@ -235,7 +235,7 @@ describe('integrations API', () => {
 
     const res = await call('PATCH', `/api/integrations/${integration.id}`, {
       as: 'bob',
-      body: { enabled: false, webhookUrl: 'https://hooks.slack.com/services/T1/B1/new-path' },
+      body: { enabled: false, webhookUrl: 'https://hooks.slack.com/services/T1/B1/NewTokenPath' },
     });
     expect(res.status).toBe(200);
     const { integration: updated } = await json<{ integration: View }>(res);

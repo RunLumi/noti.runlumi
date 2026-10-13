@@ -11,6 +11,7 @@ const statements = {
   integration: ['read', 'create', 'update', 'delete'],
   delivery: ['read', 'replay'],
   audit: ['read'],
+  workspace: ['export', 'delete'],
 } as const;
 
 export const ac = createAccessControl(statements);
@@ -23,6 +24,7 @@ export const roles = {
     integration: ['read', 'create', 'update', 'delete'],
     delivery: ['read', 'replay'],
     audit: ['read'],
+    workspace: ['export', 'delete'],
   }),
   member: ac.newRole({
     integration: ['read', 'create', 'update', 'delete'],
