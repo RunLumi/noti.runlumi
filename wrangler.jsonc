@@ -12,9 +12,22 @@
     "consumers": [
       {
         "queue": "noti-deliveries",
-        "max_batch_size": 10,
+        // F176: kept small. Each message is acked or retried on its own, but anything that
+        // fails the whole invocation still redelivers the batch; batching buys D1 round
+        // trips, not downstream batching.
+        "max_batch_size": 5,
+        // Mirrored by QUEUE_MAX_RETRIES in src/pipeline/consumer.ts (asserted by a test).
+        // Our own attempt budget (13, F177) lives in the ledger, not here.
         "max_retries": 5,
         "dead_letter_queue": "noti-dead-letters",
+      },
+      {
+        // F180: without a consumer, DLQ messages are deleted after four days. This one only
+        // moves the ledger row to the terminal `dead_lettered` state (src/pipeline/dead-letter.ts).
+        "queue": "noti-dead-letters",
+        "max_batch_size": 1,
+        "max_retries": 1,
+        "max_concurrency": 1,
       },
     ],
   },

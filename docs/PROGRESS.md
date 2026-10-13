@@ -23,7 +23,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 2 | Worker modularisation, envelope encryption with AAD and key version, queue messages carry ids not secrets, delivery-path integration tests | F33, F35–F37 (F34 tier 2) | D5, D6, D13 | ✅ | #7 |
 | 3a | Tenant-scoped integrations API; domain capabilities; audit log; closed GitHub event catalog; write-time allowlist; DB-enforced tenant contract | F24, F26, F28, F61 (catalog), F72 (write-time) | D9, D12, D16, D2 (contract for new writes) | ✅ | #9 |
 | 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ✅ | #11 |
-| 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F169–F190 | D4, D10, D11 | ⬜ | — |
+| 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F11–F13, F170, F172–F180, F182, F184, F189 (partial; see section) | D4, D10, D11 (partial) | 🟡 | #10 |
 | 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
 | 7 | Routing rules and filters | F119–F140 | — | ⬜ | — |
@@ -313,3 +313,109 @@ uses the Lark compatibility exports.
 - Slack OAuth install (F103), test delivery (F98), the UI capability surface (F92/F93) and the
   Lark app-bot mode (F101) are not started.
 - Several provider facts are `UNVERIFIED` and listed in ADR 0006. They need real-tenant checks.
+
+## Slice 4 — delivery reliability (PR #10)
+
+Decisions and their rationale are in [ADR 0005](adr/0005-delivery-reliability.md).
+
+**What changed**
+
+- `src/platform/`
+  - `errors.ts` holds the closed F13 taxonomy (plus `timestamp_out_of_tolerance`). Each code
+    carries a retryable/permanent class, an API status and a user message key.
+  - `redact.ts` is the F12 redactor.
+  - `log.ts` writes structured lines, and every line is redacted first. The consumer, the
+    outbox and the credential cron log only through it.
+- `src/delivery/`
+  - `retry.ts`: the F177 two-tier ladder with an injected RNG, F178 `Retry-After`, and the
+    ack/retry/dead-letter decision.
+  - `state.ts`: the ledger state machine.
+  - `ids.ts`: F170 dedup key and F184 delivery id.
+  - `claim.ts`: lease-fenced, tenant-scoped outbox SQL.
+  - `classify.ts`: generic HTTP mapping plus the F179 Lark codes.
+  - `ledger.ts`: consumer claim and outcome writes.
+  - `redeliver.ts`: the F182 replay service.
+- `migrations/0009_delivery_reliability.sql` rebuilds `notification_outbox` (adds `claimed`,
+  lease columns and `not_before`) and `deliveries` (new state set, attempt and schedule
+  timestamps, `last_error_code`, `dedup_key`, `replay_of`, `replay_count`). Every row is
+  copied and every index recreated. Legacy `failed` becomes `dead_lettered`, with a taxonomy
+  code derived from `last_error`.
+- Ingress derives the delivery id from `(dedup_key, integration)`. It will not re-accept a
+  GitHub redelivery that is already stored under a legacy id.
+- The dispatcher claims each row before sending. The every-minute cron is the reconciler: due
+  rows, expired leases, and parked retries. The ingress kick dispatches only its own
+  workspace.
+- The consumer:
+  - claims the ledger row before calling the provider;
+  - classifies every failure onto the taxonomy and applies `decideRetry`;
+  - retries short waits through `msg.retry({ delaySeconds })` and parks long ones on the
+    outbox;
+  - dead-letters permanent failures and exhausted retries to a terminal state;
+  - keeps the tenant re-check on every read and write, the crypto split (row defect → dead
+    letter, key fault → retry) and duplicate suppression for terminal rows.
+- Outbound calls have a 10 s `AbortSignal.timeout`.
+- `src/pipeline/dead-letter.ts` consumes `noti-dead-letters` and moves stranded ledger rows
+  to `dead_lettered` (F180). `wrangler.jsonc` sets the delivery queue `max_batch_size` to 5
+  (F176) and declares the DLQ consumer.
+
+**Verified by**
+
+- Unit tests:
+  - `tests/platform/{errors,redact,log}.test.ts`
+  - `tests/delivery/{retry,state,ids,claim,classify}.test.ts`
+  - These cover the whole taxonomy table, redaction with no secret prefix, the ladder and
+    its distribution, `Retry-After` in both forms, every state transition, injective ids and
+    the SQL tenant predicates.
+- `tests/pipeline/reliability.test.ts`, end to end over the real migrations:
+  - claim race (two dispatchers, each row sent once), and lease-expiry reclaim with a fenced
+    stale holder;
+  - invalid and foreign payloads, and tenantless rows never routed;
+  - the Tier 1 ladder under an injected RNG, a park-and-redispatch once queue retries are
+    spent, and the Tier 2 schedule;
+  - `Retry-After` overriding backoff, exhaustion → `dead_lettered`, and permanent 404/410/403/413
+    → `dead_lettered` with no second call;
+  - Lark codes, timeouts, a live versus an abandoned consumer claim, and a ledger outage
+    retried rather than lost;
+  - no URL in any log line;
+  - hashed ids at ingress, legacy-id rows dispatched and updated, and no re-acceptance of a
+    legacy-stored event;
+  - replay: one row under concurrent requests, refused for a sent delivery, refused across
+    tenants, refused without a stored message;
+  - the DLQ consumer: never-attempted, retrying, terminal, live-claim, stale-claim and
+    cross-tenant cases, plus a ledger failure retried;
+  - `QUEUE_MAX_RETRIES`, the batch size and the DLQ consumer match `wrangler.jsonc`.
+- `tests/pipeline/delivery-path.test.ts`: the slice 2 cases still pass. Permanent crypto
+  failures now end in `dead_lettered`.
+- `tests/migrations.test.ts`: 0009 keeps every row, maps legacy states, recreates the
+  indexes and enforces the new CHECKs.
+- `tests/support/d1.ts` now expands D1's ordered `?NNN` parameters, which `node:sqlite` will
+  not bind positionally.
+
+**Known gaps**
+
+- No health check asserts the DLQ consumer is attached. There is no `delivery_attempts`
+  table, no `event_dedup` table and no TTL purge.
+- No replay route, capability check or audit record.
+- No circuit breaker, client-side dedup window or per-destination rate limiting.
+- No `outbox_stalled` or reconciler-failure alert, and no metric for unmapped provider
+  errors.
+- Per-provider classification for Slack API, Teams and Discord waits for slice 5.
+- No real-provider validation.
+
+**Review fixes (PR #10 review of 5d7d5cb)**
+
+All HIGH, MEDIUM and LOW findings are fixed, each with a regression test in
+`tests/pipeline/reliability.test.ts`, `tests/migrations.test.ts` or the unit suites:
+- no claim can be stranded (H1): release on throw, a cron backstop, the DLQ dead-letters any
+  non-terminal row, and a capped claim-busy retry;
+- fenced and conditional outcome writes (H2);
+- due-time claims (M1) and attempt numbers taken from `RETURNING` (M2);
+- per-row clock, oldest-first workspaces and send back-off (M3);
+- `failed` kept legal for rollback (M4);
+- tenantless rows retired (M5);
+- indexes and a bounded retention purge (M6);
+- invalid payloads dead-letter their delivery (M7);
+- manual redirects, unconfirmed Lark bodies, a claim-token fence, a 60 s key-ring back-off,
+  and a 24 h queue delay maximum.
+
+See [ADR 0005](adr/0005-delivery-reliability.md) §12.
