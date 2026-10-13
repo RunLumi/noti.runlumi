@@ -16,6 +16,7 @@ export const TENANT_TABLES = [
   'deliveries',
   'integrations',
   'routing_decisions',
+  'sources',
 ] as const;
 
 export interface PurgeReport {

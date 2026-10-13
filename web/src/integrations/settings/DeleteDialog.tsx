@@ -63,7 +63,10 @@ export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
             {t('delete.title', { name: integration.name })}
           </AlertDialog.Title>
           <AlertDialog.Description>
-            {t('delete.body', { repo: integration.repo, destination })}
+            {t('delete.body', {
+              repo: integration.repo || t('integration.source.value'),
+              destination,
+            })}
           </AlertDialog.Description>
           <form className="form-stack" onSubmit={(e) => void onSubmit(e)}>
             <div className="field">

@@ -95,3 +95,26 @@ export async function ingressLimiter(
   );
   return result.limited ? { limited: true, retryAfterSeconds: result.retryAfterSeconds } : { limited: false };
 }
+
+/**
+ * Per-source flood control for the generic webhook source (ADR 0012). Same discipline as
+ * `ingressLimiter`: call it only AFTER the signature verified, so an unauthenticated caller
+ * cannot burn a source's budget. The key is the source row id (a server-minted uuid), never
+ * the public endpoint id.
+ */
+export const SOURCE_INGRESS_LIMIT_PER_MINUTE = 600;
+
+export async function sourceIngressLimiter(
+  env: { readonly DB: Db },
+  sourceId: string,
+  now: number = Date.now(),
+): Promise<IngressDecision> {
+  const result = await hit(
+    env.DB,
+    `ingress:source:${sourceId}`,
+    SOURCE_INGRESS_LIMIT_PER_MINUTE,
+    INGRESS_WINDOW_MS,
+    now,
+  );
+  return result.limited ? { limited: true, retryAfterSeconds: result.retryAfterSeconds } : { limited: false };
+}

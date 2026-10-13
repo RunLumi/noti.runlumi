@@ -111,7 +111,10 @@ export function IntegrationSettings() {
         title={integration.name}
         description={
           <>
-            <span className="mono-wrap">{integration.repo}</span> → {destinationLabel(integration)}
+            <span className="mono-wrap">
+              {integration.sourceId ? t('integration.source.value') : integration.repo}
+            </span>{' '}
+            → {destinationLabel(integration)}
           </>
         }
       />
@@ -130,7 +133,11 @@ export function IntegrationSettings() {
           </p>
         </Section>
         <Section id="details" title={t('settings.details.title')}>
-          <DetailsForm key={integration.id} orgId={orgId} integration={integration} />
+          {integration.sourceId ? (
+            <p>{t('settings.details.source')}</p>
+          ) : (
+            <DetailsForm key={integration.id} orgId={orgId} integration={integration} />
+          )}
         </Section>
         <Section id="filters" title={t('filters.title')}>
           <FiltersSection orgId={orgId} integration={integration} />

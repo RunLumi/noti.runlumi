@@ -9,6 +9,7 @@ import { defaultStatements } from 'better-auth/plugins/organization/access';
 const statements = {
   ...defaultStatements,
   integration: ['read', 'create', 'update', 'delete'],
+  source: ['read', 'create', 'update', 'delete'],
   delivery: ['read', 'replay'],
   audit: ['read'],
   workspace: ['export', 'delete'],
@@ -22,12 +23,14 @@ export const roles = {
     member: ['create', 'update', 'delete'],
     invitation: ['create', 'cancel'],
     integration: ['read', 'create', 'update', 'delete'],
+    source: ['read', 'create', 'update', 'delete'],
     delivery: ['read', 'replay'],
     audit: ['read'],
     workspace: ['export', 'delete'],
   }),
   member: ac.newRole({
     integration: ['read', 'create', 'update', 'delete'],
+    source: ['read', 'create', 'update', 'delete'],
     delivery: ['read'],
   }),
 } as const;

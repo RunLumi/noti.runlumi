@@ -92,7 +92,10 @@ export type CredentialsState = 'ok' | 'legacy' | 'quarantined';
 export interface Integration {
   readonly id: string;
   readonly name: string;
+  /** Empty for an integration that routes from a generic source. */
   readonly repo: string;
+  /** The generic source it routes from, or null for a repository integration. */
+  readonly sourceId: string | null;
   /** Usually catalog event types; an old row may hold a value the catalog no longer has. */
   readonly eventTypes: readonly string[];
   readonly destination: DestinationKind;
@@ -123,6 +126,15 @@ export interface CreateIntegrationBody {
   readonly webhookUrl: string;
   readonly signingSecret?: string;
   readonly filters?: FilterConfig;
+}
+
+/** An integration that sends every event of one generic source to one chat. */
+export interface CreateSourceIntegrationBody {
+  readonly name: string;
+  readonly sourceId: string;
+  readonly destination: DestinationKind;
+  readonly webhookUrl: string;
+  readonly signingSecret?: string;
 }
 
 export interface UpdateIntegrationBody {
@@ -173,6 +185,7 @@ export function parseIntegration(value: unknown): Integration {
     id: value.id,
     name: value.name,
     repo: value.repo,
+    sourceId: typeof value.sourceId === 'string' ? value.sourceId : null,
     eventTypes: value.eventTypes.filter((e): e is string => typeof e === 'string'),
     destination: value.destination,
     destinationHost: value.destinationHost,
@@ -206,6 +219,8 @@ export const integrationsApi = {
   get: async (orgId: string, id: string): Promise<Integration> =>
     one(await request(withOrg(item(id), orgId))),
   create: async (orgId: string, input: CreateIntegrationBody): Promise<Integration> =>
+    one(await request(withOrg(base, orgId), { method: 'POST', body: JSON.stringify(input) })),
+  createForSource: async (orgId: string, input: CreateSourceIntegrationBody): Promise<Integration> =>
     one(await request(withOrg(base, orgId), { method: 'POST', body: JSON.stringify(input) })),
   update: async (orgId: string, id: string, patch: UpdateIntegrationBody): Promise<Integration> =>
     one(await request(withOrg(item(id), orgId), { method: 'PATCH', body: JSON.stringify(patch) })),

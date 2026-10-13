@@ -33,6 +33,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
 | 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | #16 |
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
+| 10a | Generic signed-webhook source: Standard Webhooks verification, sealed per-source secrets, sources API and dashboard page, routing to source integrations | F74, F75, F76, F77, F78, F79, F80 (each in part, see section) | — | 🟡 | this PR |
 | W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
@@ -768,3 +769,47 @@ resolution: 600 events per installation per minute, `429` with `Retry-After` bey
 Lifecycle events and pings return before it, so a revocation is never delayed. A limiter
 fault fails open and logs a redacted `rate_limit_error`. Covered by three tests in
 `tests/pipeline/delivery-path.test.ts`. AR-16 is reworded to the residual risk.
+
+## Slice 10a — generic signed-webhook source (this PR)
+
+**What changed**
+
+- `migrations/0017_generic_source.sql`: `sources` table (sealed secret columns, public
+  `endpoint_id`, tenant triggers, cascade from the organization), `integrations.source_id`, and
+  a trigger that refuses a cross-organization source reference. Expand-only.
+- `src/connectors/sources/generic/`: `route.ts` (`POST /webhooks/generic/:endpointId`),
+  `signature.ts` (Standard Webhooks `v1`, constant-time, replay window), `event.ts` (strict
+  envelope validator and mapper to `DeliveryMessage`), `secret.ts` / `encoding.ts` (seal with
+  purpose `source.signing`, generation, KEK rewrap).
+- `src/api/sources.ts`: CRUD, rotate, delete under `source.*` capabilities, audit events,
+  quota, rate limit, deletion-pending guard. Integrations accept `sourceId`; export lists
+  sources without credential columns; `sources` joins `TENANT_TABLES`; `rewrapStaleSourceKeys`
+  runs in the credential maintenance cron.
+- `DeliveryMessage.status` gained `warning`; `sourceIngressLimiter` in `src/security/rate-limit.ts`.
+- Dashboard: `/sources` (create, one-time secret, endpoint, copy, pause, rotate, delete,
+  examples, connect a chat); source integrations render without a repository.
+- Docs: ADR 0012, `docs/API.md`, `docs/FRONTEND.md`, spec 06 and 04 status notes.
+
+**Verified by**
+
+- `tests/sources/` (signature, event, ingress, API) and `web/src/sources/sources.test.ts`,
+  `tests/migrations.test.ts` (0017), `tests/auth/permissions.test.ts`, and
+  `npm run format && npm run check`. The end-to-end tests send signed events through the real
+  Worker, then the real consumer and the Slack, Lark and Teams adapters over the fake D1, with
+  `fetch` stubbed. The shell and Node examples are executed and verified by the Worker's verifier.
+- **The Standard Webhooks spec's example signature could not be used**: it publishes the id,
+  timestamp, payload and signatures but not the secret. Vectors are generated at runtime and
+  cross-checked against `node:crypto`.
+- Not verified: real D1, Queues, a real third-party sender, timing parity of the 404 path
+  (shape equality only), and the new screens in a browser (desktop, 320 px, keyboard, screen
+  reader, contrast, Vietnamese).
+
+**Not done / follow-ups**
+
+- Secret overlap and rotation wizard, `secret_id_used` (F77); mapping, CloudEvents payloads,
+  `data.extra`, `adapterVersion` (F78); hashed and dual endpoint keys (F76);
+  `clock_skew_suspected` alert and `providerIdStability` (F75); fixture corpus gate (F79);
+  setup wizard with a send-test step (F80); filtering by generic event type (slice 7); the
+  1 MiB cap of F78 (this source caps at 256 KiB).
+- No source health beyond `last_received_at`; no per-source rate-limit tuning.
+- GitLab, Stripe, Linear, Sentry and Cloudflare sources (F81–F90).

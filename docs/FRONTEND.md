@@ -54,7 +54,7 @@ that produced `00-current-state.md` D3.
 ## Pages
 
 `/signup` `/signin` `/forgot-password` `/verify` `/reset` ·
-`/` (overview) `/integrations` `/integrations/new` `/integrations/:id` `/activity` `/team`
+`/` (overview) `/integrations` `/integrations/new` `/integrations/:id` `/sources` `/activity` `/team`
 `/settings` `/onboarding` `/invite`
 
 ## Delivery log and workspace data (`web/src/deliveries/`, `web/src/workspace/`)
@@ -103,6 +103,30 @@ filters cannot be read, a blocking notice explains that updates are being held b
 editor stays hidden until the person chooses **Replace invalid filters**, so unreadable rules are
 never overwritten by an empty form. `npm test` runs
 `web/src/integrations/integrations.test.ts` with the Worker tests.
+
+## Sources feature (`web/src/sources/`)
+
+Decisions and verification: [ADR 0012](adr/0012-generic-source.md). It reuses the integrations
+sheet, switch, field, destination-choice and dialog styles and the `validation.ts` URL policy.
+
+| Path | Role |
+| --- | --- |
+| `SourcesPage.tsx` | `/sources`: create form, one-time secret reveal, list, empty / error / loading states |
+| `SourceCard.tsx` | Endpoint URL with copy, last event, connected chats, pause switch, actions |
+| `SecretReveal.tsx`, `CopyButton.tsx` | One-time secret (persistent warning, focus moves in, explicit dismiss); copy with a stated outcome and a manual-copy fallback |
+| `SourceDialogs.tsx` | Rotate (states the cutover) and delete (typed name, states the chats deleted with it); focus starts on the safe choice |
+| `ConnectChat.tsx`, `connect.ts` | Connect a Lark, Slack or Teams chat to a source; pure validation mirrors `src/api/integration-input.ts` |
+| `Guidance.tsx`, `snippets.ts` | Event format and signing explanation; shell and Node examples that read the secret from `NOTI_SIGNING_SECRET` |
+| `api.ts`, `hooks.ts` | Strict response parsing; mutations that return a secret use `gcTime: 0` and never write the query cache |
+
+Rules this feature adds: the signing secret lives only in component state and is gone on
+dismissal or navigation (no storage, URL, cache or console; a test greps for this); it is never
+placed in a copyable example; status is always text, not colour alone. Integrations bound to a
+source show "Events from your own system" instead of a repository, and their settings page
+explains that updates cannot be chosen. `web/src/sources/sources.test.ts` runs the shell and
+Node examples and checks their output with the Worker's verifier. **Not verified:** a browser
+pass at desktop and 320 px, keyboard and screen-reader walkthrough, contrast and Vietnamese
+rendering of the new screens; they were checked only through types, lint and unit tests.
 
 ## Current truth
 

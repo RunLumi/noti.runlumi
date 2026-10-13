@@ -1,0 +1,168 @@
+/* ============================================================================
+   Sources — list, one-time secret, setup examples.
+   Reuses the integrations sheet, switch, field and dialog styles; this file only adds what
+   Sources alone needs. Tokens only (DESIGN.md §5–§8): opaque white sheets, Civic Navy
+   headings, amber for the one-time warning, no glass.
+   ========================================================================= */
+
+.source-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.source-create,
+.secret-reveal {
+  margin-bottom: var(--space-6);
+  padding: var(--space-6);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 12px);
+  background: var(--color-surface-white);
+  box-shadow: var(--shadow-card);
+}
+
+.source-create h2 {
+  margin: 0 0 var(--space-3);
+  color: var(--color-civic-navy);
+}
+
+.source-create-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-4);
+}
+
+.source-create-form .field {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.secret-reveal {
+  border-left: 4px solid var(--color-signal-amber);
+}
+
+.secret-reveal:focus-visible {
+  outline: 3px solid var(--color-lumi-blue);
+  outline-offset: 2px;
+}
+
+.secret-reveal-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  color: var(--color-civic-navy);
+}
+
+.secret-reveal .notice {
+  margin-bottom: var(--space-4);
+}
+
+.secret-reveal-value {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+
+.copy-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.copy-status {
+  font-size: 14px;
+  color: var(--color-risk-red);
+}
+
+.source-details {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: var(--space-3);
+}
+
+.source-details > summary {
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-civic-navy);
+}
+
+.source-details > summary:focus-visible {
+  outline: 3px solid var(--color-lumi-blue);
+  outline-offset: 2px;
+}
+
+.source-details-body {
+  display: grid;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+}
+
+.source-details-body h4 {
+  margin: var(--space-2) 0 0;
+  color: var(--color-civic-navy);
+}
+
+.source-details-body p {
+  margin: 0;
+}
+
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.segmented-option[aria-pressed='true'] {
+  background: var(--color-lumi-blue-soft);
+  border-color: var(--color-lumi-blue);
+  color: var(--color-civic-navy);
+  font-weight: 600;
+}
+
+.code-block {
+  margin: 0;
+  padding: var(--space-4);
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-paper-white);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.code-block:focus-visible {
+  outline: 3px solid var(--color-lumi-blue);
+  outline-offset: 2px;
+}
+
+.source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.source-actions .switch-field {
+  margin-right: auto;
+}
+
+@media (max-width: 480px) {
+  .source-create,
+  .secret-reveal {
+    padding: var(--space-4);
+  }
+  .source-actions .btn {
+    flex: 1 1 100%;
+  }
+}
