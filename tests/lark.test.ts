@@ -25,7 +25,8 @@ describe('Lark webhook adapter', () => {
   });
   it('renders a status-aware card', () => {
     expect(
-      larkCard({ title: 'Failed', url: 'https://github.com/example', status: 'failure' }).header.template,
+      (larkCard({ title: 'Failed', url: 'https://github.com/example', status: 'failure' }) as any).header
+        .template,
     ).toBe('red');
   });
   it('checks Lark response status', () => {
