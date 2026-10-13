@@ -45,8 +45,17 @@ describe('create validation', () => {
     ['https://hooks.slack.com/workflows/x', 'wrong path'],
     ['https://127.0.0.1/services/x', 'IP literal'],
     ['not a url', 'not a URL'],
+    ['https://hooks.slack.com./services/x', 'trailing dot'],
+    ['https://[::1]/services/x', 'IPv6 literal'],
+    ['https://hooks.slack.com%2eevil.test/services/x', 'encoded dot in host'],
+    ['https://evil.test\\@hooks.slack.com/services/x', 'backslash userinfo trick'],
   ])('rejects %s (%s) at write time', (webhookUrl) => {
     expect(fields(parseCreateIntegration({ ...valid, webhookUrl }))).toEqual(['webhookUrl']);
+  });
+
+  it('normalises harmless variants to the canonical host', () => {
+    const r = parseCreateIntegration({ ...valid, webhookUrl: 'HTTPS://HOOKS.SLACK.COM:443/services/T/B/x' });
+    expect(r.ok && r.value.webhookUrl).toBe('https://hooks.slack.com/services/T/B/x');
   });
 
   it('rejects a Lark URL for a Slack destination', () => {
@@ -95,7 +104,7 @@ describe('create validation', () => {
   });
 
   it('rejects names that are blank, too long or contain control characters', () => {
-    for (const name of ['', '   ', 'x'.repeat(81), 'bad\nname']) {
+    for (const name of ['', '   ', 'x'.repeat(81), 'bad\nname', 'safe\u202Etxt.exe', 'c1\u0085']) {
       expect(fields(parseCreateIntegration({ ...valid, name }))).toEqual(['name']);
     }
   });

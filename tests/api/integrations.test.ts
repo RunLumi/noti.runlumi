@@ -278,3 +278,126 @@ describe('member capability limits', () => {
     expect((await create('bob')).status).toBe(201);
   });
 });
+
+describe('review hardening', () => {
+  it('rejects PATCH and DELETE without our Origin', async () => {
+    const { integration } = await json<{ integration: View }>(await create('bob'));
+    const path = `/api/integrations/${integration.id}`;
+    expect(
+      (await call('PATCH', path, { as: 'bob', origin: 'https://evil.test', body: { enabled: false } }))
+        .status,
+    ).toBe(403);
+    expect((await call('DELETE', path, { as: 'bob', origin: null })).status).toBe(403);
+  });
+
+  it('scopes ?org= for a user in two workspaces', async () => {
+    member('alice', 'org-b', 'member');
+    const { integration } = await json<{ integration: View }>(await create('mallory'));
+    const path = `/api/integrations/${integration.id}`;
+    // alice can see org-b's integration only when org-b is the selected workspace
+    expect((await call('GET', `${path}?org=org-a`, { as: 'alice' })).status).toBe(404);
+    expect((await call('GET', `${path}?org=org-b`, { as: 'alice' })).status).toBe(200);
+    expect((await call('PATCH', `${path}?org=org-a`, { as: 'alice', body: { enabled: false } })).status).toBe(
+      404,
+    );
+    expect((await call('DELETE', `${path}?org=org-a`, { as: 'alice' })).status).toBe(404);
+    // with two memberships and no selection, the request is refused rather than guessed
+    expect((await call('GET', '/api/integrations', { as: 'alice' })).status).toBe(403);
+  });
+
+  it('refuses a declared oversized body before reading it', async () => {
+    const res = await worker.fetch(
+      new Request(`${ORIGIN}/api/integrations`, {
+        method: 'POST',
+        headers: {
+          origin: ORIGIN,
+          'x-test-user': 'bob',
+          'content-type': 'application/json',
+          'content-length': String(1024 * 1024),
+        },
+        body: '{}',
+      }),
+      env,
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(413);
+  });
+
+  it('enforces the per-workspace integration quota', async () => {
+    const { MAX_INTEGRATIONS_PER_WORKSPACE } = await import('../../src/api/integrations');
+    const insert = db.raw.prepare(
+      "INSERT INTO integrations(id,organization_id,repo,event_types,destination,webhook_ciphertext) VALUES(?,'org-a','a/b','[]','slack','')",
+    );
+    for (let i = 0; i < MAX_INTEGRATIONS_PER_WORKSPACE; i++) insert.run(`q${i}`);
+    expect((await create('bob')).status).toBe(409);
+  });
+
+  it('rate-limits mutations per user with Retry-After', async () => {
+    const { MUTATIONS_PER_MINUTE } = await import('../../src/api/integrations');
+    const { integration } = await json<{ integration: View }>(await create('bob'));
+    let last: Response | undefined;
+    for (let i = 0; i < MUTATIONS_PER_MINUTE; i++) {
+      last = await call('PATCH', `/api/integrations/${integration.id}`, {
+        as: 'bob',
+        body: { enabled: i % 2 === 0 },
+      });
+    }
+    expect(last?.status).toBe(429);
+    expect(Number(last?.headers.get('retry-after'))).toBeGreaterThan(0);
+    // another user is unaffected
+    expect((await create('alice')).status).toBe(201);
+  });
+
+  it('collapses repeated probes into one audit row and never stores a long ?org=', async () => {
+    await call('GET', '/api/integrations?org=org-a', { as: 'mallory' });
+    await call('GET', '/api/integrations?org=org-a', { as: 'mallory' });
+    await call('GET', `/api/integrations?org=${'x'.repeat(5000)}`, { as: 'mallory' });
+    const rows = db.raw
+      .prepare("SELECT organization_id,subject_id FROM audit_events WHERE action='access.denied'")
+      .all();
+    expect(rows).toEqual([
+      { organization_id: 'org-a', subject_id: 'org-a' },
+      { organization_id: null, subject_id: '(invalid)' },
+    ]);
+  });
+
+  it('returns 404 and writes no success audit when the row is deleted concurrently', async () => {
+    const { integration } = await json<{ integration: View }>(await create('bob'));
+    const realPrepare = db.d1.prepare.bind(db.d1);
+    let raced = false;
+    env = {
+      ...env,
+      DB: {
+        ...db.d1,
+        batch: db.d1.batch.bind(db.d1),
+        prepare: (sql: string) => {
+          if (!raced && sql.startsWith('UPDATE integrations SET')) {
+            raced = true;
+            db.raw.prepare('DELETE FROM integrations WHERE id=?').run(integration.id);
+          }
+          return realPrepare(sql);
+        },
+      } as D1Database,
+    };
+    const res = await call('PATCH', `/api/integrations/${integration.id}`, {
+      as: 'bob',
+      body: { name: 'Renamed' },
+    });
+    expect(res.status).toBe(404);
+    expect(auditActions('org-a')).toEqual(['integration.create']);
+  });
+
+  it('refuses moving an integration to another workspace in the database', async () => {
+    const { integration } = await json<{ integration: View }>(await create('bob'));
+    expect(() =>
+      db.raw.prepare("UPDATE integrations SET organization_id='org-b' WHERE id=?").run(integration.id),
+    ).toThrow(/cannot change/);
+    expect(() =>
+      db.raw
+        .prepare(
+          "INSERT INTO integrations(id,organization_id,repo,event_types,destination,webhook_ciphertext) VALUES('e','','a/b','[]','slack','')",
+        )
+        .run(),
+    ).toThrow(/required/);
+  });
+});

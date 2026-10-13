@@ -35,12 +35,26 @@ export function serialiseMetadata(metadata: AuditMetadata | undefined): string {
   return new TextEncoder().encode(json).length <= MAX_METADATA_BYTES ? json : '{"truncated":true}';
 }
 
-/** A statement for `db.batch`, so an audit row commits with the change it describes. */
-export function auditStatement(db: D1Database, entry: AuditEntry): D1PreparedStatement {
+/**
+ * A statement for `db.batch`, so an audit row commits with the change it describes.
+ *
+ * With `ifIntegrationExists`, the row is written only if that integration exists in that
+ * workspace when the statement runs. Put it *before* the mutation in the batch, so a row
+ * deleted concurrently produces neither a change nor a false "success" audit entry.
+ */
+export function auditStatement(
+  db: D1Database,
+  entry: AuditEntry,
+  ifIntegrationExists?: { id: string; organizationId: string },
+): D1PreparedStatement {
+  const guard = ifIntegrationExists
+    ? ' WHERE EXISTS (SELECT 1 FROM integrations WHERE id=? AND organization_id=?)'
+    : '';
+  const guardValues = ifIntegrationExists ? [ifIntegrationExists.id, ifIntegrationExists.organizationId] : [];
   return db
     .prepare(
       `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json)
-       VALUES(?,?,?,?,?,?,?,?,?,?)`,
+       SELECT ?,?,?,?,?,?,?,?,?,?${guard}`,
     )
     .bind(
       crypto.randomUUID(),
@@ -53,11 +67,35 @@ export function auditStatement(db: D1Database, entry: AuditEntry): D1PreparedSta
       entry.ip ?? null,
       entry.userAgent ? entry.userAgent.slice(0, MAX_USER_AGENT) : null,
       serialiseMetadata(entry.metadata),
+      ...guardValues,
     );
 }
 
 export async function recordAudit(db: D1Database, entry: AuditEntry): Promise<void> {
   await auditStatement(db, entry).run();
+}
+
+const DENIAL_DEDUPE_SECONDS = 60;
+
+/**
+ * Record a denial without letting it become a weapon: identical denials by the same actor
+ * within a minute collapse into one row, and a failed write never changes the response
+ * (a 500 where a 404 was due would itself leak that the target exists).
+ */
+export async function recordDenial(db: D1Database, entry: AuditEntry): Promise<void> {
+  try {
+    const recent = await db
+      .prepare(
+        `SELECT 1 AS x FROM audit_events
+         WHERE action='access.denied' AND actor_id IS ? AND organization_id IS ? AND subject_id IS ?
+           AND created_at >= datetime('now', ?) LIMIT 1`,
+      )
+      .bind(entry.actorId, entry.organizationId, entry.subjectId, `-${DENIAL_DEDUPE_SECONDS} seconds`)
+      .first();
+    if (!recent) await recordAudit(db, entry);
+  } catch {
+    console.error(JSON.stringify({ event: 'audit_write_failed', action: entry.action }));
+  }
 }
 
 /** Request attribution. `cf-connecting-ip` is set by Cloudflare's edge, not the client. */

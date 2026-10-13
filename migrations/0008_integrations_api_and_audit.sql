@@ -21,14 +21,14 @@ CREATE INDEX IF NOT EXISTS integrations_org_created ON integrations(organization
 --   migration replaces these triggers with NOT NULL + FOREIGN KEY once no NULLs remain.
 CREATE TRIGGER IF NOT EXISTS integrations_org_required_insert
 BEFORE INSERT ON integrations
-WHEN NEW.organization_id IS NULL
+WHEN NEW.organization_id IS NULL OR NEW.organization_id = ''
 BEGIN
   SELECT RAISE(ABORT, 'integrations.organization_id is required');
 END;
 
 CREATE TRIGGER IF NOT EXISTS integrations_org_immutable
 BEFORE UPDATE OF organization_id ON integrations
-WHEN OLD.organization_id IS NOT NULL AND NEW.organization_id IS NOT OLD.organization_id
+WHEN OLD.organization_id IS NOT NULL AND OLD.organization_id <> '' AND NEW.organization_id IS NOT OLD.organization_id
 BEGIN
   SELECT RAISE(ABORT, 'integrations.organization_id cannot change');
 END;
@@ -57,5 +57,15 @@ BEFORE UPDATE ON audit_events
 BEGIN
   SELECT RAISE(ABORT, 'audit_events is append-only');
 END;
--- Deletes are allowed only through organization deletion (ON DELETE CASCADE); a direct
--- DELETE is a retention job's job and must be explicit, so it is not blocked here.
+-- UPDATE is refused. DELETE is NOT blocked: organization deletion cascades, and a
+-- retention job will need it. This is an append-only *application* log, not a
+-- tamper-evident one; tamper evidence (hash chaining / external sink) is future work.
+
+-- PART 4: fixed-window counters for API abuse limits (not billing quotas; F29 keeps
+-- those separate). Rows are keyed per actor and window and pruned by age.
+CREATE TABLE IF NOT EXISTS api_rate_limits (
+  key TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  count INTEGER NOT NULL,
+  PRIMARY KEY (key, window_start)
+);

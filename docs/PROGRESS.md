@@ -168,6 +168,25 @@ AI features (F243–F262) stay out of scope until the delivery ledger is trustwo
   - an append-only audit log;
   - an API-created integration delivering end to end through the consumer.
 
+**Review.** A security review found no CRITICAL or HIGH issues. All 5 MEDIUM findings are
+fixed and covered by tests:
+
+- denial-audit flooding, handled by dedupe, a cap on `?org=` and a write that can never fail
+  the request;
+- case-sensitive repo matching;
+- false "success" audits on a concurrent delete, handled by guarded audit rows and a 404;
+- buffering before the size check;
+- audit failures turning a 404 into a 500.
+
+The LOW findings are also handled:
+
+- bidi and C1 controls in names;
+- an empty-string `organization_id`;
+- a `truncated` flag on the list;
+- quarantine-cleared in the rotation audit;
+- a 100-integration workspace quota;
+- 30 mutations per user per minute, with `Retry-After`.
+
 **Known gaps**
 
 - `repo` is checked for format, not against the installation's repositories. That arrives

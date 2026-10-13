@@ -223,6 +223,13 @@ describe('ingress tenant isolation', () => {
     expect(sent).toHaveLength(0);
   });
 
+  it('matches the repository case-insensitively, as GitHub does', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A, 'Acme/Web');
+    await postWebhook(issueEvent(100, 'acme/web'));
+    expect(sent.map((m) => m.integrationId)).toEqual(['int-a']);
+  });
+
   it('accepts a redelivered GitHub event once', async () => {
     installation('org-a', '100');
     await integration('int-a', 'org-a', LARK_A);

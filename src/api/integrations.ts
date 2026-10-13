@@ -17,6 +17,10 @@ type Ctx = Context<{ Bindings: Bindings }>;
 
 const MAX_BODY_BYTES = 16 * 1024;
 const LIST_LIMIT = 200;
+/** Per-workspace ceiling. A product limit, not a security control; raise it deliberately. */
+export const MAX_INTEGRATIONS_PER_WORKSPACE = 100;
+/** Abuse limit on mutations, per user, per minute. */
+export const MUTATIONS_PER_MINUTE = 30;
 
 interface IntegrationRow {
   id: string;
@@ -86,6 +90,9 @@ function mutationRejected(c: Ctx): Response | null {
 }
 
 async function readJson(c: Ctx): Promise<{ ok: true; body: unknown } | { ok: false; response: Response }> {
+  // Refuse on the declared length before buffering; re-check the bytes actually read.
+  if (Number(c.req.header('content-length') ?? 0) > MAX_BODY_BYTES)
+    return { ok: false, response: c.json({ error: 'Too large' }, 413) };
   const text = await c.req.text();
   if (new TextEncoder().encode(text).length > MAX_BODY_BYTES)
     return { ok: false, response: c.json({ error: 'Too large' }, 413) };
@@ -105,6 +112,32 @@ async function gate(c: Ctx, capability: Capability): Promise<Resolved | Response
   return isFailure(resolved) ? c.json({ error: resolved.error }, resolved.status) : resolved;
 }
 
+/**
+ * Fixed-window mutation limit per user. One UPSERT both counts and reads, so concurrent
+ * requests cannot all observe a stale count.
+ */
+async function rateLimited(c: Ctx, userId: string): Promise<Response | null> {
+  const windowStart = Math.floor(Date.now() / 60_000) * 60_000;
+  const row = await c.env.DB.prepare(
+    `INSERT INTO api_rate_limits(key,window_start,count) VALUES(?,?,1)
+     ON CONFLICT(key,window_start) DO UPDATE SET count=count+1
+     RETURNING count`,
+  )
+    .bind(`integrations:${userId}`, windowStart)
+    .first<{ count: number }>();
+  if ((row?.count ?? 0) <= MUTATIONS_PER_MINUTE) return null;
+  const retryAfter = Math.ceil((windowStart + 60_000 - Date.now()) / 1000);
+  return c.json({ error: 'Too many changes; try again shortly' }, 429, { 'retry-after': String(retryAfter) });
+}
+
+async function mutationGate(c: Ctx, capability: Capability): Promise<Resolved | Response> {
+  const rejected = mutationRejected(c);
+  if (rejected) return rejected;
+  const who = await gate(c, capability);
+  if (who instanceof Response) return who;
+  return (await rateLimited(c, who.userId)) ?? who;
+}
+
 async function loadRow(c: Ctx, orgId: string, id: string): Promise<IntegrationRow | null> {
   return c.env.DB.prepare(`SELECT ${SELECT_COLUMNS} FROM integrations WHERE id=? AND organization_id=?`)
     .bind(id, orgId)
@@ -117,17 +150,23 @@ function audit(
   action: Parameters<typeof auditStatement>[1]['action'],
   id: string,
   metadata: AuditMetadata,
+  guarded = true,
 ) {
-  return auditStatement(c.env.DB, {
-    organizationId: who.orgId,
-    actorId: who.userId,
-    action,
-    subjectType: 'integration',
-    subjectId: id,
-    outcome: 'success',
-    ...requestOrigin(c.req.raw.headers),
-    metadata,
-  });
+  return auditStatement(
+    c.env.DB,
+    {
+      organizationId: who.orgId,
+      actorId: who.userId,
+      action,
+      subjectType: 'integration',
+      subjectId: id,
+      outcome: 'success',
+      ...requestOrigin(c.req.raw.headers),
+      metadata,
+    },
+    // Create has nothing to guard on: the row and its audit entry are inserted together.
+    guarded ? { id, organizationId: who.orgId } : undefined,
+  );
 }
 
 async function seal(c: Ctx, orgId: string, id: string, credentials: DestinationCredentials) {
@@ -142,9 +181,14 @@ integrations.get('/', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT ${SELECT_COLUMNS} FROM integrations WHERE organization_id=? ORDER BY created_at DESC, id LIMIT ?`,
   )
-    .bind(who.orgId, LIST_LIMIT)
+    .bind(who.orgId, LIST_LIMIT + 1)
     .all<IntegrationRow>();
-  return c.json({ organizationId: who.orgId, integrations: rows.results.map(toView) });
+  const truncated = rows.results.length > LIST_LIMIT;
+  return c.json({
+    organizationId: who.orgId,
+    integrations: rows.results.slice(0, LIST_LIMIT).map(toView),
+    truncated,
+  });
 });
 
 integrations.get('/:id', async (c) => {
@@ -155,9 +199,7 @@ integrations.get('/:id', async (c) => {
 });
 
 integrations.post('/', async (c) => {
-  const rejected = mutationRejected(c);
-  if (rejected) return rejected;
-  const who = await gate(c, 'integration.create');
+  const who = await mutationGate(c, 'integration.create');
   if (who instanceof Response) return who;
   const read = await readJson(c);
   if (!read.ok) return read.response;
@@ -165,6 +207,14 @@ integrations.post('/', async (c) => {
   if (!parsed.ok) return invalid(c, parsed.errors);
 
   const input = parsed.value;
+  const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM integrations WHERE organization_id=?')
+    .bind(who.orgId)
+    .first<{ n: number }>();
+  if ((count?.n ?? 0) >= MAX_INTEGRATIONS_PER_WORKSPACE)
+    return c.json(
+      { error: `A workspace can have at most ${MAX_INTEGRATIONS_PER_WORKSPACE} integrations.` },
+      409,
+    );
   const id = crypto.randomUUID();
   const sealed = await seal(c, who.orgId, id, {
     webhookUrl: input.webhookUrl,
@@ -193,13 +243,20 @@ integrations.post('/', async (c) => {
       blob(sealed.signingSecretEnvelope),
       who.userId,
     ),
-    audit(c, who, 'integration.create', id, {
-      repo: input.repo,
-      destination: input.destination,
-      destinationHost: host,
-      eventTypes: input.eventTypes,
-      signed: input.signingSecret !== null,
-    }),
+    audit(
+      c,
+      who,
+      'integration.create',
+      id,
+      {
+        repo: input.repo,
+        destination: input.destination,
+        destinationHost: host,
+        eventTypes: input.eventTypes,
+        signed: input.signingSecret !== null,
+      },
+      false,
+    ),
   ]);
 
   const row = await loadRow(c, who.orgId, id);
@@ -207,9 +264,7 @@ integrations.post('/', async (c) => {
 });
 
 integrations.patch('/:id', async (c) => {
-  const rejected = mutationRejected(c);
-  if (rejected) return rejected;
-  const who = await gate(c, 'integration.update');
+  const who = await mutationGate(c, 'integration.update');
   if (who instanceof Response) return who;
   const id = c.req.param('id');
   const existing = await loadRow(c, who.orgId, id);
@@ -262,6 +317,7 @@ integrations.patch('/:id', async (c) => {
       audit(c, who, 'integration.credentials.rotate', id, {
         destinationHost: new URL(input.credentials.webhookUrl).hostname,
         signed: input.credentials.signingSecret !== null,
+        clearedQuarantine: existing.credentials_quarantined_at !== null,
       }),
     );
   }
@@ -278,32 +334,40 @@ integrations.patch('/:id', async (c) => {
     );
   }
 
-  await c.env.DB.batch([
+  // Audits run first and only if the row still exists, so a concurrent delete yields 404
+  // and no false "success" entry.
+  const results = await c.env.DB.batch([
+    ...statements,
     c.env.DB.prepare(`UPDATE integrations SET ${sets.join(',')} WHERE id=? AND organization_id=?`).bind(
       ...values,
       id,
       who.orgId,
     ),
-    ...statements,
   ]);
+  if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
   const row = await loadRow(c, who.orgId, id);
-  return c.json({ integration: row ? toView(row) : null });
+  return row ? c.json({ integration: toView(row) }) : c.json({ error: 'Not found' }, 404);
 });
 
 integrations.delete('/:id', async (c) => {
-  const rejected = mutationRejected(c);
-  if (rejected && rejected.status === 403) return rejected;
-  const who = await gate(c, 'integration.delete');
-  if (who instanceof Response) return who;
+  // A DELETE has no body, so only the Origin half of the CSRF check applies.
+  const origin = c.req.header('origin');
+  if (!origin || origin !== new URL(c.env.APP_ORIGIN).origin) return c.json({ error: 'Forbidden' }, 403);
+  const gated = await gate(c, 'integration.delete');
+  if (gated instanceof Response) return gated;
+  const limited = await rateLimited(c, gated.userId);
+  if (limited) return limited;
+  const who = gated;
   const id = c.req.param('id');
   const existing = await loadRow(c, who.orgId, id);
   if (!existing) return c.json({ error: 'Not found' }, 404);
   // Deleting the row deletes its wrapped DEK, so every ciphertext it sealed becomes
   // unrecoverable (crypto-shredding). Delivery history keeps ids and states only.
-  await c.env.DB.batch([
-    c.env.DB.prepare('DELETE FROM integrations WHERE id=? AND organization_id=?').bind(id, who.orgId),
+  const results = await c.env.DB.batch([
     audit(c, who, 'integration.delete', id, { repo: existing.repo, destination: existing.destination }),
+    c.env.DB.prepare('DELETE FROM integrations WHERE id=? AND organization_id=?').bind(id, who.orgId),
   ]);
+  if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
   return c.body(null, 204);
 });
 

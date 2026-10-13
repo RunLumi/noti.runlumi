@@ -33,8 +33,10 @@ const NAME_MAX = 80;
 const REPO = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}\/[A-Za-z0-9._-]{1,100}$/;
 const URL_MAX = 2048;
 const SECRET_MAX = 256;
+// C0/C1 controls and bidi overrides/isolates, which can make a name display as something
+// else in the dashboard.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point.
-const CONTROL = /[\u0000-\u001f\u007f]/;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 function parseName(value: unknown, errors: FieldError[]): string | undefined {
   if (

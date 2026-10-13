@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
-import { recordAudit, requestOrigin } from '../audit/audit';
+import { recordDenial, requestOrigin } from '../audit/audit';
 import { createAuth, type AuthBindings } from './better-auth';
 import { can, type Capability } from './permissions';
 
@@ -199,12 +199,15 @@ export async function authorize(c: WorkspaceContext, capability: Capability): Pr
     if (resolved.status === 404) {
       // A request for a workspace the caller is not a member of. Record it against that
       // workspace when it exists, so its admins can see probes; never reveal which it was.
-      const requested = c.req.query('org') ?? null;
-      const exists = requested
-        ? await c.env.DB.prepare('SELECT 1 AS x FROM organization WHERE id=?').bind(requested).first()
-        : null;
+      // Organization ids are short; anything longer is not one and is not stored verbatim.
+      const raw = c.req.query('org') ?? null;
+      const requested = raw && raw.length <= 64 ? raw : raw ? '(invalid)' : null;
+      const exists =
+        requested && requested !== '(invalid)'
+          ? await c.env.DB.prepare('SELECT 1 AS x FROM organization WHERE id=?').bind(requested).first()
+          : null;
       const s = await current(c);
-      await recordAudit(c.env.DB, {
+      await recordDenial(c.env.DB, {
         organizationId: exists ? requested : null,
         actorId: s?.user.id ?? null,
         action: 'access.denied',
@@ -219,7 +222,7 @@ export async function authorize(c: WorkspaceContext, capability: Capability): Pr
   }
 
   if (!can(resolved.role, capability)) {
-    await recordAudit(c.env.DB, {
+    await recordDenial(c.env.DB, {
       organizationId: resolved.orgId,
       actorId: resolved.userId,
       action: 'access.denied',
