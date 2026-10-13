@@ -5,6 +5,7 @@ import { Badge, Button, Notice } from '../../components/ui';
 import type { Integration } from '../../lib/api';
 import { t } from '../../i18n';
 import { CredentialsNotice } from '../CredentialsNotice';
+import { IssuedSecret } from '../IssuedSecret';
 import { DESTINATIONS } from '../destinations';
 import { fieldErrorsOf, formLevelError } from '../errors';
 import { useRotateCredentials } from '../hooks';
@@ -44,6 +45,8 @@ export function CredentialsSection({ orgId, integration }: CredentialsSectionPro
   const [signingSecret, setSigningSecret] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [done, setDone] = useState(false);
+  // A custom webhook gets a new signing secret with every rotation; shown once, then dropped.
+  const [issuedSecret, setIssuedSecret] = useState<string | null>(null);
   const openButton = useRef<HTMLButtonElement>(null);
 
   const reset = () => {
@@ -71,10 +74,11 @@ export function CredentialsSection({ orgId, integration }: CredentialsSectionPro
       return;
     }
     try {
-      await rotate.mutateAsync({
+      const result = await rotate.mutateAsync({
         webhookUrl,
         ...(info.supportsSigningSecret && signingSecret !== '' ? { signingSecret } : {}),
       });
+      setIssuedSecret(result.signingSecret);
       reset();
       rotate.reset();
       setOpen(false);
@@ -111,6 +115,18 @@ export function CredentialsSection({ orgId, integration }: CredentialsSectionPro
       <p className="field-hint">{t('settings.credentials.destinationFixed')}</p>
       <CredentialsNotice integration={integration} showFix={false} />
       {done && <Notice kind="success">{t('settings.credentials.saved')}</Notice>}
+      {issuedSecret && (
+        <IssuedSecret
+          name={integration.name}
+          secret={issuedSecret}
+          kind="rotated"
+          doneLabel="integration.secret.saved"
+          onDone={() => {
+            setIssuedSecret(null);
+            requestAnimationFrame(() => openButton.current?.focus());
+          }}
+        />
+      )}
       {open ? (
         <form className="rotate-form" onSubmit={(e) => void onSubmit(e)} noValidate>
           <p>{t('settings.credentials.replaceIntro', { destination })}</p>

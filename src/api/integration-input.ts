@@ -1,4 +1,6 @@
 import { validateDestinationConfig, type ConfigValidation } from '../connectors/destinations';
+import type { UrlPolicyOptions } from '../connectors/destinations/url-policy';
+import { generateSigningSecret } from '../connectors/sources/generic/encoding';
 import { isGithubEventType, type GithubEventType } from '../connectors/sources/github/catalog';
 import { asRecord } from '../lib/json';
 import type { DestinationKind } from '../pipeline/allowlist';
@@ -48,6 +50,18 @@ export interface UpdateIntegrationInput {
   /** Present together: rotating credentials re-seals under fresh key material. */
   readonly credentials?: { readonly webhookUrl: string; readonly signingSecret: string | null };
 }
+
+/**
+ * Deployment context the pure parsers need. The defaults are the safe ones: the custom webhook
+ * is off, and no extra hosts are blocked.
+ */
+export interface ParseOptions extends UrlPolicyOptions {
+  /** `GENERIC_WEBHOOK_ENABLED` (ADR 0014). Off by default. */
+  readonly genericWebhook?: boolean;
+}
+
+/** One message for every refusal of a gated kind, so it reveals nothing about why. */
+export const DESTINATION_UNAVAILABLE = 'This destination type is not available yet.';
 
 const NAME_MAX = 80;
 // GitHub owner: 1–39 alphanumerics or single hyphens; repo: 1–100 of [A-Za-z0-9._-].
@@ -107,9 +121,28 @@ function parseSourceEventTypes(value: unknown, errors: FieldError[]): string[] |
   return [...new Set(value as string[])];
 }
 
-function parseDestination(value: unknown, errors: FieldError[]): DestinationKind | undefined {
-  if (value !== 'lark' && value !== 'slack' && value !== 'teams') {
-    errors.push({ field: 'destination', message: 'Choose Lark, Slack or Microsoft Teams.' });
+function parseDestination(
+  value: unknown,
+  errors: FieldError[],
+  options: ParseOptions,
+): DestinationKind | undefined {
+  if (
+    value !== 'lark' &&
+    value !== 'slack' &&
+    value !== 'teams' &&
+    value !== 'discord' &&
+    value !== 'generic_webhook'
+  ) {
+    errors.push({
+      field: 'destination',
+      message: 'Choose Lark, Slack, Microsoft Teams, Discord or a custom webhook.',
+    });
+    return undefined;
+  }
+  if (value === 'generic_webhook' && options.genericWebhook !== true) {
+    // Refused before the URL or anything else about it is looked at: a gated kind must not
+    // double as an oracle for what its policy accepts.
+    errors.push({ field: 'destination', message: DESTINATION_UNAVAILABLE });
     return undefined;
   }
   return value;
@@ -119,6 +152,28 @@ const URL_HINTS: Readonly<Record<DestinationKind, string>> = {
   slack: 'Slack incoming webhook URLs start with https://hooks.slack.com/services/.',
   lark: 'Lark custom bot URLs start with https://open.larksuite.com/open-apis/bot/v2/hook/ (or open.feishu.cn).',
   teams: 'Use the HTTP URL of your Teams Workflows trigger; it is on a *.logic.azure.com host.',
+  discord:
+    'Discord webhook URLs start with https://discord.com/api/webhooks/. Copy the URL from Server Settings, Integrations, Webhooks.',
+  generic_webhook:
+    'Use the public https address of your endpoint, for example https://hooks.example.com/noti.',
+};
+
+const GENERIC_HINTS: Readonly<Partial<Record<string, string>>> = {
+  scheme: 'Use an https:// address. Plain http is not accepted.',
+  port: 'Use the standard HTTPS port (443); a custom port is not accepted.',
+  userinfo: 'Remove the username and password from the address.',
+  fragment: 'Remove the # fragment from the address.',
+  ip_literal: 'Use a hostname, not an IP address.',
+  internal_host: 'Use a public hostname. Local, internal and private names are not accepted.',
+  host: 'Use a valid public hostname, for example hooks.example.com.',
+  too_long: 'The address is too long (2048 characters at most).',
+};
+
+const NO_SECRET_INPUT: Readonly<Partial<Record<DestinationKind, string>>> = {
+  slack: 'Slack incoming webhooks do not use a signing secret.',
+  teams: 'Teams Workflows do not use a signing secret.',
+  discord: 'Discord webhooks do not use a signing secret.',
+  generic_webhook: 'Noti generates the signing secret for a custom webhook; it cannot be supplied.',
 };
 
 /** Messages name the field and the rule. They never echo the URL or the secret. */
@@ -127,7 +182,10 @@ function configFailure(result: Extract<ConfigValidation, { ok: false }>, kind: D
     case 'destination_url_rejected':
       return {
         field: 'webhookUrl',
-        message: result.rule === 'malformed' ? 'This is not a valid URL.' : URL_HINTS[kind],
+        message:
+          result.rule === 'malformed'
+            ? 'This is not a valid URL.'
+            : ((kind === 'generic_webhook' ? GENERIC_HINTS[result.rule] : undefined) ?? URL_HINTS[kind]),
       };
     case 'config_unsupported':
       return {
@@ -164,6 +222,7 @@ function parseCredentials(
   r: Record<string, unknown>,
   destination: DestinationKind | undefined,
   errors: FieldError[],
+  options: ParseOptions = {},
 ): Credentials | undefined {
   const before = errors.length;
   // Trimming is leniency for a pasted value, not a policy rule: the policy sees the result.
@@ -176,19 +235,27 @@ function parseCredentials(
   if (hasSecret && destination !== undefined && destination !== 'lark') {
     errors.push({
       field: 'signingSecret',
-      message: `${destination === 'slack' ? 'Slack incoming webhooks do' : 'Teams Workflows do'} not use a signing secret.`,
+      message: NO_SECRET_INPUT[destination] ?? 'This destination does not use a signing secret.',
     });
   }
   if (r.triggerAuth !== undefined && destination !== undefined && destination !== 'teams') {
     errors.push({ field: 'triggerAuth', message: 'Trigger authentication applies only to Microsoft Teams.' });
   }
   if (errors.length > before || destination === undefined || url === undefined) return undefined;
-  const checked = validateDestinationConfig({
-    kind: destination,
-    webhookUrl: url,
-    ...(hasSecret ? { signingSecret: secret } : {}),
-    ...(r.triggerAuth !== undefined ? { triggerAuth: r.triggerAuth } : {}),
-  });
+  const checked = validateDestinationConfig(
+    {
+      kind: destination,
+      webhookUrl: url,
+      // A custom webhook is always signed, with a secret we generate (and show once).
+      ...(destination === 'generic_webhook'
+        ? { signingSecret: generateSigningSecret() }
+        : hasSecret
+          ? { signingSecret: secret }
+          : {}),
+      ...(r.triggerAuth !== undefined ? { triggerAuth: r.triggerAuth } : {}),
+    },
+    options,
+  );
   if (!checked.ok) {
     errors.push(configFailure(checked, destination));
     return undefined;
@@ -196,7 +263,8 @@ function parseCredentials(
   const { config } = checked;
   return {
     webhookUrl: config.webhookUrl,
-    signingSecret: config.kind === 'lark' ? (config.signingSecret ?? null) : null,
+    signingSecret:
+      config.kind === 'lark' || config.kind === 'generic_webhook' ? (config.signingSecret ?? null) : null,
   };
 }
 
@@ -218,7 +286,10 @@ const SOURCE_ID = /^[A-Za-z0-9-]{8,64}$/;
  * receives every event its source sends unless `eventTypes` selects some of the source kind's
  * catalogue (GitLab, Stripe); the generic kind has no catalogue, which the handler enforces.
  */
-function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegrationInput> {
+function parseSourceIntegration(
+  r: Record<string, unknown>,
+  options: ParseOptions,
+): Parsed<CreateIntegrationInput> {
   const errors: FieldError[] = [];
   if (typeof r.sourceId !== 'string' || !SOURCE_ID.test(r.sourceId))
     errors.push({ field: 'sourceId', message: 'Choose one of your sources.' });
@@ -227,8 +298,8 @@ function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegr
       errors.push({ field, message: 'Not used with a source: it receives every event the source sends.' });
   const sourceEventTypes = 'eventTypes' in r ? parseSourceEventTypes(r.eventTypes, errors) : [];
   const name = parseName(r.name, errors);
-  const destination = parseDestination(r.destination, errors);
-  const credentials = parseCredentials(r, destination, errors);
+  const destination = parseDestination(r.destination, errors, options);
+  const credentials = parseCredentials(r, destination, errors, options);
   if (errors.length || !name || !destination || !credentials || typeof r.sourceId !== 'string')
     return { ok: false, errors };
   return {
@@ -247,16 +318,19 @@ function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegr
   };
 }
 
-export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationInput> {
+export function parseCreateIntegration(
+  body: unknown,
+  options: ParseOptions = {},
+): Parsed<CreateIntegrationInput> {
   const r = asRecord(body);
   if (!r) return { ok: false, errors: [{ field: 'body', message: 'Expected a JSON object.' }] };
-  if ('sourceId' in r) return parseSourceIntegration(r);
+  if ('sourceId' in r) return parseSourceIntegration(r, options);
   const errors: FieldError[] = [];
   const name = parseName(r.name, errors);
   const repo = parseRepo(r.repo, errors);
   const eventTypes = parseEventTypes(r.eventTypes, errors);
-  const destination = parseDestination(r.destination, errors);
-  const credentials = parseCredentials(r, destination, errors);
+  const destination = parseDestination(r.destination, errors, options);
+  const credentials = parseCredentials(r, destination, errors, options);
   const filters = parseFilterField(r, errors) ?? {};
   if (eventTypes && errors.length === 0) {
     const issue = coverageIssue(filters, eventTypes);
@@ -283,6 +357,7 @@ export function parseUpdateIntegration(
   body: unknown,
   destination: DestinationKind,
   isSource = false,
+  options: ParseOptions = {},
 ): Parsed<UpdateIntegrationInput> {
   const r = asRecord(body);
   if (!r) return { ok: false, errors: [{ field: 'body', message: 'Expected a JSON object.' }] };
@@ -314,7 +389,7 @@ export function parseUpdateIntegration(
   }
   if ('filters' in r) out.filters = parseFilterField(r, errors);
   if ('webhookUrl' in r) {
-    const credentials = parseCredentials(r, destination, errors);
+    const credentials = parseCredentials(r, destination, errors, options);
     if (credentials) out.credentials = credentials;
   } else if ('signingSecret' in r || 'triggerAuth' in r) {
     errors.push({

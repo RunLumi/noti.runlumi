@@ -378,7 +378,7 @@ describe('migration 0012', () => {
   it('accepts teams and still rejects unknown destinations', () => {
     const { raw } = createFakeD1();
     for (const kind of ['lark', 'slack', 'teams']) insertRow(raw, kind, kind, 'org-a');
-    expect(() => insertRow(raw, 'd', 'discord', 'org-a')).toThrow();
+    expect(() => insertRow(raw, 'd', 'telegram', 'org-a')).toThrow();
   });
 });
 

@@ -20,6 +20,10 @@ import {
 import { useConnectChat } from './hooks';
 import { useLocale } from '../i18n/LocaleProvider';
 
+// The one-time signing secret of a custom webhook is not shown in this flow yet, so it is not
+// offered here (ADR 0014). Create it from Integrations, where the secret is revealed.
+const CONNECT_ORDER = DESTINATION_ORDER.filter((kind) => !DESTINATIONS[kind].issuesSigningSecret);
+
 const EMPTY = (): ConnectDraft => ({
   destination: null,
   name: '',
@@ -101,7 +105,7 @@ export function ConnectChat({ orgId, source }: { readonly orgId: string; readonl
               </p>
             )}
             <div className="destination-options">
-              {DESTINATION_ORDER.map((kind) => (
+              {CONNECT_ORDER.map((kind) => (
                 <label key={kind} className="destination-option">
                   <input
                     type="radio"

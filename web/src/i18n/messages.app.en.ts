@@ -62,7 +62,7 @@ export const appEn = {
   'home.start.step1.body': 'Pick one of the GitHub repositories you allowed Noti to see.',
   'home.start.step2.title': 'Choose a destination',
   'home.start.step2.body':
-    'Paste a Lark, Slack or Teams webhook URL in the integration setup. It is stored encrypted.',
+    'Paste a Lark, Slack, Teams or Discord webhook URL in the integration setup. It is stored encrypted.',
   'home.start.step3.title': 'Connect GitHub',
   'home.start.step3.body':
     'Installing the Noti GitHub App from the dashboard and sending a test message are still in development.',

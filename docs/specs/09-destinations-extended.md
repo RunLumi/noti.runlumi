@@ -253,7 +253,7 @@ leaks into a shared channel leaks nothing.
 
 ## F107 — Discord destination
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** partial (slice 8a) — adapter, URL policy (`discord.com` only, optional `thread_id`), `wait=true`, `allowed_mentions` on every payload, classifier, end-to-end tests, wizard and setup copy; **not built:** message-id capture (so `canUpdate`/`canDelete`/`canReply`/identity are reported `false`, unlike the list below), programmatic webhook creation, `username`/`avatar_url`, threading toggle (a `?thread_id=` in the pasted URL is honoured). A malformed `200` body is `delivered`, not `destination_unavailable` (a retry would duplicate the message); see ADR 0014
 
 **Story** As a Discord community manager, I want GitHub events posted into my Discord channel,
 so that my contributors find out about CI failures where they already are.
@@ -343,7 +343,7 @@ supply, not values from the event body.
 
 ## F108 — Discord failure semantics and the shared-egress budget
 
-**Priority** P0 · **Status** not started · **This is the highest-consequence destination bug
+**Priority** P0 · **Status** partial (slice 8a) — `404`/`410` (and `401`/`403` carrying Discord code `10015`/`50027`) are permanent with zero retries and pause the integration with an `integration.auto_pause` audit event (same batch, tied to the credential used) so the next event makes no request; any other `401`/`403` retries at most once more and never pauses; `429` honours body `retry_after` then `Retry-After`. **Not built:** the global, persisted, cross-workspace breaker and customer notification, `X-RateLimit-*` pacing. **UNVERIFIED:** per-route numeric limit (none invented) · **This is the highest-consequence destination bug
 available**
 
 **Story** As an operator, I want one customer's dead Discord webhook to not degrade everyone
@@ -444,7 +444,7 @@ and a generic "temporarily paused, retrying" message.
 
 ## F109 — Discord rendering
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** partial (slice 8a) — one embed always, limits at render time, mention neutralisation, content/markdown/plain ladder; **not built:** update-in-place by message id (F156), threading toggle
 
 **Story** As a Discord user, I want a readable card with the CI result, so that I can triage
 from the channel without opening a browser.
@@ -533,7 +533,7 @@ attention, and it is set explicitly on every send without exception.
 
 ## F110 — Telegram: the architectural blocker
 
-**Priority** P2 · **Status** not started · **Decision: do not build**
+**Priority** P2 · **Status** not started — **decision: do not build** (followed in slice 8a) · **Decision: do not build**
 
 **Story** As a product owner, I want the reasons Telegram does not fit recorded in the spec,
 so that we do not ship it later on momentum.
@@ -617,7 +617,7 @@ is rejected on security grounds as well as product grounds.
 
 ## F111 — Telegram if the blocker ever clears
 
-**Priority** P2 · **Status** not started · **Not started · conditional on F110**
+**Priority** P2 · **Status** not started — conditional on F110, which is not met · **Not started · conditional on F110**
 
 **Story** As a maintainer, I want the only viable Telegram design written down in advance, so
 that if the blocker clears we ship a correct integration rather than a rushed one.
@@ -701,7 +701,7 @@ only viable model; that is the whole security improvement over F110's rejected o
 
 ## F112 — Email destination: provider decision
 
-**Priority** P2 · **Status** not started · **Fixes** a contradiction in F32
+**Priority** P2 · **Status** not started (slice 8a decision: not built — needs a provider account per customer, a verified-recipient flow and an unsubscribe surface; see ADR 0014) · **Fixes** a contradiction in F32
 
 **Story** As a customer, I want email as a destination so that a notification reaches someone
 who is not in a chat tool.
@@ -844,7 +844,7 @@ F150 (sticky one-click unsubscribe) and is a legal requirement, not a feature.
 
 ## F113 — Email rendering and honest delivery semantics
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** not started (not built; see F112)
 
 **Story** As a customer, I want to know whether an email actually arrived, so that I do not
 assume a notification succeeded when it was only accepted.
@@ -1041,7 +1041,7 @@ security reviewer can see exactly what was trusted and what was not.
 
 ## F115 — Generic customer webhook: URL policy and SSRF
 
-**Priority** P0 · **Status** not started · **Fixes** the customer-URL part of D9
+**Priority** P0 · **Status** partial (slice 8a) — shape policy in one function used at save and at send, save-time DNS-over-HTTPS check with a private-range table, no redirects, port 443, own-domain block; **not built:** the per-workspace host allowlist, periodic re-resolution and recorded addresses. **DNS rebinding is not defeated** (AR-30). **UNVERIFIED:** whether Workers egress reaches metadata or RFC 1918 addresses (assumed reachable) · **Fixes** the customer-URL part of D9
 
 **Story** As a security engineer, I want a customer's webhook URL to be impossible to point at
 anything but the public internet, so that a connection cannot be used to read our internals or
@@ -1165,7 +1165,7 @@ duplicated policy is a divergent policy, and the divergence is always the hole.
 
 ## F116 — Generic customer webhook: outbound delivery semantics
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** partial (slice 8a) — Standard Webhooks `v1` signing (`webhook-id` = delivery id, stable across retries), canonical JSON envelope, never unsigned, one-time server-generated secret sealed with the envelope crypto; **not built:** payload template, secret rotation overlap, `x-noti-event-id`/`x-noti-correlation-id`, send-a-test, per-destination request budget beyond the 64,000-byte cap and 10 s timeout
 
 **Story** As a customer with an internal service, I want Noti to sign what it sends me, so that
 my endpoint can verify each notification really came from us.
@@ -1285,7 +1285,7 @@ a customer-supplied header is a header-injection vector.
 
 ## F117 — Generic customer webhook: response classification
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** partial (slice 8a) — total status-code mapping, `Retry-After`, unknown 4xx permanent and flagged, body never read; **not built:** configurable success statuses (deliberately: see ADR 0014 decision 16), response-body excerpt, breaker/banner
 
 **Story** As a customer, I want to know exactly why my endpoint failed, so that I can fix it
 instead of guessing.

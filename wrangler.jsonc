@@ -42,6 +42,11 @@
     "crons": ["* * * * *"],
   },
   "compatibility_flags": ["nodejs_compat"],
+  // The default *.workers.dev URL exposes the same Worker on a second hostname, outside the
+  // custom domain's controls (APP_ORIGIN). Production is served from the custom domain, so the
+  // workers.dev route is switched off. `wrangler dev` is unaffected. If a deployment ever
+  // relied on workers.dev, give it a custom domain or route first.
+  "workers_dev": false,
   "send_email": [
     {
       "name": "AUTH_EMAIL",
@@ -66,5 +71,11 @@
     // Worker secret, never a var. Until these are real, /api/github/install returns 503.
     "GITHUB_APP_SLUG": "REPLACE_WITH_GITHUB_APP_SLUG",
     "GITHUB_CLIENT_ID": "REPLACE_WITH_GITHUB_CLIENT_ID",
+    // The custom-webhook destination sends to a URL the customer chooses (SSRF surface, ADR
+    // 0014, AR-30). It stays "false" until the release criteria in the ADR are met: workspace
+    // host allowlist, periodic re-resolution, and a canary test of Workers egress. When it is
+    // "false" the API refuses to create or re-enable one and the consumer refuses to send to a
+    // stored one. Not a secret.
+    "GENERIC_WEBHOOK_ENABLED": "false",
   },
 }

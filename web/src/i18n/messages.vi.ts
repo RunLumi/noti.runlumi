@@ -1,4 +1,5 @@
 import type { en, PluralMessage } from './messages.en';
+import { destinationsVi } from './messages.destinations.vi';
 import { filtersVi } from './messages.filters.vi';
 import { providersVi } from './messages.providers.vi';
 import { sourcesVi } from './messages.sources.vi';
@@ -20,12 +21,13 @@ export const vi = {
   ...filtersVi,
   ...sourcesVi,
   ...providersVi,
+  ...destinationsVi,
 
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'KẾT NỐI',
   'integrations.title': 'Tích hợp',
   'integrations.description':
-    'Mỗi tích hợp gửi các sự kiện GitHub bạn chọn từ một repository đến một nhóm chat Lark, Slack hoặc Microsoft Teams.',
+    'Mỗi tích hợp gửi các sự kiện GitHub bạn chọn từ một repository đến một nhóm chat Lark, Slack, Microsoft Teams hoặc Discord, hoặc đến webhook của riêng bạn.',
   'integrations.new': 'Tích hợp mới',
   'integrations.loading': 'Đang tải danh sách tích hợp…',
   'integrations.count': { other: '{count} tích hợp' },
@@ -180,7 +182,7 @@ export const vi = {
   'field.hideLabel': 'Ẩn {field}',
 
   // --- Client-side validation ----------------------------------------------
-  'validation.destination': 'Hãy chọn Lark, Slack hoặc Microsoft Teams.',
+  'validation.destination': 'Hãy chọn nơi nhận cập nhật.',
   'validation.name': 'Dùng 1–80 ký tự, không xuống dòng.',
   'validation.repo': 'Dùng dạng owner/repository, ví dụ acme/website.',
   'validation.events': 'Hãy chọn ít nhất một sự kiện.',

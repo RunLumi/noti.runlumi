@@ -53,12 +53,41 @@ const NEUTRALISE: Readonly<Record<string, string>> = { '<': '＜', '>': '＞', '
 
 const TEAMS_NEUTRALISE: Readonly<Record<string, string>> = { '[': '［', ']': '］' };
 
+/**
+ * Discord: `allowed_mentions: {parse: []}` is the control that stops a ping (F107); these
+ * tables are the second layer, so hostile text also *reads* as inert. `<` would start a
+ * mention, channel, emoji or timestamp token (`<@123>`, `<@&1>`, `<#1>`, `<t:1>`), and `[`/`]`
+ * a disguised masked link, so they are neutralised to fullwidth forms. `@` gets a zero-width
+ * space so `@everyone` / `@here` no longer parse as text mentions. Message content and embed
+ * descriptions render markdown, so its operators are backslash-escaped there; embed titles and
+ * footers are not escaped by backslash because a backslash would be shown literally.
+ * UNVERIFIED: which markdown subset Discord renders inside embed titles and footers.
+ */
+const DISCORD_COMMON: Readonly<Record<string, string>> = {
+  '<': '＜',
+  '>': '＞',
+  '[': '［',
+  ']': '］',
+  '@': '@\u200b',
+};
+const DISCORD_MD: Readonly<Record<string, string>> = {
+  ...DISCORD_COMMON,
+  '\\': '\\\\',
+  '*': '\\*',
+  _: '\\_',
+  '~': '\\~',
+  '`': '\\`',
+  '|': '\\|',
+};
+
 const DIALECT_ESCAPES: { readonly [D in MarkupDialect]: Readonly<Record<string, string>> } = {
   slack_mrkdwn: SLACK_ESCAPES,
   lark_md: NEUTRALISE,
   // Teams only creates a mention from an `<at>` tag paired with an `msteams.entities` entry,
   // which we never emit, so angle brackets are inert there.
   adaptive_card_md: TEAMS_NEUTRALISE,
+  discord_md: DISCORD_MD,
+  discord_text: DISCORD_COMMON,
   plain: {},
 };
 
@@ -138,7 +167,9 @@ export function linkAtom(url: string, label: string, dialect: MarkupDialect): st
       return `<${encodeLinkUrl(url, dialect)}|${text}>`;
     case 'lark_md':
     case 'adaptive_card_md':
+    case 'discord_md':
       return `[${text}](${encodeLinkUrl(url, dialect)})`;
+    case 'discord_text':
     case 'plain':
       return url;
   }

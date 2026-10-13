@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { DESTINATION_ORDER, DESTINATIONS } from './destinations';
 import {
   authApi,
   integrationsApi,
   type CreateIntegrationBody,
+  type DestinationKind,
   type Integration,
   type IntegrationList,
   type RotateCredentialsBody,
@@ -28,6 +30,15 @@ export function useIntegrations(orgId: string | null) {
     queryFn: () => integrationsApi.list(orgId ?? ''),
     enabled: orgId !== null,
   });
+}
+
+/**
+ * Destination kinds this deployment offers. A gated kind is hidden until the server says it is
+ * available (the list response carries it), including while that response is still loading.
+ */
+export function useAvailableDestinations(orgId: string | null): readonly DestinationKind[] {
+  const list = useIntegrations(orgId);
+  return DESTINATION_ORDER.filter((kind) => !DESTINATIONS[kind].gated || list.data?.genericWebhook === true);
 }
 
 export function useIntegration(orgId: string | null, id: string) {
@@ -82,7 +93,8 @@ export function useCreateIntegration(orgId: string) {
     mutationFn: (input: CreateIntegrationBody) => integrationsApi.create(orgId, input),
     // The variables hold the webhook URL and secret; do not keep them in the mutation cache.
     gcTime: 0,
-    onSuccess: (created) => {
+    // `signingSecret` (custom webhook) stays in the mutation result only; the cache gets the row.
+    onSuccess: ({ integration: created }) => {
       qc.setQueryData<IntegrationList>(
         integrationKeys.list(orgId),
         (list) => list && { ...list, integrations: [created, ...list.integrations] },
@@ -106,7 +118,7 @@ export function useRotateCredentials(orgId: string, id: string) {
   return useMutation({
     mutationFn: (input: RotateCredentialsBody) => integrationsApi.rotateCredentials(orgId, id, input),
     gcTime: 0,
-    onSuccess: (saved) => putIntegration(qc, orgId, saved),
+    onSuccess: ({ integration: saved }) => putIntegration(qc, orgId, saved),
   });
 }
 

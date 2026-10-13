@@ -1,4 +1,9 @@
+import { auditStatement } from '../audit/audit';
+import { isDeadWebhook } from '../connectors/destinations/discord/classify';
+import { genericWebhookEnabled } from '../connectors/destinations/features';
+import { ownHostsOf, type UrlPolicyOptions } from '../connectors/destinations/url-policy';
 import {
+  type ClassifiedResponse,
   classifyDeliveryResponse,
   prepareDelivery,
   sendRequest,
@@ -7,7 +12,7 @@ import {
   type ProviderResponse,
   type ValidatedDestinationConfig,
 } from '../connectors/destinations';
-import { CryptoError, type Keyring } from '../crypto/envelope';
+import { CryptoError, toBytes, type Keyring } from '../crypto/envelope';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import { SCHEDULE_REDISPATCH_SQL, scheduleRedispatchParams } from '../delivery/claim';
 import { attemptFromClassification, failed, type AttemptResult } from '../delivery/classify';
@@ -30,7 +35,7 @@ import { isTerminal, transition, type DeliveryEvent } from '../delivery/state';
 import type { Bindings, DeliveryMessage } from '../env';
 import { log } from '../platform/log';
 import type { DestinationKind } from './allowlist';
-import { CREDENTIAL_COLUMNS, openCredentials, type CredentialRow } from './credentials';
+import { CREDENTIAL_COLUMNS, blob, openCredentials, type CredentialRow } from './credentials';
 import { parseDeliveryMessage } from './outbox';
 
 type IntegrationRow = CredentialRow & { destination: DestinationKind };
@@ -67,7 +72,15 @@ function classifyCryptoError(e: CryptoError): AttemptResult {
   return failed('internal_error', `provider_config_${e.code}`);
 }
 
-type Target = { config: ValidatedDestinationConfig } | AttemptResult;
+/** The stored credential a delivery used, so a later write can be tied to exactly that one. */
+interface UsedCredential {
+  readonly envelope: ArrayBuffer | null;
+  readonly ciphertext: string;
+}
+
+type Target = { config: ValidatedDestinationConfig; credential: UsedCredential } | AttemptResult;
+
+const urlPolicyOf = (env: Bindings): UrlPolicyOptions => ({ ownHosts: ownHostsOf(env.APP_ORIGIN) });
 
 /**
  * Re-validate the stored destination with the same policy the API applies at write time
@@ -77,6 +90,10 @@ type Target = { config: ValidatedDestinationConfig } | AttemptResult;
 async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage): Promise<Target> {
   const row = await loadIntegration(env, d);
   if (!row) return failed('config_invalid', 'integration_unavailable');
+  // A gated kind never reaches the network while its feature is off, even for a row that was
+  // stored while it was on (ADR 0014). Permanent: turning the feature on and redelivering works.
+  if (row.destination === 'generic_webhook' && !genericWebhookEnabled(env))
+    return failed('config_invalid', 'destination_type_disabled');
   let credentials;
   try {
     credentials = await openCredentials(row, keyring, env.ENCRYPTION_KEY);
@@ -84,15 +101,23 @@ async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage
     if (e instanceof CryptoError) return classifyCryptoError(e);
     throw e;
   }
-  const checked = validateDestinationConfig({
-    kind: row.destination,
-    webhookUrl: credentials.webhookUrl,
-    // Only Lark has a signing secret; a stray value on a Slack or Teams row is ignored.
-    ...(row.destination === 'lark' && credentials.signingSecret
-      ? { signingSecret: credentials.signingSecret }
-      : {}),
-  });
-  if (checked.ok) return { config: checked.config };
+  const checked = validateDestinationConfig(
+    {
+      kind: row.destination,
+      webhookUrl: credentials.webhookUrl,
+      // Only Lark and the custom webhook have a signing secret; a stray value on another row
+      // is ignored. A custom webhook with no secret fails validation and is never sent.
+      ...((row.destination === 'lark' || row.destination === 'generic_webhook') && credentials.signingSecret
+        ? { signingSecret: credentials.signingSecret }
+        : {}),
+    },
+    urlPolicyOf(env),
+  );
+  if (checked.ok)
+    return {
+      config: checked.config,
+      credential: { envelope: blob(toBytes(row.webhook_envelope)), ciphertext: row.webhook_ciphertext },
+    };
   return checked.reason === 'destination_url_rejected'
     ? failed('destination_url_rejected', 'destination_not_allowed')
     : failed('config_invalid', 'destination_config_invalid');
@@ -118,11 +143,15 @@ async function attemptDelivery(
   keyring: Keyring,
   d: DeliveryMessage,
   deps: ConsumerDeps,
+  attempt: number,
 ): Promise<AttemptResult> {
   const target = await resolveTarget(env, keyring, d);
   if ('outcome' in target) return target;
-  const { config } = target;
-  const prepared = await prepareDelivery(config, toNotification(d), { now: deps.now() });
+  const { config, credential } = target;
+  const prepared = await prepareDelivery(config, toNotification(d), {
+    now: deps.now(),
+    meta: { deliveryId: d.id, organizationId: d.organizationId },
+  });
   if (!prepared.ok) {
     // Permanent by construction: the same text re-renders to the same failure.
     return prepared.reason === 'payload_too_large'
@@ -130,15 +159,108 @@ async function attemptDelivery(
       : failed('render_failed', 'render_failed');
   }
   const seen: { res: ProviderResponse | null } = { res: null };
-  const classification = await sendRequest(
+  const sent = await sendRequest(
     prepared.request,
     (res, at) => {
       seen.res = res;
       return classifyDeliveryResponse(config.kind, res, at);
     },
-    { timeoutMs: OUTBOUND_TIMEOUT_MS, now: deps.now },
+    { timeoutMs: OUTBOUND_TIMEOUT_MS, now: deps.now, urlPolicy: urlPolicyOf(env) },
   );
-  return attemptFromClassification(classification, config.kind, seen.res);
+  const classification = config.kind === 'discord' ? capDiscordAuthRetries(sent, attempt) : sent;
+  if (config.kind === 'discord' && seen.res && isDeadWebhook(seen.res.status, classification)) {
+    try {
+      await pauseDeadDiscordWebhook(env, d, credential, classification, seen.res.status);
+    } catch (e) {
+      // The pause is a safeguard on top of an outcome that is already permanent; a D1 fault
+      // here must not turn that outcome into a retry. The next failure pauses it instead.
+      log('error', 'discord_auto_pause_failed', { delivery_id: d.id, error: e });
+    }
+  }
+  const result = attemptFromClassification(classification, config.kind, seen.res);
+  return config.kind === 'generic_webhook' ? coarsenUnreachable(result) : result;
+}
+
+/**
+ * A customer endpoint's connection failures (timeout, refused, DNS, TLS, reset) are shown to
+ * the tenant as one thing. Distinguishing them would let a tenant probe what answers on a
+ * private address by choosing hosts and reading the reason (ADR 0014). HTTP statuses, which the
+ * customer needs to fix their own endpoint, are not touched.
+ */
+function coarsenUnreachable(r: AttemptResult): AttemptResult {
+  const o = r.outcome;
+  if (
+    o.kind === 'failed' &&
+    (r.diagnostic === 'provider_timeout' || r.diagnostic === 'transient_error') &&
+    (o.code === 'destination_timeout' || o.code === 'destination_unavailable')
+  )
+    return {
+      ...r,
+      outcome: { ...o, code: 'destination_unavailable' },
+      diagnostic: 'destination_unreachable',
+    };
+  return r;
+}
+
+/**
+ * An unclassified Discord 401/403 is retryable (it is not a dead webhook), but each one spends
+ * the shared invalid-request budget, so only the first attempts are allowed to repeat.
+ */
+export const DISCORD_UNAUTHORIZED_MAX_ATTEMPTS = 2;
+
+function capDiscordAuthRetries(c: ClassifiedResponse, attempt: number): ClassifiedResponse {
+  const unauthorized = c.providerCode === 'http_401' || c.providerCode === 'http_403';
+  if (c.outcome === 'retryable' && unauthorized && attempt >= DISCORD_UNAUTHORIZED_MAX_ATTEMPTS)
+    return { outcome: 'permanent', reason: 'destination_unauthorized', providerCode: c.providerCode };
+  return c;
+}
+
+/**
+ * Discord says a webhook that returned 404 must not be used again ("repeated attempts to do so
+ * will result in a temporary restriction"), and 401/403 count toward an invalid-request budget
+ * shared by every Discord delivery from our egress (spec 09 F108). This delivery is already
+ * permanent; pausing the integration is what stops the NEXT event from making the same
+ * request. It is an audited, visible pause the customer lifts after fixing the webhook.
+ *
+ * Not built: the global, cross-workspace circuit breaker F108 describes. One dead webhook
+ * costs one request per workspace that uses it, then the pause takes over.
+ */
+async function pauseDeadDiscordWebhook(
+  env: Bindings,
+  d: DeliveryMessage,
+  credential: UsedCredential,
+  classification: ClassifiedResponse,
+  status: number,
+): Promise<void> {
+  // Tied to the credential THIS delivery used: if the customer replaced the webhook after the
+  // attempt began, the new URL is not paused for the old one's failure. The pause and its audit
+  // row are one batch, and the audit row is written only if the pause changed a row.
+  await env.DB.batch([
+    env.DB.prepare(
+      `UPDATE integrations SET enabled=0,updated_at=CURRENT_TIMESTAMP
+       WHERE id=?1 AND organization_id=?2 AND destination='discord' AND enabled=1
+         AND webhook_envelope IS ?3 AND webhook_ciphertext=?4`,
+    ).bind(d.integrationId, d.organizationId, credential.envelope, credential.ciphertext),
+    auditStatement(
+      env.DB,
+      {
+        organizationId: d.organizationId,
+        actorId: null,
+        action: 'integration.auto_pause',
+        subjectType: 'integration',
+        subjectId: d.integrationId,
+        outcome: 'success',
+        metadata: {
+          destination: 'discord',
+          providerStatus: status,
+          reason: classification.reason,
+          ...(classification.providerCode ? { providerCode: classification.providerCode } : {}),
+        },
+      },
+      undefined,
+      { onlyIfPreviousStatementChangedRows: true },
+    ),
+  ]);
 }
 
 export interface ConsumerDeps {
@@ -277,9 +399,10 @@ async function attemptSafely(
   keyring: Keyring,
   d: DeliveryMessage,
   deps: ConsumerDeps,
+  attempt: number,
 ): Promise<AttemptResult> {
   try {
-    return await attemptDelivery(env, keyring, d, deps);
+    return await attemptDelivery(env, keyring, d, deps, attempt);
   } catch (e) {
     // Anything unexpected after the claim still produces an outcome, so the claim is
     // released through the normal (bounded) retry path rather than held forever (H1).
@@ -322,7 +445,7 @@ async function handleMessage(
   }
   // The attempt number comes from the claim's RETURNING row, not the earlier read (M2).
   const attempt = claim.attempts + 1;
-  const result = await attemptSafely(env, keyring, d, deps);
+  const result = await attemptSafely(env, keyring, d, deps, attempt);
   const decision = effectiveDecision(
     decideRetry({ attempt, outcome: result.outcome, random: deps.random }),
     msg,

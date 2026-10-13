@@ -61,16 +61,32 @@ describe('event catalog labels', () => {
 describe('client validation mirrors the server', () => {
   // Each case is checked against the real server parser so the two cannot silently diverge.
   const server = (overrides: Record<string, unknown>) =>
-    parseCreateIntegration({
-      name: 'Ops',
-      repo: 'acme/web',
-      eventTypes: ['push'],
-      destination: 'slack',
-      webhookUrl: SLACK,
-      ...overrides,
-    });
+    parseCreateIntegration(
+      {
+        name: 'Ops',
+        repo: 'acme/web',
+        eventTypes: ['push'],
+        destination: 'slack',
+        webhookUrl: SLACK,
+        ...overrides,
+      },
+      { genericWebhook: true },
+    );
 
-  const urls: [string, 'slack' | 'lark' | 'teams'][] = [
+  const urls: [string, 'slack' | 'lark' | 'teams' | 'discord' | 'generic_webhook'][] = [
+    ['https://discord.com/api/webhooks/123456789012345678/Tok', 'discord'],
+    ['https://discord.com/api/v10/webhooks/123456789012345678/Tok?thread_id=42', 'discord'],
+    ['https://discordapp.com/api/webhooks/123456789012345678/Tok', 'discord'],
+    ['https://discord.com/api/webhooks/123456789012345678/Tok?username=x', 'discord'],
+    [SLACK, 'discord'],
+    ['https://hooks.example.com/noti?channel=ci', 'generic_webhook'],
+    ['https://hooks.example.com:8443/noti', 'generic_webhook'],
+    ['http://hooks.example.com/noti', 'generic_webhook'],
+    ['https://127.0.0.1/noti', 'generic_webhook'],
+    ['https://2130706433/noti', 'generic_webhook'],
+    ['https://localhost/noti', 'generic_webhook'],
+    ['https://db.internal/noti', 'generic_webhook'],
+    ['https://noti.runlumi.app/webhooks/generic/x', 'generic_webhook'],
     ['https://prod-12.westus.logic.azure.com/workflows/abc/triggers/manual/paths/invoke?sig=x', 'teams'],
     ['https://logic.azure.com/workflows/abc', 'teams'],
     ['https://evil.test/logic.azure.com', 'teams'],
@@ -230,12 +246,16 @@ describe('response parsing', () => {
   });
 
   it('rejects a row with an unknown destination or credential state', () => {
-    expect(() => parseIntegration({ ...row, destination: 'discord' })).toThrow(ApiError);
+    expect(() => parseIntegration({ ...row, destination: 'telegram' })).toThrow(ApiError);
     expect(() => parseIntegration({ ...row, credentials: 'unknown' })).toThrow(ApiError);
   });
 
   it('accepts a Teams row', () => {
     expect(parseIntegration({ ...row, destination: 'teams' }).destination).toBe('teams');
+  });
+
+  it.each(['discord', 'generic_webhook'] as const)('accepts a %s row', (destination) => {
+    expect(parseIntegration({ ...row, destination }).destination).toBe(destination);
   });
 
   it('has no field that could carry a webhook URL', () => {

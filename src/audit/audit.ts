@@ -10,6 +10,7 @@ export type AuditAction =
   | 'integration.update'
   | 'integration.delete'
   | 'integration.credentials.rotate'
+  | 'integration.auto_pause'
   | 'source.create'
   | 'source.update'
   | 'source.delete'
