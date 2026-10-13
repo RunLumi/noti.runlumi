@@ -14,6 +14,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: python3 scripts/test_auth_schema.py
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run typecheck:web
