@@ -10,6 +10,7 @@ export type AuditAction =
   | 'integration.update'
   | 'integration.delete'
   | 'integration.credentials.rotate'
+  | 'delivery.replay'
   | 'access.denied'
   | 'github.installation.bind'
   | 'github.installation.bind_refused'
@@ -26,7 +27,7 @@ export interface AuditEntry {
   readonly organizationId: string | null;
   readonly actorId: string | null;
   readonly action: AuditAction;
-  readonly subjectType: 'integration' | 'organization' | 'capability' | 'github_installation' | 'repository';
+  readonly subjectType: 'integration' | 'delivery' | 'organization' | 'capability' | 'github_installation' | 'repository';
   readonly subjectId: string | null;
   readonly outcome: 'success' | 'denied';
   readonly ip?: string | null;
