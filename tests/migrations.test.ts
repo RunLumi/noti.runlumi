@@ -381,3 +381,25 @@ describe('migration 0012', () => {
     expect(() => insertRow(raw, 'd', 'discord', 'org-a')).toThrow();
   });
 });
+
+describe('migration 0013', () => {
+  it('adds the delivery log indexes without changing rows, and is idempotent', () => {
+    const { raw } = createFakeD1({ before: '0013' });
+    raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,organization_id,state) VALUES('d','i','o','dead_lettered')",
+      )
+      .run();
+    const indexes = () =>
+      (
+        raw.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='deliveries'").all() as {
+          name: string;
+        }[]
+      ).map((r) => r.name);
+    expect(indexes()).not.toContain('deliveries_org_updated');
+    applyMigration(raw, '0013_delivery_log_indexes.sql');
+    applyMigration(raw, '0013_delivery_log_indexes.sql');
+    expect(indexes()).toEqual(expect.arrayContaining(['deliveries_org_updated', 'deliveries_org_created']));
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()).toEqual({ n: 1 });
+  });
+});

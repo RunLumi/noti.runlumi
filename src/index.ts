@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { createAuth } from './auth/better-auth';
 import { api as githubApi, browser as githubBrowser } from './api/github';
+import deliveries from './api/deliveries';
 import integrations from './api/integrations';
 import workspaceLifecycle from './api/workspace-lifecycle';
 import workspace from './auth/workspace';
@@ -27,6 +28,7 @@ app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.ra
 app.route('/api/workspace', workspace);
 app.route('/api/workspace', workspaceLifecycle);
 app.route('/api/integrations', integrations);
+app.route('/api/deliveries', deliveries);
 app.route('/api/github', githubApi);
 app.route('/github', githubBrowser);
 

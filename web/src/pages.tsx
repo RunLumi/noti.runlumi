@@ -2,10 +2,12 @@ import lumiLogo from '../../brand/lumi-fulltext.svg';
 import { TeamManagement } from './team';
 import { PasskeysPanel } from './passkeys';
 import { IntegrationsStat } from './integrations/IntegrationsStat';
+import { DeliveryStats } from './deliveries/DeliveryStats';
+import { DeliveryLogPage } from './deliveries/DeliveryLogPage';
+import { WorkspaceDataPanel } from './workspace/WorkspaceDataPanel';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import {
   IconActivity,
   IconArrowRight,
@@ -156,16 +158,7 @@ export function Overview() {
       />
       <div className="stats">
         <IntegrationsStat />
-        <Card>
-          <span className="stat-label">Messages delivered</span>
-          <strong>—</strong>
-          <small>Live metrics coming soon</small>
-        </Card>
-        <Card>
-          <span className="stat-label">Delivery health</span>
-          <strong>—</strong>
-          <small>Requires delivery API</small>
-        </Card>
+        <DeliveryStats />
       </div>
       <div className="two-col">
         <Card className="panel">
@@ -181,7 +174,9 @@ export function Overview() {
             <span>02</span>
             <div>
               <b>Choose a destination</b>
-              <p>Paste a Lark or Slack webhook URL in the integration setup. It is stored encrypted.</p>
+              <p>
+                Paste a Lark, Slack or Teams webhook URL in the integration setup. It is stored encrypted.
+              </p>
             </div>
           </div>
           <div className="step">
@@ -217,49 +212,8 @@ export function Overview() {
     </>
   );
 }
-type ActivityRow = { id: string; event: string; destination: string; status: string; time: string };
-const helper = createColumnHelper<ActivityRow>();
-const cols = [
-  helper.accessor('event', { header: 'Event' }),
-  helper.accessor('destination', { header: 'Destination' }),
-  helper.accessor('status', { header: 'Status' }),
-  helper.accessor('time', { header: 'Time' }),
-];
 export function Activity() {
-  const table = useReactTable({
-    data: [] as ActivityRow[],
-    columns: cols,
-    getCoreRowModel: getCoreRowModel(),
-  });
-  return (
-    <>
-      <Header
-        eyebrow="DELIVERY LOG"
-        title="Activity"
-        description="Inspect notification delivery, retries and failures."
-      />
-      <Card className="table-wrap">
-        <table>
-          <thead>
-            {table.getHeaderGroups().map((group) => (
-              <tr key={group.id}>
-                {group.headers.map((h) => (
-                  <th key={h.id}>{flexRender(h.column.columnDef.header, h.getContext())}</th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            <tr>
-              <td colSpan={4} className="table-empty">
-                No activity data available. Delivery history API is not implemented yet.
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </Card>
-    </>
-  );
+  return <DeliveryLogPage />;
 }
 export function Team() {
   return <TeamManagement />;
@@ -297,6 +251,7 @@ export function Settings() {
         </Button>
       </Card>
       <PasskeysPanel />
+      <WorkspaceDataPanel />
     </>
   );
 }

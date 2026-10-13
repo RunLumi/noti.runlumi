@@ -12,7 +12,7 @@ export const en = {
   'integrations.eyebrow': 'CONNECTIONS',
   'integrations.title': 'Integrations',
   'integrations.description':
-    'Each integration sends chosen GitHub updates from one repository to one Lark or Slack chat.',
+    'Each integration sends chosen GitHub updates from one repository to one Lark, Slack or Microsoft Teams chat.',
   'integrations.new': 'New integration',
   'integrations.loading': 'Loading integrations…',
   'integrations.count': { one: '{count} integration', other: '{count} integrations' },
@@ -70,6 +70,24 @@ export const en = {
   'destination.slack.urlHint': 'Starts with https://hooks.slack.com/services/.',
   'destination.lark.docs': 'Lark’s guide to custom bots',
   'destination.slack.docs': 'Slack’s guide to incoming webhooks',
+  'destination.teams': 'Microsoft Teams',
+  'destination.teams.where': 'Posts to the Teams channel you choose.',
+  'destination.teams.what':
+    'Uses a Power Automate “Workflows” flow whose trigger is a web request. It runs under your account.',
+  'destination.teams.urlHint':
+    'A https://…logic.azure.com/… address, shown on the flow’s first step after you save it.',
+  'destination.teams.docs': 'Microsoft’s guide to webhooks with Workflows',
+  'destination.teams.step1':
+    'In Teams, open the channel’s “…” menu, choose Workflows, and pick “Post to a channel when a webhook request is received”. You can also start from Power Automate.',
+  'destination.teams.step2': 'Name the flow, check the team and channel, then choose Next and Create flow.',
+  'destination.teams.step3':
+    'Open the flow’s first step (“When a Teams webhook request is received”). Under Who can trigger the flow, choose Anyone. Noti cannot sign in as a Microsoft user.',
+  'destination.teams.step4': 'Save, then copy the HTTP POST URL from that step.',
+  'destination.teams.step5': 'Paste it below. Noti accepts only addresses on logic.azure.com.',
+  'destination.teams.noteOwner':
+    'The flow belongs to the person who created it, not to the team. If they leave the company, notifications stop. Ask them to add a co-owner.',
+  'destination.teams.noteAccepted':
+    'Teams only says “accepted” when we send a message. It cannot confirm the flow posted it, so Noti shows these as Accepted, never Delivered. If your admin has not approved Workflows, messages are accepted and then lost.',
   'destination.guideTitle': 'Where to find the webhook URL',
   'destination.guideNote':
     'These steps follow the provider’s own documentation. If a screen looks different, use their guide.',
@@ -147,7 +165,7 @@ export const en = {
   'field.hideLabel': 'Hide {field}',
 
   // --- Client-side validation (mirrors src/api/integration-input.ts) -------
-  'validation.destination': 'Choose Lark or Slack.',
+  'validation.destination': 'Choose Lark, Slack or Microsoft Teams.',
   'validation.name': 'Use 1–80 characters, without line breaks.',
   'validation.repo': 'Use the form owner/repository, for example acme/website.',
   'validation.events': 'Choose at least one update.',
@@ -157,6 +175,8 @@ export const en = {
     'That isn’t a Lark webhook address. It should start with https://open.larksuite.com/open-apis/bot/v2/hook/ (or open.feishu.cn).',
   'validation.webhookUrl.wrongHost.slack':
     'That isn’t a Slack webhook address. It should start with https://hooks.slack.com/services/.',
+  'validation.webhookUrl.wrongHost.teams':
+    'That isn’t a Workflows web-request address. It should start with https:// and end its host with logic.azure.com.',
   'validation.signingSecret': 'Paste the secret exactly as Lark shows it, without spaces.',
 
   // --- Event categories ---------------------------------------------------
@@ -334,6 +354,209 @@ export const en = {
   'overview.integrations.error': 'Couldn’t load',
   'overview.integrations.breakdown': '{enabled} on · {paused} paused',
   'overview.integrations.none': 'None set up yet',
+  'overview.delivered': 'Delivered, last 24 hours',
+  'overview.delivered.accepted': {
+    one: '+{count} accepted but not confirmed',
+    other: '+{count} accepted but not confirmed',
+  },
+  'overview.delivered.none': 'No deliveries in the last 24 hours',
+  'overview.delivered.confirmed': 'Confirmed by the destination',
+  'overview.failed': 'Failed, last 24 hours',
+  'overview.failed.retrying': { one: '{count} still retrying', other: '{count} still retrying' },
+  'overview.failed.clear': 'Nothing has failed',
+  'overview.failed.view': 'View failed deliveries',
+  'overview.stats.loading': 'Loading…',
+  'overview.stats.error': 'Couldn’t load',
+
+  // --- Delivery log (ADR 0009) ----------------------------------------------
+  'deliveries.eyebrow': 'DELIVERY LOG',
+  'deliveries.title': 'Activity',
+  'deliveries.description':
+    'Every notification Noti tried to send, what happened to it, and what to do about the ones that failed.',
+  'deliveries.model':
+    'Noti delivers at least once. A notification may occasionally be delivered more than once.',
+  'deliveries.loading': 'Loading deliveries…',
+  'deliveries.filters.label': 'Filter deliveries',
+  'deliveries.filter.state': 'Outcome',
+  'deliveries.filter.state.all': 'All outcomes',
+  'deliveries.filter.integration': 'Integration',
+  'deliveries.filter.integration.all': 'All integrations',
+  'deliveries.filter.from': 'From',
+  'deliveries.filter.to': 'To',
+  'deliveries.filter.clear': 'Clear filters',
+  'deliveries.filter.dateHint': 'Dates are in UTC and include the whole day.',
+  'deliveries.count': { one: '{count} delivery shown.', other: '{count} deliveries shown.' },
+  'deliveries.count.more': 'More are available.',
+  'deliveries.count.end': 'That is every delivery that matches.',
+  'deliveries.loadMore': 'Load more',
+  'deliveries.loadingMore': 'Loading…',
+  'deliveries.tableLabel': 'Deliveries, newest first',
+  'deliveries.col.state': 'Outcome',
+  'deliveries.col.integration': 'Integration',
+  'deliveries.col.destination': 'Sends to',
+  'deliveries.col.attempts': 'Attempts',
+  'deliveries.col.updated': 'Last change',
+  'deliveries.col.details': 'Details',
+  'deliveries.details': 'Details',
+  'deliveries.detailsFor': 'Details for the delivery to {name}, {state}',
+  'deliveries.redelivery': 'Redelivery',
+  'deliveries.redelivery.of': 'Redelivery of an earlier delivery',
+  'deliveries.integrationDeleted': 'Deleted integration',
+  'deliveries.empty.none.title': 'No deliveries yet',
+  'deliveries.empty.none.body':
+    'When a GitHub event reaches one of your integrations, each notification Noti sends appears here with its outcome.',
+  'deliveries.empty.filtered.title': 'No deliveries match these filters',
+  'deliveries.empty.filtered.body':
+    'Nothing matches the outcome, integration and dates you chose. Clear the filters to see everything.',
+  'deliveries.error.title': 'We couldn’t load the delivery log.',
+  'deliveries.error.body': 'Nothing has been changed. The log may be out of date until it loads.',
+  'deliveries.error.stale': 'This list may be out of date: the last refresh failed.',
+  'deliveries.retry': 'Try again',
+  'deliveries.error.notFound': 'This delivery isn’t in this workspace.',
+  'deliveries.error.conflict': 'This delivery can’t be redelivered right now.',
+
+  // --- Delivery states (text and icon, never colour alone: WCAG 1.4.1) --------
+  'delivery.state.pending': 'Waiting',
+  'delivery.state.claimed': 'Sending',
+  'delivery.state.sent': 'Delivered',
+  'delivery.state.accepted': 'Accepted',
+  'delivery.state.retrying': 'Retrying',
+  'delivery.state.dead_lettered': 'Failed',
+  'delivery.state.suppressed': 'Suppressed',
+  'delivery.state.pending.meaning': 'Noti has the notification and will send it shortly.',
+  'delivery.state.claimed.meaning': 'Noti is sending this notification now.',
+  'delivery.state.sent.meaning': 'The destination confirmed it received this notification.',
+  'delivery.state.accepted.meaning':
+    'The destination accepted this notification but cannot confirm it was shown. It probably arrived; Noti cannot promise it did.',
+  'delivery.state.retrying.meaning': 'The last attempt did not work. Noti will try again by itself.',
+  'delivery.state.dead_lettered.meaning':
+    'Noti stopped trying. The notification was not delivered by this attempt.',
+  'delivery.state.suppressed.meaning':
+    'Noti recognised this as a duplicate of a notification it already handled, and did not send it again.',
+
+  // --- Delivery detail --------------------------------------------------------
+  'delivery.detail.title': 'Delivery to {name}',
+  'delivery.detail.close': 'Close details',
+  'delivery.detail.loading': 'Loading details…',
+  'delivery.detail.error': 'We couldn’t load these details. The summary above is still correct.',
+  'delivery.detail.whatHappened': 'What happened',
+  'delivery.detail.whatNext': 'What to do',
+  'delivery.detail.nextRetry': 'Next attempt: {time}.',
+  'delivery.detail.retryable': 'Noti stopped after its retries ran out.',
+  'delivery.detail.permanent':
+    'Noti did not retry, because trying again would fail the same way until the cause is fixed.',
+  'delivery.detail.fixLink': 'Open integration settings',
+  'delivery.detail.noFix': 'Nothing you change will help; redelivering later may.',
+  'delivery.detail.facts': 'Record',
+  'delivery.detail.attempts': 'Attempts',
+  'delivery.detail.created': 'Created',
+  'delivery.detail.updated': 'Last change',
+  'delivery.detail.id': 'Delivery ID',
+  'delivery.detail.replayOf': 'Redelivery of',
+  'delivery.detail.destination': 'Sends to',
+  'delivery.detail.timeline': 'What Noti recorded',
+  'delivery.detail.timeline.note':
+    'Noti records when a delivery was created, its first and latest attempt, and when it stopped. It does not keep a log of every attempt.',
+  'delivery.timeline.created': 'Created',
+  'delivery.timeline.first_attempt': 'First attempt',
+  'delivery.timeline.last_attempt': 'Latest attempt',
+  'delivery.timeline.next_attempt': 'Next attempt scheduled',
+  'delivery.timeline.dead_lettered': 'Noti stopped trying',
+  'delivery.detail.replays': 'Redeliveries of this delivery',
+  'delivery.detail.replays.none': 'None yet.',
+  'delivery.detail.support': 'Details for support',
+  'delivery.detail.supportCode': 'Error code',
+  'delivery.detail.supportId': 'Delivery ID',
+  'delivery.detail.noMessage': 'Noti has no further explanation for this failure.',
+
+  // --- Redeliver --------------------------------------------------------------
+  'redeliver.button': 'Redeliver',
+  'redeliver.title': 'Send this notification again?',
+  'redeliver.body':
+    'Noti will send the original notification to {destination} again as a new delivery. The failed one stays in the log. The destination may receive it more than once.',
+  'redeliver.brokenWarning':
+    'If the cause above has not been fixed, this will most likely fail again. Fix it first if you can.',
+  'redeliver.confirm': 'Yes, redeliver',
+  'redeliver.sending': 'Queuing…',
+  'redeliver.cancel': 'Cancel',
+  'redeliver.queued':
+    'Queued as a new delivery. It appears in the log as soon as Noti sends it. This does not mean it has arrived yet.',
+  'redeliver.already': 'A redelivery of this notification was already queued, so Noti did not send another.',
+  'redeliver.viewNew': 'Show the new delivery',
+  'redeliver.adminOnly': 'Only workspace admins can redeliver. Ask an admin if this notification matters.',
+  'redeliver.inFlight': 'A redelivery is already {state}. Check the redeliveries below.',
+  'redeliver.succeeded': 'This was redelivered and the redelivery went through.',
+  'redeliver.integration.missing':
+    'The integration this was sent through has been deleted, so it cannot be redelivered.',
+  'redeliver.integration.disabled':
+    'This integration is paused. Turn it back on in its settings first, then come back to redeliver.',
+  'redeliver.integration.quarantined':
+    'Noti stopped using this integration’s saved webhook URL. Paste the URL again in its settings first, then come back to redeliver.',
+  'redeliver.notOffered': 'Only failed deliveries can be redelivered. This one is not failed.',
+  'redeliver.deletionPending':
+    'This workspace is scheduled for deletion, so nothing can be redelivered. Cancel the deletion in Settings first.',
+
+  // --- Failure explanations, selected by the server's message id (F220) ------
+  'errors.destination_url_rejected':
+    'The saved address isn’t one Noti is allowed to send to, so it was not used.',
+  'errors.destination_credentials_invalid':
+    '{destination} rejected the credentials Noti saved. Replace the webhook URL to fix it.',
+  'errors.destination_revoked':
+    'This connection was removed in {destination}, so notifications can’t be sent to it. Create a new webhook there and replace the URL.',
+  'errors.destination_unauthorized':
+    '{destination} refused the request. The connection may need new permission or a new webhook URL.',
+  'errors.destination_rate_limited': '{destination} asked Noti to slow down. Noti retries automatically.',
+  'errors.destination_unavailable':
+    '{destination} didn’t respond. Noti retries automatically, and gave up on this one after its retries ran out.',
+  'errors.payload_too_large':
+    'This notification was larger than {destination} accepts. It can’t be sent as it is.',
+  'errors.render_failed': 'Noti couldn’t build a message this destination accepts from this event.',
+  'errors.config_invalid':
+    'This integration has a setting Noti can’t read. Open its settings and save them again.',
+  'errors.internal_error':
+    'Something went wrong on Noti’s side. Your notification was not lost and can be redelivered.',
+
+  // --- Workspace data and deletion (Settings) ---------------------------------
+  'workspace.export.title': 'Export workspace data',
+  'workspace.export.body':
+    'Download a JSON file with your workspace’s members, integrations, GitHub connections and up to the 2,000 most recent deliveries and audit events. It never contains webhook URLs, signing secrets or other credentials.',
+  'workspace.export.button': 'Download export',
+  'workspace.export.exporting': 'Preparing…',
+  'workspace.export.done': 'Export downloaded as {file}.',
+  'workspace.export.truncated': 'Older deliveries or audit events exist that this file does not include.',
+  'workspace.export.error': 'We couldn’t prepare the export. Nothing was changed. Try again.',
+  'workspace.adminOnly': 'Only workspace admins can do this. Your role is member.',
+  'workspace.danger.title': 'Delete workspace',
+  'workspace.danger.intro':
+    'Deleting a workspace stops all of its notifications and, after a 7-day waiting period, permanently removes its data.',
+  'workspace.danger.point1': 'Right away: every integration is paused and nothing more is delivered.',
+  'workspace.danger.point2':
+    'For 7 days: you can cancel, and the integrations that were on are turned back on.',
+  'workspace.danger.point3':
+    'After 7 days: the integrations, delivery history, members, audit log and the workspace itself are deleted. Stored webhook URLs become unrecoverable.',
+  'workspace.danger.backup':
+    'Backups: Cloudflare D1 Time Travel can restore the database to any point in the last 30 days, so deleted data may remain in Cloudflare’s point-in-time history for up to 30 days after the purge. Noti does not promise faster erasure than that.',
+  'workspace.danger.exportFirst': 'Export your data first if you may need it.',
+  'workspace.danger.button': 'Delete workspace…',
+  'workspace.danger.loading': 'Checking deletion status…',
+  'workspace.danger.error': 'We couldn’t check whether a deletion is scheduled.',
+  'workspace.danger.scheduled.title': 'Deletion is scheduled',
+  'workspace.danger.scheduled.body':
+    'Integrations are paused and nothing is being delivered. Everything is permanently removed after {date}.',
+  'workspace.danger.purgeStarted': 'Removal has already started and can no longer be cancelled.',
+  'workspace.danger.cancel': 'Cancel deletion',
+  'workspace.danger.cancelling': 'Cancelling…',
+  'workspace.danger.cancelled': 'Deletion cancelled. Integrations that were on have been turned back on.',
+  'workspace.danger.dialog.title': 'Delete {name}?',
+  'workspace.danger.dialog.body':
+    'This pauses every integration now and permanently deletes the workspace after 7 days unless you cancel. Type the workspace name to confirm.',
+  'workspace.danger.dialog.label': 'Type {name} to confirm',
+  'workspace.danger.dialog.keep': 'Keep workspace',
+  'workspace.danger.dialog.confirm': 'Schedule deletion',
+  'workspace.danger.dialog.scheduling': 'Scheduling…',
+  'workspace.error.wrongName': 'That doesn’t match the workspace name. Type it exactly, including capitals.',
+  'workspace.error.already': 'A deletion is already scheduled for this workspace.',
+  'workspace.error.purgeStarted': 'Removal has already started and can’t be cancelled.',
 } as const satisfies Record<string, string | PluralMessage>;
 
 export type MessageId = keyof typeof en;

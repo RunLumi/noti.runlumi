@@ -1,4 +1,4 @@
-import { IconExternalLink, IconLock } from '@tabler/icons-react';
+import { IconAlertCircle, IconExternalLink, IconLock } from '@tabler/icons-react';
 import { Field, SecretInput } from '../components/form';
 import type { DestinationKind } from '../lib/api';
 import { t, type MessageId } from '../i18n';
@@ -16,6 +16,12 @@ export function WebhookGuide({ destination }: { destination: DestinationKind }) 
           <li key={step}>{t(step)}</li>
         ))}
       </ol>
+      {info.notes?.map((note) => (
+        <p key={note} className="guide-caveat">
+          <IconAlertCircle size={18} aria-hidden="true" />
+          <span>{t(note)}</span>
+        </p>
+      ))}
       <p className="guide-note">
         {t('destination.guideNote')}{' '}
         <a href={info.docsUrl} target="_blank" rel="noopener noreferrer" className="text-link">

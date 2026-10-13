@@ -1,0 +1,350 @@
+/* ============================================================================
+   Delivery log, delivery detail drawer and workspace data panels.
+   Tokens only (DESIGN.md §5–§8). Status colour is never the only signal: every chip
+   carries a word and an icon. The drawer is an opaque reading surface — no glass.
+   ========================================================================= */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.delivery-model {
+  margin: 0 0 var(--space-4);
+  font-size: 14px;
+  color: var(--color-soft-slate);
+}
+
+/* --- Filters --------------------------------------------------------------- */
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-4);
+  align-items: end;
+  padding: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.filter {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.filter .input {
+  width: 100%;
+}
+
+.filters-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.list-count {
+  margin: 0 0 var(--space-3);
+  font-size: 14px;
+  color: var(--color-soft-slate);
+}
+
+.load-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-5) 0;
+}
+
+/* --- Table ----------------------------------------------------------------- */
+.state-chip {
+  white-space: nowrap;
+}
+
+.redelivery-tag {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  font-size: 12px;
+  color: var(--color-soft-slate);
+}
+
+.delivery-table td {
+  vertical-align: middle;
+}
+
+.cell-main,
+.cell-sub {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.cell-sub {
+  font-size: 12px;
+  color: var(--color-soft-slate);
+}
+
+.cell-details {
+  text-align: right;
+}
+
+/* Narrow screens: each row becomes a labelled card, so nothing scrolls sideways (§16). */
+@media (max-width: 760px) {
+  .delivery-table-wrap {
+    overflow-x: visible;
+  }
+
+  .delivery-table,
+  .delivery-table tbody,
+  .delivery-table tr,
+  .delivery-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .delivery-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .delivery-table tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: var(--border-archival);
+  }
+
+  .delivery-table tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .delivery-table td {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: var(--space-3);
+    padding: var(--space-2) 0;
+    border-bottom: 0;
+  }
+
+  .delivery-table td[data-label]::before {
+    content: attr(data-label);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-soft-slate);
+  }
+
+  .delivery-table .cell-details {
+    display: block;
+    text-align: left;
+  }
+
+  .delivery-table .row-action {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* --- Drawer ---------------------------------------------------------------- */
+.drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: min(520px, 100vw);
+  overflow-y: auto;
+  padding: var(--space-6);
+  background: var(--color-surface-white);
+  border-left: var(--border-strong);
+  box-shadow: var(--shadow-card);
+  display: grid;
+  align-content: start;
+  gap: var(--space-4);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.drawer-title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.025em;
+  overflow-wrap: anywhere;
+}
+
+.drawer-close {
+  flex-shrink: 0;
+  min-width: var(--touch-target);
+  padding-inline: 0;
+  justify-content: center;
+}
+
+.drawer-model {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: 14px;
+  background: var(--color-lumi-blue-soft);
+  border-radius: var(--radius-control);
+  color: var(--color-civic-navy);
+}
+
+.detail-section {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: var(--border-hairline);
+}
+
+.detail-section h3 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  color: var(--color-soft-slate);
+  text-transform: uppercase;
+}
+
+.detail-section p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.small {
+  font-size: 14px;
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.facts dt {
+  font-size: 14px;
+  color: var(--color-soft-slate);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.timeline,
+.replay-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.replay-list .text-link {
+  min-height: var(--touch-target);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.confirm-box {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-amber-soft);
+  border-left: 3px solid var(--color-signal-amber);
+  border-radius: var(--radius-control);
+}
+
+.confirm-box p {
+  margin: 0;
+}
+
+.confirm-title {
+  font-weight: 600;
+  color: var(--color-civic-navy);
+}
+
+.support-details summary {
+  min-height: var(--touch-target);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-soft-slate);
+}
+
+/* --- Overview stat link ---------------------------------------------------- */
+.stat-link {
+  display: inline-block;
+  margin-top: var(--space-1);
+}
+
+/* --- Workspace panels in Settings ------------------------------------------ */
+.workspace-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.workspace-panel h2,
+.workspace-panel p,
+.workspace-panel ul {
+  margin: 0;
+}
+
+.workspace-panel ul {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-5);
+}
+
+.danger-zone {
+  border-color: color-mix(in oklch, var(--color-risk-red) 40%, var(--color-border));
+}
+
+.danger-zone h2 {
+  color: var(--color-risk-red);
+}
+
+.admin-only-note {
+  font-size: 14px;
+  color: var(--color-soft-slate);
+}
+
+@media (max-width: 480px) {
+  .drawer {
+    padding: var(--space-4);
+  }
+
+  .facts > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+@media (forced-colors: active) {
+  .drawer,
+  .drawer-model,
+  .confirm-box {
+    border: 1px solid CanvasText;
+  }
+}
