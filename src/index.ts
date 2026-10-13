@@ -1,3 +1,4 @@
+import auth from './auth/routes';
 import {classifyGithubEvent,verifyGithubSignature} from './connectors/sources/github/events';
 import { larkPayload, larkAccepted } from './connectors/destinations/lark/webhook';
 import { Hono } from 'hono';
@@ -12,6 +13,7 @@ async function decrypt(ciphertext:string, keyHex:string) {
   const bytes = Uint8Array.from(atob(ciphertext),c=>c.charCodeAt(0));
   return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes.slice(0,12)},key,bytes.slice(12)));
 }
+app.route('/auth',auth as never);
 app.get('/health',c=>c.json({ok:true,service:'lumi-noti'}));
 app.post('/webhooks/github',async c=>{
   if (!c.env.GITHUB_WEBHOOK_SECRET) return c.text('Not configured',503);
