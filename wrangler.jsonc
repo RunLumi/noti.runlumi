@@ -24,5 +24,10 @@
       "database_name": "lumi-noti",
       "database_id": "REPLACE_WITH_D1_DATABASE_ID"
     }
-  ]
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  }
 }
