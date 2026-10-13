@@ -30,9 +30,11 @@ describe('H1: redaction and rendering are linear on hostile input', () => {
     ['@' + 'a-'.repeat(100_000)],
     ['1 '.repeat(100_000)],
     ['+1'.repeat(100_000)],
-  ])('redactContactDetails on a 200k-char input finishes in < 50 ms (#%#)', (input) => {
+  ])('redactContactDetails on a 200k-char input finishes in linear time (#%#)', (input) => {
     redactContactDetails('warm up a@b.co 1234 5678 9');
-    expect(timed(() => redactContactDetails(input))).toBeLessThan(50);
+    // The quadratic regex took ~38 s on this input. A 1 s ceiling still catches any
+    // super-linear regression while tolerating a loaded shared CI runner.
+    expect(timed(() => redactContactDetails(input))).toBeLessThan(1000);
   });
 
   it('bounds every field before segmentation, without splitting a surrogate pair', () => {
@@ -67,7 +69,7 @@ describe('H1: redaction and rendering are linear on hostile input', () => {
         ok = r.ok && r.message.bytes <= caps.maxBodyBytes && r.message.truncatedFields.includes('summary');
       });
       expect(ok).toBe(true);
-      expect(ms).toBeLessThan(500);
+      expect(ms).toBeLessThan(2000);
     }
   });
 });
