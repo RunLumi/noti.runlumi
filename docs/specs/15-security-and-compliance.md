@@ -24,7 +24,7 @@ F233 is the release gate and not a peer.
 
 ## F227 — Threat model
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `docs/THREAT_MODEL.md` written (STRIDE per entry point, assets, adversaries, boundaries, "not defended" list); the F227 CI test that every referenced control ID exists is not built
 
 **Story** As a security reviewer, I want one written model of who attacks what and which control
 is supposed to stop them, so that new features are checked against a threat instead of against
@@ -292,7 +292,7 @@ message may be logged or read by another workspace member, and a dead-letter vie
 
 ## F231 — Rate limiting, quotas and abuse
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 D1 limiter helper and per-installation `ingressLimiter` shipped and tested, **not wired into the route**; the other three families, abuse alerting and coarse pre-filter not built
 
 **Story** As an operator, I want floods, abuse and runaway tenants bounded by policy rather than
 by quota exhaustion, so that one customer's mistake cannot take the platform down.
@@ -788,7 +788,7 @@ of destructive intent, rate limiting, and audit.
 
 ## F239 — Dependency and supply-chain hygiene
 
-**Priority** P1 · **Status** not started · **Contributes to** D14
+**Priority** P1 · **Status** 🟡 `npm ci`, audit gate with dated exceptions, SHA-pinned actions, read-only permissions, Dependabot, dependency review (non-blocking for now), dev-vars drift test; `npm audit signatures`, install-script review and OIDC not done · **Contributes to** D14
 
 **Story** As a maintainer, I want the third-party surface small, pinned and continuously checked,
 so that a compromised transitive package is a blocked PR rather than a production incident.
@@ -845,7 +845,7 @@ requires.
 
 ## F240 — Security release checklist
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `docs/RELEASE_GATES.md` restructured as a living checklist naming the four gates; every gate is partly done or not done
 
 **Story** As a maintainer, I want one checklist that decides whether a release may be called
 secure, so that "production-ready" is earned by evidence rather than asserted.
@@ -896,7 +896,7 @@ we ran".
 
 ## F241 — Known-accepted-risk register
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 register lives in `docs/THREAT_MODEL.md` §7 (AR-1 to AR-16, statuses reconciled with the code); CI check that every referenced `AR-n` exists is in `tests/security/config-guards.test.ts`
 
 **Story** As a customer, an investor or a reviewer, I want to see what we know is risky and why we
 chose it, so that trust is based on disclosure rather than on absence of bad news.
@@ -943,7 +943,7 @@ stopped thinking about.
 
 ## F242 — Incident response and disclosure
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 root `SECURITY.md` (GitHub private vulnerability reporting, no invented address); runbooks, postmortem template and `security.txt` not done
 
 **Story** As a customer whose data or credentials were affected, I want a fast, honest and
 documented response, so that an incident costs me less than silence would.

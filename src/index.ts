@@ -12,10 +12,16 @@ import { DEAD_LETTER_QUEUE, consumeDeadLetters } from './pipeline/dead-letter';
 import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { purgeDueWorkspace } from './pipeline/purge';
+import { pruneRateLimits } from './security/rate-limit';
 import { sweepStaleClaims } from './pipeline/sweep';
 import { log } from './platform/log';
+import { requireSameOrigin } from './security/csrf';
+import { securityHeaders } from './security/headers';
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+app.use('*', securityHeaders);
+app.use('/api/*', requireSameOrigin);
 
 app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
 app.route('/api/workspace', workspace);
@@ -61,6 +67,10 @@ export default {
     const purged = await purgeOutbox(env);
     log('info', 'outbox_reconcile', { ...dispatch, released_claims: releasedClaims, purged });
     await maintainCredentials(env);
+    // Fixed-window counters older than an hour are dead weight; drain them in bounded rounds.
+    for (let i = 0; i < 5; i++) {
+      if ((await pruneRateLimits(env.DB, Date.now() - 60 * 60 * 1000, 1000)) < 1000) break;
+    }
     const purge = await purgeDueWorkspace(env.DB, Date.now());
     if (purge.organizationId) log('info', 'workspace_purge', { ...purge });
   },
