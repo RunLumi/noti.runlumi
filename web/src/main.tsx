@@ -1,9 +1,11 @@
-import React from 'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';import{RouterProvider,createRouter,createRootRoute,createRoute,redirect}from'@tanstack/react-router';import{AppShell,Overview,Integrations,Activity,Team,Settings,AuthPage,VerifyPage,ResetPage}from'./pages';import './styles.css';
+import React from 'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';import{RouterProvider,createRouter,createRootRoute,createRoute,redirect}from'@tanstack/react-router';import{AppShell,Overview,Integrations,Activity,Team,Settings,AuthPage,VerifyPage,ResetPage}from'./pages';import{OnboardingPage,InvitePage}from'./onboarding';import './styles.css';
 const qc=new QueryClient({defaultOptions:{queries:{retry:1,staleTime:30_000}}});
 const root=createRootRoute({component:AppShell});
 const routes=[
 createRoute({getParentRoute:()=>root,path:'/',component:Overview}),
 createRoute({getParentRoute:()=>root,path:'/integrations',component:Integrations}),
+createRoute({getParentRoute:()=>root,path:'/onboarding',component:OnboardingPage}),
+createRoute({getParentRoute:()=>root,path:'/invite',component:InvitePage}),
 createRoute({getParentRoute:()=>root,path:'/activity',component:Activity}),
 createRoute({getParentRoute:()=>root,path:'/team',component:Team}),
 createRoute({getParentRoute:()=>root,path:'/settings',component:Settings}),
