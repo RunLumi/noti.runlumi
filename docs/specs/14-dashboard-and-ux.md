@@ -2060,7 +2060,7 @@ fixture would breach that by accident).
 
 ## F224 — Internationalisation and translated-ready strings
 
-**Priority** P1 · **Status** partial (slice 6c, ADR 0013: Vietnamese catalogue with a language switcher, saved choice, `<html lang>`, `Intl` dates/numbers/plurals, `:lang(vi)` display type, Geist Vietnamese subset asserted; tests for catalogue drift and hard-coded strings. **Not done:** locale in the URL, preserving unsaved forms across a switch, localised server-supplied errors, `lang` on inline provider text, the locale-aware screenshot pipeline, ICU `{count, plural}` syntax (a per-message `one`/`other` object is used instead); the Vietnamese copy has had no native-speaker review)
+**Priority** P1 · **Status** partial (slice 6c, ADR 0013: Vietnamese catalogue with a language switcher, saved choice, `<html lang>`, `Intl` dates/numbers/plurals, `:lang(vi)` display type, Geist Vietnamese subset asserted; tests for catalogue drift and hard-coded strings. **Not done:** locale in the URL, localised server-supplied errors, `lang` on inline provider text, the locale-aware screenshot pipeline, ICU `{count, plural}` syntax (a per-message `one`/`other` object is used instead); the Vietnamese copy has had no native-speaker review)
 
 **Story** As a user who does not read English, I want the product in my language, so that setup
 does not require an interpreter.

@@ -61,14 +61,18 @@ onboarding and passkey screens still carried literal English in their components
    The accepted entries are pinned to their ratio: the test fails if one stops failing (remove
    it) or changes (re-decide).
 
-4. **Route changes: title, announcement, focus (WCAG 2.4.2, 2.4.3, 4.1.3).**
-   `web/src/a11y/RouteA11y.tsx` is mounted once in `AppShell`. When the path changes
-   (not the query string) it sets `document.title` to "`<page>` · Lumi Noti", fills a
-   visually-hidden `role="status"` region ("`<page>` page opened") and moves focus to the
-   page `<h1>` (`tabindex="-1"`, outside the Tab order), after a frame so the new route has
-   committed its heading. First load is left to the browser; filtering the activity log
-   (query string only) never steals focus from the filter in use. The page names come from
-   the catalogue, so Vietnamese titles and announcements need no extra code.
+4. **Route changes: title and focus (WCAG 2.4.2, 2.4.3).**
+   `web/src/a11y/RouteA11y.tsx` is mounted once in `AppShell`. When the path changes it sets
+   `document.title` ("`<page>` · Lumi Noti") and moves focus to the page `<h1>`
+   (`tabindex="-1"`, outside the Tab order). If the route is still loading and has no heading,
+   it waits for one with a `MutationObserver`, for at most one second, then settles for
+   `<main>`; it does nothing if the person has moved focus meanwhile. The heading is the
+   announcement (its name is read when it takes focus), so a navigation adds no live-region
+   message. First load, redirects (`replace` navigations) and query-string-only changes
+   (filtering the activity log) do not move focus. The live region is used only for what has no
+   focus move: a language change on the same page (alternating a no-break space so a repeated
+   message is announced again). **Not implemented:** restoring the previously focused
+   element on browser Back/Forward; those navigations focus the heading like any other.
 
 5. **Skip link and landmarks (2.4.1).** `SkipLink` is the first stop on the shell and on the
    auth screens; it focuses `<main id="main-content">` itself, without writing `#main-content`
@@ -119,10 +123,15 @@ onboarding and passkey screens still carried literal English in their components
      (`i18n/format.ts`; `deliveries/Time.tsx` now uses it; the hard-coded `'en'` and
      `toLocaleDateString()` are gone). A missing Vietnamese id at runtime falls back to the
      English text rather than a blank.
-   - **Switching language remounts the subtree.** `t()` is a plain function, so
-     `LocaleProvider` keys the routed tree by locale. The router, URL, query cache and session
-     live above it and survive; an unfinished form loses its typed values. F224 asks for
-     unsaved values to be preserved; that is not met (see "Not done").
+   - **Switching language re-renders in place; nothing remounts.** `t()` is a plain function,
+     so each component subscribes with `useLocale()` (`useSyncExternalStore`) as the first line
+     of its body, and `locale-reactivity.test.ts` (TypeScript AST) fails if an upper-case
+     component returning JSX lacks it. Tests assert, across a switch: focus stays on the very
+     same `<select>`, an open delete dialog stays open (same element, typed text kept, text now
+     Vietnamese), a half-typed sign-up form and a wizard draft keep their values. The language
+     change is announced once through the polite live region ("Language changed to …"). An
+     earlier version keyed the tree by locale and remounted it; that dropped focus, open
+     dialogs and typed values (2.4.3, 3.2.2) and was replaced.
 
 9. **Tests that stop the catalogue drifting.** `catalogue.test.ts` fails if any English id is
    missing from Vietnamese, if Vietnamese has an unknown id, if any message is empty, if a
@@ -132,7 +141,12 @@ onboarding and passkey screens still carried literal English in their components
    if text is not NFC. The checking function is itself tested against deliberately broken
    catalogues. `hardcoded-strings.test.ts` parses every `.tsx` under `web/src` (TypeScript
    API, not a regex) and fails on JSX text, string literals rendered in JSX and visible
-   attribute strings (`aria-label`, `placeholder`, `title`, `alt`, …), plus
+   attribute strings (`aria-label`, `placeholder`, `title`, `alt`, `label`, `description`,
+   `heading`, `text`, `aria-valuetext`, …), and scans plain `.ts` files for sentence-like
+   strings (label tables, thrown error messages); the only entries allowed are the internal
+   `ApiError` texts that screens never show, each with its reason. An attribute whose value
+   happens to be a catalogue id is exempt only on a component (`<Field label="filters.x">`,
+   whose prop is typed `MessageId`), never on a native element. Plus
    `confirm`/`alert`/`prompt` with a literal. Its allow-list is **empty**: every existing
    literal in `pages.tsx`, `team.tsx`, `onboarding.tsx`, `passkeys.tsx` and `ui.tsx` was moved
    into the catalogue, and the strings `lib/api.ts` returns for the sign-up, resend and
@@ -154,6 +168,16 @@ onboarding and passkey screens still carried literal English in their components
     (review rows stack below 1100px; option cards use `auto-fit`) and covered by two
     stylesheet assertions. The fix lives in the new file to avoid colliding with parallel work
     in `integrations/**`.
+
+## Needs design-owner confirmation
+
+- **`--color-control-border` (Soft Slate) on text fields and selects.** It meets 1.4.11
+  (5.76:1 on white) without changing any canonical value, but it makes form-field edges
+  visibly darker than the 1px archival border that `DESIGN.md` §8.2 describes for sheets and
+  rows. The Soft Slate value stays unchanged. A design owner should confirm this reading of
+  §8.2 (or choose another treatment) before it is treated as settled; until then it is an
+  engineering interpretation, recorded here and in `a11y/contrast.test.ts`.
+- The Vietnamese copy (see "Not verified") and the accepted contrast gaps in decision 3.
 
 ## Rebase onto routing filters (ADR 0010) and generic sources (ADR 0012)
 
@@ -178,7 +202,7 @@ second adds the translation.
 ## Verification (2026-10-13)
 
 **Automated.** `npm run format && npm run check` passes: format, lint, type checks, the Worker
-and web tests, web build, Worker bundle guard. 1,747 tests on the rebased branch, 197 of them
+and web tests, web build, Worker bundle guard. 1,760 tests on the rebased branch, about 210 of them
 this slice's: catalogue 18, hard-coded strings 7, locale 14, contrast 39, stylesheet 29, pages
 (axe) 60, dialogs (axe) 15, keyboard 15. Mutation checks were run on the stylesheet tests (smooth scrolling, a 1px focus ring, a
 renamed `@supports` selector each turned the suite red).
@@ -250,7 +274,7 @@ this slice, and has been filed as a separate task.
 
 ## Not done
 
-- Locale in the URL (`?locale=`), and preserving unsaved form values across a language switch.
+- Locale in the URL (`?locale=`). Lazy-loading the Vietnamese catalogue (it is bundled eagerly, about 30 KB).
 - Localised server-supplied text: Better Auth's own error messages (for example a failed
   sign-in) and any `error` string the Worker returns outside the integrations/delivery
   taxonomy still arrive in English.

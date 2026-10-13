@@ -1,5 +1,6 @@
 import { t } from '../i18n';
 import { formatDateTime, formatRelative } from '../i18n/format';
+import { useLocale } from '../i18n/LocaleProvider';
 
 const UNITS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
   ['day', 86_400_000],
@@ -23,6 +24,7 @@ export function absoluteTime(iso: string): string {
 
 /** Relative text for scanning, the exact local time on hover and for assistive tech via the datetime. */
 export function Time({ iso }: { readonly iso: string }) {
+  useLocale();
   return (
     <time dateTime={iso} title={absoluteTime(iso)}>
       {relativeTime(iso, Date.now())}

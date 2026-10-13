@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { Button } from '../components/ui';
 import { t, type MessageId } from '../i18n';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface CopyButtonProps {
   readonly text: string;
@@ -20,6 +21,7 @@ type State = 'idle' | 'copied' | 'failed';
  * pretending it worked.
  */
 export function CopyButton({ text, label, copied, failed, ariaLabel }: CopyButtonProps) {
+  useLocale();
   const [state, setState] = useState<State>('idle');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(

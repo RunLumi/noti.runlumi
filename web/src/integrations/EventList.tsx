@@ -1,5 +1,6 @@
 import { t, tp } from '../i18n';
 import { EVENT_LABEL, isGithubEventType, sortEvents } from './events';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface EventListProps {
   readonly eventTypes: readonly string[];
@@ -9,6 +10,7 @@ interface EventListProps {
 
 /** Subscribed updates in plain language. Unknown legacy values are shown, never hidden. */
 export function EventList({ eventTypes, limit }: EventListProps) {
+  useLocale();
   const sorted = sortEvents(eventTypes);
   const shown = limit === undefined ? sorted : sorted.slice(0, limit);
   const hidden = sorted.length - shown.length;

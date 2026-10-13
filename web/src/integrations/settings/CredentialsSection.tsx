@@ -16,6 +16,7 @@ import {
   type FieldErrors,
 } from '../validation';
 import { WebhookFields, WebhookGuide } from '../WebhookFields';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface CredentialsSectionProps {
   readonly orgId: string;
@@ -34,6 +35,7 @@ const STATE_LABEL = {
  * shown; the only operation is to replace it, which discards the old key material.
  */
 export function CredentialsSection({ orgId, integration }: CredentialsSectionProps) {
+  useLocale();
   const rotate = useRotateCredentials(orgId, integration.id);
   const info = DESTINATIONS[integration.destination];
   const destination = t(info.name);

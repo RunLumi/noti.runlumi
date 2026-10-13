@@ -2,6 +2,7 @@ import { forwardRef, useId } from 'react';
 import { IconAlertCircle } from '@tabler/icons-react';
 import { t, tp } from '../i18n';
 import { EVENT_GROUPS, EVENT_LABEL, sortEvents, type EventGroup, type GithubEventType } from './events';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface EventPickerProps {
   readonly value: readonly GithubEventType[];
@@ -18,6 +19,7 @@ function GroupFieldset({
   selected: ReadonlySet<GithubEventType>;
   onChange: (next: GithubEventType[]) => void;
 }) {
+  useLocale();
   const hintId = useId();
   const allOn = group.events.every((e) => selected.has(e));
   const groupName = t(group.label);

@@ -14,6 +14,7 @@ import { FilterTester } from '../filters/FilterTester';
 import { FiltersEditor } from '../filters/FiltersEditor';
 import { coverageNotes, describeFilterCount, validateFilterDraft, type FilterErrors } from '../filters/model';
 import type { Draft, WizardErrors, WizardField } from './draft';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 export interface StepProps {
   readonly draft: Draft;
@@ -23,6 +24,7 @@ export interface StepProps {
 }
 
 export function DestinationStep({ draft, errors, update }: StepProps) {
+  useLocale();
   const base = useId();
   const errorId = base + '-error';
   return (
@@ -67,6 +69,7 @@ export function DestinationStep({ draft, errors, update }: StepProps) {
 }
 
 export function WebhookStep({ draft, errors, update }: StepProps) {
+  useLocale();
   const destination: DestinationKind = draft.destination ?? 'slack';
   return (
     <div className="webhook-step">
@@ -83,6 +86,7 @@ export function WebhookStep({ draft, errors, update }: StepProps) {
 }
 
 export function SourceStep({ draft, errors, update, installations }: StepProps) {
+  useLocale();
   return (
     <div className="form-stack">
       <RepoPicker
@@ -114,6 +118,7 @@ export function SourceStep({ draft, errors, update, installations }: StepProps) 
 }
 
 export function EventsStep({ draft, errors, update }: StepProps) {
+  useLocale();
   return (
     <EventPicker
       value={draft.eventTypes}
@@ -129,6 +134,7 @@ export function EventsStep({ draft, errors, update }: StepProps) {
  * tried to continue (or the server has refused them).
  */
 export function FiltersStep({ draft, errors, update }: StepProps) {
+  useLocale();
   const checked = validateFilterDraft(draft.filters, draft.eventTypes);
   const parsed = validateFilterDraft(draft.filters);
   const notes = coverageNotes(parsed.ok ? parsed.config : {}, draft.eventTypes);
@@ -163,6 +169,7 @@ function ReviewRow({
   onEdit: (field: WizardField) => void;
   children: ReactNode;
 }) {
+  useLocale();
   return (
     <div className="review-row">
       <dt>{label}</dt>
@@ -183,6 +190,7 @@ function ReviewRow({
 
 /** A summary that never shows the URL or secret back, only that they were provided. */
 export function ReviewStep({ draft, onEdit }: ReviewStepProps) {
+  useLocale();
   const destination = draft.destination ? t(DESTINATIONS[draft.destination].name) : '';
   const checked = validateFilterDraft(draft.filters, draft.eventTypes);
   const filterSummary = checked.ok ? describeFilterCount(checked.config) : t('filters.error.generic');

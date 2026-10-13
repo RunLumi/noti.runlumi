@@ -6,6 +6,7 @@ import { authClient, assertAuthSuccess } from './lib/auth-client';
 import { authApi } from './lib/api';
 import { Card, Button, Input } from './components/ui';
 import { t } from './i18n';
+import { useLocale } from './i18n/LocaleProvider';
 
 function slug(name: string): string {
   return (
@@ -18,6 +19,7 @@ function slug(name: string): string {
   );
 }
 export function OnboardingPage() {
+  useLocale();
   const nav = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState('');
@@ -78,6 +80,7 @@ export function OnboardingPage() {
 }
 
 export function InvitePage() {
+  useLocale();
   const id = new URLSearchParams(window.location.search).get('id');
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, retry: false });
   const nav = useNavigate();

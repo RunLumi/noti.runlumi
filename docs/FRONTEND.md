@@ -94,8 +94,9 @@ Rules for new UI:
   `dialogs.a11y.test.tsx`).
 - **Text-field edges use `--color-control-border`** (Soft Slate, 3:1); the archival border is
   for sheets and rows.
-- Switching language remounts the routed tree (`LocaleProvider`), so an unfinished form loses
-  its values; the URL, session and query cache survive.
+- **Every component calls `useLocale()` first** (`i18n/LocaleProvider`), so a language switch
+  re-renders in place and keeps focus, open dialogs and typed values; `locale-reactivity.test.ts`
+  fails for a component that forgets.
 
 ## Pages
 

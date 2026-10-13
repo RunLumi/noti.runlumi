@@ -4,9 +4,11 @@ import type { DestinationKind } from '../lib/api';
 import { t, type MessageId } from '../i18n';
 import { DESTINATIONS } from './destinations';
 import type { FieldErrors } from './validation';
+import { useLocale } from '../i18n/LocaleProvider';
 
 /** Numbered, provider-specific steps with the official guide as the fallback (F212). */
 export function WebhookGuide({ destination }: { destination: DestinationKind }) {
+  useLocale();
   const info = DESTINATIONS[destination];
   return (
     <section className="guide" aria-labelledby={`guide-${destination}`}>
@@ -55,6 +57,7 @@ export function WebhookFields({
   onChange,
   secretHint = 'field.signingSecret.hint',
 }: WebhookFieldsProps) {
+  useLocale();
   const info = DESTINATIONS[destination];
   const urlLabel = t('field.webhookUrl');
   const secretLabel = t('field.signingSecret');

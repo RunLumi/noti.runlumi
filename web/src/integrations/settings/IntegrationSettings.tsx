@@ -14,8 +14,10 @@ import { DeleteDialog } from './DeleteDialog';
 import { DetailsForm } from './DetailsForm';
 import { FiltersSection } from './FiltersSection';
 import '../integrations.css';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 function BackLink() {
+  useLocale();
   return (
     <Link to="/integrations" className="text-link back-link">
       <IconArrowLeft size={18} aria-hidden="true" />
@@ -35,6 +37,7 @@ function Section({
   children: ReactNode;
   tone?: 'danger';
 }) {
+  useLocale();
   return (
     <section
       id={id}
@@ -52,6 +55,7 @@ function Section({
  * updates, filters, destination and webhook URL, then delete. Each section saves on its own.
  */
 export function IntegrationSettings() {
+  useLocale();
   const { id = '' } = useParams({ strict: false });
   const { created } = useSearch({ strict: false });
   const orgId = useOrgId();

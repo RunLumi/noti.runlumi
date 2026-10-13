@@ -7,6 +7,7 @@ import { api, authApi } from './lib/api';
 import { Badge, Button, Card, Input } from './components/ui';
 import { t } from './i18n';
 import { roleLabel } from './lib/role-label';
+import { useLocale } from './i18n/LocaleProvider';
 
 type Member = {
   id: string;
@@ -17,6 +18,7 @@ type Member = {
   createdAt: string;
 };
 export function TeamManagement() {
+  useLocale();
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
   const team = useQuery({
     queryKey: ['team'],

@@ -2,6 +2,7 @@ import { useId, useState, type InputHTMLAttributes, type ReactNode } from 'react
 import { IconAlertCircle, IconEye, IconEyeOff } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { t } from '../i18n';
+import { useLocale } from '../i18n/LocaleProvider';
 
 /** The controls a failed submit can move focus to, in document order. */
 const INVALID_CONTROL =
@@ -39,6 +40,7 @@ interface FieldProps {
  * than in a page-level banner (F220).
  */
 export function Field({ label, hint, error, before, children }: FieldProps) {
+  useLocale();
   const base = useId();
   const inputId = base + '-input';
   const hintId = hint ? base + '-hint' : undefined;
@@ -77,6 +79,7 @@ type SecretInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> & {
  * to a password manager, and never trimmed on paste — the value is sent exactly as pasted.
  */
 export function SecretInput({ ids, fieldName, className, ...props }: SecretInputProps) {
+  useLocale();
   const [visible, setVisible] = useState(false);
   return (
     <div className="secret-input">

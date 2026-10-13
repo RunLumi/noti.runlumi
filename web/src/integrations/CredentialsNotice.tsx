@@ -3,6 +3,7 @@ import { IconAlertTriangle, IconShieldLock } from '@tabler/icons-react';
 import type { Integration } from '../lib/api';
 import { t } from '../i18n';
 import { DESTINATIONS } from './destinations';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface CredentialsNoticeProps {
   readonly integration: Integration;
@@ -15,6 +16,7 @@ interface CredentialsNoticeProps {
  * Quarantined is a stop (red rail): nothing is delivered. Legacy is advisory (amber rail).
  */
 export function CredentialsNotice({ integration, showFix = true }: CredentialsNoticeProps) {
+  useLocale();
   if (integration.credentials === 'ok') return null;
   const quarantined = integration.credentials === 'quarantined';
   const destination = t(DESTINATIONS[integration.destination].name);

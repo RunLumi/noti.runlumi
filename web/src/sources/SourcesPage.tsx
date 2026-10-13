@@ -15,6 +15,7 @@ import { useCreateSource, useSources } from './hooks';
 import { SecretReveal } from './SecretReveal';
 import { SourceCard } from './SourceCard';
 import './sources.css';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface Reveal {
   readonly kind: 'created' | 'rotated';
@@ -28,6 +29,7 @@ function CreateForm({
   readonly orgId: string;
   readonly onCreated: (r: SourceWithSecret) => void;
 }) {
+  useLocale();
   const create = useCreateSource(orgId);
   const formRef = useRef<HTMLFormElement>(null);
   const [name, setName] = useState('');
@@ -85,6 +87,7 @@ function CreateForm({
 }
 
 function ListSkeleton() {
+  useLocale();
   return (
     <div className="integration-list" aria-busy="true" aria-label={t('sources.loading')}>
       {[0, 1].map((i) => (
@@ -99,6 +102,7 @@ function ListSkeleton() {
 }
 
 export function SourcesPage() {
+  useLocale();
   const orgId = useOrgId();
   const list = useSources(orgId);
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });

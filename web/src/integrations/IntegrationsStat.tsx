@@ -2,12 +2,14 @@ import { Link } from '@tanstack/react-router';
 import { Card } from '../components/ui';
 import { t } from '../i18n';
 import { useIntegrations, useOrgId } from './hooks';
+import { useLocale } from '../i18n/LocaleProvider';
 
 /**
  * The Overview count, read from `GET /api/integrations` (F206: no number without a query).
  * Loading shows a word, a failed query says so, and neither ever renders a guessed 0.
  */
 export function IntegrationsStat() {
+  useLocale();
   const orgId = useOrgId();
   const list = useIntegrations(orgId);
   const integrations = list.data?.integrations ?? [];

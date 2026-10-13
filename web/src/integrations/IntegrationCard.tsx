@@ -6,6 +6,7 @@ import { CredentialsNotice } from './CredentialsNotice';
 import { DESTINATIONS } from './destinations';
 import { EnabledSwitch } from './EnabledSwitch';
 import { EventList } from './EventList';
+import { useLocale } from '../i18n/LocaleProvider';
 
 const EVENTS_SHOWN = 4;
 
@@ -23,6 +24,7 @@ interface IntegrationCardProps {
 
 /** One integration as an opaque work sheet: what it watches, where it sends, and its state. */
 export function IntegrationCard({ orgId, integration }: IntegrationCardProps) {
+  useLocale();
   const headingId = 'integration-' + integration.id;
   return (
     <article

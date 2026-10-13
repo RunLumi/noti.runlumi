@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface PageHeaderProps {
   readonly eyebrow: string;
@@ -10,6 +11,7 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({ eyebrow, title, description, action, before }: PageHeaderProps) {
+  useLocale();
   return (
     <div className="page-header">
       <div>

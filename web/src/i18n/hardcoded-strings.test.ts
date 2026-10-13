@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { en } from './index';
-import { isExemptText, scanSource } from './literal-scan';
+import { isExemptText, scanSource, scanTsStrings } from './literal-scan';
 
 /**
  * No user-visible English in components (F224: "zero literals in components").
@@ -17,6 +17,28 @@ import { isExemptText, scanSource } from './literal-scan';
  * Do not add an entry to make a screen "work"; add a message id and a Vietnamese translation.
  */
 const ALLOWLIST: Readonly<Record<string, string>> = {};
+
+/**
+ * Plain `.ts` strings that read like sentences but are never shown to a person: internal
+ * `ApiError` / `Error` messages. Screens show `describeError()` / `describeDeliveryError()`
+ * output, which is chosen from the HTTP status and the catalogue and never from these.
+ */
+const INTERNAL = 'Internal error text; users see describeError() output chosen by status.';
+const TS_ALLOWLIST: Readonly<Record<string, string>> = {
+  'integrations/errors.ts::Missing capability': 'Compared with the server’s error text; never displayed.',
+  'lib/api.ts::Network request failed': INTERNAL,
+  'lib/api.ts::Request failed': INTERNAL,
+  'lib/api.ts::Unexpected integration shape': INTERNAL,
+  'lib/api.ts::Unexpected response': INTERNAL,
+  'lib/api.ts::Unexpected routing log entry': INTERNAL,
+  'lib/api.ts::Unexpected installation shape': INTERNAL,
+  'lib/api.ts::Unexpected install URL': INTERNAL,
+  'sources/api.ts::Unexpected source shape': INTERNAL,
+  'sources/api.ts::Unexpected response': INTERNAL,
+  'workspace/api.ts::Unexpected response': INTERNAL,
+  'workspace/api.ts::Network request failed': INTERNAL,
+  'workspace/api.ts::Request failed': INTERNAL,
+};
 
 const SRC = join(__dirname, '..');
 
@@ -50,11 +72,32 @@ describe('hard-coded user-visible strings', () => {
         if (`${rel}::${hit.text}` in ALLOWLIST) continue;
         // A prop such as `label="filters.branches.title"` carries a catalogue id that the
         // receiving component looks up; it is not display text.
-        if (hit.kind === 'attribute' && hit.text in en) continue;
+        // Only for components (`<Field label="…">`): their props are typed `MessageId` and
+        // resolved by the component. A native element's attribute (`<option label=…>`) is
+        // displayed as written, so an id-shaped value there is still reported.
+        if (hit.kind === 'attribute' && hit.text in en && /^[A-Z]/.test(hit.tag ?? '')) continue;
         offenders.push(`${rel}:${hit.line} [${hit.kind}] ${JSON.stringify(hit.text)}`);
       }
     }
     expect(offenders, `Move these into the message catalogue:\n${offenders.join('\n')}`).toEqual([]);
+  });
+
+  it('has no sentence-like display strings in plain .ts files outside the allow-list', () => {
+    const offenders: string[] = [];
+    const used = new Set<string>();
+    for (const file of walk(SRC).filter((f) => /\.ts$/.test(f) && !/\.test\.ts$/.test(f))) {
+      const rel = relative(SRC, file).split(sep).join('/');
+      if (rel.startsWith('i18n/') || rel.startsWith('a11y/') || rel.endsWith('.d.ts')) continue;
+      for (const hit of scanTsStrings(file, readFileSync(file, 'utf8'))) {
+        const key = `${rel}::${hit.text}`;
+        if (key in TS_ALLOWLIST) used.add(key);
+        else offenders.push(`${rel}:${hit.line} ${JSON.stringify(hit.text)}`);
+      }
+    }
+    expect(offenders, `Move these into the catalogue or allow-list them:\n${offenders.join('\n')}`).toEqual(
+      [],
+    );
+    expect([...used].sort(), 'stale TS allow-list entries').toEqual(Object.keys(TS_ALLOWLIST).sort());
   });
 
   it('has no window.confirm / alert / prompt with a literal message', () => {
@@ -83,9 +126,27 @@ describe('hard-coded user-visible strings', () => {
 });
 
 describe('message ids passed as props', () => {
-  it('are recognised by the catalogue, so a mistyped id is not silently skipped', () => {
+  it('are exempt only on components, never on native elements', () => {
+    const hits = scanSource(
+      'x.tsx',
+      `const A = () => <><Field label="Branches" /><option label="Branches" /></>;`,
+    );
+    expect(hits.map((h) => h.tag)).toEqual(['Field', 'option']);
     expect('filters.branches.title' in en).toBe(true);
-    expect('filters.branches.titel' in en).toBe(false);
+  });
+
+  it('flags the extra visible attributes and plain-TS sentences', () => {
+    expect(
+      scanSource(
+        'x.tsx',
+        `const A = () => <Box description="Save your work" heading="Welcome back" text="Click here" aria-valuetext="Half way" />;`,
+      ).map((h) => h.text),
+    ).toEqual(['Save your work', 'Welcome back', 'Click here', 'Half way']);
+    expect(
+      scanTsStrings('x.ts', `export const L = { a: 'Save changes', b: 'btn btn-primary', c: 'ok' };`).map(
+        (h) => h.text,
+      ),
+    ).toEqual(['Save changes']);
   });
 });
 

@@ -1,5 +1,6 @@
 import { IconCheck } from '@tabler/icons-react';
 import { t, type MessageId } from '../../i18n';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface StepperProps {
   readonly steps: readonly MessageId[];
@@ -12,6 +13,7 @@ interface StepperProps {
  * "Step n of 5: …", and a second copy only pushes the form down.
  */
 export function Stepper({ steps, current }: StepperProps) {
+  useLocale();
   return (
     <nav aria-label={t('wizard.progress')} className="stepper">
       <ol className="stepper-list">

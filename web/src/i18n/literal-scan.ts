@@ -17,7 +17,9 @@ import ts from 'typescript';
 export interface Literal {
   readonly text: string;
   readonly line: number;
-  readonly kind: 'jsx-text' | 'jsx-expression' | 'attribute';
+  readonly kind: 'jsx-text' | 'jsx-expression' | 'attribute' | 'ts-string';
+  /** For attributes: the JSX tag, so a component prop can be told from a native attribute. */
+  readonly tag?: string;
 }
 
 const VISIBLE_ATTRIBUTES = new Set([
@@ -29,6 +31,12 @@ const VISIBLE_ATTRIBUTES = new Set([
   'title',
   'alt',
   'label',
+  'description',
+  'heading',
+  'text',
+  'aria-valuetext',
+  'aria-braillelabel',
+  'aria-brailleroledescription',
 ]);
 
 /** Product and provider names are the same in every language and are never translated. */
@@ -79,8 +87,9 @@ export function scanSource(fileName: string, source: string): Literal[] {
   const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
   const found: Literal[] = [];
   const lineOf = (node: ts.Node) => file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
-  const add = (node: ts.Node, text: string, kind: Literal['kind']) => {
-    if (!isExemptText(text)) found.push({ text: text.trim().replace(/\s+/g, ' '), line: lineOf(node), kind });
+  const add = (node: ts.Node, text: string, kind: Literal['kind'], tag?: string) => {
+    if (!isExemptText(text))
+      found.push({ text: text.trim().replace(/\s+/g, ' '), line: lineOf(node), kind, tag });
   };
 
   const visit = (node: ts.Node): void => {
@@ -90,10 +99,44 @@ export function scanSource(fileName: string, source: string): Literal[] {
         add(literal, templateText(literal), 'jsx-expression');
     } else if (ts.isJsxAttribute(node) && VISIBLE_ATTRIBUTES.has(node.name.getText(file))) {
       const init = node.initializer;
-      if (init && ts.isStringLiteral(init)) add(init, init.text, 'attribute');
+      const opening = node.parent.parent;
+      const tag =
+        ts.isJsxOpeningElement(opening) || ts.isJsxSelfClosingElement(opening)
+          ? opening.tagName.getText(file)
+          : undefined;
+      if (init && ts.isStringLiteral(init)) add(init, init.text, 'attribute', tag);
       else if (init && ts.isJsxExpression(init) && init.expression)
         for (const literal of renderedStrings(init.expression))
-          add(literal, templateText(literal), 'attribute');
+          add(literal, templateText(literal), 'attribute', tag);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}
+
+/**
+ * Display-string helpers in plain `.ts` files (label tables, messages carried in thrown
+ * errors). Heuristic: a string literal that reads like a sentence or label: two or more words,
+ * starting with a capital letter. Not reported: imports, type positions, and strings with no
+ * letters. Anything intentional (a protocol error never shown to a person, a log line) goes in
+ * the allow-list in `hardcoded-strings.test.ts` with its reason.
+ */
+const SENTENCE = /^\p{Lu}[\p{L}\p{N}'’.,;:!?()\-–— ]*\s[\p{L}\p{N}'’.,;:!?()\-–— ]*$/u;
+
+export function scanTsStrings(fileName: string, source: string): Literal[] {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const found: Literal[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node) || ts.isTypeNode(node)) return;
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      const text = node.text.trim();
+      if (SENTENCE.test(text) && !isExemptText(text))
+        found.push({
+          text: text.replace(/\s+/g, ' '),
+          line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
+          kind: 'ts-string',
+        });
     }
     ts.forEachChild(node, visit);
   };

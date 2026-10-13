@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatNumber, t, tp } from './index';
 import { formatDate, formatRelative } from './format';
-import { LocaleProvider } from './LocaleProvider';
+import { LocaleProvider, useLocale } from './LocaleProvider';
 import { LocaleSwitcher } from './LocaleSwitcher';
 import { LOCALE_STORAGE_KEY, detectLocale, getLocale, initialLocale, matchLocale, setLocale } from './locale';
 
@@ -81,7 +81,7 @@ describe('setLocale', () => {
     setLocale('vi');
     expect(document.documentElement.lang).toBe('vi');
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('vi');
-    expect(t('nav.team')).toBe('Nhóm');
+    expect(t('nav.team')).toBe('Thành viên');
   });
 
   it('does not persist when asked not to', () => {
@@ -119,7 +119,10 @@ describe('formatting follows the active locale', () => {
 describe('language switcher', () => {
   // Strings are looked up while a component renders, as in the app, not when the test builds
   // its elements.
-  const Page = () => <nav aria-label={t('shell.navLabel')}>{t('nav.team')}</nav>;
+  const Page = () => {
+    useLocale();
+    return <nav aria-label={t('shell.navLabel')}>{t('nav.team')}</nav>;
+  };
   const renderSwitcher = () =>
     render(
       <LocaleProvider>
@@ -144,7 +147,7 @@ describe('language switcher', () => {
     expect(document.documentElement.lang).toBe('vi');
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('vi');
     // The label of the switcher and the rest of the page re-render in Vietnamese.
-    expect(screen.getByRole('navigation', { name: 'Điều hướng chính' }).textContent).toBe('Nhóm');
+    expect(screen.getByRole('navigation', { name: 'Điều hướng chính' }).textContent).toBe('Thành viên');
     expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Ngôn ngữ' }).value).toBe('vi');
   });
 });

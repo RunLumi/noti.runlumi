@@ -25,8 +25,6 @@ export const appEn = {
 
   // --- Route titles: document title and the announcement after navigation ---------
   'route.titleWithApp': '{page} · Lumi Noti',
-  'route.announce': '{page} page opened',
-  'route.liveRegionLabel': 'Page changes',
   'route.title.overview': 'Overview',
   'route.title.integrations': 'Integrations',
   'route.title.integrationNew': 'New integration',
@@ -46,6 +44,7 @@ export const appEn = {
   // --- Language switcher -------------------------------------------------------------
   'locale.label': 'Language',
   'locale.en': 'English',
+  'locale.changed': 'Language changed to {language}',
   'locale.vi': 'Tiếng Việt',
 
   // --- Dialogs and shared dates --------------------------------------------------------

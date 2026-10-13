@@ -5,6 +5,7 @@ import { t } from '../i18n';
 import type { DeliveryItem } from './api';
 import { STATE_LABEL, describeDeliveryError, destinationName } from './copy';
 import { useReplay } from './hooks';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface RedeliverPanelProps {
   readonly orgId: string;
@@ -21,6 +22,7 @@ const IN_FLIGHT = new Set(['pending', 'claimed', 'retrying']);
  * Not optimistic: what is shown is what the server said happened.
  */
 export function RedeliverPanel({ orgId, delivery, onShowNew }: RedeliverPanelProps) {
+  useLocale();
   const replay = useReplay(orgId);
   const [confirming, setConfirming] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);

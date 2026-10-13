@@ -23,7 +23,7 @@ export const vi = {
   'integrations.eyebrow': 'KẾT NỐI',
   'integrations.title': 'Tích hợp',
   'integrations.description':
-    'Mỗi tích hợp gửi các cập nhật GitHub bạn chọn từ một repository đến một nhóm chat Lark, Slack hoặc Microsoft Teams.',
+    'Mỗi tích hợp gửi các sự kiện GitHub bạn chọn từ một repository đến một nhóm chat Lark, Slack hoặc Microsoft Teams.',
   'integrations.new': 'Tích hợp mới',
   'integrations.loading': 'Đang tải danh sách tích hợp…',
   'integrations.count': { other: '{count} tích hợp' },
@@ -46,7 +46,7 @@ export const vi = {
   'integration.destination': 'Gửi đến',
   'integration.destinationValue': '{destination} · {host}',
   'integration.destinationNoHost': '{destination}',
-  'integration.events': 'Cập nhật',
+  'integration.events': 'Sự kiện',
   'integration.events.more': { other: '+{count} nữa' },
   'integration.events.unknown': 'Không còn được hỗ trợ: {type}',
   'integration.manage': 'Quản lý',
@@ -62,12 +62,12 @@ export const vi = {
   // --- Credential states --------------------------------------------------
   'credentials.legacy.title': 'Nhập lại webhook URL để hoàn tất nâng cấp bảo mật',
   'credentials.legacy.body':
-    'Tích hợp này được lưu trước khi Noti bắt đầu niêm phong từng webhook URL bằng khóa mã hóa riêng. Tích hợp vẫn hoạt động, nhưng dán lại URL sẽ lưu nó theo cách mới.',
+    'Tích hợp này được lưu trước khi Noti bắt đầu mã hóa từng webhook URL bằng khóa riêng. Tích hợp vẫn hoạt động, nhưng dán lại URL sẽ lưu nó theo cách mới.',
   'credentials.quarantined.title': 'Thông báo đã dừng: chúng tôi không đọc được webhook URL đã lưu',
   'credentials.quarantined.body':
     'Webhook URL đã lưu không qua được bước kiểm tra toàn vẹn, nên Noti ngừng dùng nó thay vì đoán. Hãy dán lại URL từ {destination} để tiếp tục.',
   'credentials.fix': 'Thay webhook URL',
-  'credentials.ok': 'Đã lưu dưới dạng mã hóa. Noti không bao giờ hiển thị lại.',
+  'credentials.ok': 'Đã lưu dưới dạng mã hóa. Noti sẽ không hiển thị lại URL này.',
 
   // --- Destinations -------------------------------------------------------
   'destination.lark': 'Lark',
@@ -119,7 +119,7 @@ export const vi = {
   // --- Wizard -------------------------------------------------------------
   'wizard.eyebrow': 'TÍCH HỢP MỚI',
   'wizard.title': 'Thiết lập một tích hợp',
-  'wizard.description': 'Sáu bước ngắn. Chưa có gì được lưu cho đến khi bạn chọn Tạo tích hợp.',
+  'wizard.description': 'Vài bước ngắn. Chưa có gì được lưu cho đến khi bạn chọn Tạo tích hợp.',
   'wizard.progress': 'Các bước thiết lập',
   'wizard.stepOf': 'Bước {current} trên {total}: {title}',
   'wizard.step.github': 'Kết nối GitHub',
@@ -140,7 +140,7 @@ export const vi = {
     'Noti chưa lưu được tích hợp này. Hãy sửa các ô được đánh dấu bên dưới; các câu trả lời khác vẫn được giữ.',
   'wizard.destination.legend': 'Thông báo nên được gửi đến đâu?',
   'wizard.destination.changeNote': 'Bạn không thể đổi nơi nhận về sau, vì URL thuộc về nơi nhận đó.',
-  'wizard.review.intro': 'Hãy kiểm tra các thông tin. Bạn có thể đổi tên, repository và các cập nhật về sau.',
+  'wizard.review.intro': 'Hãy kiểm tra lại thông tin. Bạn có thể đổi tên, repository và các sự kiện về sau.',
   'wizard.review.edit': 'Đổi',
   'wizard.review.editLabel': 'Đổi {field}',
   'wizard.review.webhook': 'Webhook URL',
@@ -164,14 +164,14 @@ export const vi = {
   'field.repo.hint':
     'Chủ sở hữu và tên repository, như trong github.com/owner/repository. Không phân biệt chữ hoa, chữ thường.',
   'field.repo.placeholder': 'owner/repository',
-  'field.events': 'Cập nhật cần gửi',
+  'field.events': 'Sự kiện cần gửi',
   'field.events.hint':
-    'Chúng tôi bắt đầu với các build lỗi và hết thời gian chờ vì đây là cài đặt hữu ích mà ít gây ồn nhất. Bạn có thể đổi bất cứ lúc nào.',
+    'Chúng tôi bắt đầu với các build lỗi và hết thời gian chờ vì đây là cài đặt hữu ích mà ít gây nhiễu nhất. Bạn có thể đổi bất cứ lúc nào.',
   'field.events.selectAll': 'Chọn tất cả',
   'field.events.clearAll': 'Bỏ chọn',
-  'field.events.selectAllLabel': 'Chọn tất cả cập nhật nhóm {group}',
-  'field.events.clearAllLabel': 'Bỏ chọn tất cả cập nhật nhóm {group}',
-  'field.events.selected': { other: 'Đã chọn {count} cập nhật' },
+  'field.events.selectAllLabel': 'Chọn tất cả sự kiện nhóm {group}',
+  'field.events.clearAllLabel': 'Bỏ chọn tất cả sự kiện nhóm {group}',
+  'field.events.selected': { other: 'Đã chọn {count} sự kiện' },
   'field.show': 'Hiện',
   'field.hide': 'Ẩn',
   'field.showLabel': 'Hiện {field}',
@@ -181,7 +181,7 @@ export const vi = {
   'validation.destination': 'Hãy chọn Lark, Slack hoặc Microsoft Teams.',
   'validation.name': 'Dùng 1–80 ký tự, không xuống dòng.',
   'validation.repo': 'Dùng dạng owner/repository, ví dụ acme/website.',
-  'validation.events': 'Hãy chọn ít nhất một cập nhật.',
+  'validation.events': 'Hãy chọn ít nhất một sự kiện.',
   'validation.webhookUrl.empty': 'Hãy dán webhook URL từ {destination}.',
   'validation.webhookUrl.invalid': 'Đây chưa phải là một địa chỉ web đầy đủ. Hãy sao chép lại toàn bộ URL.',
   'validation.webhookUrl.wrongHost.lark':
@@ -227,14 +227,14 @@ export const vi = {
   'settings.loading': 'Đang tải tích hợp…',
   'settings.notFound.title': 'Tích hợp này không tồn tại trong không gian làm việc này.',
   'settings.notFound.body': 'Có thể nó đã bị xóa, hoặc liên kết thuộc về một không gian làm việc khác.',
-  'settings.created': 'Đã lưu {name}. Từ giờ, các cập nhật GitHub phù hợp từ repository này sẽ được gửi đi.',
+  'settings.created': 'Đã lưu {name}. Từ giờ, các sự kiện GitHub phù hợp từ repository này sẽ được gửi đi.',
   'settings.status.title': 'Trạng thái',
   'settings.status.on': 'Đang bật. Các sự kiện mới của repository này được gửi đến {destination}.',
   'settings.status.onBlocked':
     'Đang bật, nhưng chưa gửi được gì cho đến khi webhook URL được thay. Xem mục Nơi nhận và webhook URL bên dưới.',
   'settings.status.off':
     'Đang tạm dừng. Không có gì được gửi đi. Cài đặt và thông tin xác thực vẫn được giữ, và bạn có thể bật lại.',
-  'settings.details.title': 'Repository và cập nhật',
+  'settings.details.title': 'Repository và sự kiện',
   'settings.save': 'Lưu thay đổi',
   'settings.saving': 'Đang lưu…',
   'settings.saved': 'Đã lưu thay đổi.',
@@ -323,7 +323,7 @@ export const vi = {
   'github.return.state_invalid':
     'Liên kết kết nối GitHub đó đã hết hạn hoặc đã được dùng. Hãy chọn Kết nối GitHub để bắt đầu lại.',
   'github.return.state_user_mismatch':
-    'Kết nối GitHub được bắt đầu bởi một người dùng Noti khác. Hãy bắt đầu lại khi đang đăng nhập bằng tài khoản của chính bạn.',
+    'Kết nối GitHub do một người dùng Noti khác bắt đầu. Hãy bắt đầu lại khi đang đăng nhập bằng tài khoản của chính bạn.',
   'github.return.installation_id_invalid':
     'GitHub gửi về một bản cài đặt mà Noti không nhận ra. Hãy chọn Kết nối GitHub để thử lại.',
   'github.return.oauth_failed':
@@ -455,13 +455,13 @@ export const vi = {
   'delivery.detail.permanent':
     'Noti không thử lại, vì thử lại sẽ lỗi y như vậy cho đến khi nguyên nhân được khắc phục.',
   'delivery.detail.fixLink': 'Mở cài đặt tích hợp',
-  'delivery.detail.noFix': 'Bạn thay đổi gì cũng không giúp được; gửi lại sau có thể sẽ được.',
+  'delivery.detail.noFix': 'Bạn không cần thay đổi gì; thử gửi lại sau có thể sẽ thành công.',
   'delivery.detail.facts': 'Bản ghi',
   'delivery.detail.attempts': 'Số lần thử',
   'delivery.detail.created': 'Thời điểm tạo',
   'delivery.detail.updated': 'Thay đổi gần nhất',
   'delivery.detail.id': 'Mã lượt gửi',
-  'delivery.detail.replayOf': 'Gửi lại của',
+  'delivery.detail.replayOf': 'Gửi lại từ lượt gửi',
   'delivery.detail.destination': 'Gửi đến',
   'delivery.detail.timeline': 'Những gì Noti đã ghi lại',
   'delivery.detail.timeline.note':
@@ -517,7 +517,7 @@ export const vi = {
     '{destination} đã từ chối yêu cầu. Kết nối có thể cần quyền mới hoặc một webhook URL mới.',
   'errors.destination_rate_limited': '{destination} đề nghị Noti gửi chậm lại. Noti sẽ tự thử lại.',
   'errors.destination_unavailable':
-    '{destination} không phản hồi. Noti tự thử lại, và đã bỏ cuộc với thông báo này sau khi hết số lần thử lại.',
+    '{destination} không phản hồi. Noti tự thử lại, và đã dừng với thông báo này sau khi hết số lần thử lại.',
   'errors.payload_too_large':
     'Thông báo này lớn hơn mức {destination} chấp nhận. Không thể gửi nó nguyên như vậy.',
   'errors.render_failed': 'Noti không dựng được từ sự kiện này một tin nhắn mà nơi nhận chấp nhận.',

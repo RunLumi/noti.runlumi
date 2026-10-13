@@ -31,10 +31,12 @@ import { RouteA11y } from './a11y/RouteA11y';
 import { SkipLink } from './a11y/SkipLink';
 import { routeTitleId } from './a11y/route-titles';
 import { roleLabel } from './lib/role-label';
+import { useLocale } from './i18n/LocaleProvider';
 const privatePaths = ['/', '/integrations', '/sources', '/activity', '/team', '/settings', '/onboarding'];
 /** `/integrations/new` and `/integrations/:id` live under the Integrations section. */
 const sectionOf = (pathname: string) => '/' + (pathname.split('/')[1] ?? '');
 function Logo() {
+  useLocale();
   return (
     <div className="brand">
       <img className="brand-logo" src={lumiLogo} alt="Lumi" />
@@ -43,6 +45,7 @@ function Logo() {
   );
 }
 export function AppShell() {
+  useLocale();
   return (
     <>
       <RouteA11y />
@@ -51,6 +54,7 @@ export function AppShell() {
   );
 }
 function ShellContent() {
+  useLocale();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const section = sectionOf(pathname);
   const isPrivate = privatePaths.includes(section);
@@ -151,6 +155,7 @@ function Header({
   description: string;
   action?: ReactNode;
 }) {
+  useLocale();
   return (
     <div className="page-header">
       <div>
@@ -163,6 +168,7 @@ function Header({
   );
 }
 export function Overview() {
+  useLocale();
   return (
     <>
       <Header
@@ -227,12 +233,15 @@ export function Overview() {
   );
 }
 export function Activity() {
+  useLocale();
   return <DeliveryLogPage />;
 }
 export function Team() {
+  useLocale();
   return <TeamManagement />;
 }
 export function Settings() {
+  useLocale();
   const qc = useQueryClient();
   const nav = useNavigate();
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
@@ -282,6 +291,7 @@ function AuthFrame({
   title: string;
   description: string;
 }) {
+  useLocale();
   return (
     <div className="auth-layout">
       <SkipLink />
@@ -323,6 +333,7 @@ function AuthFrame({
   );
 }
 export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
+  useLocale();
   const nav = useNavigate();
   const qc = useQueryClient();
   const [email, setEmail] = useState(''),
@@ -468,6 +479,7 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
   );
 }
 export function VerifyPage() {
+  useLocale();
   const [message, setMessage] = useState(t('auth.verify.pending')),
     [error, setError] = useState(false);
   useEffect(() => {
@@ -495,6 +507,7 @@ export function VerifyPage() {
   );
 }
 export function ResetPage() {
+  useLocale();
   const token = new URLSearchParams(location.search).get('token') || '';
   const [password, setPassword] = useState(''),
     [message, setMessage] = useState(''),

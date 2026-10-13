@@ -1,6 +1,7 @@
 import { createAuthClient } from 'better-auth/react';
 import { organizationClient } from 'better-auth/client/plugins';
 import { passkeyClient } from '@better-auth/passkey/client';
+import { t } from '../i18n';
 
 // Same-origin Hono Worker route; Vite proxies /api locally.
 export const authClient = createAuthClient({
@@ -13,6 +14,6 @@ export function assertAuthSuccess<T>(result: {
   data: T;
   error?: { message?: string; status?: number } | null;
 }): T {
-  if (result.error) throw new Error(result.error.message || 'Authentication request failed');
+  if (result.error) throw new Error(result.error.message || t('auth.error.generic'));
   return result.data;
 }

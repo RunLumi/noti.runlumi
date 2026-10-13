@@ -5,7 +5,9 @@ import { authClient, assertAuthSuccess } from './lib/auth-client';
 import { Button, Card } from './components/ui';
 import { t } from './i18n';
 import { formatDate } from './i18n/format';
+import { useLocale } from './i18n/LocaleProvider';
 export function PasskeysPanel() {
+  useLocale();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),

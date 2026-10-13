@@ -2,6 +2,7 @@ import { useId, useState } from 'react';
 import { t } from '../i18n';
 import { CopyButton } from './CopyButton';
 import { bashSnippet, nodeSnippet } from './snippets';
+import { useLocale } from '../i18n/LocaleProvider';
 
 type Language = 'bash' | 'node';
 
@@ -10,6 +11,7 @@ type Language = 'bash' | 'node';
  * a reference to an environment variable, never the secret itself, so copying one is safe.
  */
 export function Guidance({ endpointUrl }: { readonly endpointUrl: string }) {
+  useLocale();
   const [language, setLanguage] = useState<Language>('bash');
   const tabsId = useId();
   const code = language === 'bash' ? bashSnippet(endpointUrl) : nodeSnippet(endpointUrl);

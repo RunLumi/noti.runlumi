@@ -14,8 +14,10 @@ import { DeliveryFilters } from './DeliveryFilters';
 import { DeliveryTable } from './DeliveryTable';
 import { useDeliveryList } from './hooks';
 import { hasFilters, toFilters, type ActivitySearch } from './search';
+import { useLocale } from '../i18n/LocaleProvider';
 
 function ListSkeleton() {
+  useLocale();
   return (
     <div className="integration-list" aria-busy="true" aria-label={t('deliveries.loading')}>
       {[0, 1, 2].map((i) => (
@@ -29,6 +31,7 @@ function ListSkeleton() {
 }
 
 function EmptyState({ filtered, onClear }: { readonly filtered: boolean; readonly onClear: () => void }) {
+  useLocale();
   return (
     <section className="empty" aria-labelledby="deliveries-empty-title">
       <div className="empty-icon">
@@ -53,6 +56,7 @@ interface Selected {
 }
 
 export function DeliveryLogPage() {
+  useLocale();
   const orgId = useOrgId();
   const search: ActivitySearch = useSearch({ from: '/activity' });
   const navigate = useNavigate({ from: '/activity' });

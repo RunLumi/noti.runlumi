@@ -35,6 +35,7 @@ import {
   type StepProps,
 } from './steps';
 import '../integrations.css';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 const STEP_BODIES = [SourceStep, DestinationStep, WebhookStep, EventsStep, FiltersStep] as const;
 const LAST = STEPS.length - 1;
@@ -45,6 +46,7 @@ const LAST = STEPS.length - 1;
  * earliest step that needs attention, with the message beside the field.
  */
 export function CreateWizard() {
+  useLocale();
   const orgId = useOrgId();
   const create = useCreateIntegration(orgId ?? '');
   const navigate = useNavigate();

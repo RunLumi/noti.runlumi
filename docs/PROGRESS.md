@@ -616,6 +616,11 @@ Also fixed:
   plurals in the active locale, `:lang(vi)` display metrics. Tests fail on a missing id, a
   changed `{placeholder}`, an untranslated copy or any hard-coded visible string (allow-list
   empty).
+- Review follow-up: a language switch now re-renders in place (every component subscribes via
+  `useLocale()`, enforced by a test) instead of remounting, so focus, open dialogs and typed
+  values survive; route focus waits (bounded) for a late `<h1>`, skips redirects, and the
+  duplicate navigation announcement is gone; the string scan covers plain `.ts` helpers and
+  more attributes; Vietnamese wording corrected (Thành viên, sự kiện, and others).
 - Layout fixes found in the browser at 1024px and 200% zoom: wizard review rows and
   destination cards.
 - Rebased over routing filters and generic sources: their copy is translated
@@ -636,8 +641,8 @@ Also fixed:
 - Reduced-motion, reduced-transparency, increased-contrast and forced-colours are tested in
   the stylesheet only, not seen in a browser; one Chromium build; no touch or real zoom.
 - The Vietnamese copy has not been edited by a native speaker. Server-supplied text (Better
-  Auth errors) is still English. A language switch remounts the page and loses unsaved form
-  values; locale is not in the URL.
+  Auth errors) is still English. Locale is not in the URL; browser
+  Back/Forward does not restore the previously focused element.
 - Found and filed separately: `GET /api/workspace/me` answers 403 for a user with no
   workspace, so the dashboard sends a new user back to `/signin` and `/onboarding` is
   unreachable.

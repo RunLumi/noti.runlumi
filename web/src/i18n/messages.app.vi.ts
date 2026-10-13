@@ -18,21 +18,19 @@ export const appVi = {
   'nav.overview': 'Tổng quan',
   'nav.integrations': 'Tích hợp',
   'nav.activity': 'Hoạt động',
-  'nav.team': 'Nhóm',
+  'nav.team': 'Thành viên',
   'nav.settings': 'Cài đặt',
   'role.admin': 'Quản trị viên',
   'role.member': 'Thành viên',
 
   // --- Route titles ------------------------------------------------------------
   'route.titleWithApp': '{page} · Lumi Noti',
-  'route.announce': 'Đã mở trang {page}',
-  'route.liveRegionLabel': 'Thay đổi trang',
   'route.title.overview': 'Tổng quan',
   'route.title.integrations': 'Tích hợp',
   'route.title.integrationNew': 'Tích hợp mới',
   'route.title.integration': 'Cài đặt tích hợp',
   'route.title.activity': 'Hoạt động',
-  'route.title.team': 'Nhóm',
+  'route.title.team': 'Thành viên và quyền',
   'route.title.settings': 'Cài đặt',
   'route.title.onboarding': 'Tạo không gian làm việc',
   'route.title.invite': 'Lời mời tham gia nhóm',
@@ -46,6 +44,7 @@ export const appVi = {
   // --- Language switcher -------------------------------------------------------------
   'locale.label': 'Ngôn ngữ',
   'locale.en': 'English',
+  'locale.changed': 'Đã chuyển ngôn ngữ sang {language}',
   'locale.vi': 'Tiếng Việt',
 
   // --- Dialogs and shared dates --------------------------------------------------------
@@ -67,7 +66,7 @@ export const appVi = {
   'home.start.step3.title': 'Kết nối GitHub',
   'home.start.step3.body':
     'Việc cài Noti GitHub App từ bảng điều khiển và gửi tin nhắn thử vẫn đang được phát triển.',
-  'home.clarity.title': 'Xây dựng để rõ ràng',
+  'home.clarity.title': 'Thiết kế để rõ ràng',
   'home.clarity.body': 'Mỗi sự kiện nên đến đúng nhóm mà không làm ngập các kênh của họ.',
   'home.clarity.private.title': 'Riêng tư ngay từ thiết kế',
   'home.clarity.private.body':
@@ -94,7 +93,7 @@ export const appVi = {
     'Chuyển các cập nhật GitHub đến nhóm của bạn. Việc gửi tới Lark và Slack đang ở dạng nguyên mẫu; phần thiết lập kết nối vẫn đang được phát triển.',
   'auth.hero.flowLabel': 'Lộ trình thông báo minh họa',
   'auth.hero.flowCaption': 'Lộ trình minh họa · Backend nguyên mẫu',
-  'auth.hero.ecosystem': 'Một phần của hệ sinh thái Lumi. Được xây dựng để dùng độc lập.',
+  'auth.hero.ecosystem': 'Một phần của hệ sinh thái Lumi. Có thể dùng độc lập.',
   'auth.footer': '© Lumi Noti · Thông báo không gian làm việc an toàn',
   'auth.signin.title': 'Chào mừng bạn trở lại',
   'auth.signin.description': 'Đăng nhập để quản lý các thông báo của bạn.',
@@ -168,7 +167,7 @@ export const appVi = {
 
   // --- Team ------------------------------------------------------------------------------------------
   'team.eyebrow': 'TỔ CHỨC',
-  'team.title': 'Nhóm',
+  'team.title': 'Thành viên và quyền',
   'team.description': 'Quản lý nhóm của bạn và quyền truy cập.',
   'team.invite.title': 'Mời một người',
   'team.invite.email': 'Email',
@@ -200,7 +199,7 @@ export const appVi = {
   'passkeys.loading': 'Đang tải danh sách passkey…',
   'passkeys.error': 'Không tải được danh sách passkey.',
   'passkeys.fallbackName': 'Passkey',
-  'passkeys.created': 'Tạo {date}',
+  'passkeys.created': 'Tạo ngày {date}',
   'passkeys.delete': 'Xóa',
   'passkeys.deleteFor': 'Xóa passkey {name}',
   'passkeys.deleteConfirm': 'Xóa passkey này?',

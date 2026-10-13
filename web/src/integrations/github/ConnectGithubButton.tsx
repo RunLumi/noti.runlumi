@@ -3,6 +3,7 @@ import { Button, Notice } from '../../components/ui';
 import { t } from '../../i18n';
 import { describeError } from '../errors';
 import { useStartInstall } from './hooks';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface ConnectGithubButtonProps {
   readonly orgId: string;
@@ -20,6 +21,7 @@ export function ConnectGithubButton({
   reconnect = false,
   variant = 'primary',
 }: ConnectGithubButtonProps) {
+  useLocale();
   const start = useStartInstall(orgId);
   // While the browser is navigating away the mutation has succeeded; keep the busy label.
   const busy = start.isPending || start.isSuccess;

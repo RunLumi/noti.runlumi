@@ -10,6 +10,7 @@ import { CopyButton } from './CopyButton';
 import { Guidance } from './Guidance';
 import { useToggleSource } from './hooks';
 import { DeleteSourceDialog, RotateDialog } from './SourceDialogs';
+import { useLocale } from '../i18n/LocaleProvider';
 
 interface SourceCardProps {
   readonly orgId: string;
@@ -20,6 +21,7 @@ interface SourceCardProps {
 }
 
 function ReceivingSwitch({ orgId, source }: { readonly orgId: string; readonly source: Source }) {
+  useLocale();
   const toggle = useToggleSource(orgId);
   const stateId = useId();
   const on = toggle.isPending ? !source.enabled : source.enabled;
@@ -62,6 +64,7 @@ function ReceivingSwitch({ orgId, source }: { readonly orgId: string; readonly s
 
 /** One source as an opaque work sheet: where to send events, what happened last, what to do. */
 export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProps) {
+  useLocale();
   const headingId = 'source-' + source.id;
   return (
     <article

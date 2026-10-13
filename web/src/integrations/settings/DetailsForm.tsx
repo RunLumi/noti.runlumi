@@ -15,6 +15,7 @@ import { useGithubConnection } from '../github/hooks';
 import { RepoPicker } from '../github/RepoPicker';
 import { validateRepoChoice } from '../wizard/draft';
 import { compact, fromServer, validateEvents, validateName, type FieldErrors } from '../validation';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface DetailsFormProps {
   readonly orgId: string;
@@ -59,6 +60,7 @@ function diff(saved: Values, next: Values): UpdateIntegrationBody {
  * offered as checkboxes; saving the events list replaces them with the catalog selection.
  */
 export function DetailsForm({ orgId, integration }: DetailsFormProps) {
+  useLocale();
   const save = useUpdateIntegration(orgId, integration.id);
   const saved = valuesOf(integration);
   const [values, setValues] = useState<Values>(saved);

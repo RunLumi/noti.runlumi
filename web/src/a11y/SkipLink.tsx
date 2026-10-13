@@ -1,6 +1,7 @@
 import type { MouseEvent } from 'react';
 import { t } from '../i18n';
 import './a11y.css';
+import { useLocale } from '../i18n/LocaleProvider';
 
 export const MAIN_ID = 'main-content';
 
@@ -11,6 +12,7 @@ export const MAIN_ID = 'main-content';
  * the URL and the router's history.
  */
 export function SkipLink() {
+  useLocale();
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     const main = document.getElementById(MAIN_ID);
     if (!main) return;

@@ -1,4 +1,4 @@
-import { Fragment, useSyncExternalStore, type ReactNode } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
 import { getLocale, setLocale, subscribeLocale, type Locale } from './locale';
 
 /** The active locale, re-read whenever it changes. */
@@ -8,13 +8,13 @@ export function useLocale(): readonly [Locale, (next: Locale) => void] {
 }
 
 /**
- * Re-renders everything below it when the language changes. `t()` is a plain function and
- * components do not subscribe to it individually, so the subtree is keyed by locale and
- * remounts. The trade-off is explicit: a language switch discards uncommitted component state
- * (an unfinished form). The router, query cache and URL live above this boundary and survive,
- * so the person stays on the same page with the same data.
+ * `t()` is a plain function, so a component shows the new language only if it renders again.
+ * Every component therefore calls `useLocale()` (a `useSyncExternalStore` subscription), and a
+ * language change re-renders them in place: nothing remounts, so focus, open dialogs and typed
+ * form values survive. `locale-reactivity.test.ts` fails if a component forgets.
+ * This provider only keeps the store subscribed at the root.
  */
 export function LocaleProvider({ children }: { readonly children: ReactNode }) {
-  const [locale] = useLocale();
-  return <Fragment key={locale}>{children}</Fragment>;
+  useLocale();
+  return <>{children}</>;
 }

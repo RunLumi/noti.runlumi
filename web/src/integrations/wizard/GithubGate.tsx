@@ -5,6 +5,7 @@ import type { GithubConnection } from '../../lib/api';
 import { t } from '../../i18n';
 import { describeError } from '../errors';
 import { ConnectGithubButton } from '../github/ConnectGithubButton';
+import { useLocale } from '../../i18n/LocaleProvider';
 
 interface GithubGateProps {
   readonly orgId: string;
@@ -16,6 +17,7 @@ interface GithubGateProps {
  * is a full-page trip to GitHub; nothing has been typed yet, so nothing is lost.
  */
 export function GithubGate({ orgId, connection }: GithubGateProps) {
+  useLocale();
   if (connection.isPending)
     return (
       <p className="field-hint" aria-busy="true">
