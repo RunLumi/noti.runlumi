@@ -112,7 +112,7 @@ describe('stored documents', () => {
     ['empty document', '{"v":1}', 'none'],
     ['not JSON', '{nope', 'invalid'],
     ['an array', '[]', 'invalid'],
-    ['unknown version', '{"v":2,"draft":"exclude"}', 'invalid'],
+    ['a newer version (rollback)', '{"v":2,"draft":"exclude"}', 'newer'],
     ['missing version', '{"draft":"exclude"}', 'invalid'],
     ['a value that no longer validates', '{"v":1,"branch":{"allow":["a?b"]}}', 'invalid'],
   ])('reads %s as %s', (_name, json, kind) => {

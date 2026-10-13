@@ -76,7 +76,11 @@ export function compileGlob(pattern: string): GlobCompile {
  */
 export function globMatches(glob: CompiledGlob, value: string): boolean | undefined {
   if (value.length > GLOB_INPUT_MAX) return undefined;
-  const s = fold(value);
+  return globMatchesFolded(glob, fold(value));
+}
+
+/** As {@link globMatches} for a value already folded and known to be within the input cap. */
+export function globMatchesFolded(glob: CompiledGlob, s: string): boolean {
   const n = s.length;
   let row = new Uint8Array(n + 1);
   row[0] = 1;

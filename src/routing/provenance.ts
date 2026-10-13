@@ -12,8 +12,11 @@ import type { FilterId, ReasonCode } from './filters';
 export const ROUTING_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const ROUTING_PURGE_ROWS_PER_TICK = 500;
 
-/** `config_invalid`: the stored filters did not re-validate, so the event was delivered (fail open). */
-export type DecisionReason = ReasonCode | 'no_filters' | 'config_invalid';
+/**
+ * `config_invalid`: the stored filters did not re-validate, so the event was held back (fail
+ * closed). `config_newer`: they were written by a newer release (a rollback), so it was sent.
+ */
+export type DecisionReason = ReasonCode | 'config_invalid' | 'config_newer';
 
 export interface RoutingDecisionRow {
   /** The deterministic delivery id for (dedup key, integration). A redelivery maps to the same row. */
@@ -22,7 +25,7 @@ export interface RoutingDecisionRow {
   readonly integrationId: string;
   readonly eventType: string;
   readonly outcome: 'delivered' | 'filtered';
-  readonly filterId: FilterId | null;
+  readonly filterId: FilterId | 'config' | null;
   readonly reason: DecisionReason;
   readonly unknown: boolean;
   readonly decidedAt: number;
@@ -33,11 +36,22 @@ export interface RoutingDecisionRow {
  * was filtered and a redelivery after a filter edit is delivered, the row is corrected to
  * "delivered": a delivered event is never recorded as suppressed.
  */
-export function decisionStatement(db: D1Database, row: RoutingDecisionRow): D1PreparedStatement {
+export function decisionStatement(
+  db: D1Database,
+  row: RoutingDecisionRow,
+  deliveryIds: readonly [string, string],
+): D1PreparedStatement {
+  // A "filtered" row is not written when a delivery for the same event already exists (an
+  // event first delivered before filters existed, or before a filter edit, and redelivered).
+  const guard =
+    row.outcome === 'filtered'
+      ? 'WHERE NOT EXISTS (SELECT 1 FROM deliveries WHERE organization_id=? AND id IN (?,?))'
+      : 'WHERE 1';
+  const bindings = row.outcome === 'filtered' ? [row.organizationId, ...deliveryIds] : [];
   return db
     .prepare(
       `INSERT INTO routing_decisions(id,organization_id,integration_id,event_type,outcome,filter_id,reason,unknown_fact,decided_at)
-       VALUES(?,?,?,?,?,?,?,?,?)
+       SELECT ?,?,?,?,?,?,?,?,? ${guard}
        ON CONFLICT(id) DO UPDATE SET outcome=excluded.outcome,filter_id=excluded.filter_id,reason=excluded.reason,
          unknown_fact=excluded.unknown_fact,decided_at=excluded.decided_at
        WHERE excluded.outcome='delivered' AND routing_decisions.outcome='filtered'`,
@@ -52,11 +66,12 @@ export function decisionStatement(db: D1Database, row: RoutingDecisionRow): D1Pr
       row.reason,
       row.unknown ? 1 : 0,
       row.decidedAt,
+      ...bindings,
     );
 }
 
-/** Retention: drop decisions past the window, a bounded batch per cron tick. */
-export async function purgeRoutingDecisions(db: D1Database, now: number): Promise<number> {
+/** One bounded delete round. */
+async function purgeRound(db: D1Database, now: number): Promise<number> {
   const result = await db
     .prepare(
       `DELETE FROM routing_decisions WHERE rowid IN (
@@ -65,6 +80,27 @@ export async function purgeRoutingDecisions(db: D1Database, now: number): Promis
     .bind(now - ROUTING_RETENTION_MS, ROUTING_PURGE_ROWS_PER_TICK)
     .run();
   return result.meta.changes ?? 0;
+}
+
+/** Rounds per cron tick: bounded work, but capacity (rounds x rows x ticks per day) outruns growth. */
+export const ROUTING_PURGE_ROUNDS = 5;
+
+/**
+ * Retention: drop decisions past the window. Rounds repeat while a round is full, up to a bound,
+ * so a backlog drains over a few ticks and cannot outgrow the purge.
+ */
+export async function purgeRoutingDecisions(
+  db: D1Database,
+  now: number,
+  rounds = ROUTING_PURGE_ROUNDS,
+): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < rounds; i++) {
+    const deleted = await purgeRound(db, now);
+    total += deleted;
+    if (deleted < ROUTING_PURGE_ROWS_PER_TICK) break;
+  }
+  return total;
 }
 
 export interface RoutingLogEntry {

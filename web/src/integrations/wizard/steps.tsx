@@ -12,7 +12,7 @@ import type { GithubEventType } from '../events';
 import { WebhookFields, WebhookGuide } from '../WebhookFields';
 import { FilterTester } from '../filters/FilterTester';
 import { FiltersEditor } from '../filters/FiltersEditor';
-import { describeFilterCount, validateFilterDraft, type FilterErrors } from '../filters/model';
+import { coverageNotes, describeFilterCount, validateFilterDraft, type FilterErrors } from '../filters/model';
 import type { Draft, WizardErrors, WizardField } from './draft';
 
 export interface StepProps {
@@ -129,7 +129,9 @@ export function EventsStep({ draft, errors, update }: StepProps) {
  * tried to continue (or the server has refused them).
  */
 export function FiltersStep({ draft, errors, update }: StepProps) {
-  const checked = validateFilterDraft(draft.filters);
+  const checked = validateFilterDraft(draft.filters, draft.eventTypes);
+  const parsed = validateFilterDraft(draft.filters);
+  const notes = coverageNotes(parsed.ok ? parsed.config : {}, draft.eventTypes);
   const shown: FilterErrors = errors.filters ? (checked.ok ? { form: errors.filters } : checked.errors) : {};
   return (
     <div className="form-stack">
@@ -137,9 +139,10 @@ export function FiltersStep({ draft, errors, update }: StepProps) {
       <FiltersEditor
         draft={draft.filters}
         errors={shown}
+        notes={notes}
         onChange={(field, value) => update('filters', { ...draft.filters, [field]: value })}
       />
-      <FilterTester config={checked.ok ? checked.config : null} />
+      <FilterTester config={parsed.ok ? parsed.config : null} />
     </div>
   );
 }
@@ -181,7 +184,7 @@ function ReviewRow({
 /** A summary that never shows the URL or secret back, only that they were provided. */
 export function ReviewStep({ draft, onEdit }: ReviewStepProps) {
   const destination = draft.destination ? t(DESTINATIONS[draft.destination].name) : '';
-  const checked = validateFilterDraft(draft.filters);
+  const checked = validateFilterDraft(draft.filters, draft.eventTypes);
   const filterSummary = checked.ok ? describeFilterCount(checked.config) : t('filters.error.generic');
   return (
     <div className="review">

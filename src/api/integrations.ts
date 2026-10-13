@@ -12,6 +12,8 @@ import { isDeletionPending } from './workspace-lifecycle';
 import {
   activeFilterIds,
   changedFilterIds,
+  coverageIssue,
+  coverageWarnings,
   readStoredFilters,
   serializeFilters,
 } from '../routing/filter-input';
@@ -61,8 +63,13 @@ export interface IntegrationView {
   readonly credentials: 'ok' | 'legacy' | 'quarantined';
   /** Routing filters; `{}` when none. A stored document that no longer validates reads as `{}`. */
   readonly filters: FilterConfig;
-  /** True when stored filters could not be read and events are being delivered unfiltered. */
+  /**
+   * True when the stored filters are corrupt or no longer valid. Events for this integration
+   * are HELD BACK (fail closed) until the filters are replaced.
+   */
   readonly filtersInvalid: boolean;
+  /** True when the stored filters were written by a newer release (rollback): sent unfiltered. */
+  readonly filtersNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
 }
@@ -89,6 +96,7 @@ export function toView(row: IntegrationRow): IntegrationView {
     credentials: row.credentials_quarantined_at ? 'quarantined' : row.sealed ? 'ok' : 'legacy',
     filters: stored.kind === 'ok' ? stored.config : {},
     filtersInvalid: stored.kind === 'invalid',
+    filtersNewer: stored.kind === 'newer',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -300,7 +308,10 @@ integrations.post('/', async (c) => {
   ]);
 
   const row = await loadRow(c, who.orgId, id);
-  return c.json({ integration: row ? toView(row) : null }, 201);
+  return c.json(
+    { integration: row ? toView(row) : null, warnings: coverageWarnings(input.filters, input.eventTypes) },
+    201,
+  );
 });
 
 integrations.patch('/:id', async (c) => {
@@ -318,6 +329,14 @@ integrations.patch('/:id', async (c) => {
     const repo = await canonicalRepository(c.env.DB, who.orgId, input.repo);
     if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
     input = { ...input, repo };
+  }
+
+  // The filters and subscribed events that will be in force after this change must fit together.
+  const effectiveEvents = input.eventTypes ?? eventTypesOf(existing.event_types);
+  const effectiveFilters = input.filters ?? currentFilters(existing);
+  if (input.filters !== undefined || input.eventTypes !== undefined) {
+    const issue = coverageIssue(effectiveFilters, effectiveEvents);
+    if (issue) return invalid(c, [issue]);
   }
 
   type SqlValue = string | number | ArrayBuffer | null;
@@ -393,7 +412,9 @@ integrations.patch('/:id', async (c) => {
   ]);
   if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
   const row = await loadRow(c, who.orgId, id);
-  return row ? c.json({ integration: toView(row) }) : c.json({ error: 'Not found' }, 404);
+  return row
+    ? c.json({ integration: toView(row), warnings: coverageWarnings(effectiveFilters, effectiveEvents) })
+    : c.json({ error: 'Not found' }, 404);
 });
 
 integrations.delete('/:id', async (c) => {
@@ -417,6 +438,11 @@ integrations.delete('/:id', async (c) => {
   // unrecoverable (crypto-shredding). Delivery history keeps ids and states only.
   const results = await c.env.DB.batch([
     audit(c, who, 'integration.delete', id, { repo: existing.repo, destination: existing.destination }),
+    // Routing provenance for this integration goes with it, in the same transaction.
+    c.env.DB.prepare('DELETE FROM routing_decisions WHERE integration_id=? AND organization_id=?').bind(
+      id,
+      who.orgId,
+    ),
     c.env.DB.prepare('DELETE FROM integrations WHERE id=? AND organization_id=?').bind(id, who.orgId),
   ]);
   if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);

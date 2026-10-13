@@ -16,6 +16,8 @@ import {
   type Draft,
 } from '../wizard/draft';
 import {
+  coverageNotes,
+  eventsCoverageError,
   describeDecision,
   describeFilterCount,
   draftFromConfig,
@@ -169,7 +171,7 @@ describe('"Try it" uses the ingress evaluator', () => {
 
   it('treats an empty field as "GitHub did not say", not as a value', () => {
     const d = runSample(config, { ...EMPTY_SAMPLE, event: 'push', branch: '' });
-    expect(d).toMatchObject({ pass: false, reason: 'field_unknown', unknown: true });
+    expect(d).toMatchObject({ pass: false, reason: 'unknown_fact', unknown: true });
   });
 
   it('knows the deleted-account login is never skipped', () => {
@@ -184,6 +186,7 @@ describe('"Try it" uses the ingress evaluator', () => {
       ...EMPTY_SAMPLE,
       event: 'pull_request.opened',
       branch: 'main',
+      bot: 'no',
       draft: 'yes',
     });
     expect(describeDecision(skipped)).toBe(
@@ -293,5 +296,99 @@ describe('API client', () => {
     expect(parseRoutingLog({ entries: [], nextCursor: null }).nextCursor).toBeNull();
     expect(() => parseRoutingLog({ entries: [{ ...entry, outcome: 'maybe' }] })).toThrow(ApiError);
     expect(() => parseRoutingLog({})).toThrow(ApiError);
+  });
+});
+
+describe('filters must fit the selected updates (H2)', () => {
+  const only = ok(draft({ branchAllow: 'main' }));
+  const never = ok(draft({ branchDeny: 'wip', skipDrafts: true }));
+
+  it('refuses an "only" list that some selected update cannot read, naming both in plain language', () => {
+    const notes = coverageNotes(only, ['push', 'issues.opened']);
+    expect(notes.blocking).toHaveLength(1);
+    expect(notes.blocking[0]).toContain('Branches');
+    expect(notes.blocking[0]).toContain('An issue is opened');
+    expect(eventsCoverageError(only, ['push', 'issues.opened'])).toContain('Branches');
+    expect(eventsCoverageError(only, ['push', 'pull_request.opened'])).toBeUndefined();
+  });
+
+  it('only warns for a "never" rule', () => {
+    const notes = coverageNotes(never, ['push', 'issues.opened']);
+    expect(notes.blocking).toEqual([]);
+    expect(notes.warnings.map((w) => w.includes('sent regardless'))).toEqual([true, true]);
+  });
+
+  it('validation of the draft includes the selected updates, as the API does', () => {
+    const d = draft({ branchAllow: 'main' });
+    expect(validateFilterDraft(d, ['push']).ok).toBe(true);
+    const r = validateFilterDraft(d, ['push', 'issues.opened']);
+    expect(!r.ok && r.errors.form).toContain('Branches');
+  });
+
+  it('maps the server coverage refusal onto the form-level message', () => {
+    const errors = errorsFromServer(
+      [{ field: 'filters.coverage', message: 'server words' }],
+      EMPTY_FILTER_DRAFT,
+    );
+    expect(errors.form).toBe('server words');
+  });
+
+  it('the wizard blocks Continue on the filters step and on submit when events and filters disagree', () => {
+    const bad: Draft = {
+      ...EMPTY_DRAFT,
+      destination: 'slack',
+      webhookUrl: 'https://hooks.slack.com/services/T000/B000/XXXX',
+      repo: 'acme/web',
+      eventTypes: ['push', 'issues.opened'],
+      filters: draft({ branchAllow: 'main' }),
+    };
+    expect(validateStep(stepOf('filters'), bad, []).filters).toBeTruthy();
+    expect(validateStep(stepOf('filters'), { ...bad, eventTypes: ['push'] }, [])).toEqual({});
+  });
+});
+
+describe('unknown facts and invalid stored filters in copy (M1, H1)', () => {
+  it('tells people that a missing detail holds an update back', () => {
+    expect(t('filters.honest')).toContain('held back');
+    const d = runSample(ok(draft({ peopleDeny: 'mallory' })), { ...EMPTY_SAMPLE, event: 'push' });
+    expect(d).toMatchObject({ pass: false, reason: 'unknown_fact' });
+    expect(describeDecision(d)).toContain('held back to be safe');
+  });
+
+  it('explains a held-back event from unreadable stored filters', () => {
+    const text = describeDecision({
+      pass: false,
+      unknown: false,
+      filterId: 'config',
+      reason: 'config_invalid',
+    });
+    expect(text).toContain('Stored filters');
+    expect(text).toContain('held back to be safe');
+    expect(
+      describeDecision({ pass: true, unknown: false, filterId: null, reason: 'config_newer' }),
+    ).toContain('newer version');
+  });
+
+  it('reads the new integration flags from the API', () => {
+    const row = {
+      id: 'i',
+      name: 'n',
+      repo: 'a/b',
+      eventTypes: ['push'],
+      destination: 'slack',
+      destinationHost: null,
+      enabled: true,
+      credentials: 'ok',
+      createdAt: null,
+      updatedAt: null,
+    };
+    expect(parseIntegration({ ...row, filtersInvalid: true })).toMatchObject({
+      filtersInvalid: true,
+      filtersNewer: false,
+    });
+    expect(parseIntegration({ ...row, filtersNewer: true })).toMatchObject({
+      filtersInvalid: false,
+      filtersNewer: true,
+    });
   });
 });

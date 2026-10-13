@@ -56,12 +56,15 @@ why each event was or was not sent.
    `actorIsGhost`, `draft`, `labels`) extracted from the verified payload by
    `extractGithubFacts`. **No payload is stored or passed on.**
 
-4. **Three-valued facts (F124).** A fact GitHub did not send is `null`, never `false`/`""`/`[]`.
-   An `allow`/`include`/`bots: only` condition cannot say yes to an unknown fact, so the event
-   is held back with reason `field_unknown`. A `deny`/`exclude`/`bots: exclude` condition never
-   skips on an unknown fact. Either way the decision carries `unknown_fact`, so an unknown is
-   never silent. A filter that does not apply to an event type (a branch filter on an issue)
-   is skipped, not treated as unknown.
+4. **Three-valued facts that fail closed (F124).** A fact GitHub did not send is `null`, never
+   `false`/`""`/`[]`. **Any configured filter that applies to the event and cannot judge it
+   holds the event back** as `unknown_fact`, whether it is an `allow` list, a `deny` list,
+   `bots: exclude`, `draft` or a `labels` list. Treating "unknown" as "so send it" would turn a
+   privacy rule into a rule that fails exactly when the data is odd. The one exception is a
+   deleted account (decision 5). The decision carries `unknown_fact`, so an unknown is never
+   silent, and the dashboard says that a missing detail holds an update back. A filter that does
+   not apply to an event type (a branch filter on an issue) is skipped, not treated as unknown;
+   decision 10 stops that from being a silent hole.
 
 5. **A deleted account is never skipped (F138, F151).** `actor` passes any event whose sender
    is GitHub's placeholder `ghost`, whatever the bot setting, and the placeholder cannot be put
@@ -76,25 +79,63 @@ why each event was or was not sent.
    over-long value is "cannot compare" (unknown), never a truncated match. Matching is
    case-insensitive and NFC-normalised.
 
-7. **Provenance in `routing_decisions` (F137).** One row per integration *considered* (enabled,
-   same tenant and repository, subscribed to the event type): `delivered` or `filtered`, the
-   `filter_id`, a reason from a closed vocabulary, and `unknown_fact`. It holds ids and codes
-   only: **no field values, no compared literals, no payload**. Its id is the deterministic
-   delivery id for `(dedup key, integration)`, so a provider redelivery cannot duplicate a row;
-   if a filtered event is redelivered after the filter was edited and is now sent, the row
-   becomes `delivered`, and the reverse never happens. For a delivered event the row is inserted
-   in the same `db.batch()` as the delivery and outbox rows. Retention is 30 days (bounded
-   delete per cron tick). The table is in `TENANT_TABLES`, so the workspace purge removes it;
-   it carries no foreign key, like `deliveries`.
+7. **Provenance in `routing_decisions` (F137).** One row per integration *with filters*
+   considered (enabled, same tenant and repository, subscribed to the event type): `delivered`
+   or `filtered`, the `filter_id`, a reason from a closed vocabulary, and `unknown_fact`.
+   Integrations without filters write **no** row: the delivery row is their record, and a row
+   per unfiltered event would be pure growth. A row holds ids and codes only: **no field values,
+   no compared literals, no payload**. Its id is the deterministic delivery id for
+   `(dedup key, integration)`, so a provider redelivery cannot duplicate a row. If a filtered
+   event is redelivered after the filter was edited and is now sent, the row becomes
+   `delivered`; the reverse never happens, and a "filtered" row is not written for an event that
+   already has a delivery.
 
-   A separate table was chosen over a column on `deliveries` because a filtered event has no
-   delivery row, and "why did I not get this" is exactly the case that needs a record.
+   **Provenance is best effort and outside the delivery transaction.** The delivery and outbox
+   rows commit together exactly as before; the decision statements run afterwards in their own
+   batch inside a `try/catch` that logs a redacted `routing_provenance_failed` warning (a count,
+   nothing else). A failed record therefore never blocks or loses a notification and never turns
+   a 202 into a 500. The price: a held-back event whose record failed leaves no trace, and the
+   event itself is not stored anywhere, so it cannot be reconstructed. That is a deliberate
+   privacy trade, and the warning is the signal.
 
-8. **Fail open.** If a stored document does not validate (corruption, a version this Worker
-   does not know), ingress delivers and records `config_invalid`; the API reports
-   `filtersInvalid` and the dashboard says so. Filters are noise control, not authorization:
-   authorization is the verified installation, and hiding events because a config is unreadable
-   would be the worse failure.
+   Retention is 30 days, drained in up to five bounded rounds of 500 rows per cron tick so the
+   backlog cannot outgrow the purge. Deleting an integration deletes its rows in the same batch.
+   The table is in `TENANT_TABLES`, so the workspace purge removes it; it carries no foreign key,
+   like `deliveries`. A separate table was chosen over a column on `deliveries` because a
+   filtered event has no delivery row, and "why did I not get this" is exactly the case that
+   needs a record.
+
+   Events delivered before migration 0015 have no decision row, and a redelivery of one after a
+   filter now excludes it writes none either (the delivery already exists), so history before
+   0015 never shows a false "held back".
+
+   Known edge: if an event was first delivered, then a redelivery arrives after *all* filters
+   were removed, a stale `filtered` row from an earlier attempt can remain until retention
+   removes it (no row is written for an unfiltered integration to correct it). The delivery
+   log is authoritative for what was sent.
+
+8. **Fail closed for an unusable stored document, open only for a newer one.** The stored
+   document is re-validated on every read with the API's own parser.
+   - **Corrupt or no longer valid** (bad JSON, wrong shape, or a document that violates the
+     limits of the running Worker): ingress holds the event back as `filtered` /
+     `config` / `config_invalid`. A deny, exclude or bots rule is often a privacy control, and
+     an unreadable one must not quietly mean "send everything". The API reports
+     `filtersInvalid: true`, the dashboard shows a blocking notice, and the editor requires an
+     explicit **Replace invalid filters** action before anything can be saved, so the unreadable
+     rules are never overwritten by accident. A `routing_filters_invalid` error line (integration
+     id and state only) is logged for alerting.
+   - **Written by a newer release** (`v` greater than this Worker's): this is what a rollback
+     looks like, and the document is probably fine. Holding back every event of every filtered
+     integration until the next deploy would be the larger harm, so it fails open as
+     `config_newer`, with the same error log and an API/dashboard note (`filtersNewer`).
+   - A canary test asserts that every document `serializeFilters` can produce re-validates
+     unchanged, and a simulation tightens the limits to show that a document that no longer fits
+     becomes `invalid`. **Any release that tightens a limit or changes a filter's meaning must
+     bump `STORED_VERSION` and migrate existing documents**, or those integrations will hold
+     back events until their filters are replaced.
+   - The trade-off to be aware of: events held back are not stored, so after fixing the filters
+     they cannot be replayed from Noti. GitHub's own delivery log can redeliver them within its
+     retention window.
 
 9. **API.** `filters` on create and update (replace-all; `null` or `{}` clears), strict
    validation with dotted field paths and messages that never echo values, limits of 32 entries
@@ -104,7 +145,19 @@ why each event was or was not sent.
    rules as other mutations; 60 per user per minute). There is no `deliveries` API on this
    branch's base, so the routing log is its own small endpoint.
 
-10. **Dashboard.** A "Filters" section on the integration settings page and an optional
+10. **A filter must be able to read what it checks (H2).** Applicability by event type used to be
+    a silent hole: a branch "only" list on `release.published` or an issue simply did not apply.
+    Now (a) the extractor reads the ref a release (`target_commitish`) or deployment
+    (`deployment.ref`) carries when it looks like a branch name (not a SHA, not `refs/tags/`),
+    and the branch filter applies to those events, holding them back as unknown when GitHub
+    names no branch; (b) saving an **"only" list** (branch, target branch, labels) together with
+    subscribed event types that cannot supply that fact is refused with `422` on
+    `filters.coverage` (checked on create and on every update of either side); (c) a **"never"
+    rule** on such event types is allowed and the response carries
+    `warnings: [{filter, eventTypes}]`; the editor shows per-filter "applies to" copy and the
+    same notes before saving.
+
+11. **Dashboard.** A "Filters" section on the integration settings page and an optional
     "Filters" step in the create wizard. The web code imports the server's own parser and
     evaluator (pure TypeScript), so the form accepts exactly what the API accepts and the
     "Try it" check answers exactly as ingress would. People type one entry per line; errors are
@@ -113,15 +166,26 @@ why each event was or was not sent.
 
 ## Consequences
 
-- Existing integrations are unchanged: `filters_json` is `NULL`, the decision is
-  `no_filters`, and the delivery path is as before.
-- Each event now does one extra batched write per filtered integration and one extra statement
-  per delivered one. At the current volume that is negligible; at scale it is the first thing
+- Existing integrations are unchanged: `filters_json` is `NULL`, nothing is evaluated or
+  recorded, and the delivery path is as before.
+- Each event now does one extra best-effort batched write covering its filtered integrations. At the current volume that is negligible; at scale it is the first thing
   to measure (spec 11 grouping and F53 coalescing would reduce it).
 - A user who sets an `allow` list on a field some events lack (a tag push has no branch) will
-  see those events held back with `field_unknown`. That is the documented, visible behaviour.
+  see those events held back with `unknown_fact`. That is the documented, visible behaviour.
 - Rolling the Worker back re-enables delivery of events the filters were suppressing; the old
   Worker ignores the column and the table.
+
+## Semantics worth knowing
+
+- **Case:** branch, login and label comparison is case-insensitive and NFC-normalised. That is
+  fail-safe for `deny` (a differently-cased name is still denied) and means an `allow` list also
+  admits a differently-cased name. Git itself is case-sensitive; a repository with `Main` and
+  `main` as different branches cannot be told apart by these filters.
+- **`bots: exclude` checks the sender**, the account that caused the event, not a pull
+  request's author. A Dependabot pull request that a human merges or comments on is not
+  excluded for that event; use a `people` deny entry for the author where it matters.
+- Evaluation cost: filters are parsed and compiled once per distinct document per request and
+  the facts are folded once per request, however many integrations are evaluated.
 
 ## Not done
 

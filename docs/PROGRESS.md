@@ -713,7 +713,11 @@ Also fixed:
   extracts the seven facts from a verified payload.
 - Ingress (`github/route.ts`): each subscribed, enabled integration is evaluated; a filtered
   event creates no delivery and records a reason, a delivered one records `delivered` in the
-  same batch as the delivery and outbox rows. Invalid stored filters fail open.
+  a best-effort batch after (never inside) the delivery transaction; integrations without filters
+  write no row. Unreadable stored filters fail closed (a newer-version document, i.e. a rollback,
+  fails open). Unknown facts hold an update back for every filter. Releases and deployments carry
+  a branch where GitHub names one, and an "only" list that cannot be enforced on a subscribed
+  event is refused at save.
 - API: `filters` on create and update, strict validation, audit with filter ids only,
   `GET /api/integrations/:id/routing-log`, `POST /api/integrations/:id/filters/preview`
   ([API.md](API.md#routing-filters)). `purge.ts` lists the new table; the cron job applies a
@@ -732,6 +736,17 @@ Also fixed:
   rate limit), routing log (paging, tenant scoping). `tests/migration-0015.test.ts`.
 - `web/src/integrations/filters/*.test.*`: draft model, error mapping, parity with the server
   parser and evaluator, wizard step, API parsing, server-rendered markup of the editor.
+
+**Security review follow-up (this PR)**
+
+- Fail closed on corrupt/invalid stored filters (`filtersInvalid`, blocking dashboard state,
+  explicit "Replace invalid filters"), open only for a newer `v`; canary and limits-tightening
+  tests. Unknown facts hold back for deny rules too. Branch facts for releases and deployments,
+  and coverage refusal/warnings at save. Decision rows deleted with the integration, none for
+  unfiltered integrations, bounded multi-round retention. Provenance moved out of the delivery
+  transaction (best effort, redacted warning). Filters compiled once per document and facts
+  folded once per request. Documented: case-insensitivity, `bots: exclude` is the sender,
+  events held back are not stored, and the pre-0015 redelivery edge.
 
 **Not done (named, not hidden)**
 

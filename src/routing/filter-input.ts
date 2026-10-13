@@ -2,7 +2,9 @@ import { asRecord } from '../lib/json';
 import {
   BOT_MODES,
   FILTER_IDS,
+  filterCoverage,
   type BotMode,
+  type Coverage,
   type FilterConfig,
   type FilterId,
   type RoutingFacts,
@@ -25,6 +27,16 @@ export type FilterParse =
 /** Entries per list, and across the whole config. Product bounds that also bound CPU. */
 export const MAX_ENTRIES_PER_LIST = 32;
 export const MAX_ENTRIES_TOTAL = 128;
+/**
+ * The limits a document is validated against. Injectable so a test can simulate a later release
+ * that tightens them: a stored document that no longer fits must read as invalid (fail closed),
+ * not be half-applied.
+ */
+export interface FilterLimits {
+  readonly perList: number;
+  readonly total: number;
+}
+export const DEFAULT_LIMITS: FilterLimits = { perList: MAX_ENTRIES_PER_LIST, total: MAX_ENTRIES_TOTAL };
 export const LOGIN_MAX = 64;
 export const LABEL_MAX = 100;
 /** Version of the stored document. Bump together with the registry definition versions. */
@@ -43,14 +55,20 @@ const ALLOWED_KEYS: Readonly<Record<string, readonly string[]>> = {
 type ItemCheck = (value: string) => string | null;
 
 /** Parse one list of strings: trims, checks each entry, drops case-insensitive duplicates. */
-function parseList(raw: unknown, path: string, check: ItemCheck, errors: FilterIssue[]): string[] {
+function parseList(
+  raw: unknown,
+  path: string,
+  check: ItemCheck,
+  errors: FilterIssue[],
+  limits: FilterLimits,
+): string[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) {
     errors.push({ field: path, message: 'Must be a list.' });
     return [];
   }
-  if (raw.length > MAX_ENTRIES_PER_LIST) {
-    errors.push({ field: path, message: `At most ${MAX_ENTRIES_PER_LIST} entries per list.` });
+  if (raw.length > limits.perList) {
+    errors.push({ field: path, message: `At most ${limits.perList} entries per list.` });
     return [];
   }
   const out: string[] = [];
@@ -102,15 +120,21 @@ function checkKeys(
     if (!allowed.includes(key)) errors.push({ field: `${path}.${key}`, message: 'Unknown option.' });
 }
 
-function parseAllowDeny(raw: unknown, path: string, check: ItemCheck, errors: FilterIssue[]) {
+function parseAllowDeny(
+  raw: unknown,
+  path: string,
+  check: ItemCheck,
+  errors: FilterIssue[],
+  limits: FilterLimits,
+) {
   const r = asRecord(raw);
   if (!r) {
     errors.push({ field: path, message: 'Expected an object.' });
     return undefined;
   }
   checkKeys(r, ALLOWED_KEYS[path.split('.').at(-1) ?? ''] ?? [], path, errors);
-  const allow = parseList(r.allow, `${path}.allow`, check, errors);
-  const deny = parseList(r.deny, `${path}.deny`, check, errors);
+  const allow = parseList(r.allow, `${path}.allow`, check, errors, limits);
+  const deny = parseList(r.deny, `${path}.deny`, check, errors, limits);
   return { allow, deny };
 }
 
@@ -118,7 +142,11 @@ function parseAllowDeny(raw: unknown, path: string, check: ItemCheck, errors: Fi
  * Validate a `filters` value. `null`/`{}` mean "no filters". The result is normalised: empty
  * lists and default values are dropped, so equal configs serialise equally.
  */
-export function parseFilters(raw: unknown, path = 'filters'): FilterParse {
+export function parseFilters(
+  raw: unknown,
+  path = 'filters',
+  limits: FilterLimits = DEFAULT_LIMITS,
+): FilterParse {
   if (raw === null) return { ok: true, value: {} };
   const r = asRecord(raw);
   if (!r) return { ok: false, errors: [{ field: path, message: 'Expected an object.' }] };
@@ -130,12 +158,12 @@ export function parseFilters(raw: unknown, path = 'filters'): FilterParse {
   const out: { -readonly [K in keyof FilterConfig]: FilterConfig[K] } = {};
   for (const id of ['branch', 'baseBranch'] as const) {
     if (r[id] === undefined) continue;
-    const v = parseAllowDeny(r[id], `${path}.${id}`, globCheck, errors);
+    const v = parseAllowDeny(r[id], `${path}.${id}`, globCheck, errors, limits);
     if (v && (v.allow.length || v.deny.length)) out[id] = v;
   }
   if (r.actor !== undefined) {
     const a = asRecord(r.actor);
-    const base = parseAllowDeny(r.actor, `${path}.actor`, loginCheck, errors);
+    const base = parseAllowDeny(r.actor, `${path}.actor`, loginCheck, errors, limits);
     let bots: BotMode = 'any';
     if (a && a.bots !== undefined) {
       if ((BOT_MODES as readonly unknown[]).includes(a.bots)) bots = a.bots as BotMode;
@@ -152,13 +180,13 @@ export function parseFilters(raw: unknown, path = 'filters'): FilterParse {
     if (!lr) errors.push({ field: `${path}.labels`, message: 'Expected an object.' });
     else {
       checkKeys(lr, ALLOWED_KEYS.labels ?? [], `${path}.labels`, errors);
-      const include = parseList(lr.include, `${path}.labels.include`, labelCheck, errors);
-      const exclude = parseList(lr.exclude, `${path}.labels.exclude`, labelCheck, errors);
+      const include = parseList(lr.include, `${path}.labels.include`, labelCheck, errors, limits);
+      const exclude = parseList(lr.exclude, `${path}.labels.exclude`, labelCheck, errors, limits);
       if (include.length || exclude.length) out.labels = { include, exclude };
     }
   }
-  if (errors.length === 0 && countEntries(out) > MAX_ENTRIES_TOTAL)
-    errors.push({ field: path, message: `At most ${MAX_ENTRIES_TOTAL} entries in total.` });
+  if (errors.length === 0 && countEntries(out) > limits.total)
+    errors.push({ field: path, message: `At most ${limits.total} entries in total.` });
   if (
     errors.length === 0 &&
     serializeFilters(out) !== null &&
@@ -194,15 +222,22 @@ export function serializeFilters(c: FilterConfig): string | null {
 export type StoredFilters =
   | { readonly kind: 'none' }
   | { readonly kind: 'ok'; readonly config: FilterConfig }
-  | { readonly kind: 'invalid' };
+  /** Corrupt, hand-edited or no longer valid under this Worker's rules. Ingress FAILS CLOSED. */
+  | { readonly kind: 'invalid' }
+  /** Written by a NEWER release (rollback). This Worker cannot read it. Ingress fails open. */
+  | { readonly kind: 'newer' };
 
 /**
- * Read a stored document. Anything that does not re-validate (corruption, a version this
- * Worker does not know, a hand-edited row) is `invalid`, and ingress then fails OPEN with a
- * recorded reason: a filter is a noise control, not an authorization, and a broken one must
- * not silently swallow notifications.
+ * Read a stored document and re-validate it with the same parser the API uses.
+ *
+ * Policy (ADR 0010): a deny, exclude or bots rule is often a privacy control, so a document that
+ * is corrupt or no longer valid is `invalid` and ingress FAILS CLOSED (holds the event back and
+ * says so). The one exception is a document whose version is newer than this Worker's: that is
+ * what a rollback looks like, the document may be perfectly good, and holding back every event
+ * of every filtered integration until the next deploy would be the larger harm. It is `newer`
+ * and fails open, loudly.
  */
-export function readStoredFilters(json: string | null): StoredFilters {
+export function readStoredFilters(json: string | null, limits: FilterLimits = DEFAULT_LIMITS): StoredFilters {
   if (json === null || json === '') return { kind: 'none' };
   let raw: unknown;
   try {
@@ -211,11 +246,33 @@ export function readStoredFilters(json: string | null): StoredFilters {
     return { kind: 'invalid' };
   }
   const r = asRecord(raw);
-  if (!r || r.v !== STORED_VERSION) return { kind: 'invalid' };
+  if (!r) return { kind: 'invalid' };
+  if (typeof r.v === 'number' && Number.isInteger(r.v) && r.v > STORED_VERSION) return { kind: 'newer' };
+  if (r.v !== STORED_VERSION) return { kind: 'invalid' };
   const { v: _version, ...rest } = r;
-  const parsed = parseFilters(rest);
+  const parsed = parseFilters(rest, 'filters', limits);
   if (!parsed.ok) return { kind: 'invalid' };
   return activeFilterIds(parsed.value).length ? { kind: 'ok', config: parsed.value } : { kind: 'none' };
+}
+
+/**
+ * The save-time refusal for an "only" list that cannot be enforced on a subscribed event type
+ * (H2): that combination would silently let those events through. The message names filters and
+ * catalog event types, never anything the user typed.
+ */
+export function coverageIssue(config: FilterConfig, eventTypes: readonly string[]): FilterIssue | null {
+  const { blocking } = filterCoverage(config, eventTypes);
+  if (blocking.length === 0) return null;
+  const parts = blocking.map((b) => `"${b.filter}" (${b.eventTypes.join(', ')})`).join('; ');
+  return {
+    field: 'filters.coverage',
+    message: `An "only" list cannot be applied to every selected update, so it would not be enforced for: ${parts}. Remove those updates or the list.`,
+  };
+}
+
+/** Warnings for "never" rules that do not apply to some subscribed event types. */
+export function coverageWarnings(config: FilterConfig, eventTypes: readonly string[]): Coverage['warnings'] {
+  return filterCoverage(config, eventTypes).warnings;
 }
 
 /** Ids whose configuration differs. For audit metadata: ids only, never values. */

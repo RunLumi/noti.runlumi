@@ -13,12 +13,29 @@ import type { RoutingFacts } from '../../../routing/filters';
 const MAX_LABELS = 100;
 const HEADS_PREFIX = 'refs/heads/';
 
+const SHA = /^[0-9a-f]{7,40}$/i;
+const TAGS_PREFIX = 'refs/tags/';
+
+/**
+ * A ref from a deployment or release, kept only when it looks like a branch name. GitHub puts a
+ * branch, a tag or a commit SHA there and does not say which, so a SHA or a `refs/tags/` ref is
+ * "no branch" (unknown), never a guess. A tag name that is not a SHA is indistinguishable from a
+ * branch name and is accepted as one.
+ */
+function branchLikeRef(value: unknown): string | null {
+  const ref = str(value);
+  if (!ref || SHA.test(ref) || ref.startsWith(TAGS_PREFIX)) return null;
+  return ref.startsWith(HEADS_PREFIX) ? ref.slice(HEADS_PREFIX.length) : ref;
+}
+
 function branchOf(kind: string, event: Record<string, unknown>): string | null {
   if (kind === 'push') {
     const ref = str(event.ref);
     return ref?.startsWith(HEADS_PREFIX) ? ref.slice(HEADS_PREFIX.length) : null;
   }
   if (kind === 'workflow_run') return str(asRecord(event.workflow_run)?.head_branch) ?? null;
+  if (kind === 'deployment_status') return branchLikeRef(asRecord(event.deployment)?.ref);
+  if (kind === 'release') return branchLikeRef(asRecord(event.release)?.target_commitish);
   return str(asRecord(asRecord(event.pull_request)?.head)?.ref) ?? null;
 }
 

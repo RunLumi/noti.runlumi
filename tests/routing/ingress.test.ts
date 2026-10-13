@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index';
 import type { Bindings, DeliveryMessage } from '../../src/env';
 import { purgeDueWorkspace } from '../../src/pipeline/purge';
@@ -160,19 +160,12 @@ const deliveryCount = (integrationId: string): number =>
   ).n;
 
 describe('ingress routing filters', () => {
-  it('an integration without filters is delivered and the decision says so', async () => {
+  it('an integration without filters is delivered and writes no decision row', async () => {
     integration('i1', 'org-a', null);
     expect((await post('push', push('anything'))).persisted).toBe(1);
     expect(deliveryCount('i1')).toBe(1);
-    expect(decisions()).toMatchObject([
-      {
-        integration_id: 'i1',
-        outcome: 'delivered',
-        reason: 'no_filters',
-        filter_id: null,
-        organization_id: 'org-a',
-      },
-    ]);
+    // The delivery row is the record; a row per unfiltered event would only be growth (M2).
+    expect(decisions()).toEqual([]);
     expect(sent).toHaveLength(1);
   });
 
@@ -250,7 +243,7 @@ describe('ingress routing filters', () => {
     integration('i1', 'org-a', { branch: { allow: ['main'] } });
     // A tag push carries no branch, so an allow-list cannot say yes, and says so.
     await post('push', { ref: 'refs/tags/v1', sender: { login: 'octocat', type: 'User' } });
-    expect(decisions()).toMatchObject([{ outcome: 'filtered', reason: 'field_unknown', unknown_fact: 1 }]);
+    expect(decisions()).toMatchObject([{ outcome: 'filtered', reason: 'unknown_fact', unknown_fact: 1 }]);
   });
 
   it('only integrations subscribed to the event type are considered', async () => {
@@ -266,10 +259,65 @@ describe('ingress routing filters', () => {
     expect(decisions()).toEqual([]);
   });
 
-  it('fails open, with a recorded reason, when stored filters no longer validate', async () => {
+  it('FAILS CLOSED for corrupt or invalid stored filters, and says so', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    integration('i1', 'org-a', null, undefined, '{"v":1,"actor":{"deny":["a b"]}}');
+    integration('i2', 'org-a', null, undefined, '[1,2]');
+    expect((await post('push', push('dev'))).persisted).toBe(0);
+    expect(deliveryCount('i1') + deliveryCount('i2')).toBe(0);
+    expect(decisions().map((d) => [d.integration_id, d.outcome, d.filter_id, d.reason])).toEqual([
+      ['i1', 'filtered', 'config', 'config_invalid'],
+      ['i2', 'filtered', 'config', 'config_invalid'],
+    ]);
+    expect(error.mock.calls.map((c) => String(c[0])).some((l) => l.includes('routing_filters_invalid'))).toBe(
+      true,
+    );
+    error.mockRestore();
+  });
+
+  it('fails OPEN only for a document written by a newer release (rollback)', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     integration('i1', 'org-a', null, undefined, '{"v":99,"branch":{"allow":["main"]}}');
     expect((await post('push', push('dev'))).persisted).toBe(1);
-    expect(decisions()).toMatchObject([{ outcome: 'delivered', reason: 'config_invalid' }]);
+    expect(decisions()).toMatchObject([{ outcome: 'delivered', reason: 'config_newer', filter_id: null }]);
+    error.mockRestore();
+  });
+
+  it('holds back a deny-only config when the fact is unknown (fail closed)', async () => {
+    integration('i1', 'org-a', { actor: { deny: ['mallory'] } });
+    await post('push', { ref: 'refs/heads/x' }); // no sender at all
+    expect(decisions()).toMatchObject([
+      { outcome: 'filtered', filter_id: 'actor', reason: 'unknown_fact', unknown_fact: 1 },
+    ]);
+  });
+
+  it('enforces branch filters on releases and deployments through their refs', async () => {
+    integration('i1', 'org-a', { branch: { deny: ['wip'] } }, [
+      'release.published',
+      'deployment_status.created',
+    ]);
+    const login = { login: 'octocat', type: 'User' };
+    await post(
+      'release',
+      {
+        action: 'published',
+        sender: login,
+        release: { target_commitish: 'wip', html_url: 'https://x.test' },
+      },
+      'r1',
+    );
+    await post('deployment_status', { action: 'created', sender: login, deployment: { ref: 'main' } }, 'd1');
+    // A SHA is not a branch, so the deny rule cannot be judged and the event is held back.
+    await post(
+      'deployment_status',
+      { action: 'created', sender: login, deployment: { ref: 'a'.repeat(40) } },
+      'd2',
+    );
+    expect(decisions().map((d) => [d.event_type, d.outcome, d.reason])).toEqual([
+      ['release.published', 'filtered', 'in_deny_list'],
+      ['deployment_status.created', 'delivered', 'allowed'],
+      ['deployment_status.created', 'filtered', 'unknown_fact'],
+    ]);
   });
 
   it('keeps tenants apart: another workspace never sees or influences a decision', async () => {
@@ -302,7 +350,9 @@ describe('ingress routing filters', () => {
     integration('i1', 'org-a', { branch: { allow: ['main'] } });
     await post('push', push('dev'), 'same');
     expect(decisions()[0]?.outcome).toBe('filtered');
-    db.raw.prepare("UPDATE integrations SET filters_json=NULL WHERE id='i1'").run();
+    db.raw
+      .prepare("UPDATE integrations SET filters_json=? WHERE id='i1'")
+      .run(serializeFilters({ branch: { allow: ['dev'], deny: [] } }));
     await post('push', push('dev'), 'same');
     expect(decisions()).toMatchObject([{ outcome: 'delivered', filter_id: null }]);
     db.raw
@@ -312,10 +362,69 @@ describe('ingress routing filters', () => {
     expect(decisions()).toMatchObject([{ outcome: 'delivered' }]);
   });
 
+  it('does not record "filtered" for an event that was already delivered (before filters existed)', async () => {
+    integration('i1', 'org-a', null);
+    await post('push', push('dev'), 'same');
+    expect(deliveryCount('i1')).toBe(1);
+    db.raw
+      .prepare("UPDATE integrations SET filters_json=? WHERE id='i1'")
+      .run(serializeFilters({ branch: { allow: ['main'], deny: [] } }));
+    await post('push', push('dev'), 'same');
+    expect(decisions()).toEqual([]);
+    expect(deliveryCount('i1')).toBe(1);
+  });
+
   it('an event suppressed everywhere is still acknowledged with 202', async () => {
     integration('i1', 'org-a', { branch: { allow: ['main'] } });
     const res = await post('push', push('dev'));
     expect(res).toEqual({ status: 202, persisted: 0 });
+  });
+});
+
+describe('provenance is best effort (M3)', () => {
+  /** A database whose provenance writes always fail; everything else works. */
+  function failingProvenance(): D1Database {
+    return {
+      prepare: (sql: string) => db.d1.prepare(sql),
+      batch: (statements: { sql?: string }[]) =>
+        statements.some((st) => String(st.sql).includes('routing_decisions'))
+          ? Promise.reject(new Error('simulated D1 failure'))
+          : db.d1.batch(statements as never),
+    } as unknown as D1Database;
+  }
+
+  it('a failed provenance write never blocks or loses a delivery', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    env = { ...env, DB: failingProvenance() };
+    integration('i1', 'org-a', { branch: { allow: ['main'] } });
+    const res = await post('push', push('main'));
+    expect(res).toEqual({ status: 202, persisted: 1 });
+    expect(deliveryCount('i1')).toBe(1);
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get()).toEqual({ n: 1 });
+    expect(sent).toHaveLength(1);
+    expect(decisions()).toEqual([]);
+    const line = warn.mock.calls
+      .map((c) => String(c[0]))
+      .find((l) => l.includes('routing_provenance_failed'));
+    expect(line).toBeDefined();
+    expect(line).not.toContain('simulated');
+    warn.mockRestore();
+  });
+
+  it('a failed record of a held-back event is still a 202, not a 500', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    env = { ...env, DB: failingProvenance() };
+    integration('i1', 'org-a', { branch: { allow: ['main'] } });
+    expect(await post('push', push('dev'))).toEqual({ status: 202, persisted: 0 });
+    expect(deliveryCount('i1')).toBe(0);
+    warn.mockRestore();
+  });
+
+  it('the delivery and outbox rows no longer depend on the decision statement', async () => {
+    integration('i1', 'org-a', { branch: { allow: ['main'] } });
+    await post('push', push('main'));
+    expect(deliveryCount('i1')).toBe(1);
+    expect(decisions()).toHaveLength(1);
   });
 });
 

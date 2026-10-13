@@ -103,6 +103,8 @@ export interface Integration {
   readonly filters: FilterConfig;
   /** The stored filters could not be read, so every chosen update is being sent. */
   readonly filtersInvalid: boolean;
+  /** Saved by a newer release: this one cannot read them and sends every chosen update. */
+  readonly filtersNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
 }
@@ -140,9 +142,15 @@ export interface RotateCredentialsBody {
 const nullableString = (v: unknown): v is string | null => v === null || typeof v === 'string';
 
 /** Re-validated with the server's own parser, so a malformed value reads as "no filters". */
-function filtersOf(value: Record<string, unknown>): Pick<Integration, 'filters' | 'filtersInvalid'> {
+function filtersOf(
+  value: Record<string, unknown>,
+): Pick<Integration, 'filters' | 'filtersInvalid' | 'filtersNewer'> {
   const parsed = parseFilters(value.filters ?? null);
-  return { filters: parsed.ok ? parsed.value : {}, filtersInvalid: value.filtersInvalid === true };
+  return {
+    filters: parsed.ok ? parsed.value : {},
+    filtersInvalid: value.filtersInvalid === true,
+    filtersNewer: value.filtersNewer === true,
+  };
 }
 
 /** Narrow one API row. A malformed row is an error, never silently dropped (F225). */

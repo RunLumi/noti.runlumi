@@ -10,7 +10,7 @@ export const filtersEn = {
   'filters.intro':
     'Filters make this integration quieter. An update is sent only if it passes every filter you set. With no filters, every update you chose above is sent.',
   'filters.honest':
-    'Filters never add updates and never change who can see them; they only hold back updates this integration would have sent. Noti keeps a short log of what was held back and why.',
+    'Filters never add updates and never change who can see them; they only hold back updates this integration would have sent. If a detail a filter needs is missing from an update, that update is held back, and the log says so. Noti keeps a short log of what was held back and why; it does not keep the events themselves.',
 
   'filters.branches.title': 'Branches',
   'filters.branches.hint':
@@ -69,9 +69,9 @@ export const filtersEn = {
   'filters.clear': 'Remove all filters',
   'filters.unsaved': 'You have unsaved filter changes.',
   'filters.none': 'No filters. Every update you chose is sent.',
-  'filters.invalidStored.title': 'These filters can’t be read, so they are not being applied',
+  'filters.invalidStored.title': 'These filters can’t be read, so updates are being held back',
   'filters.invalidStored.body':
-    'Noti is sending every update you chose rather than risk silently hiding one. Saving filters again replaces what is stored.',
+    'Noti holds back every update for this integration until the filters are replaced, because a rule you can’t see might be there for privacy. Replace the filters to resume.',
 
   'filters.summary.none': 'None',
   'filters.summary.count': { one: '{count} filter on', other: '{count} filters on' },
@@ -101,23 +101,18 @@ export const filtersEn = {
   'filters.try.button': 'Check this update',
   'filters.try.invalid': 'Fix the highlighted filters above first, then try again.',
   'filters.result.sent': 'Sent. None of your filters hold this update back.',
-  'filters.result.sentUnknown':
-    'Sent. A detail a filter needed was not reported, and that filter does not skip on missing details.',
   'filters.result.sentGhost': 'Sent. It came from a deleted account, which filters never skip.',
   'filters.result.skipped': 'Skipped by the “{filter}” filter, because {reason}.',
 
   'filters.reason.not_in_allow_list': 'it is not on your “only” list',
   'filters.reason.in_deny_list': 'it is on your “never” list',
-  'filters.reason.field_unknown':
-    'GitHub did not report the detail, so Noti can’t confirm it is on your “only” list',
   'filters.reason.draft_excluded': 'it is a draft pull request',
   'filters.reason.bot_excluded': 'it came from a bot',
   'filters.reason.not_a_bot': 'it did not come from a bot',
   'filters.reason.ghost_exempt': 'it came from a deleted account',
   'filters.reason.allowed': 'it passed',
   'filters.reason.not_applicable': 'this filter does not apply to this kind of update',
-  'filters.reason.no_filters': 'this integration has no filters',
-  'filters.reason.config_invalid': 'its stored filters could not be read, so nothing was held back',
+  'filters.reason.config_invalid': 'its stored filters could not be read, so it was held back to be safe',
 
   'filters.log.title': 'Recent decisions',
   'filters.log.intro':
@@ -131,4 +126,28 @@ export const filtersEn = {
   'filters.log.skipped': 'Held back',
   'filters.log.unknownNote': 'A detail was missing',
   'filters.log.entry': '{event}, {outcome}, {when}',
+  'filters.reason.unknown_fact':
+    'GitHub did not report the detail this filter checks, so the update was held back to be safe',
+  'filters.reason.config_newer':
+    'its filters were saved by a newer version of Noti that this one cannot read, so nothing was held back',
+  'filters.name.config': 'Stored filters',
+  'filters.replaceInvalid': 'Replace invalid filters',
+  'filters.newer.title': 'These filters were saved by a newer version of Noti',
+  'filters.newer.body':
+    'This version can’t read them, so it is sending every update you chose. Saving filters here replaces them.',
+  'filters.appliesTo.branch':
+    'Applies to: pushes, pull requests, workflow runs, releases and deployments. For a release or deployment, only when GitHub names a branch.',
+  'filters.appliesTo.base': 'Applies to: pull requests.',
+  'filters.appliesTo.people':
+    'Applies to: every update. “Bots” checks who caused the update (the sender), not who wrote a pull request: a bot’s pull request merged by a person is not skipped.',
+  'filters.appliesTo.drafts': 'Applies to: pull requests.',
+  'filters.appliesTo.labels': 'Applies to: issues, issue comments and pull requests.',
+  'filters.coverage.blocking':
+    'The “only” list in “{filter}” can’t be applied to: {events}. It would not be enforced for them. Remove those updates under “Updates to send”, or remove the list.',
+  'filters.coverage.warning':
+    'The “{filter}” filter does not apply to: {events}. Those updates are sent regardless.',
+  'filters.error.coverageEvents':
+    'Your filters can’t be applied to some of these updates ({filters}). Remove those updates, or change the filters first.',
+  'filters.caseNote':
+    'Branch and label names are compared without regard to capital letters, so “Main” and “main” are the same.',
 } as const satisfies Record<string, string | PluralMessage>;

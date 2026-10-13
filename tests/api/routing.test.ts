@@ -80,7 +80,7 @@ const create = (as: string, body: Record<string, unknown> = {}) =>
     body: {
       name: 'Alerts',
       repo: 'acme/web',
-      eventTypes: ['issues.opened'],
+      eventTypes: ['pull_request.opened'],
       destination: 'slack',
       webhookUrl: SLACK,
       ...body,
@@ -214,13 +214,33 @@ describe('filters on create and update', () => {
     expect(view.integration.filters).toMatchObject({ draft: 'exclude' });
   });
 
-  it('flags stored filters this Worker cannot read, and shows none', async () => {
+  it('reports corrupt stored filters as filtersInvalid (events are held back) and shows none', async () => {
     const { integration } = await json<{ integration: FilterView }>(await create('alice'));
-    db.raw.prepare('UPDATE integrations SET filters_json=? WHERE id=?').run('{"v":99}', integration.id);
-    const view = await json<{ integration: FilterView }>(
+    db.raw.prepare('UPDATE integrations SET filters_json=? WHERE id=?').run('[1,2]', integration.id);
+    const view = await json<{ integration: FilterView & { filtersNewer: boolean } }>(
       await call('GET', `/api/integrations/${integration.id}`, { as: 'alice' }),
     );
-    expect(view.integration).toMatchObject({ filters: {}, filtersInvalid: true });
+    expect(view.integration).toMatchObject({ filters: {}, filtersInvalid: true, filtersNewer: false });
+  });
+
+  it('reports a newer-version document as filtersNewer, not invalid', async () => {
+    const { integration } = await json<{ integration: FilterView }>(await create('alice'));
+    db.raw.prepare('UPDATE integrations SET filters_json=? WHERE id=?').run('{"v":99}', integration.id);
+    const view = await json<{ integration: FilterView & { filtersNewer: boolean } }>(
+      await call('GET', `/api/integrations/${integration.id}`, { as: 'alice' }),
+    );
+    expect(view.integration).toMatchObject({ filtersInvalid: false, filtersNewer: true });
+  });
+
+  it('replaces corrupt stored filters when new ones are saved', async () => {
+    const { integration } = await json<{ integration: FilterView }>(await create('alice'));
+    db.raw.prepare('UPDATE integrations SET filters_json=? WHERE id=?').run('[1,2]', integration.id);
+    const res = await call('PATCH', `/api/integrations/${integration.id}`, {
+      as: 'alice',
+      body: { filters: { draft: 'exclude' } },
+    });
+    const body = await json<{ integration: FilterView }>(res);
+    expect(body.integration).toMatchObject({ filters: { draft: 'exclude' }, filtersInvalid: false });
   });
 
   it('another workspace cannot change filters', async () => {
@@ -231,6 +251,105 @@ describe('filters on create and update', () => {
     });
     expect(res.status).toBe(404);
     expect(db.raw.prepare('SELECT filters_json FROM integrations').get()).toEqual({ filters_json: null });
+  });
+});
+
+describe('filters must fit the subscribed events (H2)', () => {
+  const only = { branch: { allow: ['main'] } };
+  type Fields = { fields: { field: string; message: string }[] };
+
+  it('rejects an "only" list on events that cannot read it, without echoing the value', async () => {
+    const res = await create('alice', {
+      eventTypes: ['push', 'issues.opened'],
+      filters: { branch: { allow: ['super-secret-branch'] } },
+    });
+    expect(res.status).toBe(422);
+    const body = await json<Fields>(res);
+    expect(body.fields.map((f) => f.field)).toEqual(['filters.coverage']);
+    expect(JSON.stringify(body)).toContain('issues.opened');
+    expect(JSON.stringify(body)).not.toContain('super-secret-branch');
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM integrations').get()).toEqual({ n: 0 });
+  });
+
+  it('accepts a "never" rule on such events and returns a warning naming them', async () => {
+    const res = await create('alice', {
+      eventTypes: ['push', 'issues.opened'],
+      filters: { branch: { deny: ['wip'] } },
+    });
+    expect(res.status).toBe(201);
+    const body = await json<{ warnings: { filter: string; eventTypes: string[] }[] }>(res);
+    expect(body.warnings).toEqual([{ filter: 'branch', eventTypes: ['issues.opened'] }]);
+  });
+
+  it('returns no warnings when every selected event can be filtered', async () => {
+    const body = await json<{ warnings: unknown[] }>(await create('alice', { filters: only }));
+    expect(body.warnings).toEqual([]);
+  });
+
+  it('rejects subscribing to an event the saved "only" list cannot read', async () => {
+    const { integration } = await json<{ integration: FilterView }>(await create('alice', { filters: only }));
+    const res = await call('PATCH', `/api/integrations/${integration.id}`, {
+      as: 'alice',
+      body: { eventTypes: ['pull_request.opened', 'issues.opened'] },
+    });
+    expect(res.status).toBe(422);
+    expect((await json<Fields>(res)).fields.map((f) => f.field)).toEqual(['filters.coverage']);
+    expect(db.raw.prepare('SELECT event_types FROM integrations').get()).toEqual({
+      event_types: '["pull_request.opened"]',
+    });
+  });
+
+  it('rejects adding an "only" list to events that cannot read it, and allows fixing both at once', async () => {
+    const { integration } = await json<{ integration: FilterView }>(
+      await create('alice', { eventTypes: ['issues.opened'] }),
+    );
+    const path = `/api/integrations/${integration.id}`;
+    expect((await call('PATCH', path, { as: 'alice', body: { filters: only } })).status).toBe(422);
+    const both = await call('PATCH', path, {
+      as: 'alice',
+      body: { filters: only, eventTypes: ['push'] },
+    });
+    expect(both.status).toBe(200);
+  });
+
+  it('warns on update for a "never" rule that does not cover some events', async () => {
+    const { integration } = await json<{ integration: FilterView }>(
+      await create('alice', { eventTypes: ['push', 'issues.opened'] }),
+    );
+    const res = await call('PATCH', `/api/integrations/${integration.id}`, {
+      as: 'alice',
+      body: { filters: { draft: 'exclude' } },
+    });
+    const body = await json<{ warnings: { filter: string }[] }>(res);
+    expect(body.warnings.map((w) => w.filter)).toEqual(['draft']);
+  });
+});
+
+describe('deleting an integration deletes its routing decisions (M2)', () => {
+  it('removes them in the same transaction, and only this integration’s', async () => {
+    const a = (await json<{ integration: FilterView }>(await create('alice'))).integration.id;
+    const b = (await json<{ integration: FilterView }>(await create('alice', { name: 'Other' }))).integration
+      .id;
+    const insert = db.raw.prepare(
+      `INSERT INTO routing_decisions(id,organization_id,integration_id,event_type,outcome,reason,decided_at)
+       VALUES(?,?,?,?,?,?,?)`,
+    );
+    insert.run('r1', 'org-a', a, 'push', 'delivered', 'allowed', 1);
+    insert.run('r2', 'org-a', b, 'push', 'delivered', 'allowed', 1);
+    expect((await call('DELETE', `/api/integrations/${a}`, { as: 'alice' })).status).toBe(204);
+    expect(db.raw.prepare('SELECT id FROM routing_decisions').all()).toEqual([{ id: 'r2' }]);
+  });
+
+  it('a delete by another workspace removes nothing', async () => {
+    const a = (await json<{ integration: FilterView }>(await create('alice'))).integration.id;
+    db.raw
+      .prepare(
+        `INSERT INTO routing_decisions(id,organization_id,integration_id,event_type,outcome,reason,decided_at)
+         VALUES('r1','org-a',?,'push','delivered','allowed',1)`,
+      )
+      .run(a);
+    expect((await call('DELETE', `/api/integrations/${a}`, { as: 'mallory' })).status).toBe(404);
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM routing_decisions').get()).toEqual({ n: 1 });
   });
 });
 
@@ -268,11 +387,11 @@ describe('POST /api/integrations/:id/filters/preview', () => {
     });
   });
 
-  it('evaluates an unsaved draft instead when one is sent, and flags unknown facts', async () => {
+  it('evaluates an unsaved draft instead when one is sent, and holds back unknown facts', async () => {
     const res = await json<{ result: Record<string, unknown> }>(
       await preview({ eventType: 'pull_request.opened', facts: {}, filters: { draft: 'exclude' } }),
     );
-    expect(res.result).toMatchObject({ outcome: 'delivered', unknownFact: true });
+    expect(res.result).toMatchObject({ outcome: 'filtered', reason: 'unknown_fact', unknownFact: true });
   });
 
   it('is pure: no delivery, outbox, audit or decision row is written and nothing is fetched', async () => {

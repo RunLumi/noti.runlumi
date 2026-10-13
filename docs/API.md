@@ -53,7 +53,8 @@ type Integration = {
   enabled: boolean;
   credentials: 'ok' | 'legacy' | 'quarantined';
   filters: FilterConfig;              // {} when none; see "Routing filters"
-  filtersInvalid: boolean;            // stored filters unreadable: events are sent unfiltered
+  filtersInvalid: boolean;            // stored filters corrupt/invalid: events are HELD BACK until replaced
+  filtersNewer: boolean;              // saved by a newer release (rollback): sent unfiltered
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -131,9 +132,25 @@ type FilterConfig = {
   label, 8 wildcards per glob, 8 KiB stored. Violations return `422` with dotted field paths
   such as `filters.branch.allow[2]`; messages never echo the value.
 - `deny` wins over `allow`. An empty `allow` allows everything.
-- A fact GitHub did not send is unknown, never `false`. An `allow`/`include` list cannot say
-  yes to an unknown fact, so the event is held back and the decision is flagged
-  `unknownFact`. A `deny`/`exclude` list never skips on an unknown fact.
+- A fact GitHub did not send is unknown, never `false`. **Any configured filter that applies
+  to the event and cannot judge it holds the event back** (`unknown_fact`, `unknownFact: true`),
+  `allow` and `deny` alike, because a deny rule is often a privacy control. The one exception
+  is a deleted account (`ghost`), which an actor filter always passes.
+- A filter reads facts only from some event types (branch: push, pull requests, workflow runs,
+  releases and deployments; target branch, draft: pull requests; labels: issues, issue comments,
+  pull requests; people: all). On create and on every update the filters and the subscribed
+  `eventTypes` must fit together: an **"only" list** (`branch.allow`, `baseBranch.allow`,
+  `labels.include`) with a subscribed event type that cannot supply that fact is refused with
+  `422` on field `filters.coverage` (the message names the filters and catalog events, never the
+  typed values). A **"never" rule** on such event types is accepted, and the `201`/`200` body
+  carries `warnings: [{filter, eventTypes}]`. For releases and deployments the branch is read
+  from `target_commitish` / `deployment.ref` when it looks like a branch (not a SHA or tag ref).
+- `branch`, login and label comparison is case-insensitive (fail-safe for `deny`; an `allow`
+  list also admits a differently-cased name). `actor.bots: exclude` checks the **sender** of the
+  event, not a pull request's author.
+- Stored filters that are corrupt or no longer valid make `filtersInvalid: true`: events for the
+  integration are held back (`filtered`, filter `config`, reason `config_invalid`) until
+  `PATCH` replaces them. `filtersNewer: true` (written by a newer release) sends unfiltered.
 - The audit entry for a create or update lists the **ids** of the changed filters
   (`filters: ["branch","labels"]`), never their values.
 
@@ -145,13 +162,16 @@ Capability `integration.read`; another workspace's integration is `404`.
 | `POST /api/integrations/:id/filters/preview` | `{eventType, facts?, filters?}` | `200 {result: {outcome: 'delivered' \| 'filtered', filterId, reason, unknownFact}}`. Pure: no delivery, no write, no fetch. |
 
 - `outcome` is `delivered` or `filtered`. `filterId` is set when filtered. `reason` is one of a
-  closed vocabulary: `allowed`, `not_in_allow_list`, `in_deny_list`, `field_unknown`,
-  `draft_excluded`, `bot_excluded`, `not_a_bot`, `ghost_exempt`, `no_filters`,
-  `config_invalid`. A routing-log row exists for every integration that was enabled, on the
-  repository and subscribed to the event type. It holds ids, the event type, the outcome and
-  the reason code, never field values or payload, and is kept for 30 days.
-- `config_invalid` means the stored filters failed validation, so the event was delivered.
-  Filters fail **open**: they are noise control, not authorization.
+  closed vocabulary: `allowed`, `not_in_allow_list`, `in_deny_list`, `unknown_fact`,
+  `draft_excluded`, `bot_excluded`, `not_a_bot`, `ghost_exempt`, `config_invalid`,
+  `config_newer`. A routing-log row exists for every integration **with filters** that was
+  enabled, on the repository and subscribed to the event type; integrations without filters
+  write none (their delivery row is the record). It holds ids, the event type, the outcome and
+  the reason code, never field values or payload, is written best effort after (never inside)
+  the delivery transaction, is deleted with its integration, and is kept for 30 days.
+- `config_invalid` means the stored filters are corrupt or no longer valid, so the event was
+  **held back** (fail closed; `filterId` is `config`). `config_newer` means a newer release wrote
+  them, so the event was sent. Held-back events are not stored and cannot be replayed from Noti.
 - `preview` takes a **sample** facts object. Every key is optional and absent means unknown:
   `{branch, baseBranch, actorLogin, actorIsBot, actorIsGhost, draft, labels}`. `eventType` must
   be in the catalog. `filters` is an unsaved draft to try; omit it to test the saved filters.

@@ -95,7 +95,13 @@ Filters: one entry per line in labelled textareas inside fieldsets with legends;
 attached to its control and line and announced. The form imports the Worker's own filter parser
 and evaluator, so it accepts exactly what the API accepts and "Try it" answers as ingress would;
 it sends nothing and says so. Bot handling is three radio choices; a deleted account is never
-skipped, and the copy says why. "Recent decisions" shows event type and reason, never content. `npm test` runs
+skipped, and the copy says why. "Recent decisions" shows event type and reason, never content.
+Each filter group says which updates it applies to; an "only" list that cannot be enforced on a
+selected update is refused with the same rule the API uses (and a "never" rule is flagged as
+not covering them). Unknown details hold an update back, and the copy says so. When the stored
+filters cannot be read, a blocking notice explains that updates are being held back, and the
+editor stays hidden until the person chooses **Replace invalid filters**, so unreadable rules are
+never overwritten by an empty form. `npm test` runs
 `web/src/integrations/integrations.test.ts` with the Worker tests.
 
 ## Current truth

@@ -9,10 +9,11 @@ import { classifyGithubEvent, verifyGithubSignature } from './events';
 import { recordAudit } from '../../../audit/audit';
 import { handleLifecycle, LIFECYCLE_EVENTS } from './lifecycle';
 import { repositoryInScope, resolveTenant } from './tenant';
+import { log } from '../../../platform/log';
 import { extractGithubFacts } from './facts';
-import { evaluateFilters, type RouteDecision, type RoutingFacts } from '../../../routing/filters';
-import { readStoredFilters } from '../../../routing/filter-input';
-import { decisionStatement, type DecisionReason, type RoutingDecisionRow } from '../../../routing/provenance';
+import type { RoutingFacts } from '../../../routing/filters';
+import { createRouteDecider } from '../../../routing/ingress';
+import { decisionStatement, type RoutingDecisionRow } from '../../../routing/provenance';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -84,24 +85,6 @@ function displayFields(event: Record<string, unknown>, eventType: string): Displ
     ...(actor ? { actor: actor.slice(0, 100) } : {}),
     ...(summary ? { summary } : {}),
   };
-}
-
-/**
- * One integration's routing verdict. A stored config that no longer validates fails OPEN with a
- * recorded reason (ADR 0010): filters are noise control, never authorization.
- */
-function decideRoute(
-  filtersJson: string | null,
-  eventType: string,
-  facts: () => RoutingFacts,
-): Omit<RouteDecision, 'reason'> & { reason: DecisionReason } {
-  const stored = readStoredFilters(filtersJson);
-  if (stored.kind === 'none') return { pass: true, filterId: null, reason: 'no_filters', unknown: false };
-  if (stored.kind === 'invalid') {
-    console.error(JSON.stringify({ event: 'routing_filters_invalid' }));
-    return { pass: true, filterId: null, reason: 'config_invalid', unknown: false };
-  }
-  return evaluateFilters(stored.config, eventType, facts());
 }
 
 export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise<Response> {
@@ -199,11 +182,14 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     eventId: deliveryId,
   });
   let queued = 0;
-  // Facts are extracted once, lazily, and only when some integration has filters. They are the
-  // only part of the payload routing may read, and are never stored (ADR 0010).
+  // Facts are extracted and folded at most once, and each distinct stored filters document is
+  // parsed and compiled at most once per request. They are the only part of the payload routing
+  // reads, and are never stored (ADR 0010).
   let facts: RoutingFacts | undefined;
-  const factsOf = (): RoutingFacts => (facts ??= extractGithubFacts(kind, event));
-  const filtered: D1PreparedStatement[] = [];
+  const decide = createRouteDecider(eventType, () => (facts ??= extractGithubFacts(kind, event)));
+  // Provenance is best effort and kept OUT of the delivery transaction: a failed record must
+  // never block or lose a delivery.
+  const provenance: D1PreparedStatement[] = [];
   const decidedAt = Date.now();
   for (const row of rows.results) {
     let types: unknown;
@@ -216,32 +202,33 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
 
     // F184 / D10: identity is (dedup_key, destination), hashed — never a hand-built string.
     const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
-    const decision = decideRoute(row.filters_json, eventType, factsOf);
-    const provenance: RoutingDecisionRow = {
-      id,
-      organizationId,
-      integrationId: row.id,
-      eventType,
-      outcome: decision.pass ? 'delivered' : 'filtered',
-      filterId: decision.filterId,
-      reason: decision.reason,
-      unknown: decision.unknown,
-      decidedAt,
-    };
-    if (!decision.pass) {
-      // Suppressed by the integration's own filters: nothing is queued, and the reason is
-      // recorded so "why did I not get this" has an answer.
-      filtered.push(decisionStatement(c.env.DB, provenance));
-      continue;
-    }
+    const decision = decide(row.id, row.filters_json);
     // Rows written before 0009 used this id. A redelivery of such an event must not be
     // accepted a second time under the new id.
     const legacyId = `${deliveryId}:${row.id}`;
+    if (decision) {
+      const record: RoutingDecisionRow = {
+        id,
+        organizationId,
+        integrationId: row.id,
+        eventType,
+        outcome: decision.pass ? 'delivered' : 'filtered',
+        filterId: decision.filterId,
+        reason: decision.reason,
+        unknown: decision.unknown,
+        decidedAt,
+      };
+      provenance.push(decisionStatement(c.env.DB, record, [id, legacyId]));
+    }
+    if (decision && !decision.pass) {
+      // Held back by this integration's own filters: nothing is queued, and the reason is
+      // recorded so "why did I not get this" has an answer.
+      continue;
+    }
     // Identifiers and display text only. Credentials stay in D1 (D5).
     const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...display };
 
-    // One batch, one transaction: the delivery row, the outbox row and the routing decision
-    // commit together.
+    // One batch, one transaction: the delivery row and the outbox row commit together.
     const notLegacy = 'WHERE NOT EXISTS (SELECT 1 FROM deliveries WHERE id=? AND organization_id=?)';
     const results = await c.env.DB.batch([
       c.env.DB.prepare(
@@ -252,11 +239,17 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
         `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
          SELECT ?,?,? ${notLegacy}`,
       ).bind(id, organizationId, JSON.stringify(message), legacyId, organizationId),
-      decisionStatement(c.env.DB, provenance),
     ]);
     if (batchResult(results, 1).meta.changes) queued++;
   }
-  if (filtered.length > 0) await c.env.DB.batch(filtered);
+  if (provenance.length > 0) {
+    try {
+      await c.env.DB.batch(provenance);
+    } catch {
+      // Redacted: counts only. The deliveries above are already durable.
+      log('warn', 'routing_provenance_failed', { records: provenance.length });
+    }
+  }
 
   // The prompt path; the every-minute reconciler is the recovery path (F174). Both are
   // safe together because each row's claim is atomic (F172).

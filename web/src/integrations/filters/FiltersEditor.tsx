@@ -3,12 +3,14 @@ import { Field } from '../../components/form';
 import { t } from '../../i18n';
 import type { MessageId } from '../../i18n';
 import { BOT_MODES } from '../../../../src/routing/filters';
-import type { FilterControl, FilterDraft, FilterErrors } from './model';
+import type { CoverageNotes, FilterControl, FilterDraft, FilterErrors } from './model';
 
 interface FiltersEditorProps {
   readonly draft: FilterDraft;
   readonly errors: FilterErrors;
   readonly onChange: <K extends keyof FilterDraft>(field: K, value: FilterDraft[K]) => void;
+  /** Which selected updates the filters can and cannot read; shown above the controls. */
+  readonly notes?: CoverageNotes;
 }
 
 type ListField = Exclude<keyof FilterDraft, 'bots' | 'skipDrafts'>;
@@ -42,11 +44,22 @@ function LinesField({
   );
 }
 
-function Group({ title, hint, children }: { title: MessageId; hint: MessageId; children: ReactNode }) {
+function Group({
+  title,
+  hint,
+  appliesTo,
+  children,
+}: {
+  title: MessageId;
+  hint: MessageId;
+  appliesTo: MessageId;
+  children: ReactNode;
+}) {
   return (
     <fieldset className="filter-group">
       <legend>{t(title)}</legend>
       <p className="field-hint">{t(hint)}</p>
+      <p className="field-hint filter-applies">{t(appliesTo)}</p>
       {children}
     </fieldset>
   );
@@ -64,10 +77,24 @@ const BOT_LABEL: Readonly<Record<(typeof BOT_MODES)[number], MessageId>> = {
  * are real fieldsets with legends (F220, F221).
  */
 export function FiltersEditor(props: FiltersEditorProps) {
-  const { draft, errors, onChange } = props;
+  const { draft, errors, onChange, notes } = props;
   return (
     <div className="filters-editor">
-      <Group title="filters.branches.title" hint="filters.branches.hint">
+      {notes && notes.blocking.length + notes.warnings.length > 0 && (
+        <div className="filters-notes">
+          {notes.blocking.map((line) => (
+            <p key={line} className="field-error" role="alert">
+              {line}
+            </p>
+          ))}
+          {notes.warnings.map((line) => (
+            <p key={line} className="field-hint" role="status">
+              {line}
+            </p>
+          ))}
+        </div>
+      )}
+      <Group title="filters.branches.title" hint="filters.branches.hint" appliesTo="filters.appliesTo.branch">
         <LinesField
           {...props}
           field="branchAllow"
@@ -76,14 +103,15 @@ export function FiltersEditor(props: FiltersEditorProps) {
         />
         <LinesField {...props} field="branchDeny" label="filters.branchDeny" hint="filters.branchDeny.hint" />
         <p className="field-hint">{t('filters.patternHelp')}</p>
+        <p className="field-hint">{t('filters.caseNote')}</p>
       </Group>
 
-      <Group title="filters.base.title" hint="filters.base.hint">
+      <Group title="filters.base.title" hint="filters.base.hint" appliesTo="filters.appliesTo.base">
         <LinesField {...props} field="baseAllow" label="filters.baseAllow" hint="filters.baseAllow.hint" />
         <LinesField {...props} field="baseDeny" label="filters.baseDeny" hint="filters.baseDeny.hint" />
       </Group>
 
-      <Group title="filters.people.title" hint="filters.people.hint">
+      <Group title="filters.people.title" hint="filters.people.hint" appliesTo="filters.appliesTo.people">
         <fieldset className="filter-bots" aria-describedby={errors.bots ? 'filter-bots-error' : undefined}>
           <legend className="field-label">{t('filters.bots')}</legend>
           {errors.bots && (
@@ -115,7 +143,7 @@ export function FiltersEditor(props: FiltersEditorProps) {
         <LinesField {...props} field="peopleDeny" label="filters.peopleDeny" hint="filters.peopleDeny.hint" />
       </Group>
 
-      <Group title="filters.drafts.title" hint="filters.drafts.hint">
+      <Group title="filters.drafts.title" hint="filters.drafts.hint" appliesTo="filters.appliesTo.drafts">
         <label className="check">
           <input
             type="checkbox"
@@ -126,7 +154,7 @@ export function FiltersEditor(props: FiltersEditorProps) {
         </label>
       </Group>
 
-      <Group title="filters.labels.title" hint="filters.labels.hint">
+      <Group title="filters.labels.title" hint="filters.labels.hint" appliesTo="filters.appliesTo.labels">
         <LinesField
           {...props}
           field="labelsInclude"

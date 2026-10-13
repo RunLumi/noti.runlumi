@@ -2,7 +2,7 @@ import { validateDestinationConfig, type ConfigValidation } from '../connectors/
 import { isGithubEventType, type GithubEventType } from '../connectors/sources/github/catalog';
 import { asRecord } from '../lib/json';
 import type { DestinationKind } from '../pipeline/allowlist';
-import { parseFilters } from '../routing/filter-input';
+import { coverageIssue, parseFilters } from '../routing/filter-input';
 import type { FilterConfig } from '../routing/filters';
 
 /**
@@ -194,6 +194,10 @@ export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationI
   const destination = parseDestination(r.destination, errors);
   const credentials = parseCredentials(r, destination, errors);
   const filters = parseFilterField(r, errors) ?? {};
+  if (eventTypes && errors.length === 0) {
+    const issue = coverageIssue(filters, eventTypes);
+    if (issue) errors.push(issue);
+  }
   if (errors.length || !name || !repo || !eventTypes || !destination || !credentials)
     return { ok: false, errors };
   return {

@@ -107,7 +107,7 @@ export function validateStep(
     case 3:
       return compact({ eventTypes: validateEvents(draft.eventTypes) });
     case 4: {
-      const checked = validateFilterDraft(draft.filters);
+      const checked = validateFilterDraft(draft.filters, draft.eventTypes);
       // The step shows each message beside its control; this carries only "has errors".
       return checked.ok ? {} : { filters: Object.values(checked.errors)[0] ?? t('filters.error.generic') };
     }

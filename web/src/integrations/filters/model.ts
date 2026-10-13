@@ -2,6 +2,7 @@ import { parseFilters, type FilterIssue } from '../../../../src/routing/filter-i
 import {
   EMPTY_FACTS,
   evaluateFilters,
+  filterCoverage,
   FILTER_IDS,
   type BotMode,
   type FilterConfig,
@@ -11,7 +12,7 @@ import {
   type RoutingFacts,
 } from '../../../../src/routing/filters';
 import { t, tp, type MessageId } from '../../i18n';
-import type { GithubEventType } from '../events';
+import { EVENT_LABEL, isGithubEventType, type GithubEventType } from '../events';
 
 /**
  * The dashboard's model of routing filters. The server's own parser and evaluator are imported
@@ -151,13 +152,49 @@ export function nthNonBlankLine(text: string, n: number): number {
   return n + 1;
 }
 
+/** Event labels, comma separated, for a list of catalog event types. */
+function eventNames(types: readonly string[]): string {
+  return types.map((type) => (isGithubEventType(type) ? t(EVENT_LABEL[type]) : type)).join(', ');
+}
+
+export interface CoverageNotes {
+  /** "Only" lists that cannot be enforced on a selected update: saving is refused. */
+  readonly blocking: readonly string[];
+  /** "Never" rules that do not apply to some selected updates: saving is allowed. */
+  readonly warnings: readonly string[];
+}
+
+/** Plain-language coverage notes, from the same rules the API enforces. */
+export function coverageNotes(config: FilterConfig, eventTypes: readonly string[]): CoverageNotes {
+  const { blocking, warnings } = filterCoverage(config, eventTypes);
+  const line =
+    (id: 'filters.coverage.blocking' | 'filters.coverage.warning') => (c: (typeof blocking)[number]) =>
+      t(id, { filter: t(FILTER_NAME[c.filter]), events: eventNames(c.eventTypes) });
+  return {
+    blocking: blocking.map(line('filters.coverage.blocking')),
+    warnings: warnings.map(line('filters.coverage.warning')),
+  };
+}
+
+/** The refusal for events that the saved filters cannot be applied to, or undefined. */
+export function eventsCoverageError(config: FilterConfig, eventTypes: readonly string[]): string | undefined {
+  const { blocking } = filterCoverage(config, eventTypes);
+  return blocking.length
+    ? t('filters.error.coverageEvents', { filters: blocking.map((b) => t(FILTER_NAME[b.filter])).join(', ') })
+    : undefined;
+}
+
 export type FilterValidation =
   | { readonly ok: true; readonly config: FilterConfig }
   | { readonly ok: false; readonly errors: FilterErrors };
 
-export function validateFilterDraft(draft: FilterDraft): FilterValidation {
+export function validateFilterDraft(draft: FilterDraft, eventTypes?: readonly string[]): FilterValidation {
   const parsed = parseFilters(rawFilters(draft));
-  if (parsed.ok) return { ok: true, config: parsed.value };
+  if (parsed.ok) {
+    // The filters must also fit the updates being sent (the API refuses the same combination).
+    const coverage = eventTypes ? coverageNotes(parsed.value, eventTypes).blocking[0] : undefined;
+    return coverage ? { ok: false, errors: { form: coverage } } : { ok: true, config: parsed.value };
+  }
   const errors: FilterErrors = {};
   for (const issue of parsed.errors) {
     const [control, message] = describeIssue(issue, draft);
@@ -171,6 +208,10 @@ export function errorsFromServer(fields: readonly FilterIssue[], draft: FilterDr
   const errors: FilterErrors = {};
   for (const issue of fields) {
     if (!issue.field.startsWith('filters')) continue;
+    if (issue.field === 'filters.coverage') {
+      errors.form ??= issue.message;
+      continue;
+    }
     const [control, message] = describeIssue(issue, draft);
     errors[control] ??= message;
   }
@@ -186,7 +227,8 @@ export function describeFilterCount(config: FilterConfig): string {
   return n === 0 ? t('filters.summary.none') : tp('filters.summary.count', n);
 }
 
-export const FILTER_NAME: Readonly<Record<FilterId, MessageId>> = {
+export const FILTER_NAME: Readonly<Record<FilterId | 'config', MessageId>> = {
+  config: 'filters.name.config',
   branch: 'filters.name.branch',
   baseBranch: 'filters.name.baseBranch',
   actor: 'filters.name.actor',
@@ -194,18 +236,18 @@ export const FILTER_NAME: Readonly<Record<FilterId, MessageId>> = {
   labels: 'filters.name.labels',
 };
 
-export const REASON_TEXT: Readonly<Record<ReasonCode | 'no_filters' | 'config_invalid', MessageId>> = {
+export const REASON_TEXT: Readonly<Record<ReasonCode | 'config_invalid' | 'config_newer', MessageId>> = {
   allowed: 'filters.reason.allowed',
   not_applicable: 'filters.reason.not_applicable',
   not_in_allow_list: 'filters.reason.not_in_allow_list',
   in_deny_list: 'filters.reason.in_deny_list',
-  field_unknown: 'filters.reason.field_unknown',
+  unknown_fact: 'filters.reason.unknown_fact',
   ghost_exempt: 'filters.reason.ghost_exempt',
   draft_excluded: 'filters.reason.draft_excluded',
   bot_excluded: 'filters.reason.bot_excluded',
   not_a_bot: 'filters.reason.not_a_bot',
-  no_filters: 'filters.reason.no_filters',
   config_invalid: 'filters.reason.config_invalid',
+  config_newer: 'filters.reason.config_newer',
 };
 
 /** Sentence for one decision, used by the tester and the recent-decisions list. */
@@ -213,14 +255,15 @@ export function describeDecision(
   decision: Pick<RouteDecision, 'pass' | 'unknown'> & { filterId: string | null; reason: string },
 ): string {
   if (!decision.pass) {
-    const name = FILTER_NAME[decision.filterId as FilterId];
+    const name = FILTER_NAME[decision.filterId as FilterId | 'config'];
     const reason = REASON_TEXT[decision.reason as keyof typeof REASON_TEXT];
     return name && reason
       ? t('filters.result.skipped', { filter: t(name), reason: t(reason) })
       : t('filters.log.skipped');
   }
   if (decision.reason === 'ghost_exempt') return t('filters.result.sentGhost');
-  return decision.unknown ? t('filters.result.sentUnknown') : t('filters.result.sent');
+  if (decision.reason === 'config_newer') return t('filters.reason.config_newer');
+  return t('filters.result.sent');
 }
 
 // --- "Try it" ---------------------------------------------------------------------------
