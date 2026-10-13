@@ -771,7 +771,8 @@ type DestinationSetupState = {
 **Security** — `credential_ref` is the only thing the client ever receives. SSRF validation is a
 **write-time** gate (F96) and re-checked at send time (F91). The credential is never returned
 by any read endpoint, never logged (F12), never included in an error body, and never placed in
-a client-side analytics event. Redirects are `redirect: 'error'`.
+a client-side analytics event. Redirects are never followed (`redirect: 'manual'`, with a 3xx
+treated as a permanent failure; amended 2026-10-13, [ADR 0006](../adr/0006-destination-adapter-contract.md)).
 
 **Tests**
 - `credential_field_is_write_only_and_never_echoed`

@@ -24,9 +24,24 @@ describe('Lark webhook adapter', () => {
     expect(p.sign).toBe(await larkSignature('secret', 123456));
   });
   it('renders a status-aware card', () => {
-    expect(
-      larkCard({ title: 'Failed', url: 'https://github.com/example', status: 'failure' }).header.template,
-    ).toBe('red');
+    const card = larkCard({ title: 'Failed', url: 'https://github.com/example', status: 'failure' });
+    expect(card.header?.template).toBe('red');
+    // Legacy titles keep their original text: no status prefix.
+    expect(card.header?.title.content).toBe('Failed');
+  });
+  it('routes legacy helpers through DLP masking and the byte budget', async () => {
+    const event = {
+      title: 'Fix by jane@example.com',
+      url: 'https://github.com/example',
+      actor: 'call +84 912 345 678',
+      repo: 'x'.repeat(200_000),
+    };
+    const card = JSON.stringify(larkCard(event));
+    expect(card).not.toContain('jane@example.com');
+    expect(card).not.toContain('912 345');
+    const payload = await larkPayload(event, 'secret', 123456000);
+    expect(new TextEncoder().encode(JSON.stringify(payload)).length).toBeLessThanOrEqual(20_000);
+    expect(JSON.stringify(payload)).not.toContain('jane@example.com');
   });
   it('checks Lark response status', () => {
     expect(larkAccepted({ code: 0 })).toBe(true);
