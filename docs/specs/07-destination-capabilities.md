@@ -261,7 +261,7 @@ the same repo would collapse. Never rely on multiple embeds.
 
 ## F96 — Credential validation at write time
 
-**Priority** P0 · **Status** partial — `validateDestinationConfig` + send-time re-check exist; the write path (slice 3) does not call them yet · **Fixes** D9
+**Priority** P0 · **Status** partial — `validateDestinationConfig` + send-time re-check exist; the integrations API (PR #9) still validates with the narrower `src/pipeline/allowlist.ts`, and switching it to `validateDestinationConfig` is pending · **Fixes** D9
 
 **Story** As a security engineer, I want an invalid or malicious destination rejected when it
 is saved, so that a hostile URL is never persisted in the first place.
