@@ -15,6 +15,8 @@ jobs:
         with:
           node-version: '22'
       - run: python3 scripts/test_auth_schema.py
+      # `npm ci` installs exactly the committed lockfile. Never `npm install`: it
+      # re-resolves ranges, so a passing local build would not imply a passing CI build.
       - run: npm ci --no-audit --no-fund
       - run: npm run format:check
       - run: npm run lint
@@ -22,3 +24,6 @@ jobs:
       - run: npm run typecheck:web
       - run: npm run build:web
       - run: npm test
+      # Guards the deployed Worker artifact against the pure-JS scrypt fallback, whose
+      # digest comparison is not constant-time. Must run after install; see the script.
+      - run: npm run verify:worker-bundle

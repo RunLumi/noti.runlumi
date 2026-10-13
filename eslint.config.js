@@ -30,8 +30,9 @@ export default tseslint.config(
   // information. `disableTypeChecked` is the supported way to exempt them without
   // enumerating individual type-aware rules.
   {
-    files: ['**/*.config.ts', 'scripts/**/*.ts'],
+    files: ['**/*.config.ts', 'scripts/**/*.{ts,mjs,js}', '**/*.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: { globals: { ...globals.node } },
   },
 
   // Worker source: the runtime is not a browser, but Web APIs are available.

@@ -1052,6 +1052,9 @@ prohibits; if repository-level latency is ever needed it is hashed first (F196's
 numbers, so that I can tune my setup instead of guessing.
 
 **Acceptance** — the views the dashboard must offer, and the honesty rule each one obeys.
+These are **aggregates**. The per-row screens are F213 (delivery log) and F214 (event log and
+single-event trace), and nothing here replaces them: an aggregate that is not backed by a
+drill-down is a number the user cannot act on.
 
 | View | Shows | Honesty rule |
 | --- | --- | --- |
@@ -1159,7 +1162,7 @@ D1 under the tenant predicate, not from a shared dataset.
 - `views_are_tenant_scoped_and_never_expose_another_workspace`
 - `no_decline_rate_is_claimed_without_an_engagement_signal`
 
-**Deps** — F24, F42, F51, F137, F145, F153, F164, F166, F191, F197.
+**Deps** — F24, F42, F51, F137, F145, F153, F164, F166, F191, F197, F213, F214.
 
 ---
 
@@ -1344,6 +1347,13 @@ that I act on evidence rather than on hunches while a customer's alerts are miss
       staging at least once per release. A runbook that has never been followed is documentation.
 - [ ] The alert table and the runbook are **generated from the same source of truth** as the job
       cadence table (F192), so an alert cannot exist without a runbook entry — a test asserts it.
+- [ ] ⭐ **This runbook is the availability and delivery-loss runbook. Security incidents are a
+      different document.** `15-security-and-compliance.md` F242 owns incident response and
+      disclosure for the four scenarios it defines (cross-tenant exposure, credential compromise,
+      silent delivery loss, degraded availability); F240 owns the security release checklist and
+      F241 the accepted-risk register. The boundary is drawn at the first sign of a security
+      event, not at the first sign of an outage: an entry here may begin *"if you suspect
+      credential exposure, stop and escalate to F242 — do not triage it here."*
 - [ ] Every claim in the runbook about a platform limit cites the URL and read date, as
       `01-platform-runtime.md` requires.
 
@@ -1418,7 +1428,7 @@ administrative surface only.
 - `the_runbook_states_the_at_least_once_delivery_model`
 - `post_incident_template_requires_declaring_what_is_unknown`
 
-**Deps** — F05, F13, F65, F69, F174, F181, F182, F183, F185, F192, F200, F204.
+**Deps** — F05, F13, F65, F69, F174, F181, F182, F183, F185, F192, F200, F204, F240, F241, F242.
 
 ---
 
@@ -1549,7 +1559,7 @@ a normative list; adding an entry is easy, removing one requires an ADR.
 | **Notification quality / relevance score** | Requires a model and a ground truth we do not have. `AGENTS.md`: never silently fabricate event facts. | Nothing. We do not rank our customers' alerts. |
 | **Per-user latency** | We cannot attribute a notification to a reader. We would be measuring Slack's or Lark's read behaviour, not ours. | End-to-end latency per destination and per rule |
 | **Repository-name or actor-login metric dimensions** | `docs/SECURITY.md` prohibits exposing private event data to analytics. A tenant's repository names in our metrics is a disclosure. | Hashed dimensions, where a dimension is genuinely needed |
-| **Token / cost per delivery to a customer** | We do not yet have a per-workspace cost model, and a fabricated number on a pricing page is the single most damaging thing we could do. F233 defines the unit (**messages sent**); the price is undecided. | Nothing, until F233 has a verified cost basis |
+| **Token / cost per delivery to a customer** | We do not yet have a price, and a fabricated number on a pricing page is the single most damaging thing we could do. F253 fixes the billable unit (**one delivered message**); F254 owns the price and is undecided. | Nothing, until F254 has a verified cost basis |
 | **"System uptime" as a percentage** | We can measure our Worker returning 200. We cannot measure whether the customer's notification arrived. Reporting the former under the name "uptime" is the Teams problem again. | Acceptance rate and confirmed-delivery rate, per destination, with their definitions (F197) |
 | **Security incident rate / audit findings** | **No formal security audit has been performed** (`docs/SECURITY.md`). Reporting a security posture we have not assessed would be the most dangerous line in the product. | A link to `docs/SECURITY.md`, which says the same thing |
 | **Competitor / market benchmarks** | We have not run a benchmark. `AGENTS.md` forbids fabricated results. | Nothing. Qualitative competitor claims cite `docs/specs/COMPETITIVE-FEATURE-SET.md` and its URLs. |
@@ -1579,9 +1589,12 @@ that line, it stops being a measurement and becomes a story. The largest entries
 exactly-once, engagement, uptime — are exactly the three that marketing departments ask for and
 that no honest implementation can supply.
 
-The entry on cost-per-delivery is the one that will be tested soonest, since F233 exists. The
-rule is that the *unit* can be defined before the price is, and the price appears on a pricing
-page only when it is real.
+The entry on cost-per-delivery is the one that will be tested soonest, since F253 fixes the
+billable unit. The rule is that the *unit* can be defined before the price is, and the price
+appears on a pricing page only when it is real. (⚠️ `11-grouping-and-noise.md` cites the billing
+feature as **F233**; `15-security-and-compliance.md` uses F233 for *tenant isolation* and
+`16-ai-and-roadmap.md` uses F253/F254 for metering and pricing. **F253** is the current ID; the
+collision should be fixed at the next reindex.)
 
 **Schema**
 
@@ -1592,7 +1605,7 @@ export type RefusedMetric =
   | 'read_by_human' | 'engagement' | 'decline_rate' | 'relevance_score'
   | 'per_user_latency'
   | 'repository_or_actor_metric_dimension'   // SECURITY.md prohibition
-  | 'cost_per_delivery_to_customer'          // F233 defines the unit, not the price
+  | 'cost_per_delivery_to_customer'          // F253 fixes the unit; F254 owns the price
   | 'system_uptime_percentage'
   | 'security_posture' | 'audit_findings'   // no formal audit has been performed
   | 'competitor_benchmark'
@@ -1632,7 +1645,7 @@ prohibition it enforces.
 - `removing_a_refusal_requires_an_adr` (CI check on the spec file)
 - `refusals_are_reviewed_and_the_review_is_recorded`
 
-**Deps** — F185, F188, F197, F198, F199, F233.
+**Deps** — F185, F188, F197, F198, F199, F253, F254.
 
 ---
 

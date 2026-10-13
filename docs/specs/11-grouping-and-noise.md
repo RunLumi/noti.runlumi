@@ -35,7 +35,7 @@ one message bills the customer for 200.
 > Billing on triggers directly punishes exactly the deduplication and digest behaviour this
 > domain exists to provide.
 
-F233 therefore mandates billing on **messages sent**, never on events received or rules
+F253 (and F254) therefore mandate billing on **messages sent**, never on events received or rules
 evaluated. Any pricing model that charges for suppression will make this product worse.
 
 ---
@@ -460,7 +460,7 @@ high-volume destination cannot saturate a channel the team depends on.
       a digest."
 - [ ] Critical events (F148) are exempt from the ceiling.
 - [ ] ⚠️ The ceiling is a **product** policy and is separate from provider rate limits (F187)
-      and from billing counters (F233). Three different things that must not be conflated.
+      and from billing counters (F253). Three different things that must not be conflated.
 
 **Design** — Dropping is always wrong. Every suppression path in this domain routes to
 digest or to a visible "held" state.

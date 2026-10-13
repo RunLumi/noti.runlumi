@@ -25,6 +25,15 @@ filter, summarize" but fails "never silently fabricate" is not this feature.
 does the customer believe, and is the belief visibly attributable to a machine?* If the answer
 involves a sentence, a badge or a "possible" that a human may miss, the design is wrong.
 
+## ID reconciliation
+
+`11-grouping-and-noise.md` twice names **F233** as the feature that "mandates billing on
+messages sent, never on events received or rules evaluated". That ID is outside both of this
+session's ranges. It is **not** silently renumbered here: **F253** is the feature that actually
+defines the billable unit, and this file's Part B preamble restates the finding verbatim. The
+`11` references should be repointed to F253 in a follow-up, or F233 should be retired from `11`
+if it was reserved for something else. Left as-is here rather than guessed at.
+
 ---
 
 # PART A — Optional opt-in AI
@@ -62,7 +71,7 @@ notifications never change because a model decided to.
 - [ ] **AI is disabled by default at every level** — workspace, integration, per-destination.
       There is no trial, no beta cohort auto-enrolment and no "AI-assisted" preset.
 - [ ] ⭐ **The deterministic path is executed unconditionally and first.** The canonical event
-      is verified (F058), normalized (F062), rendered (F091) and durably accepted (F169) with
+      is verified (F58), normalized (F62), rendered (F91) and durably accepted (F169) with
       **no model involvement**. The AI stage is a later, optional, separately-queued stage that
       consumes an already-recorded delivery. If F243 were reverted entirely, the product would
       behave identically minus three optional lines — and that must be verifiable by a test.
@@ -83,7 +92,7 @@ notifications never change because a model decided to.
       disabled, or when its budget is exhausted.
 - [ ] ⭐ **A single feature flag disables all AI in the account**, off the critical path, with
       no redeploy and no customer action — and a tested kill path (F252).
-- [ ] The provider is **pluggable behind an interface** identical in shape to F091's
+- [ ] The provider is **pluggable behind an interface** identical in shape to F91's
       `DestinationAdapter` — `capabilities / validate / render / send / classifyError` — so the
       AI stage is testable with a fake provider and the production provider is swappable. ⚠️ The
       provider choice, model ids, token prices and rate limits are an ADR with numbers read at
@@ -106,7 +115,7 @@ volume. Both are acceptable. Losing a CI failure is not.
 ```ts
 type AiCapability = 'summarize' | 'filter_assist' | 'explain';
 
-interface AiProvider {                       // mirrors DestinationAdapter (F091)
+interface AiProvider {                       // mirrors DestinationAdapter (F91)
   readonly id: string;
   readonly adapterVersion: string;
   capabilities(): { max_input_bytes: number; max_output_tokens: number;
@@ -147,7 +156,7 @@ the consent in F246 explicitly scopes.
 - `provider_is_swappable_behind_a_fake_in_tests`
 - `disabling_all_ai_is_a_runtime_flag_not_a_redeploy`
 
-**Deps** — F169, F091, F222, F252. **Authorised by** — nothing yet; see the file header.
+**Deps** — F169, F91, F222, F252. **Authorised by** — nothing yet; see the file header.
 
 ---
 
@@ -210,7 +219,8 @@ we invented.
 The refusal to fill gaps is the part that will feel wrong to build. A summary that says
 *"a build failed"* is more useful than one that says *"a workflow run completed with conclusion
 failure (actor unknown)"*. We accept the less pleasant output, because a notification product
-that invents an actor will, exactly once, tell someone the wrong person broke the release.
+that invents an actor will, on some Tuesday, tell the wrong person that they broke the
+release.
 
 **Schema**
 
@@ -241,9 +251,9 @@ type RenderedField =
 | Provenance lost on a stored delivery | Delivery detail shows the message with its class map; missing class renders as `unknown`, never as `source_field` |
 
 **Security** — AI text is **rendered as text**, escaped with the same per-destination escaping as
-any other string (F094). It never reaches a URL, a mention context, an interactive payload or an
+any other string (F94). It never reaches a URL, a mention context, an interactive payload or an
 `allowed_mentions` decision. A PR titled `@here fix login` summarised by a model must still not
-ping anyone — the summariser does not launder F094's protection.
+ping anyone — the summariser does not launder F94's protection.
 
 **Tests**
 - `ai_text_cannot_occupy_a_source_field_slot`
@@ -255,7 +265,7 @@ ping anyone — the summariser does not launder F094's protection.
 - `ai_text_is_escaped_per_destination_and_cannot_trigger_mentions`
 - `copy_test_rejects_strings_readable_as_source_facts`
 
-**Deps** — F041, F043, F094, F095, F244 (self), F220.
+**Deps** — F41, F43, F94, F95, F244 (self), F220.
 
 ---
 
@@ -276,7 +286,7 @@ differently from the facts beside it.
       block, the Lark card, the Teams Adaptive Card and the dashboard event detail. If a
       destination cannot render the label as text, **the AI line is dropped** — an unlabelled AI
       sentence in a customer channel is exactly the failure this feature exists to prevent.
-- [ ] Destination-specific presentation, capability-gated (F092/F093), never silent:
+- [ ] Destination-specific presentation, capability-gated (F92/F93), never silent:
       | Destination | Presentation |
       |---|---|
       | Slack | `_Written by AI:_ <line>` inside the block, with the label inside the **top-level `text`** so screen readers reach it |
@@ -342,7 +352,7 @@ it cannot carry injected content. AI text inside it remains escaped (F244).
 - `replayed_message_retains_its_provenance_label`
 - `destination_presentation_matrix_is_tested_for_every_adapter`
 
-**Deps** — F244, F092, F093, F182, F214, F221, F224.
+**Deps** — F244, F92, F93, F182, F214, F221, F224.
 
 ---
 
@@ -442,8 +452,8 @@ type AiConsent = {
 | Provider changed | All consents for the old provider `needs_renewal` |
 | Revoked | Immediate stop; history retained and stated |
 
-**Security** — Consent is **tenant-scoped on read and write** (F026) and is an append-only row,
-so a revoked consent is never deleted (F222/F030). The AI prompt builder is a **whitelist
+**Security** — Consent is **tenant-scoped on read and write** (F26) and is an append-only row,
+so a revoked consent is never deleted (F222/F30). The AI prompt builder is a **whitelist
 serialiser**: it physically cannot serialise a field not on the allow-list, so a future
 developer adding a field to the envelope cannot leak it by forgetting the prompt. Destination
 credentials, user emails, session material, internal ids, tokens, webhook URLs and raw payload
@@ -460,7 +470,7 @@ bytes are on a hard deny-list in addition to the allow-list.
 - `credentials_and_identifiers_are_on_the_deny_list_and_never_serialised`
 - `consent_is_checked_in_the_same_commit_as_the_send`
 
-**Deps** — F244, F222, F026, F030, F249.
+**Deps** — F244, F222, F26, F30, F249.
 
 ---
 
@@ -568,7 +578,7 @@ CREATE INDEX ix_ai_cost_org_period ON ai_cost_ledger(org_id, occurred_at);
 | Month rolls over | Budget resets; `needs_renewal` consents still block AI |
 
 **Security** — The cap is enforced in **D1, transactionally**, so it cannot be bypassed by a
-crash, a retry or a second consumer. Cost rows are tenant-scoped (F026) and append-only. The
+crash, a retry or a second consumer. Cost rows are tenant-scoped (F26) and append-only. The
 cap state is visible to **workspace admins only** and is itself audited when changed (F222).
 The customer-facing figure is computed from `billed_to_customer = 1` rows only, so our own
 absorbed cost never appears as their spend.
@@ -584,7 +594,7 @@ absorbed cost never appears as their spend.
 - `cost_projection_states_its_window_and_is_labelled_a_projection`
 - `budget_reads_and_writes_are_tenant_scoped`
 
-**Deps** — F246, F248, F253, F222, F191, F026.
+**Deps** — F246, F248, F253, F222, F191, F26.
 
 ---
 
@@ -665,12 +675,12 @@ type AiStageOutcome =
 | Provider timeout | `fallback`, `ai_unavailable`, metric, no user-visible message change |
 | Schema validation failure | `fallback`, `ai_invalid_output`, metric |
 | Budget exhausted | `not_attempted`, deterministic path only |
-| Test delivery (F098) | ⚠️ ⭐ **`not_attempted` — AI never runs on a test delivery.** A test message is how the customer verifies the setup; spending money and latency on it is wrong, and its preview would then not match production output, which is worse |
+| Test delivery (F98) | ⚠️ ⭐ **`not_attempted` — AI never runs on a test delivery.** A test message is how the customer verifies the setup; spending money and latency on it is wrong, and its preview would then not match production output, which is worse |
 | Replay of a delivery with a stored AI line | The **stored** line is replayed verbatim; no new model call, no new charge |
 
 **Security** — Fallback carries **no** partial or truncated model output: a validation failure
 discards the response entirely rather than shipping a fragment. Provider errors are redacted
-(F012) before storage and never rendered to the user (F220).
+(F12) before storage and never rendered to the user (F220).
 
 **Tests**
 - `delivery_with_provider_always_timing_out_still_reaches_delivered`
@@ -682,7 +692,7 @@ discards the response entirely rather than shipping a fragment. Provider errors 
 - `replay_of_an_ai_annotated_delivery_makes_no_new_provider_call`
 - `provider_outage_is_surfaced_and_never_silently_absorbed`
 
-**Deps** — F243, F247, F252, F098, F191, F012.
+**Deps** — F243, F247, F252, F98, F191, F12.
 
 ---
 
@@ -707,7 +717,7 @@ deliberately place inside a model prompt.**
       All of it reaches the model. The attacker's goals, in order of plausibility: make the
       summary fabricate a fact (F244), make the summary exfiltrate other content via the
       message, make the filter-assist write a rule that suppresses a real event, make the model
-      emit a URL or a mention that fires (F094), or drive unbounded consumption (F247).
+      emit a URL or a mention that fires (F94), or drive unbounded consumption (F247).
 - [ ] **The model has no capabilities.** No tools, no function calling, no retrieval, no HTTP, no
       filesystem, no ability to call our API or any destination. Its entire output surface is a
       validated string we already control (F250). This is the primary control, because it is the
@@ -793,9 +803,9 @@ type AiRequestEnvelope = {
 
 **Security** — This feature *is* the security feature. It is listed under `AGENTS.md`'s
 "explicit schemas at trust boundaries" applied to the model's input and output. Field-level
-escaping reuses F094's per-destination escaping for output, and the prompt serialiser is a
+escaping reuses F94's per-destination escaping for output, and the prompt serialiser is a
 whitelist, not a blacklist. No user content is ever concatenated into an instruction string.
-Provider responses are redacted before storage (F012).
+Provider responses are redacted before storage (F12).
 
 **Tests**
 - `injection_corpus_never_produces_a_fabricated_source_field`
@@ -809,7 +819,7 @@ Provider responses are redacted before storage (F012).
 - `oversized_payload_is_truncated_before_serialisation`
 - `injection_corpus_runs_on_every_prompt_version_and_adapter_change`
 
-**Deps** — F246, F094, F250, F247, F012, F244.
+**Deps** — F246, F94, F250, F247, F12, F244.
 
 ---
 
@@ -838,7 +848,7 @@ Misinformation** (<https://genai.owasp.org/llm-top-10/>).
 | Text | Length-capped, control characters stripped, NFC-normalised, escaped per destination |
 | URL | ⚠️ **Only the canonical URL from the envelope is ever used.** Any URL the model returns is discarded, not sanitised — a model-proposed URL is never trusted, because a sanitised attacker-chosen URL is still an attacker-chosen URL |
 | Numbers | Bounded range; non-numeric discarded |
-| Mentions | ⭐ **The model cannot produce a mention.** No mention syntax is ever passed through (F094's `allowed_mentions` policy is applied identically to AI text) |
+| Mentions | ⭐ **The model cannot produce a mention.** No mention syntax is ever passed through (F94's `allowed_mentions` policy is applied identically to AI text) |
 | Identifiers | Never accepted from the model. Correlation, dedup key and delivery id are ours |
 
 - [ ] **Credential-shaped output is discarded.** A value matching a token/URL pattern
@@ -900,7 +910,7 @@ type AiOutputEnvelope<T> =
 **Security** — The validator runs on the **Worker**, before any downstream consumer. No
 model-derived value reaches a URL, a mention, a destination credential, an action payload or a
 routing expression — the fields that could do damage are simply not in the schema (deny by
-absence, not by check). Validation failure detail is redacted before storage (F012) and never
+absence, not by check). Validation failure detail is redacted before storage (F12) and never
 rendered to the user (F220).
 
 **Tests**
@@ -913,7 +923,7 @@ rendered to the user (F220).
 - `unknown_schema_version_is_discarded_and_raises_a_drift_metric`
 - `capability_is_disabled_when_the_provider_lacks_structured_output`
 
-**Deps** — F244, F245, F249, F248, F191, F012.
+**Deps** — F244, F245, F249, F248, F191, F12.
 
 ---
 
@@ -934,7 +944,7 @@ off, so that an experimental feature cannot degrade the product it sits inside.
       consumes delivery ids from a table that already contains a `sent` delivery. **There is no
       queue message whose payload implies a message has not been sent.**
 - [ ] **The delivery is acknowledged to the destination before the AI stage is enqueued.** GitHub
-      is acknowledged after durable acceptance (F064/F169) regardless of AI. An AI provider
+      is acknowledged after durable acceptance (F64/F169) regardless of AI. An AI provider
       slowdown can never extend a webhook request's `waitUntil` budget or hold an inbound
       Worker invocation open (Cloudflare's wall-clock and CPU limits are per-invocation and
       non-negotiable).
@@ -950,7 +960,7 @@ off, so that an experimental feature cannot degrade the product it sits inside.
       destination configuration.
 - [ ] **The deterministic renderer is the single renderer.** There is no AI-aware renderer
       variant, no "AI summary" rendering mode inside the renderer, and no per-capability branch
-      in `DestinationAdapter.render`. Rendering stays pure and synchronous per F091; enrichment is
+      in `DestinationAdapter.render`. Rendering stays pure and synchronous per F91; enrichment is
       a separate stage with a separate payload.
 - [ ] **Documented blast radius**: a table in this file's design section listing what AI can and
       cannot affect. It can: add a labelled line to a delivered message; populate a dashboard
@@ -992,7 +1002,7 @@ type DeliveryStage = 'verify'|'normalize'|'render'|'durable_accept'|'ai_enrich'|
 
 **Security** — The AI stage runs **after** the message has left, so it holds no destination
 credential and has no capability to send anything. Its only write path is provenance columns on
-an existing row plus `ai_*` tables. Tenant scoping applies to every one of them (F026).
+an existing row plus `ai_*` tables. Tenant scoping applies to every one of them (F26).
 
 **Tests**
 - `send_stage_has_no_dependency_edge_on_any_ai_stage`
@@ -1000,11 +1010,11 @@ an existing row plus `ai_*` tables. Tenant scoping applies to every one of them 
 - `delivery_is_acknowledged_to_github_before_ai_enqueue`
 - `delivery_suite_passes_identically_with_a_failing_slow_and_garbage_provider`
 - `ai_stage_cannot_alter_routing_retry_or_destination_state`
-- `ai_cosid_ledger_is_idempotent_per_delivery_and_capability`
+- `ai_cost_ledger_is_idempotent_per_delivery_and_capability`
 - `load_shedding_leaves_delivery_latency_flat`
 - `build_fails_if_a_send_to_ai_dependency_is_added`
 
-**Deps** — F243, F064, F169, F091, F247.
+**Deps** — F243, F64, F169, F91, F247.
 
 ---
 
@@ -1042,7 +1052,7 @@ can react to a concern without waiting for us.
 - [ ] **No AI state is presented without its disclosure.** A destination that received AI-labelled
       messages shows that fact in the integration's health summary for the retention window, so
       a user auditing "what did this channel receive" finds it.
-- [ ] A customer **data-export includes the AI disclosure records** (F030): what was consented
+- [ ] A customer **data-export includes the AI disclosure records** (F30): what was consented
       to, what was sent, what was generated, what it cost, and when.
 
 **Design** — Two different switches for two different jobs, and conflating them is a real
@@ -1079,9 +1089,9 @@ type AiWorkspaceState = {
 | Re-enable after a prompt/field version change | Consents marked `needs_renewal`; AI stays off until renewed |
 | Operator switch on | All workspaces off; each affected workspace's AI panel states why |
 
-**Security** — The workspace switch is owner/admin-only (F024) and audited; the operator switch is
+**Security** — The workspace switch is owner/admin-only (F24) and audited; the operator switch is
 behind a Worker flag with change audit. Neither can be triggered by a member. Neither deletes
-data, so neither is a data-deletion path and both leave the delivery log intact (F030).
+data, so neither is a data-deletion path and both leave the delivery log intact (F30).
 
 **Tests**
 - `kill_switch_disables_every_capability_immediately`
@@ -1093,7 +1103,7 @@ data, so neither is a data-deletion path and both leave the delivery log intact 
 - `every_ai_toggle_writes_an_audit_row`
 - `export_includes_ai_consent_generation_and_cost_records`
 
-**Deps** — F246, F247, F248, F222, F030, F024.
+**Deps** — F246, F247, F248, F222, F30, F24.
 
 ---
 
@@ -1126,7 +1136,7 @@ events received, rules evaluated, or steps executed.**
 
 ## F253 — Usage metering on messages sent
 
-**Priority** P2 · **Status** not started · **Mandated by `11-grouping-and-noise.md` as F233**
+**Priority** P2 · **Status** not started · **Mandated by `11-grouping-and-noise.md`** (that file previously cited a stale `F233`, now corrected to point here)
 
 **Story** As a customer, I want to be charged for notifications I actually receive, so that
 reducing my own noise reduces my bill instead of increasing it.
@@ -1157,7 +1167,7 @@ type BillableUnit = {
 | Grouped events beyond the first (F141/F143) | The digest's entire value |
 | Quiet-hours holds (F146) | A deferral, not a send |
 | `dead_lettered` and `failed` deliveries | We did not deliver them; billing for them is billing for our failure |
-| **Test deliveries** (F098) | Free, always, so setup costs nothing |
+| **Test deliveries** (F98) | Free, always, so setup costs nothing |
 | **AI requests** (F247) | A separate meter; never folded in |
 
 - [ ] ⭐ **Retries count once, ever.** A delivery that failed five times and succeeded on the
@@ -1172,7 +1182,7 @@ type BillableUnit = {
 - [ ] The customer-facing usage view shows **messages sent, suppressed, and failed — with the
       suppressed count stated as a saving**, because in this product suppression is the feature
       and a bill that hides it teaches the wrong lesson.
-- [ ] **Rate limits and quotas** (F022/F189) are also denominated in messages sent, with the
+- [ ] **Rate limits and quotas** (F22/F189) are also denominated in messages sent, with the
       distinction stated: a quota protects us, a bill pays for value.
 - [ ] ⚠️ **Plan-gating core reliability features is forbidden.** Delivery log, dead letters,
       replay, test deliveries and retention are not behind a paywall. Plan-gating core features
@@ -1224,7 +1234,7 @@ CREATE TABLE usage_counters (                    -- derived cache; ledger is tru
 | Period boundary crossed mid-delivery | Billed in the period of `counted_at` (first successful transmission) |
 | Negative adjustment / correction | An explicit `usage_adjustments` row, visible on the invoice, never a silent overwrite |
 
-**Security** — Metering queries are tenant-scoped (F026). **Cross-tenant aggregation for our own
+**Security** — Metering queries are tenant-scoped (F26). **Cross-tenant aggregation for our own
 analytics is forbidden** on event content; only counts are ever aggregated, and only in an
 explicitly internal, access-controlled store. Raw payloads are not part of metering and never
 leave D1.
@@ -1241,7 +1251,7 @@ leave D1.
 - `ai_spend_never_appears_in_the_message_meter`
 - `delivery_log_features_are_not_plan_gated`
 
-**Deps** — F184, F186, F141, F144, F146, F098, F190, F022.
+**Deps** — F184, F186, F141, F144, F146, F98, F190, F22.
 
 ---
 
@@ -1274,7 +1284,7 @@ talking to sales.
 - [ ] **Overage is opt-in and visible**, never a surprise: a hard cap by default, an explicit
       toggle for overage, and an alert at 80% and 100% of the allowance.
 - [ ] **Self-serve, including downgrade and cancellation**, with data export first
-      (F030). Cancel does not delete; it stops billing and tells the user exactly what they lose
+      (F30). Cancel does not delete; it stops billing and tells the user exactly what they lose
       and for how long.
 - [ ] **No dark patterns.** No pre-selected add-ons, no countdown timers, no "you will lose your
       history" pressure — because F185's honesty standard applies to billing copy too. The
@@ -1285,7 +1295,7 @@ talking to sales.
       dashboard is the fastest route to a dispute.
 - [ ] Billing data is stored separately from event data, is tenant-scoped, and **never joins to
       raw event payloads** — billing needs counts, and a schema that makes a payload join
-      possible is a liability (F030).
+      possible is a liability (F30).
 - [ ] ⚠️ **Payment provider choice is an ADR.** No provider is named in this file.
 
 **Design** — The plans are a consequence of the reliability contract, not a revenue exercise.
@@ -1326,7 +1336,7 @@ type PlanLimits = {
 | Cancellation | Stops billing; preserves data for a stated period; export offered |
 
 **Security** — Billing identity, plan state and invoices are tenant-scoped and stored separately
-from event data (F030). Plan enforcement is **server-side on every metered action**, never a
+from event data (F30). Plan enforcement is **server-side on every metered action**, never a
 client-side flag. Billing webhooks are signature-verified against raw bytes, and an
 unrecognised plan transition is refused rather than applied optimistically.
 
@@ -1340,7 +1350,7 @@ unrecognised plan transition is refused rather than applied optimistically.
 - `billing_webhook_signatures_are_verified_and_unknown_transitions_refused`
 - `ai_cost_never_appears_as_a_message_multiplier`
 
-**Deps** — F253, F030, F180, F185. **Authorised by** — demand evidence; see F262.
+**Deps** — F253, F30, F180, F185. **Authorised by** — demand evidence; see F262.
 
 ---
 
@@ -1369,7 +1379,7 @@ provisioned automatically, so that access is governed centrally.
       admin cannot turn the first one off — that is a governance failure, not a missing feature.
 - [ ] **SCIM 2.0**: user create/update/deactivate and group push, with **deactivation removing
       access within a defined window** and, by default, **suspend rather than delete** — so a
-      audit trail and delivery history survive a person leaving (F030/F222).
+      audit trail and delivery history survive a person leaving (F30/F222).
 - [ ] ⭐ **Just-in-time provisioning is the default**: a new employee authenticated by the IdP
       gets a membership on first sign-in, subject to domain rules and seat limits. The
       alternative — admin-invite-only — is the friction this feature exists to remove.
@@ -1431,7 +1441,7 @@ type ScimProvision = {
 explicit issuer, audience, `NotBefore`/`NotOnOrAfter` and replay-window checks, and XML is
 parsed **without** entity expansion (XXE). OIDC uses PKCE and state/nonce. SCIM bearer tokens are
 hashed at rest, single-workspace, and every SCIM request is tenant-scoped and audited. **Email
-is never an identity key** (F024/F025).
+is never an identity key** (F24/F25).
 
 **Tests**
 - `email_matching_never_auto_links_an_idp_assertion`
@@ -1444,7 +1454,7 @@ is never an identity key** (F024/F025).
 - `last_admin_invariant_holds_under_scim_deprovisioning`
 - `idp_outage_never_falls_back_to_password`
 
-**Deps** — F024, F025, F030, F222, F205, F254.
+**Deps** — F24, F25, F30, F222, F205, F254.
 
 ---
 
@@ -1457,7 +1467,7 @@ notifications without being able to read everyone's or delete a workspace.
 
 **Acceptance**
 
-- [ ] **V1's `owner` / `admin` / `member` (F024) is the floor, not the ceiling.** F182 already
+- [ ] **V1's `owner` / `admin` / `member` (F24) is the floor, not the ceiling.** F182 already
       requires a `replay` capability distinct from membership, which is the seed of the real
       model: a **capability** set, not a role hierarchy.
 - [ ] Capabilities are declared, not implied:
@@ -1471,7 +1481,7 @@ type Capability =
   | 'export:generate'           // F257: leaves the tenant boundary
   | 'audit:read'                // F222: sees who did what
   | 'member:invite' | 'member:remove' | 'role:change'
-  | 'workspace:delete'          // F030
+  | 'workspace:delete'          // F30
   | 'ai:enable' | 'ai:budget'   // F246/F247
   | 'billing:manage' | 'plan:change';
 ```
@@ -1488,7 +1498,7 @@ type Capability =
       cannot be reduced below the last-admin invariant.
 - [ ] **Deny wins**: an explicit deny is never overridden by a role grant.
 - [ ] Every capability check is **server-side, on every request**, at the data-access layer and
-      not only in the route (F026). A missing check in one query is a cross-tenant read, and
+      not only in the route (F26). A missing check in one query is a cross-tenant read, and
       F222's existence is the audit that this did not happen.
 - [ ] The **UI mirrors capabilities exactly**: a control the user cannot perform is hidden or
       disabled **with the reason** (F211/F217), so "why can't I do this?" is answerable without
@@ -1559,7 +1569,7 @@ boundary crossing.
 - `every_privileged_mutation_is_audited_with_the_capability_used`
 - `ui_visibility_matches_server_capability_checks`
 
-**Deps** — F024, F026, F155, F182, F222, F217, F254.
+**Deps** — F24, F26, F155, F182, F222, F217, F254.
 
 ---
 
@@ -1589,10 +1599,10 @@ I don't have to check a browser tab to prove who changed what.
 - [ ] `export:generate` is a **separate capability** (F256), audited, rate-limited, and
       notification-generating: an export is sent to the workspace's security contacts.
 - [ ] **The export contains no event payloads.** It is a log of configuration and access actions.
-      A customer who wants event data exports events (F030), on a separate path, with its own
+      A customer who wants event data exports events (F30), on a separate path, with its own
       capability — mixing them would make an audit export a data-exfiltration primitive.
 - [ ] Retention of the export artefact follows the shorter of the signed-URL TTL and the
-      workspace retention policy; deletion is verified by a test (F030).
+      workspace retention policy; deletion is verified by a test (F30).
 - [ ] ⚠️ **A public status/SLI surface is a different feature** and is not bundled here. A
       public delivery-rate page is a trust signal
       (`docs/specs/COMPETITIVE-FEATURE-SET.md`, Courier provider metrics) but it exposes
@@ -1642,7 +1652,7 @@ test. The projection contains no secret and no event payload.
 - `signed_url_is_single_artefact_scoped_and_short_lived`
 - `artefact_deletion_on_expiry_is_verified_by_a_test`
 
-**Deps** — F222, F256, F030, F026.
+**Deps** — F222, F256, F30, F26.
 
 ---
 
@@ -1678,8 +1688,8 @@ deployment-topology decision, and the decision must be made before the product c
       destinations, email, error tracking, and — if enabled — **the AI provider** (F246). This is
       necessary regardless of which option is chosen, and it is the thing enterprise buyers
       actually ask for first.
-- [ ] **Backups and exports inherit the region.** A data export (F030) leaves the region when the
-      customer downloads it, and the UI says so. Retention purges (F051/F192) run **per region**
+- [ ] **Backups and exports inherit the region.** A data export (F30) leaves the region when the
+      customer downloads it, and the UI says so. Retention purges (F51/F192) run **per region**
       and are verifiable.
 - [ ] **If B is chosen**, an additional hard rule: **a workspace's region is immutable after
       creation**, and migration between regions is a deliberate, audited, customer-initiated
@@ -1733,7 +1743,7 @@ engineering behind it — `AGENTS.md` bans exactly this.
 - `retention_purge_runs_and_is_verifiable_per_region`
 - `no_residency_claim_is_published_without_the_verification_test`
 
-**Deps** — F030, F051, F246, F254, F255. **Blocked by** — a verified read of Cloudflare's
+**Deps** — F30, F51, F246, F254, F255. **Blocked by** — a verified read of Cloudflare's
 current D1/Queues regional capabilities.
 
 ---
@@ -1753,7 +1763,7 @@ be entered accidentally.
 - [ ] ⭐ **V1 prohibition, stated as a product constraint not an omission:** there is no
       third-party connector, no community source, and no self-published destination. The
       Integrations catalogue shows only connectors **we** ship and verify (F206).
-- [ ] �️ **Community connectors would be third-party code on our delivery path**, which
+- [ ] ⭐ **Community connectors would be third-party code on our delivery path**, which
       `AGENTS.md` forbids in the strongest available terms ("no arbitrary code execution") and
       which the competitive research independently identifies as the category's most
       complained-about surface: Zapier's Code steps have no first-party troubleshooting
@@ -1763,11 +1773,11 @@ be entered accidentally.
 - [ ] **If a future version permits it**, the non-negotiable preconditions, all of which must
       exist first:
       1. Tenant isolation closed and audited — **D2** (currently the largest gap in the repo).
-      2. A **connector contract conformance suite** (F071) that a third party can run without
+      2. A **connector contract conformance suite** (F71) that a third party can run without
          reading our internals.
       3. An outbound-network policy per connector, because a connector that can fetch anything is
          an SSRF primitive (F102).
-      4. Credential storage and rotation owned by us, never by the connector (F097).
+      4. Credential storage and rotation owned by us, never by the connector (F97).
       5. A review and publishing process with a named reviewer, because *"definition of done for
          a connector"* (`AGENTS.md`: real-provider acceptance evidence, fixture tests, redaction)
          is a **process**, and it is the process — not the code — that makes a connector
@@ -1812,7 +1822,7 @@ contradicts `AGENTS.md` and `docs/SECURITY.md`'s threat model directly.
 - `catalog_lists_only_verified_first_party_connectors`
 - `refusal_of_a_marketplace_request_names_the_generic_webhook_alternative`
 
-**Deps** — F071, F097, F102, F243. **Blocked by** — D2 (tenant isolation).
+**Deps** — F71, F97, F102, F243. **Blocked by** — D2 (tenant isolation).
 
 ---
 
@@ -1848,15 +1858,15 @@ so that I can automate what the dashboard does.
       "public API" for a product whose source is webhooks, and it ships with the product.
 - [ ] ⚠️ **Explicit non-features**, matching `AGENTS.md`: no arbitrary code execution, no
       bidirectional sync, no unrestricted workflow graphs (F167), no user-authored routing DSL.
-      The API exposes a closed event catalog (F042), a closed filter grammar (F161), and a
+      The API exposes a closed event catalog (F42), a closed filter grammar (F161), and a
       closed destination list — **the same constraints the UI has**. An API that can express more
       than the UI is how a product grows a support burden it cannot serve.
 - [ ] **Documented, tested, and generated from the implementation** — the OpenAPI document is
       produced from the same types the router uses, so it cannot drift. Doc examples are executed
       as tests.
-- [ ] Error responses use F013's taxonomy with F220's plain-language messages, so an API client
+- [ ] Error responses use F13's taxonomy with F220's plain-language messages, so an API client
       and a UI user get the same explanation.
-- [ ] No rate-limit or error response ever contains a credential or a webhook URL (F012).
+- [ ] No rate-limit or error response ever contains a credential or a webhook URL (F12).
 
 **Design** — The scope question is "is the API for the target user?" The answer is no, which is
 why it is post-V1: our non-technical user will never call this API, and building it early means
@@ -1891,8 +1901,8 @@ type ApiKey = {
 
 **Security** — Keys are hashed at rest, shown once at creation, scoped to one workspace and an
 explicit capability list. Every request is tenant-scoped first (D2) and capability-checked
-second. Ingress retains signature verification against raw bytes (F058) and a documented content
-cap. No error body, log line or rate-limit header contains a secret (F012).
+second. Ingress retains signature verification against raw bytes (F58) and a documented content
+cap. No error body, log line or rate-limit header contains a secret (F12).
 
 **Tests**
 - `api_keys_are_hashed_scoped_expired_and_rotatable`
@@ -1904,7 +1914,7 @@ cap. No error body, log line or rate-limit header contains a secret (F012).
 - `api_cannot_express_a_capability_the_ui_cannot`
 - `no_response_contains_a_credential_or_webhook_url`
 
-**Deps** — F256, F222, F013, F220, F058, F012, F042. **Authorised by** — F226 + F262.
+**Deps** — F256, F222, F13, F220, F58, F12, F42. **Authorised by** — F226 + F262.
 
 ---
 
@@ -1935,14 +1945,14 @@ catalogue grows only where it is wanted.
       |---|---|
       | Demand | ≥5 workspaces asking, or one contractually committed account. Recorded with names and dates |
       | Provider verification | Official API documentation read and cited, with the date. No memory, no blogs |
-      | Fixture suite | Real captured payloads per event type (F072), including edge and malformed cases |
+      | Fixture suite | Real captured payloads per event type (F72), including edge and malformed cases |
       | Real-tenant acceptance | A real provider account, a real event, a real delivery — with evidence, per `AGENTS.md`'s "definition of done for a connector" |
-      | Failures understood | The provider's documented error surface mapped onto F013, including the permanent-failure cases |
+      | Failures understood | The provider's documented error surface mapped onto F13, including the permanent-failure cases |
       | Rollback rehearsal | Documented, because `AGENTS.md` requires it before a "production-ready" label |
 - [ ] **Ordering rationale, recorded so it is not re-litigated**: GitLab first (same mental
       model as GitHub, same CI/MR vocabulary, cheapest after GitHub); Sentry next (demand-
       validated incident alerting, and it is a **second-class event source** — issues and alerts
-      are genuinely different, which tests the F041 envelope); Stripe next (high business
+      are genuinely different, which tests the F41 envelope); Stripe next (high business
       consequence, high volume, and it forces the volume/retention story); Cloudflare last in
       the first wave (it is adjacent to our own runtime and its event semantics are the least
       conventional). **Destinations follow sources**, per `AGENTS.md`'s wedge, and Discord/Telegram/
@@ -1957,11 +1967,12 @@ catalogue grows only where it is wanted.
 - [ ] ⚠️ **"Planned" is never shown as selectable** (F206). Until a connector passes the gate it
       does not appear in the catalogue — not as a card, not as a badge.
 
-**Design** — The competitor research is explicit that breadth is not the moat: on Zapier, *"the
-'easy thing to code up'… I don't think it does even have a moat"*
-(<https://news.ycombinator.com/item?id=21743609> — ⚠️ HN comment, opinion), and the same file
-records that the complaints about the big platforms are about **onboarding friction and
-trust**, not about connector count. The category's differentiators are setups that work and
+**Design** — The competitor research is explicit that breadth is not the moat. The same
+reference file records, under *"Ecosystem breadth ≠ relevance"* and attributed to an HN comment
+(opinion, <https://zapier.com/blog/n8n-vs-zapier> ⚠️ vendor blog): *"the 'API integration' is
+one of the easiest things to code up… I don't think it does have a moat."* And it records that
+the complaints about the big platforms are about **onboarding friction and trust**, not about
+connector count. The category's differentiators are setups that work and
 failures that are honest — both of which are harder than a 40th integration.
 
 The per-connector cost is also higher than it looks, because `AGENTS.md`'s definition of done
@@ -1981,7 +1992,7 @@ authorises is the checklist.
 | D2 still open | **Blocked.** No second source |
 | Study gate missed | Catalog expansion does not begin (F262) |
 | Connector lacks a real-tenant run | Shipped behind honest labelling at most; **never** claimed as supported |
-| Provider API changes under a shipped connector | F071's fixture suite fails; the connector is flagged for re-verification |
+| Provider API changes under a shipped connector | F71's fixture suite fails; the connector is flagged for re-verification |
 
 **Security** — Each connector re-opens the full trust boundary: an unverified signature, a
 tenant-binding gap or a routing decision taken from a body field is a cross-tenant event. The
@@ -1996,7 +2007,7 @@ catalogue is the product's trust surface and a broken entry is worse than a miss
 - `catalog_shows_only_connectors_that_passed_the_gate`
 - `one_connector_is_in_flight_at_a_time`
 
-**Deps** — F071, F072, F058, F061, F067, F226, F262, **D2**.
+**Deps** — F71, F72, F58, F61, F67, F226, F262, **D2**.
 
 ---
 

@@ -84,8 +84,9 @@ type RoutingRule = {
 - [ ] Write-time validation runs before persistence and rejects: an unauthorized repository
       (F126), an event type outside the catalog, a destination from another org, or a filter
       field that is not in the registry (F125).
-- [ ] The serialized form is the filter-config schema gated by F167; `filter_config_schema_rejects_computed_expressions`
-      is the test that keeps it from drifting.
+- [ ] The serialized form is the filter-config schema gated by F167. The test that keeps it
+      from drifting — `filter_config_schema_rejects_computed_expressions` — is owned by F167 and
+      runs against the schema F123 defines.
 
 **Design** — Today routing is `SELECT * FROM integrations WHERE repo=? AND enabled=1` where
 `repo` is `event.repository.full_name`, an **attacker-supplied request body field**, with no
@@ -335,7 +336,7 @@ this path. That property is the security argument, and it is asserted by a test,
 - `group_match_any_ors_its_conditions`
 - `groups_cannot_nest`
 - `empty_condition_group_is_rejected`
-- `filter_config_schema_rejects_computed_expressions`
+- `filter_group_conditions_accept_only_literals`
 - `condition_bounds_are_enforced_with_named_messages`
 
 **Deps** — F121, F124, F167.
@@ -1598,7 +1599,7 @@ into a support export. Rule names are user text and pass F94 escaping.
 - `a_deleted_rule_still_resolves_in_delivery_history`
 - `trace_contains_no_field_values_or_event_payload`
 
-**Deps** — F09, F94, F149, F164, F181, F184, F195, F202.
+**Deps** — F09, F94, F149, F164, F181, F184, F195, F202, F214.
 
 ---
 
@@ -1730,7 +1731,11 @@ stops an alert I depend on.
       `test = 1`, is **always** accepted regardless of rule state, and is **never** subject to
       filtering — including the critical-event lock, because it is not an event.
 - [ ] A test delivery is visually marked in the destination (F93) and is excluded from every
-      volume count and billing meter (F233 bills on messages sent).
+      volume count and billing meter — F253 makes the billable unit *one delivered message*, and a
+      test delivery is explicitly not one. (⚠️ `11-grouping-and-noise.md` cites this feature as
+      **F233**; `15-security-and-compliance.md` uses F233 for *tenant isolation*, so **F253** is
+      the current billing-meter feature. That numbering collision is unresolved and should be
+      fixed at the next reindex.)
 
 **Versioning and rollback**
 - [ ] Every change is a new version (F122). **Rollback restores a previous version as a new
@@ -1828,7 +1833,7 @@ dialog. Replay and rollback both require an explicit capability (F204) and are a
 - `critical_rules_are_exempt_from_the_preview_gate`
 - `simulate_delivery_is_marked_and_excluded_from_volume_counters`
 
-**Deps** — F93, F122, F136, F148, F182, F192, F204, F233.
+**Deps** — F93, F122, F136, F148, F182, F192, F204, F215, F253.
 
 ---
 
@@ -1885,6 +1890,14 @@ optional visual editor. Those are tools for people who already know what they wa
 For the audience in `docs/PRODUCT.md`, the sentence is what makes the whole configuration
 system reachable without documentation, and it is also what makes F167's constraint invisible:
 the user is never offered a language, so they never need one.
+
+**Relationship to the sibling UI features** — this is the **authoring** surface, not the
+onboarding one. F210 is the setup-wizard step and is deliberately preset-led: it leads with
+radio buttons (*"Only things that failed — recommended to start"*) and keeps raw event-type
+selection collapsed and read-only. This feature is what the user arrives at afterwards, once a
+workspace exists and they want something the presets do not cover. Both collapse advanced
+controls by default; neither shows a field path. F215 renders the simulation delivery (F139);
+F221 owns accessibility conformance for the whole surface.
 
 Showing `last-seen` on each event type is the honesty mechanism for the picker. GitHub states
 that it *"continues to add new event types and new actions to existing event types"* (F42), so
@@ -1945,4 +1958,4 @@ credentials are never sent to the browser, in any mode.
 - `no_webhook_url_is_ever_sent_to_the_browser`
 - `builder_does_not_render_json_or_field_paths_by_default`
 
-**Deps** — F24, F42, F92, F98, F121, F125, F131, F132, F133. **Fixes** part of D12, D16.
+**Deps** — F24, F42, F92, F98, F121, F125, F131, F132, F133, F210, F215, F221. **Fixes** part of D12, D16.
