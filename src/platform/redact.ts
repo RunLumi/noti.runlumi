@@ -109,6 +109,8 @@ const SCRUBBERS: readonly Scrubber[] = [
     /\b(?:gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[a-z]-[a-z0-9-]{4,}|[sr]k_(?:live|test)_[a-z0-9]{8,})/gi,
     REDACTED,
   ],
+  // Webhook signing secrets (Standard Webhooks and Stripe both use the whsec_ prefix).
+  [/\bwhsec_[a-z0-9+/=_-]{8,}/gi, REDACTED],
   [/\b(sha1|sha256|sha512|v1)=[a-f0-9]{16,}/gi, `$1=${REDACTED}`],
   // `"secret": "..."` inside an echoed JSON body (F13: provider bodies echo credentials).
   [/("([^"\\]{1,64})"\s*:\s*)(?:"(?:[^"\\]|\\.)*"|-?\d[\d.eE+-]*)/g, scrubJsonPair],

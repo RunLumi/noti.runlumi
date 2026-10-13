@@ -86,6 +86,11 @@ export const SOURCES = [
   {
     id: 'src_1',
     name: 'CI pipeline',
+    kind: 'generic',
+    authMode: null,
+    livemode: null,
+    droppedEvents: 0,
+    lastDroppedAt: null,
     endpointId: 'ep_abc123',
     endpointUrl: 'https://noti.example.test/webhooks/ep_abc123',
     enabled: true,
@@ -98,6 +103,11 @@ export const SOURCES = [
   {
     id: 'src_2',
     name: 'Billing service',
+    kind: 'generic',
+    authMode: null,
+    livemode: null,
+    droppedEvents: 0,
+    lastDroppedAt: null,
     endpointId: 'ep_def456',
     endpointUrl: 'https://noti.example.test/webhooks/ep_def456',
     enabled: false,

@@ -910,3 +910,45 @@ Found by the accessibility agent while walking the app in a real browser.
 - Covered by `tests/api/workspace-me.test.ts`.
 - Not built: a workspace switcher in the dashboard. Users in several workspaces stay in the
   active one until the switcher ships.
+
+## Slice 10b — GitLab and Stripe sources, Sentry refused (this PR)
+
+**What changed**
+
+- `migrations/0019_provider_sources.sql`: `sources` rebuilt (kind CHECK `generic|gitlab|stripe`,
+  columns `auth_mode`, `livemode`), every column, index and trigger preserved; schema-diff test.
+- `src/connectors/sources/`: `types.ts` (`SourceConnector` contract), `registry.ts`,
+  `provider-route.ts` (`POST /webhooks/<kind>/:endpointId`), `gitlab/` and `stripe/`
+  (verify, map, catalogue, pasted-credential parsing), `text.ts` (display sanitising),
+  `src/lib/timing.ts` (constant-time string compare).
+- `src/api/sources.ts`: kinds, pasted credentials sealed on write and never returned, provider
+  rotate, Sentry refused with the reason. `src/api/integrations.ts` / `integration-input.ts`:
+  `eventTypes` on source integrations validated against the kind's catalogue (GitHub path untouched).
+- Dashboard: kind picker, GitLab auth-mode and Stripe test/live choices, masked credential field,
+  provider guidance, event checkboxes per chat, replace-credential dialog; copy in
+  `messages.providers.en.ts`.
+- Docs: ADR 0015, `docs/API.md`, `docs/FRONTEND.md`, spec 06 statuses.
+
+**Verified by**
+
+- `tests/sources/gitlab.test.ts`, `stripe.test.ts`, `provider-api.test.ts`,
+  `tests/migration-0019.test.ts`, `web/src/sources/providers.test.tsx`, and `npm run format &&
+  npm run check` (all green). Signatures are built with `node:crypto`; mapping fixtures are the
+  providers' documented examples. End to end through the real Slack, Lark and Teams adapters over
+  the fake D1.
+- Not verified: any real GitLab or Stripe delivery, real D1 and Queues, the new screens in a browser
+  (desktop, 320 px, keyboard, screen reader, contrast, Vietnamese). UNVERIFIED provider facts are
+  listed in ADR 0015.
+
+**Security review follow-up**: GitLab links restricted to gitlab.com (M1); dropped-event counter,
+migration 0020, card, export, `ingressDropped` in the observability summary (M2); coarse per-endpoint
+limiter before the secret unwrap (L1); unreadable `event_types` delivers nothing (L3); confidential
+issues build no labels (L4); export lists `auth_mode`/`livemode` (L5); `whsec_` scrubber (L6);
+`confirmDowngrade` for GitLab signing token to secret token (L7). Vietnamese copy
+(`messages.providers.vi.ts`) and `useLocale()` added for the rebased i18n/a11y rules; the a11y
+source fixtures carry the new fields. Details: ADR 0015.
+
+**Not done / follow-ups**: see ADR 0015 "Deliberately not done" (GitLab self-managed and the F82
+health model, Stripe thin events, enrichment, semantic dedup and reconciliation, Linear, Cloudflare,
+fixtures captured from real providers, merging the two webhook fan-out paths). Sentry is a
+recorded refusal, not a gap.

@@ -165,6 +165,20 @@ sheet, switch, field, destination-choice and dialog styles and the `validation.t
 | `ConnectChat.tsx`, `connect.ts` | Connect a Lark, Slack or Teams chat to a source; pure validation mirrors `src/api/integration-input.ts` |
 | `Guidance.tsx`, `snippets.ts` | Event format and signing explanation; shell and Node examples that read the secret from `NOTI_SIGNING_SECRET` |
 | `api.ts`, `hooks.ts` | Strict response parsing; mutations that return a secret use `gcTime: 0` and never write the query cache |
+| `providers.ts` | Source kinds, the pasted-credential checks (a parity test asserts they agree with the Worker's `parseSecret`), the event catalogues imported from `src/connectors/sources/*/catalog.ts`, the create body |
+| `ProviderGuidance.tsx` | GitLab and Stripe setup steps: what to paste where, GitLab.com only, auto-disable and push limits, secret-token weakness (shown only in that mode), Stripe test/live and privacy notes |
+
+Provider sources (ADR 0015): the create form starts with a kind picker (your own system, GitLab,
+Stripe). GitLab asks which credential will be pasted (signing token, recommended, or secret
+token, labelled weaker) and Stripe asks test or live; the credential goes in a masked field with
+a statement that it is stored encrypted and never shown again. A provider create or replace shows
+a plain success notice, never a secret reveal; only the generic source reveals a generated secret
+once. The card shows the kind, how GitLab is verified or which Stripe mode it is, and the
+provider guidance instead of the shell and Node examples. "Send these events to a chat" lists the
+kind's event catalogue as checkboxes (none ticked means all). Replace credential (admin) asks for
+the new pasted value. Copy lives in `web/src/i18n/messages.providers.en.ts`, merged into `en`
+like the filters catalogue; every catalogue event type has a label (tested). Not verified: a
+browser, 320 px, keyboard or screen-reader pass of these screens.
 
 Rules this feature adds: the signing secret lives only in component state and is gone on
 dismissal or navigation (no storage, URL, cache or console; a test greps for this); it is never

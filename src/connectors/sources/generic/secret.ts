@@ -89,15 +89,23 @@ export async function sealSourceSecret(
   return { keySalt: salt, dekWrapped: wrapped, kekVersion: m.kekVersion, secretEnvelope: sealed };
 }
 
+/**
+ * Open the sealed secret as the text that was sealed. Provider sources (GitLab, Stripe) store
+ * the credential exactly as the person pasted it. Throws CryptoError on any defect.
+ */
+export async function openSourceSecretText(row: SourceCredentialRow, keyring: Keyring): Promise<string> {
+  const dek = await unwrapConnectionKey(keyring, material(row));
+  const envelope = toBytes(row.secret_envelope);
+  if (!envelope) throw new CryptoError('malformed_envelope');
+  return open(dek, envelope, context(row));
+}
+
 /** Open the secret and decode the HMAC key bytes. Throws CryptoError on any defect. */
 export async function openSourceSecret(
   row: SourceCredentialRow,
   keyring: Keyring,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const dek = await unwrapConnectionKey(keyring, material(row));
-  const envelope = toBytes(row.secret_envelope);
-  if (!envelope) throw new CryptoError('malformed_envelope');
-  const secret = await open(dek, envelope, context(row));
+  const secret = await openSourceSecretText(row, keyring);
   if (!secret.startsWith(SECRET_PREFIX)) throw new CryptoError('malformed_envelope');
   const key = fromBase64(secret.slice(SECRET_PREFIX.length));
   if (!key || key.length === 0) throw new CryptoError('malformed_envelope');

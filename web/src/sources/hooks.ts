@@ -25,7 +25,7 @@ export function useSources(orgId: string | null) {
 export function useCreateSource(orgId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => sourcesApi.create(orgId, name),
+    mutationFn: (body: Record<string, unknown>) => sourcesApi.create(orgId, body),
     gcTime: 0,
     onSuccess: () => qc.invalidateQueries({ queryKey: sourceKeys.all(orgId) }),
   });
@@ -34,7 +34,8 @@ export function useCreateSource(orgId: string) {
 export function useRotateSource(orgId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => sourcesApi.rotate(orgId, id),
+    mutationFn: ({ id, body }: { id: string; body?: Record<string, unknown> }) =>
+      sourcesApi.rotate(orgId, id, body),
     gcTime: 0,
     onSuccess: () => qc.invalidateQueries({ queryKey: sourceKeys.all(orgId) }),
   });

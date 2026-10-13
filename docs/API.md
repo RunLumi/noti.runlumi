@@ -225,9 +225,13 @@ workspace's source is `404`.
 type Source = {
   id: string;
   name: string;
-  kind: 'generic';
+  kind: 'generic' | 'gitlab' | 'stripe';
+  authMode: 'signing_token' | 'secret_token' | null; // GitLab only; never the credential
+  livemode: boolean | null;           // Stripe only
+  droppedEvents: number;              // events dropped by the per-source flood limit (GitLab absorbs floods)
+  lastDroppedAt: string | null;
   endpointId: string;                 // public routing id, 24 base64url characters
-  endpointUrl: string;                // APP_ORIGIN + /webhooks/generic/<endpointId>
+  endpointUrl: string;                // APP_ORIGIN + /webhooks/<kind>/<endpointId>
   enabled: boolean;
   createdAt: string; updatedAt: string;
   lastReceivedAt: string | null;      // last accepted, verified event
@@ -242,14 +246,63 @@ type Source = {
 | --- | --- | --- |
 | `GET /api/sources` | | `200 {sources: Source[]}` |
 | `GET /api/sources/:id` | | `200 {source}` |
-| `POST /api/sources` | `{name}` (1–80 characters, no control characters) | `201 {source, secret}`, `Cache-Control: no-store` |
+| `POST /api/sources` | `{name, kind?}` (1–80 characters, no control characters; `kind` defaults to `generic`; GitLab and Stripe take a pasted credential, see [Provider sources](#provider-sources-gitlab-and-stripe)) | `201 {source, secret}` for `generic`, `201 {source}` for a provider; `Cache-Control: no-store` |
 | `PATCH /api/sources/:id` | `{name?, enabled?}` | `200 {source}`; any other field is `422` |
-| `POST /api/sources/:id/rotate` | none | **Admin only** (`source.rotate`). `200 {source, secret}`, `Cache-Control: no-store`; the previous secret is invalid at once. `409` if the source changed while rotating (nothing changed; retry). |
+| `POST /api/sources/:id/rotate` | none for `generic`; the new pasted credential for a provider | **Admin only** (`source.rotate`). `200 {source, secret}` (generic) or `200 {source}` (provider), `Cache-Control: no-store`; the previous secret is invalid at once. `409` if the source changed while rotating (nothing changed; retry). |
 | `DELETE /api/sources/:id[?cascade=true]` | none | **Admin only** (`source.delete`). `204`. A source with connected chats returns `409 {error, integrations: n}` unless `cascade=true`, which also deletes those integrations and their saved webhook URLs. |
 
 `secret` (`whsec_` + base64 of 32 random bytes) is returned **only** by create and rotate and is
 never readable again; it is also absent from the workspace export, which lists sources without
 credential columns. While a workspace deletion is pending, mutations return `409`.
+
+### Provider sources (GitLab and Stripe)
+
+Decisions: [ADR 0015](adr/0015-provider-sources.md). GitLab and Stripe generate their own secret,
+so it is **pasted**, sealed on write and never returned by any response, list, export, audit entry
+or log; validation messages never echo it.
+
+| `kind` | Create body (besides `name`) | Rules |
+| --- | --- | --- |
+| `gitlab` | `authMode: "signing_token" \| "secret_token"`, `secret` | `signing_token`: `whsec_` + base64, as GitLab shows it once. `secret_token`: 8–255 visible ASCII characters without spaces. The mode is chosen, not guessed. |
+| `stripe` | `livemode: boolean`, `secret` | `secret` is the endpoint signing secret (`whsec_...`). Test and live are separate sources. |
+| `sentry` | | `422` on `kind` with the reason: Noti does not offer a Sentry source (ADR 0015, decision 8). |
+
+`POST /api/sources/:id/rotate` for a provider source takes `{secret}` (and `authMode` for GitLab,
+which may move from `secret_token` to `signing_token`; moving from `signing_token` to the weaker
+`secret_token` also needs `confirmDowngrade: true`, otherwise `422` on `confirmDowngrade`). `livemode` cannot change (`422`). Field
+errors are `422 {error, fields: [{field, message}]}`; an unknown `kind` is `422` on `kind`.
+
+**Event selection on integrations.** `POST /api/integrations` with a `sourceId` of a GitLab or
+Stripe source accepts `eventTypes` (a list from the catalogue below; empty or absent means every
+event of the source), and `PATCH` accepts it later. Anything outside the catalogue is `422` on
+`eventTypes`; a generic source has no catalogue and refuses any selection. `repo` and `filters`
+remain `422` for every source integration.
+
+| Kind | Catalogue |
+| --- | --- |
+| `gitlab` | `push`, `tag_push`, `merge_request.opened`, `merge_request.merged`, `merge_request.closed`, `merge_request.reopened`, `issue.opened`, `issue.closed`, `issue.reopened`, `pipeline.failed`, `pipeline.succeeded` |
+| `stripe` | `invoice.payment_failed`, `payment_intent.payment_failed`, `charge.dispute.created`, `charge.dispute.closed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted` |
+
+### Receiving provider events: `POST /webhooks/gitlab/:endpointId`, `POST /webhooks/stripe/:endpointId`
+
+No session. `Content-Type: application/json`; body at most 1 MiB (GitLab) or 512 KiB (Stripe).
+Unknown, malformed, disabled and wrong-kind endpoints all answer one identical `404 Not found`.
+
+| Situation | Answer |
+| --- | --- |
+| Credential missing, wrong, stale or malformed | `401 Unauthorized` (nothing is parsed or routed) |
+| Authentic event, stored | `202 {accepted, persisted}`; `duplicate: true` when the provider id was already accepted |
+| Authentic event Noti does not notify about (type or action outside the catalogue, GitLab merge request update, Stripe thin or Connect event, other livemode) | `200 {accepted: true, ignored: reason}`; nothing is routed |
+| Per-source flood limit (600/min), GitLab | `200 {accepted: false, dropped: "rate_limited"}` (GitLab disables webhooks after repeated 4xx); counted in `droppedEvents` |
+| More than 1200 requests a minute to one endpoint id, before authentication | `429` with `Retry-After` |
+| Per-source flood limit (600/min), Stripe | `429` with `Retry-After` (Stripe retries) |
+| GitLab request from an instance other than `gitlab.com`, or without `X-Gitlab-Event` | `401` / `400` |
+| Verified body that is not a usable event | `400 {error: reason}` |
+
+GitLab verifies `webhook-id`/`webhook-timestamp`/`webhook-signature` (signing token) or
+`X-Gitlab-Token` (secret token) per the source's `authMode`. Stripe verifies
+`Stripe-Signature` (`t=`, `v1=`) with a five minute tolerance. Notifications carry no customer
+personal data.
 
 ### Sending events: `POST /webhooks/generic/:endpointId`
 

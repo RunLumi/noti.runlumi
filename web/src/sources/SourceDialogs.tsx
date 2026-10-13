@@ -1,12 +1,14 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { AlertDialog } from '@base-ui/react/alert-dialog';
 import { IconRefresh, IconTrash } from '@tabler/icons-react';
+import { Field, SecretInput } from '../components/form';
 import { Button, Input, Notice } from '../components/ui';
 import { t, tp } from '../i18n';
-import { describeError } from '../integrations/errors';
+import { describeError, fieldErrorsOf } from '../integrations/errors';
 import type { Source, SourceWithSecret } from './api';
 import { useDeleteSource, useRotateSource } from './hooks';
 import { useLocale } from '../i18n/LocaleProvider';
+import { KIND_LABEL, isProviderKind, validateSecret, type AuthMode } from './providers';
 
 interface DialogProps {
   readonly orgId: string;
@@ -27,7 +29,9 @@ function Failure({ error, title }: { readonly error: unknown; readonly title: st
 
 /**
  * Rotation is immediate and has no overlap, so it is confirmed. Focus starts on the safe
- * choice. The new secret is handed to the parent, which owns the one-time reveal.
+ * choice. A generic source gets a new secret from Noti, which the parent reveals once. A GitLab
+ * or Stripe source asks for the new credential the person created in that provider; it is
+ * sealed on write and never shown again.
  */
 export function RotateDialog({
   orgId,
@@ -37,14 +41,48 @@ export function RotateDialog({
   useLocale();
   const rotate = useRotateSource(orgId);
   const [open, setOpen] = useState(false);
+  const [secret, setSecret] = useState('');
+  const [authMode, setAuthMode] = useState<AuthMode | null>(source.authMode);
+  const [problem, setProblem] = useState<string | undefined>();
+  const [confirmDowngrade, setConfirmDowngrade] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const confirm = async () => {
+  const kind = source.kind;
+  const provider = isProviderKind(kind) ? kind : null;
+  const providerName = t(KIND_LABEL[kind].name);
+  // Moving GitLab from a signing token to a plain secret token weakens it: it must be confirmed.
+  const downgrade = source.authMode === 'signing_token' && authMode === 'secret_token';
+
+  const reset = () => {
+    setSecret('');
+    setAuthMode(source.authMode);
+    setProblem(undefined);
+    setConfirmDowngrade(false);
+    rotate.reset();
+  };
+  const confirm = async (e?: FormEvent) => {
+    e?.preventDefault();
     if (rotate.isPending) return;
+    let body: Record<string, unknown> | undefined;
+    if (provider) {
+      const local = validateSecret(provider, authMode, secret);
+      setProblem(local);
+      if (local) return;
+      if (downgrade && !confirmDowngrade) {
+        setProblem(t('sources.validation.downgrade'));
+        return;
+      }
+      body =
+        provider === 'gitlab'
+          ? { authMode, secret, ...(downgrade ? { confirmDowngrade: true } : {}) }
+          : { secret };
+    }
     try {
-      onRotated(await rotate.mutateAsync(source.id));
+      onRotated(await rotate.mutateAsync({ id: source.id, ...(body ? { body } : {}) }));
       setOpen(false);
-    } catch {
-      // Rendered from `rotate.error`; the dialog stays open and the old secret is unchanged.
+      reset();
+    } catch (failure) {
+      // The dialog stays open and the old credential is unchanged; a field message is shown inline.
+      setProblem(fieldErrorsOf(failure).find((f) => f.field === 'secret')?.message);
     }
   };
   return (
@@ -53,33 +91,97 @@ export function RotateDialog({
       onOpenChange={(next) => {
         if (rotate.isPending) return;
         setOpen(next);
-        if (!next) rotate.reset();
+        if (!next) reset();
       }}
     >
       <AlertDialog.Trigger render={<Button variant="outline" type="button" />}>
         <IconRefresh size={18} aria-hidden="true" />
-        {t('sources.rotate.open')}
+        {t(provider ? 'sources.rotate.provider.open' : 'sources.rotate.open')}
       </AlertDialog.Trigger>
       <AlertDialog.Portal>
         <AlertDialog.Backdrop className="modal-backdrop" />
         <AlertDialog.Popup className="modal delete-dialog" initialFocus={cancelRef}>
           <AlertDialog.Title className="modal-title">
-            {t('sources.rotate.title', { name: source.name })}
+            {t(provider ? 'sources.rotate.provider.title' : 'sources.rotate.title', { name: source.name })}
           </AlertDialog.Title>
-          <AlertDialog.Description>{t('sources.rotate.body')}</AlertDialog.Description>
-          {rotate.isError && <Failure error={rotate.error} title={t('sources.rotate.failed')} />}
-          <div className="form-actions dialog-actions">
-            <AlertDialog.Close render={<Button ref={cancelRef} type="button" variant="outline" />}>
-              {t('sources.rotate.keep')}
-            </AlertDialog.Close>
-            <Button
-              type="button"
-              aria-disabled={rotate.isPending || undefined}
-              onClick={() => void confirm()}
-            >
-              {rotate.isPending ? t('sources.rotate.rotating') : t('sources.rotate.confirm')}
-            </Button>
-          </div>
+          <AlertDialog.Description>
+            {provider
+              ? t('sources.rotate.provider.body', { provider: providerName })
+              : t('sources.rotate.body')}
+          </AlertDialog.Description>
+          <form className="form-stack" noValidate onSubmit={(e) => void confirm(e)}>
+            {provider === 'gitlab' && (
+              <fieldset className="destination-choice">
+                <legend className="field-label">{t('sources.gitlab.auth.legend')}</legend>
+                {(['signing_token', 'secret_token'] as const).map((mode) => (
+                  <label key={mode} className="destination-option">
+                    <input
+                      type="radio"
+                      name={`rotate-auth-${source.id}`}
+                      checked={authMode === mode}
+                      onChange={() => setAuthMode(mode)}
+                    />
+                    <span className="destination-option-body">
+                      <span className="destination-option-name">
+                        {t(
+                          mode === 'signing_token'
+                            ? 'sources.gitlab.auth.signing'
+                            : 'sources.gitlab.auth.secret',
+                        )}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            )}
+            {downgrade && (
+              <label className="destination-option">
+                <input
+                  type="checkbox"
+                  checked={confirmDowngrade}
+                  onChange={(e) => setConfirmDowngrade(e.target.checked)}
+                />
+                <span className="destination-option-body">
+                  <span className="destination-option-name">{t('sources.rotate.downgrade.label')}</span>
+                  <span className="destination-option-where">{t('sources.rotate.downgrade.help')}</span>
+                </span>
+              </label>
+            )}
+            {provider && (
+              <Field
+                label={t(provider === 'gitlab' ? 'sources.paste.gitlab.label' : 'sources.paste.stripe.label')}
+                hint={t('sources.paste.stored')}
+                error={problem}
+              >
+                {(ids) => (
+                  <SecretInput
+                    ids={ids}
+                    fieldName={t(
+                      provider === 'gitlab' ? 'sources.paste.gitlab.label' : 'sources.paste.stripe.label',
+                    )}
+                    value={secret}
+                    onChange={(e) => setSecret(e.target.value)}
+                  />
+                )}
+              </Field>
+            )}
+            {rotate.isError && !problem && (
+              <Failure
+                error={rotate.error}
+                title={t(provider ? 'sources.rotate.provider.failed' : 'sources.rotate.failed')}
+              />
+            )}
+            <div className="form-actions dialog-actions">
+              <AlertDialog.Close render={<Button ref={cancelRef} type="button" variant="outline" />}>
+                {t('sources.rotate.keep')}
+              </AlertDialog.Close>
+              <Button type="submit" aria-disabled={rotate.isPending || undefined}>
+                {rotate.isPending
+                  ? t(provider ? 'sources.rotate.provider.replacing' : 'sources.rotate.rotating')
+                  : t(provider ? 'sources.rotate.provider.confirm' : 'sources.rotate.confirm')}
+              </Button>
+            </div>
+          </form>
         </AlertDialog.Popup>
       </AlertDialog.Portal>
     </AlertDialog.Root>

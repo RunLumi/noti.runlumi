@@ -19,6 +19,8 @@ const row = {
   id: 's1',
   name: 'CI',
   kind: 'generic',
+  authMode: null,
+  livemode: null,
   endpointId: 'AbCdEfGhIjKlMnOpQrStUvWx',
   endpointUrl: URL_,
   enabled: true,
@@ -27,6 +29,8 @@ const row = {
   lastReceivedAt: null,
   secretRotatedAt: null,
   reusedIdRejections: 0,
+  droppedEvents: 0,
+  lastDroppedAt: null,
   integrationCount: 0,
 };
 

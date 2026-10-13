@@ -202,7 +202,8 @@ lifecycle.get('/export', async (c) => {
     // Never the secret, key, salt or envelope: an explicit column list, not SELECT *.
     db
       .prepare(
-        `SELECT id,kind,name,endpoint_id,enabled,created_at,updated_at,last_received_at,secret_rotated_at
+        `SELECT id,kind,name,endpoint_id,auth_mode,livemode,enabled,created_at,updated_at,last_received_at,
+           secret_rotated_at,dropped_events,last_dropped_at
          FROM sources WHERE organization_id=? ORDER BY created_at`,
       )
       .bind(who.orgId),

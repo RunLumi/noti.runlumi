@@ -8,6 +8,8 @@ import { isoOf, type Source, type SourceWithSecret } from './api';
 import { ConnectChat } from './ConnectChat';
 import { CopyButton } from './CopyButton';
 import { Guidance } from './Guidance';
+import { ProviderGuidance } from './ProviderGuidance';
+import { KIND_LABEL, isProviderKind } from './providers';
 import { useToggleSource } from './hooks';
 import { DeleteSourceDialog, RotateDialog } from './SourceDialogs';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -77,6 +79,28 @@ export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProp
         </h3>
       </header>
       <dl className="integration-facts">
+        <div>
+          <dt>{t('sources.card.type')}</dt>
+          <dd>{t(KIND_LABEL[source.kind].name)}</dd>
+        </div>
+        {source.kind === 'gitlab' && source.authMode && (
+          <div>
+            <dt>{t('sources.card.auth')}</dt>
+            <dd>
+              {t(
+                source.authMode === 'signing_token'
+                  ? 'sources.card.auth.signing'
+                  : 'sources.card.auth.secret',
+              )}
+            </dd>
+          </div>
+        )}
+        {source.kind === 'stripe' && source.livemode !== null && (
+          <div>
+            <dt>{t('sources.card.mode')}</dt>
+            <dd>{t(source.livemode ? 'sources.card.mode.live' : 'sources.card.mode.test')}</dd>
+          </div>
+        )}
         <div className="integration-facts-wide">
           <dt>
             <IconLink size={18} aria-hidden="true" />
@@ -127,13 +151,35 @@ export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProp
           </div>
         )}
       </dl>
+      {source.droppedEvents > 0 && (
+        <Notice kind="warning">
+          <p className="notice-title">{tp('sources.card.dropped', source.droppedEvents)}</p>
+          <p>
+            {t('sources.card.droppedHelp')}
+            {source.lastDroppedAt && (
+              <>
+                {' '}
+                <Time iso={isoOf(source.lastDroppedAt)} />
+              </>
+            )}
+          </p>
+        </Notice>
+      )}
       {source.reusedIdRejections > 0 && (
         <Notice kind="warning">
           <p className="notice-title">{tp('sources.card.reused', source.reusedIdRejections)}</p>
           <p>{t('sources.card.reusedHelp')}</p>
         </Notice>
       )}
-      <Guidance endpointUrl={source.endpointUrl} />
+      {isProviderKind(source.kind) ? (
+        <ProviderGuidance
+          kind={source.kind}
+          endpointUrl={source.endpointUrl}
+          weakAuth={source.authMode === 'secret_token'}
+        />
+      ) : (
+        <Guidance endpointUrl={source.endpointUrl} />
+      )}
       <ConnectChat orgId={orgId} source={source} />
       <footer className="integration-card-foot source-actions">
         <ReceivingSwitch orgId={orgId} source={source} />

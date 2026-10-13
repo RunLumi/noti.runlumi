@@ -136,6 +136,8 @@ export interface CreateSourceIntegrationBody {
   readonly destination: DestinationKind;
   readonly webhookUrl: string;
   readonly signingSecret?: string;
+  /** GitLab and Stripe sources: a selection from the source kind's catalogue (empty or absent: all). */
+  readonly eventTypes?: readonly string[];
 }
 
 export interface UpdateIntegrationBody {

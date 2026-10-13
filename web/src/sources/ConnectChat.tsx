@@ -9,6 +9,7 @@ import { fromServer } from '../integrations/validation';
 import { WebhookFields, WebhookGuide } from '../integrations/WebhookFields';
 import type { DestinationKind } from '../lib/api';
 import type { Source } from './api';
+import { eventCatalog, eventLabelId } from './providers';
 import {
   defaultChatName,
   toConnectBody,
@@ -19,7 +20,13 @@ import {
 import { useConnectChat } from './hooks';
 import { useLocale } from '../i18n/LocaleProvider';
 
-const EMPTY = (): ConnectDraft => ({ destination: null, name: '', webhookUrl: '', signingSecret: '' });
+const EMPTY = (): ConnectDraft => ({
+  destination: null,
+  name: '',
+  webhookUrl: '',
+  signingSecret: '',
+  eventTypes: [],
+});
 
 /** Connect one chat to a source: pick the app, paste its webhook URL, name it, done. */
 export function ConnectChat({ orgId, source }: { readonly orgId: string; readonly source: Source }) {
@@ -29,6 +36,15 @@ export function ConnectChat({ orgId, source }: { readonly orgId: string; readonl
   const [draft, setDraft] = useState<ConnectDraft>(EMPTY);
   const [errors, setErrors] = useState<ConnectErrors>({});
   const [done, setDone] = useState<DestinationKind | null>(null);
+  const catalog = eventCatalog(source.kind);
+  const toggleEvent = (type: string) =>
+    setDraft((d) => {
+      const current = d.eventTypes ?? [];
+      return {
+        ...d,
+        eventTypes: current.includes(type) ? current.filter((x) => x !== type) : [...current, type],
+      };
+    });
 
   const pick = (destination: DestinationKind) =>
     setDraft((d) => ({
@@ -104,6 +120,26 @@ export function ConnectChat({ orgId, source }: { readonly orgId: string; readonl
               ))}
             </div>
           </fieldset>
+          {catalog.length > 0 && (
+            <fieldset className="destination-choice">
+              <legend className="field-label">{t('sources.events.legend')}</legend>
+              <p className="field-hint">{t('sources.events.hint')}</p>
+              <div className="destination-options">
+                {catalog.map((type) => (
+                  <label key={type} className="destination-option">
+                    <input
+                      type="checkbox"
+                      checked={(draft.eventTypes ?? []).includes(type)}
+                      onChange={() => toggleEvent(type)}
+                    />
+                    <span className="destination-option-body">
+                      <span className="destination-option-name">{t(eventLabelId(type))}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           {draft.destination && (
             <>
               <WebhookGuide destination={draft.destination} />

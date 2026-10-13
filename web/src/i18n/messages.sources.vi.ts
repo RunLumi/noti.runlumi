@@ -1,4 +1,5 @@
 import type { en, PluralMessage } from './messages.en';
+import type { providersEn } from './messages.providers.en';
 
 /**
  * Vietnamese copy for generic sources (ADR 0012). "Source" is "nguồn"; a connected Lark, Slack
@@ -6,13 +7,16 @@ import type { en, PluralMessage } from './messages.en';
  * (webhook-id, webhook-timestamp, webhook-signature, HTTP 409, Standard Webhooks, HMAC-SHA256,
  * curl, openssl, Node.js, JSON, POST) is left in English exactly as the sender must write it.
  */
-type SourceId = Extract<
-  keyof typeof en,
-  | `sources.${string}`
-  | 'integration.source'
-  | 'integration.source.value'
-  | 'integration.source.manage'
-  | 'settings.details.source'
+type SourceId = Exclude<
+  Extract<
+    keyof typeof en,
+    | `sources.${string}`
+    | 'integration.source'
+    | 'integration.source.value'
+    | 'integration.source.manage'
+    | 'settings.details.source'
+  >,
+  keyof typeof providersEn
 >;
 
 export const sourcesVi = {
