@@ -1143,3 +1143,12 @@ prerender), other signed-in screens under the CSP, and a 320px or keyboard pass 
   queue consumers, `html_handling`/`not_found_handling` `none`, fails in CI if
   `web/dist/server/.dev.vars` exists, and `npm run deploy` strips it first.
 - New explicit items in `RELEASE_GATES.md` section 3 for what is still unverified on a real deployment.
+
+## Dependency deferrals (2026-10-14)
+
+| PR | Package | Decision | Why |
+| --- | --- | --- | --- |
+| #43, #17, #32 | minor/patch groups, GitHub Actions | merged | CI green; pins stay full-SHA / exact |
+| #40 | `@types/node` 22 → 26 | closed, major ignored | types must match the runtime floor (Node 22) |
+| #39 | `jsdom` 29 → 30 | closed, major ignored until 2026-11-01 | 10 days old (< 2 weeks); needs Node ≥22.22 |
+| #38 | `@tanstack/react-table` 8 → 9 | closed, major ignored | breaking API; CI fails; needs a deliberate port |
