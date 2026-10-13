@@ -12,17 +12,28 @@ import { setFetchHandler } from './environment';
 import { AppShell, Overview, Activity, Team, Settings, AuthPage, VerifyPage, ResetPage } from '../../pages';
 import { OnboardingPage, InvitePage } from '../../onboarding';
 import { IntegrationsPage } from '../../integrations/IntegrationsPage';
+import { SourcesPage } from '../../sources/SourcesPage';
 import { CreateWizard } from '../../integrations/wizard/CreateWizard';
 import { IntegrationSettings } from '../../integrations/settings/IntegrationSettings';
 import { validateActivitySearch } from '../../deliveries/search';
 import { LocaleProvider } from '../../i18n/LocaleProvider';
 import { setLocale, type Locale } from '../../i18n/locale';
-import { ADMIN, DELIVERIES, INSTALLATIONS, INTEGRATIONS, MEMBERS, ORG_ID, PASSKEYS } from './fixtures';
+import {
+  ADMIN,
+  DELIVERIES,
+  INSTALLATIONS,
+  INTEGRATIONS,
+  MEMBERS,
+  ORG_ID,
+  PASSKEYS,
+  ROUTING_LOG,
+  SOURCES,
+} from './fixtures';
 import type { Me } from '../../lib/api';
 
 /**
  * The application's route table, mirrored from `web/src/main.tsx` (which builds the router at
- * import time and cannot be imported without mounting the app). `routes.test.tsx` fails if the
+ * import time and cannot be imported without mounting the app). `pages.a11y.test.tsx` fails if the
  * two ever disagree, so a new route cannot ship without being added here and audited.
  */
 export const ROUTE_PATHS = [
@@ -30,6 +41,7 @@ export const ROUTE_PATHS = [
   '/integrations',
   '/integrations/new',
   '/integrations/$id',
+  '/sources',
   '/onboarding',
   '/invite',
   '/activity',
@@ -51,6 +63,7 @@ function buildRouter(initialPath: string) {
     route('/integrations', IntegrationsPage),
     route('/integrations/new', CreateWizard),
     route('/integrations/$id', IntegrationSettings),
+    route('/sources', SourcesPage),
     route('/onboarding', OnboardingPage),
     route('/invite', InvitePage),
     createRoute({
@@ -79,6 +92,7 @@ function buildRouter(initialPath: string) {
 export interface ApiState {
   me: Me | 'unauthenticated';
   integrations: unknown[] | 'error';
+  sources: unknown[] | 'error';
   deliveries: unknown[] | 'error';
   installations: unknown[];
   githubConfigured: boolean;
@@ -90,6 +104,7 @@ export interface ApiState {
 export const defaultApi = (): ApiState => ({
   me: ADMIN,
   integrations: [...INTEGRATIONS],
+  sources: [...SOURCES],
   deliveries: [...DELIVERIES],
   installations: [...INSTALLATIONS],
   githubConfigured: true,
@@ -98,11 +113,15 @@ export const defaultApi = (): ApiState => ({
   deletion: { scheduled: false },
 });
 
+/** A made-up value in the real `whsec_` shape; built at runtime so no literal looks like a credential. */
+const fixtureSecret = () => ['whsec', btoa('fixture-not-a-real-value')].join('_');
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
 /** Requests a test made that no handler answered; asserted empty by the route-coverage test. */
 export const unhandled: string[] = [];
+export const clearUnhandled = () => unhandled.splice(0, unhandled.length);
 
 export function installFetch(state: ApiState): void {
   setFetchHandler((input: RequestInfo | URL, init?: RequestInit) => {
@@ -123,6 +142,12 @@ export function installFetch(state: ApiState): void {
             ? json({ error: 'boom' }, 500)
             : json({ integrations: state.integrations, truncated: false }),
         );
+      if (path === '/api/sources')
+        return Promise.resolve(
+          state.sources === 'error' ? json({ error: 'boom' }, 500) : json({ sources: state.sources }),
+        );
+      if (/^\/api\/integrations\/[^/]+\/routing-log$/.test(path))
+        return Promise.resolve(json({ entries: ROUTING_LOG, nextCursor: null }));
       const one = /^\/api\/integrations\/([^/]+)$/.exec(path);
       if (one && Array.isArray(state.integrations)) {
         const found = (state.integrations as { id: string }[]).find((i) => i.id === one[1]);
@@ -172,6 +197,16 @@ export function installFetch(state: ApiState): void {
       if (path === '/api/workspace/deletion') return Promise.resolve(json(state.deletion));
       if (path.endsWith('/passkey/list-user-passkeys')) return Promise.resolve(json(state.passkeys));
     }
+    if (method === 'POST' && path === '/api/sources')
+      return Promise.resolve(
+        json(
+          {
+            source: { ...SOURCES[1], id: 'src_new', name: 'New source', enabled: true },
+            secret: fixtureSecret(),
+          },
+          201,
+        ),
+      );
     unhandled.push(`${method} ${path}`);
     return Promise.resolve(json({ error: 'not mocked' }, 404));
   });

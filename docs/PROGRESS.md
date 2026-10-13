@@ -618,10 +618,13 @@ Also fixed:
   empty).
 - Layout fixes found in the browser at 1024px and 200% zoom: wizard review rows and
   destination cards.
+- Rebased over routing filters and generic sources: their copy is translated
+  (`messages.filters.vi.ts`, `messages.sources.vi.ts`), `/sources`, the filters editor and the
+  six-step wizard are in the axe and keyboard tests.
 
 **Verified by**
 
-- 183 new tests (1,336 in total), `npm run format && npm run check` green.
+- 197 new tests (1,747 in total on the rebased branch), `npm run format && npm run check` green.
 - A browser pass against `wrangler dev` with local D1 (ADR 0013): axe-core with colour
   contrast on in the page, zero violations on nine screens in English and Vietnamese and with
   a dialog open; keyboard-only sign-in and wizard; 320px with no overflow; emulated 200% zoom;

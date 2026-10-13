@@ -12,6 +12,8 @@ export function routeTitleId(pathname: string): MessageId {
   if (path === '/integrations/new') return 'route.title.integrationNew';
   if (path.startsWith('/integrations/')) return 'route.title.integration';
   switch (path) {
+    case '/sources':
+      return 'sources.title';
     case '/activity':
       return 'route.title.activity';
     case '/team':

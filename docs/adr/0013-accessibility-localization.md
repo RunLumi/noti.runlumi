@@ -155,12 +155,32 @@ onboarding and passkey screens still carried literal English in their components
     stylesheet assertions. The fix lives in the new file to avoid colliding with parallel work
     in `integrations/**`.
 
+## Rebase onto routing filters (ADR 0010) and generic sources (ADR 0012)
+
+Both landed on `main` while this slice was in review, and both added English-only copy. They
+were brought in line here, which is also the intended workflow now: the Vietnamese type check
+and `catalogue.test.ts` fail the moment an English id has no Vietnamese, so whoever merges
+second adds the translation.
+
+- `messages.filters.vi.ts` (about 150 ids) and `messages.sources.vi.ts` (about 100 ids, plus
+  `integration.source*`, `settings.details.source`) mirror their English files; the six-step
+  wizard's `wizard.step.filters` and the "Six short steps" description are translated.
+- The Sources nav entry uses their existing `sources.nav` id, and `/sources` has a page title
+  (`route-titles.ts`), a route in the test harness and axe scenarios (list, empty, error), plus
+  dialog tests: the one-time secret reveal, rotate and delete (focus contract), and the
+  guidance sections open in Vietnamese. Integration settings with saved filters and recent
+  decisions, a source-bound integration, and wizard step 5 (filters) are scanned too.
+- Their code needed no accessibility change. One line of `filters.test.ts` changed its import
+  of `en` (from `messages.en` to `i18n`, because `MessageId` now includes the app ids).
+- `label="filters.branches.title"`-style props carry a catalogue id, not text; the literal
+  scan skips attribute values that are catalogue ids.
+
 ## Verification (2026-10-13)
 
 **Automated.** `npm run format && npm run check` passes: format, lint, type checks, the Worker
-and web tests, web build, Worker bundle guard. 1,336 tests, 183 of them new: catalogue 18,
-hard-coded strings 6, locale 14, contrast 39, stylesheet 29, pages (axe) 50, dialogs (axe) 12,
-keyboard 15. Mutation checks were run on the stylesheet tests (smooth scrolling, a 1px focus ring, a
+and web tests, web build, Worker bundle guard. 1,747 tests on the rebased branch, 197 of them
+this slice's: catalogue 18, hard-coded strings 7, locale 14, contrast 39, stylesheet 29, pages
+(axe) 60, dialogs (axe) 15, keyboard 15. Mutation checks were run on the stylesheet tests (smooth scrolling, a 1px focus ring, a
 renamed `@supports` selector each turned the suite red).
 
 **Browser, against a real local Worker.** `wrangler dev` with local D1 (all migrations), the
@@ -186,13 +206,16 @@ served from `web/public` for the run and removed.
   switch under 44px tall.
 - **200% zoom, emulated** as a 640×400 CSS-pixel viewport (the tool cannot change page zoom):
   the wizard reflows without horizontal scroll and long Vietnamese text wraps.
+- After the rebase the pass was repeated for `/sources` (including the one-time secret reveal
+  and the guidance sections open, in Vietnamese) and the integration settings page with the
+  filters editor: zero axe violations with colour contrast on.
 - **Vietnamese rendering**: tone marks render from the bundled Geist Vietnamese subset
   (screenshots below), including stacked marks in the display heading "Bớt nhiễu. Rõ tín hiệu."
   at line-height 1.14 without clipping.
 
 Screenshots (our own UI, local test data): `docs/screenshots/a11y-vi-signup-desktop.png`,
 `a11y-vi-integration-settings-desktop.png`, `a11y-vi-activity-desktop.png`,
-`a11y-vi-wizard-320.png`, `a11y-vi-wizard-200pct-zoom.png`.
+`a11y-vi-wizard-320.png`, `a11y-vi-wizard-200pct-zoom.png`, `a11y-vi-filters-desktop.png`.
 
 **Found, not fixed here.** `GET /api/workspace/me` returns 403 for a signed-in user with no
 workspace, and the dashboard treats any `/me` error as signed-out, so a brand-new user is sent

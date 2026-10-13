@@ -1,4 +1,6 @@
 import type { en, PluralMessage } from './messages.en';
+import { filtersVi } from './messages.filters.vi';
+import { sourcesVi } from './messages.sources.vi';
 
 /**
  * Vietnamese catalogue for the integrations, delivery-log and workspace screens (F224).
@@ -14,6 +16,9 @@ import type { en, PluralMessage } from './messages.en';
  * `catalogue.test.ts` fails if an id is missing or a `{placeholder}` differs from English.
  */
 export const vi = {
+  ...filtersVi,
+  ...sourcesVi,
+
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'KẾT NỐI',
   'integrations.title': 'Tích hợp',
@@ -114,7 +119,7 @@ export const vi = {
   // --- Wizard -------------------------------------------------------------
   'wizard.eyebrow': 'TÍCH HỢP MỚI',
   'wizard.title': 'Thiết lập một tích hợp',
-  'wizard.description': 'Năm bước ngắn. Chưa có gì được lưu cho đến khi bạn chọn Tạo tích hợp.',
+  'wizard.description': 'Sáu bước ngắn. Chưa có gì được lưu cho đến khi bạn chọn Tạo tích hợp.',
   'wizard.progress': 'Các bước thiết lập',
   'wizard.stepOf': 'Bước {current} trên {total}: {title}',
   'wizard.step.github': 'Kết nối GitHub',
@@ -122,6 +127,7 @@ export const vi = {
   'wizard.step.webhook': 'Dán webhook URL',
   'wizard.step.source': 'Chọn repository',
   'wizard.step.events': 'Chọn nội dung cần gửi',
+  'wizard.step.filters': 'Thêm bộ lọc (không bắt buộc)',
   'wizard.step.review': 'Xem lại và tạo',
   'wizard.back': 'Quay lại',
   'wizard.continue': 'Tiếp tục',

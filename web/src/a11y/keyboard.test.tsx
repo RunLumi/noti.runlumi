@@ -88,12 +88,13 @@ describe('tab order of the shell', () => {
     const user = userEvent.setup();
     await renderApp('/integrations');
     await screen.findByText('Website builds');
-    const order = await tabOrder(user, 10);
-    expect(order.slice(0, 9)).toEqual([
+    const order = await tabOrder(user, 11);
+    expect(order.slice(0, 10)).toEqual([
       'Skip to content',
       'Noti', // logo link back to the overview
       'Overview',
       'Integrations',
+      'Sources',
       'Activity',
       'Team',
       'Settings',

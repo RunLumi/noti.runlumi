@@ -52,9 +52,12 @@ describe('Vietnamese catalogue', () => {
     expect(mismatched).toEqual([]);
   });
 
-  it('has balanced braces: no half-written placeholder', () => {
-    const broken = ids.filter((id) =>
-      Object.values(variants(vi[id])).some((text) => text.replace(/\{\w+\}/g, '').match(/[{}]/)),
+  it('has no stray braces beyond English’s: no half-written placeholder', () => {
+    // A message may legitimately show literal braces (a list of unsupported characters), so
+    // compare with the English text rather than forbidding them.
+    const stray = (text: string) => (text.replace(/\{\w+\}/g, '').match(/[{}]/g) ?? []).length;
+    const broken = ids.filter(
+      (id) => stray(variants(vi[id]).other ?? '') !== stray(variants(en[id]).other ?? ''),
     );
     expect(broken).toEqual([]);
   });

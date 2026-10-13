@@ -73,7 +73,7 @@ Decisions and verification: [ADR 0013](adr/0013-accessibility-localization.md).
 | `i18n/locale.ts`, `LocaleProvider.tsx`, `LocaleSwitcher.tsx` | Active locale (saved choice, `navigator.languages`, English), `<html lang>`, the `<select>` |
 | `i18n/format.ts` | `Intl` dates and relative times in the active locale (numbers: `formatNumber` in `i18n/index.ts`) |
 | `i18n/messages.en.ts`, `messages.app.en.ts` | English source catalogue (two files, merged in `i18n/index.ts`) |
-| `i18n/messages.vi.ts`, `messages.app.vi.ts` | Vietnamese catalogue, typed against English |
+| `i18n/messages.vi.ts`, `messages.app.vi.ts`, `messages.filters.vi.ts`, `messages.sources.vi.ts` | Vietnamese catalogue, typed against English (one file per English file) |
 | `i18n/catalogue*.ts`, `hardcoded-strings.test.ts`, `literal-scan.ts` | Completeness, placeholder, plural and literal-string checks |
 
 Rules for new UI:

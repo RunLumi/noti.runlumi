@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { en } from './index';
 import { isExemptText, scanSource } from './literal-scan';
 
 /**
@@ -47,6 +48,9 @@ describe('hard-coded user-visible strings', () => {
       const rel = relative(SRC, file).split(sep).join('/');
       for (const hit of scanSource(file, readFileSync(file, 'utf8'))) {
         if (`${rel}::${hit.text}` in ALLOWLIST) continue;
+        // A prop such as `label="filters.branches.title"` carries a catalogue id that the
+        // receiving component looks up; it is not display text.
+        if (hit.kind === 'attribute' && hit.text in en) continue;
         offenders.push(`${rel}:${hit.line} [${hit.kind}] ${JSON.stringify(hit.text)}`);
       }
     }
@@ -75,6 +79,13 @@ describe('hard-coded user-visible strings', () => {
         `stale allow-list entry ${key}`,
       ).toBe(true);
     }
+  });
+});
+
+describe('message ids passed as props', () => {
+  it('are recognised by the catalogue, so a mistyped id is not silently skipped', () => {
+    expect('filters.branches.title' in en).toBe(true);
+    expect('filters.branches.titel' in en).toBe(false);
   });
 });
 

@@ -26,11 +26,15 @@ export const NO_WORKSPACE: Me = { user: { ...ADMIN.user, org_id: null, org_name:
 
 const integration = (over: Partial<Integration> & Pick<Integration, 'id' | 'name'>): Integration => ({
   repo: 'acme/website',
+  sourceId: null,
   eventTypes: ['workflow_run.failure', 'workflow_run.timed_out'],
   destination: 'slack',
   destinationHost: 'hooks.slack.com',
   enabled: true,
   credentials: 'ok',
+  filters: {},
+  filtersInvalid: false,
+  filtersNewer: false,
   createdAt: '2026-10-01T09:00:00Z',
   updatedAt: '2026-10-02T09:00:00Z',
   ...over,
@@ -38,6 +42,26 @@ const integration = (over: Partial<Integration> & Pick<Integration, 'id' | 'name
 
 export const INTEGRATIONS: readonly Integration[] = [
   integration({ id: 'int_1', name: 'Website builds' }),
+  integration({
+    id: 'int_4',
+    name: 'Deploy alerts',
+    repo: '',
+    sourceId: 'src_1',
+    eventTypes: [],
+    destination: 'slack',
+    destinationHost: 'hooks.slack.com',
+  }),
+  integration({
+    id: 'int_5',
+    name: 'Filtered pushes',
+    repo: 'acme/web-app',
+    eventTypes: ['push', 'pull_request.opened'],
+    filters: {
+      branch: { allow: ['main', 'release/*'], deny: [] },
+      actor: { allow: [], deny: ['dependabot[bot]'], bots: 'exclude' },
+      draft: 'exclude',
+    },
+  }),
   integration({
     id: 'int_2',
     name: 'API releases',
@@ -57,6 +81,54 @@ export const INTEGRATIONS: readonly Integration[] = [
     eventTypes: ['pull_request_review.submitted'],
   }),
 ];
+
+export const SOURCES = [
+  {
+    id: 'src_1',
+    name: 'CI pipeline',
+    endpointId: 'ep_abc123',
+    endpointUrl: 'https://noti.example.test/webhooks/ep_abc123',
+    enabled: true,
+    createdAt: '2026-10-01 09:00:00',
+    lastReceivedAt: '2026-10-13 07:30:00',
+    secretRotatedAt: null,
+    reusedIdRejections: 2,
+    integrationCount: 1,
+  },
+  {
+    id: 'src_2',
+    name: 'Billing service',
+    endpointId: 'ep_def456',
+    endpointUrl: 'https://noti.example.test/webhooks/ep_def456',
+    enabled: false,
+    createdAt: '2026-10-02 09:00:00',
+    lastReceivedAt: null,
+    secretRotatedAt: '2026-10-05 10:00:00',
+    reusedIdRejections: 0,
+    integrationCount: 0,
+  },
+] as const;
+
+export const ROUTING_LOG = [
+  {
+    id: 'rl_1',
+    eventType: 'push',
+    outcome: 'filtered',
+    filterId: 'branch',
+    reason: 'not_in_allow_list',
+    unknownFact: false,
+    decidedAt: '2026-10-13T08:00:00Z',
+  },
+  {
+    id: 'rl_2',
+    eventType: 'pull_request.opened',
+    outcome: 'delivered',
+    filterId: null,
+    reason: 'allowed',
+    unknownFact: false,
+    decidedAt: '2026-10-13T08:05:00Z',
+  },
+] as const;
 
 export const INSTALLATIONS: readonly GithubInstallation[] = [
   {

@@ -96,6 +96,29 @@ const SCENARIOS: readonly Scenario[] = [
     ready: () => screen.findByRole('heading', { level: 1, name: 'Mobile reviews' }),
   },
   {
+    name: 'integration settings (filters and recent decisions)',
+    path: '/integrations/int_5',
+    ready: () => screen.findByText(/Recent decisions|Các quyết định gần đây/),
+  },
+  {
+    name: 'integration settings (routes from a source)',
+    path: '/integrations/int_4',
+    ready: () => screen.findByRole('heading', { level: 1, name: 'Deploy alerts' }),
+  },
+  { name: 'sources list', path: '/sources', ready: text('CI pipeline') },
+  {
+    name: 'sources empty',
+    path: '/sources',
+    options: { api: { sources: [] } },
+    ready: () => screen.findByRole('heading', { name: /No sources yet|Chưa có nguồn nào/ }),
+  },
+  {
+    name: 'sources error',
+    path: '/sources',
+    options: { api: { sources: 'error' } },
+    ready: () => screen.findByRole('alert'),
+  },
+  {
     name: 'create wizard',
     path: '/integrations/new',
     ready: heading(/Set up an integration|Thiết lập một tích hợp/),

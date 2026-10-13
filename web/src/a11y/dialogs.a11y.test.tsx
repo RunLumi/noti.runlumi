@@ -147,7 +147,7 @@ describe('create-integration wizard', () => {
     const user = userEvent.setup();
     await renderApp('/integrations/new');
     const stepper = await screen.findByRole('navigation', { name: 'Setup steps' });
-    expect(within(stepper).getAllByRole('listitem')).toHaveLength(5);
+    expect(within(stepper).getAllByRole('listitem')).toHaveLength(6);
     expect(stepper.querySelector('ol')).not.toBeNull();
 
     // 1 Repository
@@ -169,7 +169,11 @@ describe('create-integration wizard', () => {
     await screen.findByText(/Updates to send/);
     await expectClean('wizard step 4');
     await next(user);
-    // 5 Review
+    // 5 Filters (optional): editors for five filters plus the "Try it" checker
+    await screen.findByRole('heading', { level: 2, name: /Step 5 of 6/ });
+    await expectClean('wizard step 5 (filters)');
+    await next(user);
+    // 6 Review
     await screen.findByRole('button', { name: /Create integration/ });
     await expectClean('wizard review');
   });
@@ -217,5 +221,64 @@ describe('error and validation states', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     await screen.findByRole('alert');
     await expectClean('sign in with error');
+  });
+});
+
+describe('sources', () => {
+  it('create: shows the one-time secret in an accessible reveal, and the form validates inline', async () => {
+    const user = userEvent.setup();
+    await renderApp('/sources');
+    await screen.findByText('CI pipeline');
+    // Empty name: inline, linked error with focus on the field.
+    await user.click(screen.getByRole('button', { name: 'Create source' }));
+    const field = await screen.findByLabelText('Source name');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(field.getAttribute('aria-invalid')).toBe('true');
+    await expectClean('source create with validation error');
+    // Valid name: the secret is revealed once.
+    await user.type(field, 'New source');
+    await user.click(screen.getByRole('button', { name: 'Create source' }));
+    await screen.findByText(/Signing secret for New source/);
+    await expectClean('one-time secret reveal');
+  });
+
+  it('rotate and delete dialogs follow the focus contract and are accessible', async () => {
+    const user = userEvent.setup();
+    await renderApp('/sources');
+    await screen.findByText('CI pipeline');
+
+    const rotate = screen.getAllByRole('button', { name: /Rotate secret/ })[0];
+    await user.click(rotate);
+    const rotateDialog = await screen.findByRole('alertdialog');
+    await expectClean('rotate dialog');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(rotateDialog).getByRole('button', { name: 'Keep current secret' }),
+      ),
+    );
+    expect(await tabStaysWithin(user, rotateDialog, 6)).toBe(true);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(rotate));
+
+    const remove = screen.getAllByRole('button', { name: /Delete source/ })[0];
+    await user.click(remove);
+    const deleteDialog = await screen.findByRole('alertdialog');
+    await expectClean('delete source dialog');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(deleteDialog).getByRole('button', { name: 'Keep source' })),
+    );
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(remove));
+  });
+
+  it('is accessible in Vietnamese with the guidance and chat sections open', async () => {
+    const user = userEvent.setup();
+    await renderApp('/sources', { locale: 'vi' });
+    await screen.findByText('CI pipeline');
+    for (const summary of screen.getAllByText(/Gửi một sự kiện thử|Gửi các sự kiện này đến một chat/))
+      await user.click(summary);
+    await expectClean('sources with guidance open (vi)');
   });
 });

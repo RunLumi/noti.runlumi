@@ -95,7 +95,7 @@ function ShellContent() {
           {[
             { to: '/', icon: IconLayoutDashboard, label: t('nav.overview') },
             { to: '/integrations', icon: IconWebhook, label: t('nav.integrations') },
-            { to: '/sources', icon: IconPlugConnected, label: t('nav.sources') },
+            { to: '/sources', icon: IconPlugConnected, label: t('sources.nav') },
             { to: '/activity', icon: IconActivity, label: t('nav.activity') },
             { to: '/team', icon: IconUsers, label: t('nav.team') },
             { to: '/settings', icon: IconSettings, label: t('nav.settings') },
