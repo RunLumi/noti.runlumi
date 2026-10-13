@@ -1,5 +1,0 @@
-const te=new TextEncoder();
-export function randomToken(){const b=crypto.getRandomValues(new Uint8Array(32));return [...b].map(v=>v.toString(16).padStart(2,'0')).join('');}
-export async function sha256(value:string){const d=await crypto.subtle.digest('SHA-256',te.encode(value));return [...new Uint8Array(d)].map(v=>v.toString(16).padStart(2,'0')).join('');}
-export async function hashPassword(password:string,salt?:string){const s=salt||randomToken();const key=await crypto.subtle.importKey('raw',te.encode(password),'PBKDF2',false,['deriveBits']);const d=await crypto.subtle.deriveBits({name:'PBKDF2',salt:te.encode(s),iterations:310000,hash:'SHA-256'},key,256);return {salt:s,hash:[...new Uint8Array(d)].map(v=>v.toString(16).padStart(2,'0')).join('')};}
-export async function checkPassword(password:string,salt:string,expected:string){const {hash}=await hashPassword(password,salt);if(hash.length!==expected.length)return false;let n=0;for(let i=0;i<hash.length;i++)n|=hash.charCodeAt(i)^expected.charCodeAt(i);return n===0;}
