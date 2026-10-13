@@ -850,8 +850,11 @@ exhaust a Worker invocation.
 - [ ] Provider response parsing is strict: unknown shapes raise a metric, never a silent
       success.
 
-**Design** — `redirect: 'error'` is already used in `src/index.ts:70`, which is stricter than
-`manual` and correct. Preserve it.
+**Design** — The invariant is *never follow a redirect*. *Amended 2026-10-13 ([ADR 0006](../adr/0006-destination-adapter-contract.md)):* this
+text previously preferred `redirect: 'error'`. Both modes refuse to follow, but `'error'` turns a
+redirect into a network `TypeError` that cannot be told apart from a transient failure. With
+`'manual'`, the 3xx is classified as a permanent `destination_redirected`, matching Stripe's
+"redirects are failures".
 
 **Errors** — a timeout is `destination_timeout`, **transient**.
 

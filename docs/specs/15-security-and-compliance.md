@@ -98,8 +98,10 @@ function in our code, so that we never assume Cloudflare is filtering egress whe
       `sendToDestination(url, body, credentials)`. A static test fails if `fetch(` appears
       anywhere else in `src/` outside a small, explicitly listed set (provider API calls for our
       own control-plane operations, each individually commented).
-- [ ] `redirect: 'error'` on every destination call. Already present at `src/index.ts:70` and
-      correct; F189 generalises it.
+- [ ] No destination call ever follows a redirect. F189 generalises this. *Amended 2026-10-13
+      ([ADR 0006](../adr/0006-destination-adapter-contract.md)):* the control is `redirect: 'manual'`, with any 3xx classified as a permanent
+      `destination_redirected`. It was previously `redirect: 'error'`, which also never follows
+      but is indistinguishable from a network error and would be retried.
 - [ ] The policy decision (F229 allowlist) and the send are the **same function's decision**, not
       two checks in two places. There is no time-of-check/time-of-use window in which a URL passes
       validation and then gets sent somewhere else.

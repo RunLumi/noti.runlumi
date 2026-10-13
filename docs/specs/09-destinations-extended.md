@@ -1089,10 +1089,11 @@ attack our neighbours.
       claiming either that the metadata endpoint is reachable (a real risk) or that it is
       unreachable (a defence we should not rely on without proof). **Assume reachable until
       tested.**
-- [ ] **Redirects are never followed.** `redirect: 'error'` — the same control the current
-      outbound path already uses and worth preserving verbatim (F96). A redirect is the
-      cheapest bypass of every check above, and the customer's own server is what would issue
-      it.
+- [ ] **Redirects are never followed.** The invariant is *never follow a redirect*. A redirect
+      is the cheapest bypass of every check above, and the customer's own server is what would
+      issue it. *Amended 2026-10-13 ([ADR 0006](../adr/0006-destination-adapter-contract.md)):* destination sends use `redirect: 'manual'` and
+      classify any 3xx as a permanent `destination_redirected`. `'error'` also never follows,
+      but it surfaces as an ambiguous network `TypeError` that would be retried.
 - [ ] **DNS resolution is re-checked periodically**, not only at save time, and a hostname
       whose resolution changes into a blocked range **disables the destination** and alerts.
 - [ ] The rejected URL is **never echoed in full** in an error, a log or a support bundle
