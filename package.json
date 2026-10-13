@@ -9,7 +9,8 @@
     "test": "vitest run",
     "dev:web": "vite --config web/vite.config.ts",
     "build:web": "vite build --config web/vite.config.ts",
-    "preview:web": "vite preview --config web/vite.config.ts"
+    "preview:web": "vite preview --config web/vite.config.ts",
+    "typecheck:web": "tsc -p web/tsconfig.json --noEmit"
   },
   "dependencies": {
     "hono": "^4.9.0",
@@ -34,6 +35,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "tailwindcss": "^4.1.0",
-    "@tailwindcss/vite": "^4.1.0"
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^22.15.0"
   }
 }
