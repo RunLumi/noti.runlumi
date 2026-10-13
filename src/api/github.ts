@@ -11,6 +11,7 @@ import {
   type InstallError,
 } from '../connectors/sources/github/install';
 import type { Bindings } from '../env';
+import { isDeletionPending } from './workspace-lifecycle';
 
 /**
  * GitHub connection endpoints (F56, F57, F67; ADR 0008).
@@ -32,7 +33,9 @@ function mayConnect(db: D1Database) {
       .prepare('SELECT role FROM member WHERE organization_id=? AND user_id=?')
       .bind(organizationId, userId)
       .first<{ role: string }>();
-    return row !== null && can(row.role, 'integration.create');
+    return (
+      row !== null && can(row.role, 'integration.create') && !(await isDeletionPending(db, organizationId))
+    );
   };
 }
 
@@ -52,6 +55,8 @@ api.post('/install', async (c) => {
   if (!config) return c.json({ error: 'GitHub App is not configured on this server' }, 503);
   const who = await authorize(c, 'integration.create');
   if (isFailure(who)) return c.json({ error: who.error }, who.status);
+  if (await isDeletionPending(c.env.DB, who.orgId))
+    return c.json({ error: 'This workspace is scheduled for deletion.' }, 409);
   const url = await startInstall(
     c.env.DB,
     config,

@@ -66,9 +66,10 @@ without cross-tenant leaks."** With this setting an agency operator cannot serve
 cap alone would have introduced a tenant leak — see N7 — so the selection rule was rewritten
 in the same change.
 
-### N3 — No self-service workspace deletion ⛔ still open
-`disableOrganizationDeletion: true` with no replacement. Still no path for a customer to
-delete their workspace and its data. Tracked as `02` F30.
+### N3 — No self-service workspace deletion ✅ resolved (PR #12)
+Better Auth's own deletion stays disabled. Noti's two-phase deletion replaces it: an admin
+request soft-stops the workspace, a 7-day cancel window follows, then a cron purge removes
+the data (`src/api/workspace-lifecycle.ts`, `src/pipeline/purge.ts`).
 
 ### N4 — `createAuth()` constructed per request ❌ was a false positive
 `src/auth/workspace.ts` calls `createAuth(c.env, c.executionCtx)` on every request.
@@ -163,7 +164,7 @@ Status as of slice 4 (2026-10-13):
 | D15 | Magic 1 MiB webhook cap | ⬜ unchanged |
 | D16 | Unbounded event-type string space | ✅ closed 18-type catalog; ingress ignores anything else (PR #9) |
 
-New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N6 is resolved; N3 remains open.
+New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N3 and N6 are resolved.
 
 Each item below is reproducible from the code. Severity is our judgement.
 

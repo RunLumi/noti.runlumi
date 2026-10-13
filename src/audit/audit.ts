@@ -14,7 +14,11 @@ export type AuditAction =
   | 'github.installation.bind'
   | 'github.installation.bind_refused'
   | 'github.installation.lifecycle'
-  | 'github.repository.out_of_scope';
+  | 'github.repository.out_of_scope'
+  | 'workspace.export'
+  | 'workspace.deletion.request'
+  | 'workspace.deletion.cancel'
+  | 'workspace.purged';
 
 export type AuditMetadata = Readonly<Record<string, string | number | boolean | null | readonly string[]>>;
 

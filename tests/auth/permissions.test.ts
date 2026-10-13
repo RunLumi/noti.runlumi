@@ -13,6 +13,8 @@ const table: [Capability, admin: boolean, member: boolean][] = [
   ['invitation.create', true, false],
   ['organization.update', true, false],
   ['organization.delete', false, false],
+  ['workspace.export', true, false],
+  ['workspace.delete', true, false],
 ];
 
 describe('domain authorization (F24)', () => {

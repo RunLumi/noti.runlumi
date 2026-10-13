@@ -24,12 +24,13 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 3a | Tenant-scoped integrations API; domain capabilities; audit log; closed GitHub event catalog; write-time allowlist; DB-enforced tenant contract | F24, F26, F28, F61 (catalog), F72 (write-time) | D9, D12, D16, D2 (contract for new writes) | ✅ | #9 |
 | 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ✅ | #11 |
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F11–F13, F170, F172–F180, F182, F184, F189 (partial; see section) | D4, D10, D11 (partial) | 🟡 | #10 |
-| 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
+| 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending) | F91–F104 | D8 | 🟡 | #8 |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
 | 7 | Routing rules and filters | F119–F140 | — | ⬜ | — |
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
 | 9 | Observability and runbook | F191–F204 | — | ⬜ | — |
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
+| W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
 [`specs/00-current-state.md` §5](specs/00-current-state.md#5-non-goals-this-audit-implies).
@@ -419,3 +420,73 @@ All HIGH, MEDIUM and LOW findings are fixed, each with a regression test in
   and a 24 h queue delay maximum.
 
 See [ADR 0005](adr/0005-delivery-reliability.md) §12.
+## Slice W — workspace export and deletion (PR #12)
+
+**What changed**
+
+- `GET /api/workspace/export` (admin) returns a JSON archive: members, integrations,
+  installations, delivery states and the audit log. No credential column is ever selected.
+- `POST /api/workspace/deletion` (admin, confirmed by typing the workspace name):
+  - It disables every integration at once. Nothing is routed or delivered from that moment,
+    and it records which integrations were on.
+  - It blocks new integrations and GitHub installs.
+  - The purge is scheduled 7 days out.
+- `DELETE /api/workspace/deletion` cancels the request and restores exactly the
+  integrations that had been enabled. It is refused once the purge has started.
+- `src/pipeline/purge.ts` runs from cron. It is bounded at 500 rows per table per tick and
+  resumable. It deletes the outbox, delivery and integration rows (deleting the wrapped DEKs
+  crypto-shreds every credential). Then it deletes the organization, which cascades members,
+  invitations, installations, auth states and audit events, and it stamps the ledger.
+- `migrations/0011`:
+  - The `workspace_deletions` ledger. It deliberately has no foreign key, so it can outlive
+    the organization as evidence.
+  - The last-admin trigger is recreated with a single exemption, for a purge in progress.
+    Without that exemption it blocked the cascade.
+- The integrations API's allowlist now delegates to the single strict destination URL policy
+  from ADR 0006: Slack `/services/T…/B…/<token>`, and no fragment or IP literal.
+- `tests/retired-schema.test.ts` fails if any source file references the retired identity
+  tables (F31).
+
+**Verified by** — `tests/api/workspace-lifecycle.test.ts` covers:
+
+- admin-only access;
+- typed confirmation;
+- immediate soft stop and blocked mutations;
+- an exact restore on cancel;
+- a full purge that leaves other tenants intact and keeps the ledger;
+- bounded, resumable ticks;
+- no cancel after the purge starts;
+- the last admin still protected outside a purge;
+- an export with no credential material, scoped to the caller's workspace.
+
+**Review.** A security review found no CRITICAL or HIGH issues. The two races and two
+MEDIUM gaps are fixed with regression tests:
+
+- A cancel racing the purge start. The purge now claims the row with one guarded `UPDATE`
+  and deletes nothing if it loses.
+- A double-click overwriting the restore snapshot. Scheduling is one atomic upsert that also
+  takes the snapshot, and it matches nothing while a request is pending.
+- An unbounded cascade. Audit events, auth states and synced repositories are drained in
+  bounded ticks before the organization is deleted.
+- A cancel batch that could exceed 100 statements. It is now one `json_each` update.
+
+Also fixed:
+
+- The deletion-pending guard now covers integration delete and the GitHub callback.
+- The purge writes a `workspace.purged` audit row with no organization, so the trail survives.
+- The export orders its rows, exports the most recent ones, and reports `truncated` per table
+  (2,000-row cap).
+
+**Known gaps**
+
+- In-flight deliveries for a workspace pending deletion fail permanently
+  (`integration_unavailable`); cancelling does not requeue them.
+- Existing stored Slack URLs that do not match the strict `/services/T…/B…/<token>` shape are
+  rejected at send time as permanent failures. A one-off re-check job that quarantines them
+  visibly is not built.
+- The GitHub installation stays installed on GitHub's side after a purge; admins should
+  uninstall it there.
+- D1 Time Travel keeps restorable history for up to 30 days, so erasure from backups is not
+  faster than that. `SECURITY.md` says so.
+- The dashboard has no deletion or export screen yet.
+- Deleting individual member accounts is Better Auth's job and is not covered here.

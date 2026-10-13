@@ -124,3 +124,14 @@ See [ADR 0008](adr/0008-github-install-verification.md) and [GITHUB_APP.md](GITH
 
 An integration's `repo` must be covered by an active installation in the workspace. Otherwise
 the request gets `422` with a `repo` field error. The stored value uses GitHub's casing.
+
+## Workspace export and deletion (admin)
+
+| Method and path | Capability | Result |
+| --- | --- | --- |
+| `GET /api/workspace/export` | `workspace.export` | `200` JSON attachment, `format: "lumi-noti-export/v1"`, `credentialsIncluded: false`, at most the 2,000 most recent deliveries and audit events (`truncated` says if older rows were left out). The export is audited. |
+| `GET /api/workspace/deletion` | `workspace.delete` | `{scheduled: false}` or `{scheduled: true, requestedAt, purgeAfter, purgeStarted}` |
+| `POST /api/workspace/deletion` | `workspace.delete` | Body `{confirm: "<workspace name>"}`. Returns `202`. Integrations are disabled immediately and the purge runs after 7 days. Returns `422` on a wrong confirmation and `409` if a deletion is already scheduled. |
+| `DELETE /api/workspace/deletion` | `workspace.delete` | Cancels and restores the integrations that were enabled. Returns `409` once the purge has started. |
+
+While a deletion is pending, integration mutations and `POST /api/github/install` return `409`.

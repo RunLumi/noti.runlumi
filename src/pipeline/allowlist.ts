@@ -1,15 +1,13 @@
+import { checkDestinationUrl } from '../connectors/destinations/url-policy';
+
 export type DestinationKind = 'lark' | 'slack';
 
 /**
- * Outbound SSRF guard, applied at write time (D9) and again before every send. The platform
- * does not filter egress, so this allowlist is ours to maintain; `redirect: 'error'` on the
- * fetch is the second half of the control.
+ * Outbound SSRF guard, applied at write time (D9) and again before every send. A thin
+ * adapter over the single destination URL policy (`connectors/destinations/url-policy.ts`,
+ * ADR 0006) so there is exactly one allowlist: https only, documented hosts and path shapes,
+ * no userinfo, port, fragment or IP literal. Sends never follow a redirect.
  */
 export function destinationAllowed(url: URL, destination: DestinationKind): boolean {
-  if (url.protocol !== 'https:') return false;
-  if (url.username || url.password || url.port) return false;
-  return destination === 'slack'
-    ? url.hostname === 'hooks.slack.com' && url.pathname.startsWith('/services/')
-    : ['open.larksuite.com', 'open.feishu.cn'].includes(url.hostname) &&
-        url.pathname.startsWith('/open-apis/bot/v2/hook/');
+  return checkDestinationUrl(destination, url.toString()).ok;
 }

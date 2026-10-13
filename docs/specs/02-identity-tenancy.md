@@ -447,7 +447,7 @@ cannot exhaust our Worker quota.
 
 ## F30 — Workspace deletion and data export
 
-**Priority** P1 · **Status** ❛ blocked by N3
+**Priority** P1 · **Status** ✅ two-phase deletion, bounded purge, credential-free export (PR #12)
 
 **Acceptance**
 - [ ] ⚠️ `disableOrganizationDeletion: true` currently makes this **impossible**. Either
@@ -468,7 +468,7 @@ cannot exhaust our Worker quota.
 
 ## F31 — Retire the superseded identity schema
 
-**Priority** P1 · **Status** ❌ not started · **Decision: documentation only**
+**Priority** P1 · **Status** ✅ 0004 labelled superseded; CI guard against any reference (PR #12) · **Decision: documentation only**
 
 **Acceptance** — per the decision taken 2026-10-13, **no schema change**:
 - [ ] `migrations/0004_identity.sql` gains a header comment naming it **superseded by
