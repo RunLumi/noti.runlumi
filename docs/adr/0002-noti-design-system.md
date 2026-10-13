@@ -31,7 +31,7 @@ real-provider acceptance or production readiness.
 
 ## Verification evidence and remaining limits
 
-Local formatting, lint, Worker/web type checks, the nine provider unit tests,
+Local formatting, lint, Worker/web type checks, the provider unit tests,
 production web build and SQLite auth schema checks passed on 2026-10-13.
 The production build emits the supplied SVG favicon and self-hosted Vietnamese
 and Latin Geist subsets. `.gitignore` checks confirm local environments, Wrangler
