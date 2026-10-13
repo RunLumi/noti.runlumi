@@ -1,5 +1,6 @@
 import type { en, PluralMessage } from './messages.en';
 import { filtersVi } from './messages.filters.vi';
+import { providersVi } from './messages.providers.vi';
 import { sourcesVi } from './messages.sources.vi';
 
 /**
@@ -18,6 +19,7 @@ import { sourcesVi } from './messages.sources.vi';
 export const vi = {
   ...filtersVi,
   ...sourcesVi,
+  ...providersVi,
 
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'KẾT NỐI',

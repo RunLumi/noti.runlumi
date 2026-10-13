@@ -1,7 +1,8 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { connectorFor } from '../../../src/connectors/sources/registry';
-import { en } from '../i18n/messages.en';
+import { en } from '../i18n';
+import { tp } from '../i18n';
 import { ApiError } from '../lib/api';
 import { parseSource, parseSourceWithSecret } from './api';
 import { toConnectBody } from './connect';
@@ -34,6 +35,8 @@ const row = {
   lastReceivedAt: null,
   secretRotatedAt: null,
   reusedIdRejections: 0,
+  droppedEvents: 0,
+  lastDroppedAt: null,
   integrationCount: 0,
 };
 
@@ -135,6 +138,25 @@ describe('API parsing', () => {
     expect(JSON.stringify(provider)).toContain('GitLab');
     expect(JSON.stringify(outcomeOf('rotated', { source: parseSource(row), secret: null }))).toContain(
       'replaced',
+    );
+  });
+});
+
+describe('dropped events', () => {
+  it('reads the counter and refuses a response without it', () => {
+    expect(parseSource({ ...row, droppedEvents: 4, lastDroppedAt: '2026-10-13 12:00:00' })).toMatchObject({
+      droppedEvents: 4,
+      lastDroppedAt: '2026-10-13 12:00:00',
+    });
+    const { droppedEvents: _omit, ...without } = row;
+    void _omit;
+    expect(() => parseSource(without)).toThrow(ApiError);
+  });
+
+  it('the card copy states the count and the cause in both locales', () => {
+    expect(tp('sources.card.dropped', 1)).toContain('1 event was dropped');
+    expect(tp('sources.card.dropped', 3)).toContain(
+      '3 events were dropped because the source exceeded the rate limit',
     );
   });
 });

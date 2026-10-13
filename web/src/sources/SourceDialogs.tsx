@@ -44,15 +44,19 @@ export function RotateDialog({
   const [secret, setSecret] = useState('');
   const [authMode, setAuthMode] = useState<AuthMode | null>(source.authMode);
   const [problem, setProblem] = useState<string | undefined>();
+  const [confirmDowngrade, setConfirmDowngrade] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const kind = source.kind;
   const provider = isProviderKind(kind) ? kind : null;
   const providerName = t(KIND_LABEL[kind].name);
+  // Moving GitLab from a signing token to a plain secret token weakens it: it must be confirmed.
+  const downgrade = source.authMode === 'signing_token' && authMode === 'secret_token';
 
   const reset = () => {
     setSecret('');
     setAuthMode(source.authMode);
     setProblem(undefined);
+    setConfirmDowngrade(false);
     rotate.reset();
   };
   const confirm = async (e?: FormEvent) => {
@@ -63,7 +67,14 @@ export function RotateDialog({
       const local = validateSecret(provider, authMode, secret);
       setProblem(local);
       if (local) return;
-      body = provider === 'gitlab' ? { authMode, secret } : { secret };
+      if (downgrade && !confirmDowngrade) {
+        setProblem(t('sources.validation.downgrade'));
+        return;
+      }
+      body =
+        provider === 'gitlab'
+          ? { authMode, secret, ...(downgrade ? { confirmDowngrade: true } : {}) }
+          : { secret };
     }
     try {
       onRotated(await rotate.mutateAsync({ id: source.id, ...(body ? { body } : {}) }));
@@ -122,6 +133,19 @@ export function RotateDialog({
                   </label>
                 ))}
               </fieldset>
+            )}
+            {downgrade && (
+              <label className="destination-option">
+                <input
+                  type="checkbox"
+                  checked={confirmDowngrade}
+                  onChange={(e) => setConfirmDowngrade(e.target.checked)}
+                />
+                <span className="destination-option-body">
+                  <span className="destination-option-name">{t('sources.rotate.downgrade.label')}</span>
+                  <span className="destination-option-where">{t('sources.rotate.downgrade.help')}</span>
+                </span>
+              </label>
             )}
             {provider && (
               <Field

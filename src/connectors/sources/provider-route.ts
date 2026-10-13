@@ -7,7 +7,7 @@ import type { Bindings, DeliveryMessage } from '../../env';
 import { readBodyCapped } from '../../lib/body';
 import { log } from '../../platform/log';
 import { dispatchOutbox } from '../../pipeline/outbox';
-import { sourceIngressLimiter } from '../../security/rate-limit';
+import { hit, sourceIngressLimiter } from '../../security/rate-limit';
 import { DECOY_MAX_BODY_BYTES } from './generic/route';
 import { openSourceSecretText, type SourceCredentialRow } from './generic/secret';
 import { connectorFor } from './registry';
@@ -39,17 +39,29 @@ function isJson(contentType: string | undefined): boolean {
 
 const notFound = (c: Context<{ Bindings: Bindings }>): Response => c.text('Not found', 404);
 
-/** The stored event types of an integration: empty means "every event the source can send". */
-function subscribed(json: string): ReadonlySet<string> | null {
+/**
+ * The stored event types of an integration. `[]` means "every event the source can send"
+ * (`null`). A value that cannot be read is NOT "everything": it is `'invalid'` and delivers
+ * nothing, so a corrupted selection can never widen what a chat receives.
+ */
+export function subscribed(json: string): ReadonlySet<string> | null | 'invalid' {
   try {
     const parsed: unknown = JSON.parse(json);
-    if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((v) => typeof v === 'string'))
-      return new Set(parsed);
+    if (Array.isArray(parsed) && parsed.every((v): v is string => typeof v === 'string'))
+      return parsed.length === 0 ? null : new Set(parsed);
   } catch {
-    // Unreadable: treated as "no selection", i.e. everything, like a fresh integration.
+    // Falls through to invalid.
   }
-  return null;
+  return 'invalid';
 }
+
+/**
+ * Coarse guard in front of the secret unwrap: one counter per endpoint id, above the post-auth
+ * limit so an honest sender is never near it. It bounds the DEK unwrap and HMAC work an
+ * unauthenticated caller can force. Residual: someone who knows the public endpoint id can fill
+ * it and make the real sender wait (THREAT_MODEL AR-22).
+ */
+export const ENDPOINT_PREAUTH_LIMIT_PER_MINUTE = 1200;
 
 /** Drop empty optional fields so a message never carries `summary: ''`. */
 function toMessage(
@@ -98,6 +110,17 @@ export function providerWebhook(kind: ProviderKind) {
       return notFound(c);
     }
 
+    // A limiter fault must not take ingestion down: it fails open and the post-auth limit still applies.
+    const coarse = await hit(
+      c.env.DB,
+      `ingress:endpoint:${endpointId}`,
+      ENDPOINT_PREAUTH_LIMIT_PER_MINUTE,
+      60_000,
+      nowMs,
+    ).catch(() => null);
+    if (coarse?.limited)
+      return c.text('Too many requests', 429, { 'retry-after': String(coarse.retryAfterSeconds) });
+
     let secret: string;
     try {
       secret = await openSourceSecretText(source, keyringFromEnv(c.env));
@@ -126,6 +149,16 @@ export function providerWebhook(kind: ProviderKind) {
       // Absorb: a 4xx would count toward the provider disabling the webhook. The drop is logged
       // (source id only) and is the documented trade-off of this kind.
       log('warn', 'provider_source_flood_dropped', { source_id: source.id, kind });
+      try {
+        await c.env.DB.prepare(
+          `UPDATE sources SET dropped_events=dropped_events+1,last_dropped_at=CURRENT_TIMESTAMP
+           WHERE id=? AND organization_id=?`,
+        )
+          .bind(source.id, source.organization_id)
+          .run();
+      } catch {
+        // Display-only counter; the drop already happened and is logged.
+      }
       return c.json({ accepted: false, dropped: 'rate_limited' }, 200);
     }
 
@@ -168,6 +201,10 @@ export function providerWebhook(kind: ProviderKind) {
       .all<{ id: string; event_types: string }>();
     const targets = rows.results.filter((row) => {
       const selection = subscribed(row.event_types);
+      if (selection === 'invalid') {
+        log('warn', 'provider_integration_event_types_unreadable', { integration_id: row.id, kind });
+        return false;
+      }
       return (
         selection === null ||
         (mapped.display.eventType !== undefined && selection.has(mapped.display.eventType))

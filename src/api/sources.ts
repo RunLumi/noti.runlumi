@@ -51,11 +51,13 @@ interface SourceRow {
   last_reuse_rejected_at: string | null;
   auth_mode: AuthMode | null;
   livemode: number | null;
+  dropped_events: number;
+  last_dropped_at: string | null;
   integration_count: number;
 }
 
 const SELECT = `s.id,s.name,s.kind,s.endpoint_id,s.enabled,s.created_at,s.updated_at,s.last_received_at,
-  s.secret_rotated_at,s.reused_id_rejections,s.last_reuse_rejected_at,s.auth_mode,s.livemode,
+  s.secret_rotated_at,s.reused_id_rejections,s.last_reuse_rejected_at,s.auth_mode,s.livemode,s.dropped_events,s.last_dropped_at,
   (SELECT COUNT(*) FROM integrations i WHERE i.source_id=s.id AND i.organization_id=s.organization_id) AS integration_count`;
 
 export interface SourceView {
@@ -77,6 +79,9 @@ export interface SourceView {
   readonly authMode: AuthMode | null;
   /** Stripe only: true for live events, false for test events. */
   readonly livemode: boolean | null;
+  /** Events dropped because the source exceeded its rate limit (GitLab flood policy, ADR 0015). */
+  readonly droppedEvents: number;
+  readonly lastDroppedAt: string | null;
   readonly integrationCount: number;
 }
 
@@ -100,6 +105,8 @@ function toView(row: SourceRow, appOrigin: string): SourceView {
     lastReuseRejectedAt: row.last_reuse_rejected_at,
     authMode: row.auth_mode,
     livemode: row.livemode === null ? null : row.livemode === 1,
+    droppedEvents: row.dropped_events,
+    lastDroppedAt: row.last_dropped_at,
     integrationCount: row.integration_count,
   };
 }
@@ -390,6 +397,7 @@ sources.post('/:id/rotate', async (c) => {
   // GitLab and Stripe generate it. Neither is ever read back.
   let secret: string;
   let authMode: AuthMode | null = existing.auth_mode;
+  let downgrade = false;
   if (existing.kind === 'generic') {
     secret = generateSigningSecret();
   } else {
@@ -399,6 +407,23 @@ sources.post('/:id/rotate', async (c) => {
     if (!body) return c.json({ error: 'Expected a JSON object.' }, 422);
     const pasted = providerSecret(c, existing.kind, body, 'rotate');
     if (pasted instanceof Response) return pasted;
+    // Moving GitLab from a signing token to the weaker plain token is a downgrade: it must be
+    // asked for explicitly, not happen because a field was left on its default.
+    downgrade = existing.auth_mode === 'signing_token' && pasted.authMode === 'secret_token';
+    if (downgrade && body.confirmDowngrade !== true)
+      return c.json(
+        {
+          error: 'Validation failed',
+          fields: [
+            {
+              field: 'confirmDowngrade',
+              message:
+                'This replaces a signing token with a plain secret token, which cannot detect a changed message. Send confirmDowngrade: true to proceed.',
+            },
+          ],
+        },
+        422,
+      );
     secret = pasted.secret;
     authMode = pasted.authMode;
   }
@@ -429,7 +454,11 @@ sources.post('/:id/rotate', async (c) => {
       who.orgId,
       seenWrap,
     ),
-    audit(c, who, 'source.secret.rotate', id, { kind: existing.kind, ...(authMode ? { authMode } : {}) }),
+    audit(c, who, 'source.secret.rotate', id, {
+      kind: existing.kind,
+      ...(authMode ? { authMode } : {}),
+      ...(downgrade ? { downgrade: true } : {}),
+    }),
   ]);
   if (results[0]?.meta.changes !== 1) {
     return (await load(c, who.orgId, id))

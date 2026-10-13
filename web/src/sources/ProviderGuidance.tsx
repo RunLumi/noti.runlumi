@@ -1,5 +1,6 @@
 import { IconAlertCircle, IconExternalLink } from '@tabler/icons-react';
 import { t, type MessageId } from '../i18n';
+import { useLocale } from '../i18n/LocaleProvider';
 import { CopyButton } from './CopyButton';
 import type { ProviderKind } from './providers';
 
@@ -65,6 +66,7 @@ export function ProviderGuidance({
   /** GitLab secret-token mode: shown as a standing security note. */
   readonly weakAuth: boolean;
 }) {
+  useLocale();
   const guide = GUIDES[kind];
   return (
     <details className="source-details">

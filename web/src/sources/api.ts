@@ -14,6 +14,9 @@ export interface Source {
   readonly authMode: AuthMode | null;
   /** Stripe only: true for live, false for test. */
   readonly livemode: boolean | null;
+  /** Events dropped because the source exceeded its rate limit. */
+  readonly droppedEvents: number;
+  readonly lastDroppedAt: string | null;
   readonly endpointId: string;
   readonly endpointUrl: string;
   readonly enabled: boolean;
@@ -57,6 +60,8 @@ export function parseSource(value: unknown): Source {
     !nullableString(value.lastReceivedAt) ||
     !nullableString(value.secretRotatedAt) ||
     typeof value.reusedIdRejections !== 'number' ||
+    typeof value.droppedEvents !== 'number' ||
+    !nullableString(value.lastDroppedAt) ||
     typeof value.integrationCount !== 'number'
   )
     throw new ApiError('Unexpected source shape', 500);
@@ -73,6 +78,8 @@ export function parseSource(value: unknown): Source {
     lastReceivedAt: value.lastReceivedAt,
     secretRotatedAt: value.secretRotatedAt,
     reusedIdRejections: value.reusedIdRejections,
+    droppedEvents: value.droppedEvents,
+    lastDroppedAt: value.lastDroppedAt,
     integrationCount: value.integrationCount,
   };
 }

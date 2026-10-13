@@ -69,6 +69,7 @@ function RadioGroup<T extends string | boolean>({
   readonly error?: string | undefined;
   readonly onChange: (value: T) => void;
 }) {
+  useLocale();
   return (
     <fieldset className="destination-choice">
       <legend className="field-label">{legend}</legend>

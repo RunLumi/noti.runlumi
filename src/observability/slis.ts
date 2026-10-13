@@ -100,6 +100,12 @@ export interface ObservabilitySummary {
     /** Over DUE outbox rows only (`not_before` empty or past): a parked retry is waiting by design. */
     readonly oldestOutboxPendingAgeMs: number | null;
   };
+  /**
+   * Provider-source events dropped by the per-source flood limit (GitLab absorbs instead of
+   * answering 429). `total` is the lifetime counter across the workspace's sources;
+   * `sourcesInWindow` counts sources that dropped something inside the window.
+   */
+  readonly ingressDropped: { readonly total: number; readonly sourcesInWindow: number };
   readonly byDestination: readonly DestinationSli[];
   readonly notMeasurable: readonly NotMeasurable[];
 }
@@ -277,7 +283,7 @@ export async function computeSummary(
   nowMs: number = Date.now(),
 ): Promise<ObservabilitySummary> {
   const since = sqliteTimestamp(nowMs - windowMs);
-  const [states, retry, codes, endToEnd, queueDelay, byDestination, pending] = await Promise.all([
+  const [states, retry, codes, endToEnd, queueDelay, byDestination, pending, dropped] = await Promise.all([
     db
       .prepare(
         'SELECT state, COUNT(*) AS n FROM deliveries WHERE organization_id=?1 AND created_at>=?2 GROUP BY state',
@@ -304,6 +310,14 @@ export async function computeSummary(
     latency(db, QUEUE_DELAY_SQL, organizationId, since),
     destinationBreakdown(db, organizationId, since),
     backlog(db, organizationId, nowMs),
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(dropped_events),0) AS total,
+                COALESCE(SUM(CASE WHEN last_dropped_at>=?2 THEN 1 ELSE 0 END),0) AS recent
+         FROM sources WHERE organization_id=?1`,
+      )
+      .bind(organizationId, since)
+      .first<{ total: number; recent: number }>(),
   ]);
   const byState = foldStates(states.results);
   const total = Object.values(byState).reduce((a, b) => a + b, 0);
@@ -323,6 +337,7 @@ export async function computeSummary(
     },
     latency: { endToEnd, queueDelay },
     backlog: pending,
+    ingressDropped: { total: dropped?.total ?? 0, sourcesInWindow: dropped?.recent ?? 0 },
     byDestination,
     notMeasurable: NOT_MEASURABLE,
   };

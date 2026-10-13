@@ -130,6 +130,43 @@ Every provider claim below was read from the provider's own documentation on **2
    spelled out in F89 (a real delivery from a test organization verified over the raw bytes) and a
    documented replay window.
 
+## Security review follow-up (same PR)
+
+An independent review found no critical or high issues; every finding is fixed with a test.
+
+- **M1, links.** Every GitLab link (push commit, merge request, issue, pipeline) goes through
+  `safeHttpsUrl(x, ['gitlab.com'])`. A link on another host, a look-alike (`gitlab.com.evil.io`,
+  `evilgitlab.com`), plain `http:`, credentials in the URL or `javascript:` is dropped and the event
+  is still delivered without a link. Stripe's hosted invoice link was already limited to `stripe.com`.
+- **M2, drops are visible.** The GitLab flood drop now increments `sources.dropped_events` and sets
+  `last_dropped_at` (migration 0020, `ADD COLUMN`, display-only like `reused_id_rejections`). The
+  Sources card says "N events were dropped because the source exceeded the rate limit" with the
+  cause and the last time, the API returns `droppedEvents` and `lastDroppedAt`, the export lists
+  both, and the observability summary has `ingressDropped: {total, sourcesInWindow}` (lifetime sum
+  and the number of sources that dropped inside the window; the counter is cumulative, so a
+  windowed event count is not claimed).
+- **L1, coarse pre-authentication limiter.** `provider-route.ts` counts requests per live endpoint
+  id (1200 per minute, above the 600 post-auth limit) before the secret is unwrapped, so an
+  unauthenticated caller cannot force unbounded DEK unwrap and HMAC work. Dead endpoints create no
+  counter. A limiter fault fails open. Residual: whoever knows the public endpoint id can fill the
+  counter and delay the real sender (THREAT_MODEL AR-22).
+- **L3, unreadable selections deliver nothing.** `event_types` that is not valid JSON, not an array
+  of strings, or contains a non-string is `invalid`: nothing is delivered to that integration and a
+  warning with the integration id is logged. `[]` still means every event.
+- **L4.** A confidential issue builds no label text at all.
+- **L5.** The workspace export lists `auth_mode`, `livemode`, `dropped_events` and `last_dropped_at`
+  for sources, still without any secret, key or envelope column.
+- **L6.** `src/platform/redact.ts` scrubs `whsec_...` in free text.
+- **L7.** Rotating a GitLab source from `signing_token` to `secret_token` is `422` on
+  `confirmDowngrade` unless the body carries `confirmDowngrade: true`; the dialog shows a checkbox
+  and the audit entry records `downgrade`. Upgrades and same-mode rotations need nothing.
+- **L2 (wording).** The timing parity of the dead-endpoint path remains best effort: the extra work
+  of a live endpoint (single-row read, DEK unwrap, secret open) is narrowed, not removed, and timing
+  is not measured.
+- Migration numbering: 0018 belongs to another change; mine are 0019 and 0020. If that change
+  merges first nothing here needs renumbering; if a migration with either number appears, rename
+  before merging.
+
 ## Verification and what is not verified
 
 Tests: signature vectors built with `node:crypto` (independent of the code) for both providers,

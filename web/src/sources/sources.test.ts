@@ -29,6 +29,8 @@ const row = {
   lastReceivedAt: null,
   secretRotatedAt: null,
   reusedIdRejections: 0,
+  droppedEvents: 0,
+  lastDroppedAt: null,
   integrationCount: 0,
 };
 

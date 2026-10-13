@@ -19,6 +19,13 @@ import { GITLAB_COM_HOST, type GitlabEventType } from './catalog';
  * hostname"); a present header that is not `gitlab.com` is refused, an absent one is accepted.
  */
 
+/**
+ * Every link in a notification must be on gitlab.com: a payload URL is data from the sender, and
+ * a verified secret does not make an arbitrary host safe to link to. A link that fails the check
+ * is dropped; the event is still delivered.
+ */
+const link = (value: unknown): string => safeHttpsUrl(value, ['gitlab.com']);
+
 const ZERO_SHA = /^0{40}$/;
 
 type Mapped = Display & { readonly eventType: GitlabEventType };
@@ -61,7 +68,7 @@ function push(body: Record<string, unknown>, tag: boolean): Mapped | null {
   return {
     eventType: tag ? 'tag_push' : 'push',
     title,
-    url: safeHttpsUrl(newest?.url),
+    url: link(newest?.url),
     status: deleted ? 'warning' : 'info',
     ...(projectPath(body) ? { repo: projectPath(body) as string } : {}),
     ...(actorOf(body) ? { actor: actorOf(body) as string } : {}),
@@ -91,7 +98,7 @@ function mergeRequest(body: Record<string, unknown>): Mapped | null {
   return {
     eventType: action.type,
     title: `${iid} ${action.word}: ${clean(attrs.title, 200) || '(no title)'}`,
-    url: safeHttpsUrl(attrs.url),
+    url: link(attrs.url),
     status: action.status,
     ...(projectPath(body) ? { repo: projectPath(body) as string } : {}),
     ...(actorOf(body) ? { actor: actorOf(body) as string } : {}),
@@ -114,18 +121,20 @@ function issue(body: Record<string, unknown>): Mapped | null {
   const iid = typeof attrs.iid === 'number' ? `#${attrs.iid}` : 'Issue';
   // A confidential issue's title is not copied into a chat the project did not choose.
   const confidential = attrs.confidential === true;
-  const labels = Array.isArray(body.labels)
-    ? body.labels
-        .map((l) => clean(asRecord(l)?.title, 40))
-        .filter(Boolean)
-        .slice(0, 5)
-    : [];
+  const labels = confidential
+    ? []
+    : Array.isArray(body.labels)
+      ? body.labels
+          .map((l) => clean(asRecord(l)?.title, 40))
+          .filter(Boolean)
+          .slice(0, 5)
+      : [];
   return {
     eventType: action.type,
     title: confidential
       ? `Confidential issue ${iid} ${action.word}`
       : `Issue ${iid} ${action.word}: ${clean(attrs.title, 200) || '(no title)'}`,
-    url: safeHttpsUrl(attrs.url),
+    url: link(attrs.url),
     status: action.status,
     ...(projectPath(body) ? { repo: projectPath(body) as string } : {}),
     ...(actorOf(body) ? { actor: actorOf(body) as string } : {}),
@@ -152,7 +161,7 @@ function pipeline(body: Record<string, unknown>): Mapped | null {
   return {
     eventType: failed ? 'pipeline.failed' : 'pipeline.succeeded',
     title: `Pipeline ${failed ? 'failed' : 'succeeded'}${ref ? ` on ${ref}` : ''}`,
-    url: safeHttpsUrl(attrs.url),
+    url: link(attrs.url),
     status: failed ? 'failure' : 'success',
     ...(projectPath(body) ? { repo: projectPath(body) as string } : {}),
     ...(actorOf(body) ? { actor: actorOf(body) as string } : {}),

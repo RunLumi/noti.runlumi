@@ -410,12 +410,16 @@ describe('workspace lifecycle', () => {
     };
     expect(body.sources).toHaveLength(1);
     expect(Object.keys(body.sources[0] ?? {}).sort()).toEqual([
+      'auth_mode',
       'created_at',
+      'dropped_events',
       'enabled',
       'endpoint_id',
       'id',
       'kind',
+      'last_dropped_at',
       'last_received_at',
+      'livemode',
       'name',
       'secret_rotated_at',
       'updated_at',

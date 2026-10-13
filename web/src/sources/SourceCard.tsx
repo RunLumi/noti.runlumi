@@ -151,6 +151,20 @@ export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProp
           </div>
         )}
       </dl>
+      {source.droppedEvents > 0 && (
+        <Notice kind="warning">
+          <p className="notice-title">{tp('sources.card.dropped', source.droppedEvents)}</p>
+          <p>
+            {t('sources.card.droppedHelp')}
+            {source.lastDroppedAt && (
+              <>
+                {' '}
+                <Time iso={isoOf(source.lastDroppedAt)} />
+              </>
+            )}
+          </p>
+        </Notice>
+      )}
       {source.reusedIdRejections > 0 && (
         <Notice kind="warning">
           <p className="notice-title">{tp('sources.card.reused', source.reusedIdRejections)}</p>

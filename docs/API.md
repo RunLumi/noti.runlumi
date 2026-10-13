@@ -200,6 +200,8 @@ type Source = {
   kind: 'generic' | 'gitlab' | 'stripe';
   authMode: 'signing_token' | 'secret_token' | null; // GitLab only; never the credential
   livemode: boolean | null;           // Stripe only
+  droppedEvents: number;              // events dropped by the per-source flood limit (GitLab absorbs floods)
+  lastDroppedAt: string | null;
   endpointId: string;                 // public routing id, 24 base64url characters
   endpointUrl: string;                // APP_ORIGIN + /webhooks/<kind>/<endpointId>
   enabled: boolean;
@@ -238,7 +240,8 @@ or log; validation messages never echo it.
 | `sentry` | | `422` on `kind` with the reason: Noti does not offer a Sentry source (ADR 0015, decision 8). |
 
 `POST /api/sources/:id/rotate` for a provider source takes `{secret}` (and `authMode` for GitLab,
-which may move from `secret_token` to `signing_token`). `livemode` cannot change (`422`). Field
+which may move from `secret_token` to `signing_token`; moving from `signing_token` to the weaker
+`secret_token` also needs `confirmDowngrade: true`, otherwise `422` on `confirmDowngrade`). `livemode` cannot change (`422`). Field
 errors are `422 {error, fields: [{field, message}]}`; an unknown `kind` is `422` on `kind`.
 
 **Event selection on integrations.** `POST /api/integrations` with a `sourceId` of a GitLab or
@@ -262,7 +265,8 @@ Unknown, malformed, disabled and wrong-kind endpoints all answer one identical `
 | Credential missing, wrong, stale or malformed | `401 Unauthorized` (nothing is parsed or routed) |
 | Authentic event, stored | `202 {accepted, persisted}`; `duplicate: true` when the provider id was already accepted |
 | Authentic event Noti does not notify about (type or action outside the catalogue, GitLab merge request update, Stripe thin or Connect event, other livemode) | `200 {accepted: true, ignored: reason}`; nothing is routed |
-| Per-source flood limit (600/min), GitLab | `200 {accepted: false, dropped: "rate_limited"}` (GitLab disables webhooks after repeated 4xx) |
+| Per-source flood limit (600/min), GitLab | `200 {accepted: false, dropped: "rate_limited"}` (GitLab disables webhooks after repeated 4xx); counted in `droppedEvents` |
+| More than 1200 requests a minute to one endpoint id, before authentication | `429` with `Retry-After` |
 | Per-source flood limit (600/min), Stripe | `429` with `Retry-After` (Stripe retries) |
 | GitLab request from an instance other than `gitlab.com`, or without `X-Gitlab-Event` | `401` / `400` |
 | Verified body that is not a usable event | `400 {error: reason}` |

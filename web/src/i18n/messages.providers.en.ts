@@ -53,6 +53,16 @@ export const providersEn = {
   'sources.replaced.provider': 'The credential for {name} was replaced. The old one no longer works.',
 
   'sources.card.type': 'Source type',
+  'sources.card.dropped': {
+    one: '{count} event was dropped because the source exceeded the rate limit',
+    other: '{count} events were dropped because the source exceeded the rate limit',
+  },
+  'sources.card.droppedHelp':
+    'GitLab disables a webhook that gets error answers, so Noti answers 200 and drops the extra events instead. Pause noisy pipelines in GitLab or narrow its triggers. Last drop:',
+  'sources.rotate.downgrade.label': 'Replace the signing token with a plain secret token',
+  'sources.rotate.downgrade.help':
+    'A plain secret token cannot show that a message was changed and a captured request can be replayed.',
+  'sources.validation.downgrade': 'Tick the box to confirm the weaker credential.',
   'sources.card.auth': 'Verified with',
   'sources.card.auth.signing': 'Signed with a signing token',
   'sources.card.auth.secret': 'Plain secret token (weaker)',
