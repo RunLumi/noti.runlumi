@@ -112,6 +112,12 @@ describe('send a test from the integration settings', () => {
     expect(section.textContent).not.toMatch(/limit/i);
   });
 
+  it('a test already running (409 test_in_flight) says so', async () => {
+    const { section } = await sendFromSettings({ api: { testSend: 'in_flight' } });
+    await within(section).findByText(/test is already running/);
+    await expectClean('test in flight');
+  });
+
   it('a server error is announced as an error with a support reference', async () => {
     const { section } = await sendFromSettings({ api: { testSend: 500 } });
     await within(section).findByText(/500/);
@@ -232,6 +238,25 @@ describe('setup progress on the Overview', () => {
     await expectClean('setup progress');
   });
 
+  it('reports an accepted-only destination as accepted, not done', async () => {
+    await renderApp('/', {
+      api: {
+        setup: {
+          ...SETUP_PROGRESS,
+          steps: SETUP_PROGRESS.steps.map((s) =>
+            s.id === 'destination_verified' ? { ...s, status: 'accepted', since: '2026-10-02T09:00:00Z' } : s,
+          ),
+        },
+      },
+    });
+    const card = (await screen.findByRole('heading', { name: 'Finish setting up' })).closest('section');
+    if (!card) throw new Error('no card');
+    expect(within(card).getByText(/Accepted, not confirmed/)).toBeTruthy();
+    expect(within(card).getByText(/does not confirm it was shown/)).toBeTruthy();
+    expect(within(card).getByText('2 of 4 steps done')).toBeTruthy();
+    await expectClean('setup accepted');
+  });
+
   it('is accessible in Vietnamese', async () => {
     await renderApp('/', { locale: 'vi' });
     await screen.findByRole('heading', { name: 'Hoàn tất thiết lập' });
@@ -243,7 +268,7 @@ describe('setup progress on the Overview', () => {
       api: {
         setup: {
           ...SETUP_PROGRESS,
-          steps: SETUP_PROGRESS.steps.map((s) => ({ ...s, done: true, nextAction: 'none' })),
+          steps: SETUP_PROGRESS.steps.map((s) => ({ ...s, done: true, status: 'done', nextAction: 'none' })),
           complete: true,
           next: null,
         },

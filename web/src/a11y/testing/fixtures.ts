@@ -246,10 +246,22 @@ export const DELIVERIES: readonly DeliveryItem[] = [
 export const SETUP_PROGRESS = {
   organizationId: ORG_ID,
   steps: [
-    { id: 'source_connected', done: true, since: '2026-10-01T09:00:00Z', nextAction: 'none' },
-    { id: 'integration_created', done: true, since: '2026-10-01T09:30:00Z', nextAction: 'none' },
-    { id: 'destination_verified', done: false, since: null, nextAction: 'send_test' },
-    { id: 'first_event_received', done: false, since: null, nextAction: 'trigger_real_event' },
+    { id: 'source_connected', done: true, status: 'done', since: '2026-10-01T09:00:00Z', nextAction: 'none' },
+    {
+      id: 'integration_created',
+      done: true,
+      status: 'done',
+      since: '2026-10-01T09:30:00Z',
+      nextAction: 'none',
+    },
+    { id: 'destination_verified', done: false, status: 'todo', since: null, nextAction: 'send_test' },
+    {
+      id: 'first_event_received',
+      done: false,
+      status: 'todo',
+      since: null,
+      nextAction: 'trigger_real_event',
+    },
   ],
   complete: false,
   next: 'destination_verified',

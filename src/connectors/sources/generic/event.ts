@@ -134,6 +134,13 @@ export function parseGenericEvent(body: unknown): ParsedEvent {
   const type = line(r.type, 'type', LIMITS.type, true, errors);
   if (type !== undefined && !TYPE.test(type))
     errors.push({ field: 'type', message: 'Use letters, digits and . _ : - (for example deploy.failed).' });
+  // `test` and `noti.*` belong to Noti: the sender chooses this string, so it must never be able
+  // to name an event as one of ours (ADR 0018).
+  if (type !== undefined && (type === 'test' || type.toLowerCase().startsWith('noti.')))
+    errors.push({
+      field: 'type',
+      message: 'This event type is reserved. Choose another (for example deploy.failed).',
+    });
   const title = line(r.title, 'title', LIMITS.title, true, errors);
   const actor = line(r.actor, 'actor', LIMITS.actor, false, errors);
   let summary: string | undefined;

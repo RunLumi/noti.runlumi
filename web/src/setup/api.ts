@@ -19,9 +19,14 @@ export const NEXT_ACTIONS = [
 ] as const;
 export type NextAction = (typeof NEXT_ACTIONS)[number];
 
+export type StepStatus = 'done' | 'accepted' | 'todo';
+const isStatus = (v: unknown): v is StepStatus => v === 'done' || v === 'accepted' || v === 'todo';
+
 export interface SetupStep {
   readonly id: SetupStepId;
   readonly done: boolean;
+  /** `accepted`: the destination accepted a message but never confirmed it was shown. */
+  readonly status: StepStatus;
   readonly since: string | null;
   readonly nextAction: NextAction;
 }
@@ -43,11 +48,18 @@ function parseStep(value: unknown): SetupStep {
     !isRecord(value) ||
     !isStepId(value.id) ||
     typeof value.done !== 'boolean' ||
+    !isStatus(value.status) ||
     !(value.since === null || typeof value.since === 'string') ||
     !isAction(value.nextAction)
   )
     throw new ApiError('Unexpected response', 500);
-  return { id: value.id, done: value.done, since: value.since, nextAction: value.nextAction };
+  return {
+    id: value.id,
+    done: value.done,
+    status: value.status,
+    since: value.since,
+    nextAction: value.nextAction,
+  };
 }
 
 export function parseProgress(body: unknown): SetupProgress {

@@ -22,13 +22,24 @@ import { isDeletionPending } from './workspace-lifecycle';
  *
  * Capability: `integration.update` (a member may test what they may edit). Same CSRF rules as
  * every mutation. Abuse limits are stricter than the general 30/min because every click makes
- * an outbound request to a customer's chat: 5 per integration and 20 per user per minute. The
+ * an outbound request to a customer-chosen destination: per minute, 5 per integration, 20 per
+ * user, 30 per workspace and 10 per destination host across tenants, plus a `test_in_flight`
+ * guard (one test per integration while the last is pending or retrying). The
  * limits count only requests that passed the tenant lookup, so probing another workspace's ids
  * neither reveals nor burns anything.
  */
 
 export const TESTS_PER_INTEGRATION_PER_MINUTE = 5;
 export const TESTS_PER_USER_PER_MINUTE = 20;
+/** Whole workspace: many members and integrations cannot multiply the per-user figure. */
+export const TESTS_PER_WORKSPACE_PER_MINUTE = 30;
+/**
+ * Per destination host across ALL tenants: a customer-chosen host (a custom webhook, or a shared
+ * provider host like hooks.slack.com) must not receive a flood assembled from many workspaces.
+ */
+export const TESTS_PER_HOST_PER_MINUTE = 10;
+/** A test still pending, claimed or retrying this recently blocks another one for the same integration. */
+export const IN_FLIGHT_WINDOW = '-15 minutes';
 const WINDOW_MS = 60_000;
 
 export const TEST_TITLE = 'Test notification from Noti';
@@ -37,8 +48,25 @@ export const TEST_SUMMARY =
 
 interface Target {
   id: string;
+  destination_host: string | null;
   enabled: number;
   credentials_quarantined_at: string | null;
+}
+
+async function testInFlight(db: D1Database, orgId: string, integrationId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 AS x FROM deliveries
+       WHERE integration_id=?1 AND organization_id=?2 AND is_test=1
+         AND state IN ('pending','claimed','retrying') AND created_at >= datetime('now', ?3) LIMIT 1`,
+    )
+    .bind(integrationId, orgId, IN_FLIGHT_WINDOW)
+    .first();
+  return row !== null;
+}
+
+function inFlightResponse(c: Ctx): Response {
+  return c.json({ error: 'A test is already running for this integration.', reason: 'test_in_flight' }, 409);
 }
 
 const testSend = new Hono<{ Bindings: Bindings }>();
@@ -65,7 +93,7 @@ testSend.post('/:id/test', async (c) => {
 
   const integrationId = c.req.param('id');
   const target = await c.env.DB.prepare(
-    'SELECT id,enabled,credentials_quarantined_at FROM integrations WHERE id=? AND organization_id=?',
+    'SELECT id,destination_host,enabled,credentials_quarantined_at FROM integrations WHERE id=? AND organization_id=?',
   )
     .bind(integrationId, who.orgId)
     .first<Target>();
@@ -81,6 +109,10 @@ testSend.post('/:id/test', async (c) => {
       409,
     );
 
+  // Before any budget is spent: a second click while a test is still running is not a new test.
+  const inFlight = await testInFlight(c.env.DB, who.orgId, integrationId);
+  if (inFlight) return inFlightResponse(c);
+
   const perIntegration = await hit(
     c.env.DB,
     `test-send:integration:${who.orgId}:${integrationId}`,
@@ -90,6 +122,17 @@ testSend.post('/:id/test', async (c) => {
   if (perIntegration.limited) return limited(c, perIntegration.retryAfterSeconds);
   const perUser = await hit(c.env.DB, `test-send:user:${who.userId}`, TESTS_PER_USER_PER_MINUTE, WINDOW_MS);
   if (perUser.limited) return limited(c, perUser.retryAfterSeconds);
+  const perOrg = await hit(c.env.DB, `test-send:org:${who.orgId}`, TESTS_PER_WORKSPACE_PER_MINUTE, WINDOW_MS);
+  if (perOrg.limited) return limited(c, perOrg.retryAfterSeconds);
+  if (target.destination_host) {
+    const perHost = await hit(
+      c.env.DB,
+      `test-send:host:${target.destination_host}`,
+      TESTS_PER_HOST_PER_MINUTE,
+      WINDOW_MS,
+    );
+    if (perHost.limited) return limited(c, perHost.retryAfterSeconds);
+  }
 
   const id = (await testDeliveryId(who.orgId, integrationId, crypto.randomUUID())).hex;
   const message: DeliveryMessage = {
@@ -115,8 +158,12 @@ testSend.post('/:id/test', async (c) => {
                      WHERE i.id = ?2 AND i.organization_id = ?3
                        AND i.enabled = 1 AND i.credentials_quarantined_at IS NULL)
          AND NOT EXISTS (SELECT 1 FROM workspace_deletions w
-                         WHERE w.organization_id = ?3 AND w.cancelled_at IS NULL AND w.purged_at IS NULL)`,
-    ).bind(id, integrationId, who.orgId),
+                         WHERE w.organization_id = ?3 AND w.cancelled_at IS NULL AND w.purged_at IS NULL)
+         AND NOT EXISTS (SELECT 1 FROM deliveries t
+                         WHERE t.integration_id = ?2 AND t.organization_id = ?3 AND t.is_test = 1
+                           AND t.state IN ('pending','claimed','retrying')
+                           AND t.created_at >= datetime('now', ?4))`,
+    ).bind(id, integrationId, who.orgId, IN_FLIGHT_WINDOW),
     c.env.DB.prepare(
       `INSERT INTO notification_outbox(id,organization_id,payload_json)
        SELECT ?1,?2,?3 WHERE changes() > 0`,
@@ -137,8 +184,11 @@ testSend.post('/:id/test', async (c) => {
       { onlyIfPreviousStatementChangedRows: true },
     ),
   ]);
-  if ((results[1]?.meta.changes ?? 0) !== 1)
+  if ((results[1]?.meta.changes ?? 0) !== 1) {
+    // Lost a race with another click: report what the winner made.
+    if (await testInFlight(c.env.DB, who.orgId, integrationId)) return inFlightResponse(c);
     return c.json({ error: 'This integration can no longer receive a test.', reason: 'unavailable' }, 409);
+  }
 
   c.executionCtx.waitUntil(
     dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId: who.orgId }),

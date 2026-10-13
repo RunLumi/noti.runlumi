@@ -337,9 +337,6 @@ export function evaluateCompiled(
   eventType: string,
   facts: PreparedFacts,
 ): RouteDecision {
-  // A user-requested test notification (ADR 0018) is not an event from a source: no filter
-  // describes it, and a deny rule must not make "send a test" look like a broken destination.
-  if (eventType === 'test') return { pass: true, filterId: null, reason: 'allowed', unknown: false };
   let exempt = false;
   for (const id of FILTER_IDS) {
     const result = runFilter(id, compiled, eventType, facts);

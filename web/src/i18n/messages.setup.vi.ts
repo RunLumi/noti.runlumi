@@ -47,6 +47,7 @@ export const setupVi = {
     'Noti đã ngừng dùng URL webhook đã lưu của tích hợp này. Hãy dán lại URL trong phần thông tin xác thực, rồi gửi thông báo thử.',
   'test.error.unavailable':
     'Hiện tại tích hợp này không nhận được thông báo thử. Nếu không gian làm việc đang được lên lịch xóa, hãy hủy việc đó trong Cài đặt trước. Nếu không, hãy tải lại trang và thử lại.',
+  'test.error.inFlight': 'Một thông báo thử đang chạy cho tích hợp này. Hãy chờ kết quả rồi gửi thêm.',
   'test.error.rateLimited': 'Bạn đã gửi khá nhiều thông báo thử. Hãy chờ {seconds} giây rồi thử lại.',
 
   'delivery.testBadge': 'Thử',
@@ -64,6 +65,9 @@ export const setupVi = {
   'setup.listLabel': 'Các bước thiết lập',
   'setup.done': 'Đã xong',
   'setup.todo': 'Chưa xong',
+  'setup.accepted': 'Đã được chấp nhận, chưa được xác nhận',
+  'setup.step.destination_verified.accepted':
+    'Một đích nhận đã chấp nhận tin nhắn nhưng không xác nhận là tin đã hiển thị (Microsoft Teams hoạt động như vậy). Hãy xem trong nhóm chat để chắc chắn.',
   'setup.next': 'Tiếp theo',
   'setup.since': 'Từ {when}',
   'setup.step.source_connected': 'Kết nối một nguồn',

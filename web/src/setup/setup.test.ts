@@ -7,6 +7,7 @@ const body = (over: Record<string, unknown> = {}) => ({
   steps: STEP_IDS.map((id, i) => ({
     id,
     done: i < 2,
+    status: i < 2 ? 'done' : 'todo',
     since: i < 2 ? '2026-10-01T00:00:00.000Z' : null,
     nextAction: i < 2 ? 'none' : 'send_test',
   })),

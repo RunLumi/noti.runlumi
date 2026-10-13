@@ -71,9 +71,10 @@ export async function countStalls(db: Db, nowMs: number): Promise<StallCounts> {
     .prepare(
       `SELECT
          (SELECT COUNT(*) FROM notification_outbox
-            WHERE state='pending' AND created_at<=?1 AND (not_before IS NULL OR not_before<=?3)) AS outbox_pending,
-         (SELECT COUNT(*) FROM deliveries WHERE state='claimed' AND claimed_at<=?2) AS claimed_stale,
-         (SELECT COUNT(*) FROM deliveries WHERE state='retrying' AND next_attempt_at<=?4) AS retry_overdue`,
+            WHERE state='pending' AND created_at<=?1 AND (not_before IS NULL OR not_before<=?3)
+              AND NOT EXISTS (SELECT 1 FROM deliveries t WHERE t.id=notification_outbox.id AND t.is_test=1)) AS outbox_pending,
+         (SELECT COUNT(*) FROM deliveries WHERE state='claimed' AND is_test=0 AND claimed_at<=?2) AS claimed_stale,
+         (SELECT COUNT(*) FROM deliveries WHERE state='retrying' AND is_test=0 AND next_attempt_at<=?4) AS retry_overdue`,
     )
     .bind(
       sqliteTimestamp(nowMs - OUTBOX_STALL_MS),

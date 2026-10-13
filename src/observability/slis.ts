@@ -18,8 +18,9 @@
  * terminal state) minus `created_at`, so it carries up to one second of resolution error.
  *
  * User-requested test notifications (`is_test = 1`, ADR 0018) are excluded from every ratio,
- * count, latency and error breakdown here: they measure a person's click, not the service. The
- * backlog ages DO include them, because a test stuck in the queue is a stuck delivery.
+ * count, latency, error breakdown and backlog age here: they measure a person's click, not the
+ * service, and stall detection ignores them too. The server's in-flight guard bounds how many can
+ * exist per integration.
  *
  * Every ratio is a cohort by creation time: rows CREATED inside the window, counted by their
  * CURRENT state (a row created before the window that finishes inside it is not counted).
@@ -257,7 +258,7 @@ async function backlog(db: Db, org: string, nowMs: number): Promise<Observabilit
          MIN(CASE WHEN state='pending' THEN ${CREATED_MS} END) AS pending_at,
          MIN(CASE WHEN state='claimed' THEN claimed_at END) AS claimed_at,
          MIN(CASE WHEN state='retrying' AND next_attempt_at<=?2 THEN next_attempt_at END) AS retry_at
-       FROM deliveries WHERE organization_id=?1 AND state IN ('pending','claimed','retrying')`,
+       FROM deliveries WHERE organization_id=?1 AND is_test=0 AND state IN ('pending','claimed','retrying')`,
     )
     .bind(org, nowMs)
     .first<{ pending_at: number | null; claimed_at: number | null; retry_at: number | null }>();
@@ -265,7 +266,8 @@ async function backlog(db: Db, org: string, nowMs: number): Promise<Observabilit
     .prepare(
       `SELECT MIN(CAST(strftime('%s', created_at) AS INTEGER) * 1000) AS at
        FROM notification_outbox
-       WHERE organization_id=?1 AND state='pending' AND (not_before IS NULL OR not_before<=?2)`,
+       WHERE organization_id=?1 AND state='pending' AND (not_before IS NULL OR not_before<=?2)
+         AND NOT EXISTS (SELECT 1 FROM deliveries t WHERE t.id=notification_outbox.id AND t.is_test=1)`,
     )
     .bind(org, nowMs)
     .first<{ at: number | null }>();

@@ -889,9 +889,15 @@ What exists now:
   rows; 202 with the delivery id only; `integration.update`; CSRF; 5 per integration and 20 per user
   per minute; refused (409) while deletion is pending, or for a paused or quarantined integration;
   cross-tenant is a 404 that burns no budget.
-- Test events are never held by noise control (`isCritical`) and pass every routing filter; they are
-  excluded from the observability SLIs, `GET /api/deliveries/summary` and the "real event" setup
+- A test never enters the noise or filter paths (the route does not use them); there is **no**
+  event-type bypass, and `test` / `noti.*` are reserved at generic ingress. Tests are excluded from
+  the observability SLIs, stall detection, `GET /api/deliveries/summary` and the "real event" setup
   step. A replay of a test is still a test.
+- Security review fixes: layered limits (integration 5, user 20, workspace 30, destination host 10 per
+  minute across tenants), a `test_in_flight` guard (atomic, 15-minute window), two-bucket results for
+  custom webhooks, a tri-state "verified" (`accepted` is not `done`) that requires a live, enabled,
+  unquarantined integration, index-driven progress queries, disabled sources ignored, `CHECK(is_test
+  IN (0,1))`, and 429-tolerant polling. Migration 0022 must be applied before the new Worker.
 - `GET /api/setup/progress`: four derived steps with `since` and a closed next-action key.
 - Dashboard: `TestSend` (settings section and list row), the optional "Test it" wizard step, the
   "Finish setting up" Overview card, and a "Test" badge in the delivery log. English and Vietnamese.

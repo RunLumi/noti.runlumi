@@ -450,15 +450,14 @@ describe('registry', () => {
   });
 });
 
-describe('a user-requested test notification (ADR 0018)', () => {
-  it('passes every filter, even a deny that would match, and an allow that cannot', () => {
+describe('the event type `test` is not special (ADR 0018)', () => {
+  it('gets exactly the decision any other unknown type gets: no string-keyed bypass', () => {
     const config: FilterConfig = {
       branch: { allow: ['release/*'], deny: ['main'] },
-      actor: { mode: 'only', allow: ['nobody'], deny: [] },
-    } as unknown as FilterConfig;
-    const decision = evaluateFilters(config, 'test', facts({ branch: 'main', actorLogin: 'octocat' }));
-    expect(decision).toEqual({ pass: true, filterId: null, reason: 'allowed', unknown: false });
-    // The same config does hold back a real event of another type, so the bypass is the type.
-    expect(evaluateFilters(config, 'push', facts({ branch: 'main' })).pass).toBe(false);
+      actor: { allow: ['nobody'], deny: [], bots: 'any' },
+    };
+    const f = facts({ branch: 'main', actorLogin: 'octocat' });
+    expect(evaluateFilters(config, 'test', f)).toEqual(evaluateFilters(config, 'zzz.unknown', f));
+    expect(evaluateFilters(config, 'noti.test', f)).toEqual(evaluateFilters(config, 'zzz.unknown', f));
   });
 });

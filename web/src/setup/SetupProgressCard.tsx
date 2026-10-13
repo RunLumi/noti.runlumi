@@ -32,14 +32,25 @@ function StepRow({ step, isNext, days }: { step: SetupStep; isNext: boolean; day
           {t(title)}
           <span className="setup-status">
             {' '}
-            · {t(step.done ? 'setup.done' : isNext ? 'setup.next' : 'setup.todo')}
+            ·{' '}
+            {t(
+              step.done
+                ? 'setup.done'
+                : step.status === 'accepted'
+                  ? 'setup.accepted'
+                  : isNext
+                    ? 'setup.next'
+                    : 'setup.todo',
+            )}
           </span>
         </p>
         <p className="setup-step-text">
-          {t(`${title}.body` as MessageId, { days })}
-          {step.done && step.since ? ` ${t('setup.since', { when: absoluteTime(step.since) })}` : ''}
+          {t((step.status === 'accepted' ? `${title}.accepted` : `${title}.body`) as MessageId, { days })}
+          {step.status !== 'todo' && step.since
+            ? ` ${t('setup.since', { when: absoluteTime(step.since) })}`
+            : ''}
         </p>
-        {isNext && step.nextAction !== 'none' && (
+        {(isNext || step.status === 'accepted') && step.nextAction !== 'none' && (
           <Link to={ACTION_TARGET[step.nextAction]} className="btn btn-primary setup-action">
             {t(`setup.action.${step.nextAction}` as MessageId)}
           </Link>

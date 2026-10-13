@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DELIVERY_STATES, type DeliveryItem, type DeliveryState } from '../../deliveries/api';
-import { PANEL_TERMINAL, outcomeOf, pollTest, POLL_MAX_READ_FAILURES } from './poll';
+import { ApiError } from '../../lib/api';
+import { PANEL_TERMINAL, RATE_LIMIT_WAIT_MAX_MS, outcomeOf, pollTest, POLL_MAX_READ_FAILURES } from './poll';
 
 const delivery = (state: DeliveryState): DeliveryItem => ({
   id: 'd',
@@ -52,6 +53,39 @@ function clock() {
     },
   };
 }
+
+describe('pollTest while rate limited', () => {
+  const limited = () => Promise.reject(new ApiError('slow down', 429, [], 3));
+
+  it('waits as asked on a 429 and keeps going; it is not a failure', async () => {
+    const c = clock();
+    let n = 0;
+    const outcome = await pollTest({
+      read: () => (++n <= POLL_MAX_READ_FAILURES + 2 ? limited() : Promise.resolve(delivery('sent'))),
+      cancelled: () => false,
+      ...c,
+    });
+    expect(outcome).toMatchObject({ kind: 'sent' });
+    expect(c.sleeps.every((ms) => ms === 3000)).toBe(true);
+  });
+
+  it('ends with a timeout (still waiting), never an error, if it stays rate limited', async () => {
+    const c = clock();
+    const outcome = await pollTest({ read: limited, cancelled: () => false, maxMs: 10_000, ...c });
+    expect(outcome).toEqual({ kind: 'timeout' });
+  });
+
+  it('caps a huge Retry-After', async () => {
+    const c = clock();
+    await pollTest({
+      read: () => Promise.reject(new ApiError('x', 429, [], 3600)),
+      cancelled: () => false,
+      maxMs: 1000,
+      ...c,
+    });
+    expect(Math.max(...c.sleeps)).toBeLessThanOrEqual(RATE_LIMIT_WAIT_MAX_MS);
+  });
+});
 
 describe('pollTest', () => {
   it('returns at the first terminal state, without sleeping first', async () => {

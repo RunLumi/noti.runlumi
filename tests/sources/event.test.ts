@@ -10,6 +10,21 @@ import { SUMMARY_MAX_CHARS } from '../../src/env';
 const base = { type: 'deploy.failed', title: 'Deploy failed on production' };
 const fields = (r: ReturnType<typeof parseGenericEvent>) => (r.ok ? [] : r.errors.map((e) => e.field));
 
+describe('reserved event types (ADR 0018)', () => {
+  it.each(['test', 'noti.test', 'NOTI.anything', 'noti.'])(
+    'rejects %s with a clear message on `type`',
+    (type) => {
+      const r = parseGenericEvent({ ...base, type });
+      expect(fields(r)).toEqual(['type']);
+      expect(!r.ok && r.errors[0]?.message).toMatch(/reserved/);
+    },
+  );
+
+  it.each(['tests', 'test.run', 'notification', 'deploy.test'])('still accepts %s', (type) => {
+    expect(parseGenericEvent({ ...base, type }).ok).toBe(true);
+  });
+});
+
 describe('parseGenericEvent', () => {
   it('accepts the minimal event and defaults severity to info', () => {
     expect(parseGenericEvent(base)).toEqual({ ok: true, event: { ...base, severity: 'info', fields: [] } });

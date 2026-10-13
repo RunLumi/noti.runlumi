@@ -4,6 +4,7 @@ import { TEST_SUMMARY, TEST_TITLE } from '../../src/api/test-send';
 import { serializeFilters } from '../../src/routing/filter-input';
 import { DEFAULT_NOISE, serializeNoise } from '../../src/routing/noise';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
+import { generateSigningSecret } from '../../src/connectors/sources/generic/encoding';
 import { legacySeal } from '../support/legacy';
 
 /**
@@ -286,9 +287,17 @@ describe('POST /api/integrations/:id/test: access control', () => {
   });
 });
 
+/** Finish every test so the in-flight guard does not mask the limit under test. */
+const settle = (): void => {
+  db.raw.prepare("UPDATE deliveries SET state='sent' WHERE is_test=1").run();
+};
+
 describe('rate limits', () => {
   it('5 per integration per minute, then 429 with Retry-After; nothing more is queued', async () => {
-    for (let i = 0; i < 5; i++) expect((await post('int-lark')).status).toBe(202);
+    for (let i = 0; i < 5; i++) {
+      expect((await post('int-lark')).status).toBe(202);
+      settle();
+    }
     const res = await post('int-lark');
     expect(res.status).toBe(429);
     expect(Number(res.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
@@ -296,14 +305,154 @@ describe('rate limits', () => {
     expect(count('deliveries')).toBe(5);
   });
 
+  /** Each integration gets its own host, so only the limit under test can fire. */
+  async function distinctHosts(n: number, org = 'org-a'): Promise<string[]> {
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const id = `h-${org}-${i}`;
+      await integration(id, 'slack', { org });
+      db.raw
+        .prepare('UPDATE integrations SET destination_host=? WHERE id=?')
+        .run(`host-${org}-${i}.test`, id);
+      ids.push(id);
+    }
+    return ids;
+  }
+
   it('20 per user per minute across integrations', async () => {
-    for (let n = 0; n < 5; n++) await integration(`int-${n}`, 'slack');
-    for (let i = 0; i < 20; i++) expect((await post(`int-${i % 5}`)).status).toBe(202);
-    // Every integration is at 4 of 5; the user is at 20 of 20.
-    const res = await post('int-0');
-    expect(res.status).toBe(429);
+    const ids = await distinctHosts(20);
+    for (const id of ids) {
+      expect((await post(id)).status).toBe(202);
+      settle();
+    }
+    await integration('extra', 'slack');
+    db.raw.prepare("UPDATE integrations SET destination_host='extra.test' WHERE id='extra'").run();
+    expect((await post('extra')).status).toBe(429);
     // Another user is unaffected.
-    expect((await post('int-1', { as: 'alice' })).status).toBe(202);
+    expect((await post('extra', { as: 'alice' })).status).toBe(202);
+  });
+
+  it('30 per workspace per minute, however many members and integrations', async () => {
+    const ids = await distinctHosts(31);
+    for (const [i, id] of ids.slice(0, 30).entries()) {
+      expect((await post(id, { as: i % 2 ? 'alice' : 'bob' })).status).toBe(202);
+      settle();
+    }
+    const res = await post(ids[30] ?? '', { as: 'alice' });
+    expect(res.status).toBe(429);
+    expect(count('deliveries')).toBe(30);
+  });
+
+  it('10 per destination host per minute across ALL workspaces', async () => {
+    for (let i = 0; i < 5; i++) await integration(`a-${i}`, 'slack');
+    for (let i = 0; i < 5; i++) await integration(`b-${i}`, 'slack', { org: 'org-b' });
+    // Same host (hooks.slack.com) in two tenants.
+    for (let i = 0; i < 5; i++) {
+      expect((await post(`a-${i}`)).status).toBe(202);
+      expect((await post(`b-${i}`, { as: 'mallory' })).status).toBe(202);
+      settle();
+    }
+    await integration('a-extra', 'slack');
+    const res = await post('a-extra');
+    expect(res.status).toBe(429);
+    expect((await post('b-0', { as: 'mallory' })).status).toBe(429);
+    // A different host is unaffected.
+    expect((await post('int-lark')).status).toBe(202);
+  });
+});
+
+describe('in-flight guard', () => {
+  it('a second click while a test is pending is refused (409 test_in_flight) and spends no budget', async () => {
+    expect((await post('int-lark')).status).toBe(202);
+    const res = await post('int-lark');
+    expect(res.status).toBe(409);
+    expect((await json<{ reason: string }>(res)).reason).toBe('test_in_flight');
+    expect(count('deliveries')).toBe(1);
+    const budget = rows("SELECT count FROM api_rate_limits WHERE key LIKE 'test-send:integration:%'");
+    expect(budget).toEqual([{ count: 1 }]);
+  });
+
+  it.each(['claimed', 'retrying'])('still blocks while the test is %s', async (state) => {
+    await post('int-lark');
+    db.raw.prepare('UPDATE deliveries SET state=? WHERE is_test=1').run(state);
+    expect((await post('int-lark')).status).toBe(409);
+  });
+
+  it('a finished test does not block, and neither does a stale one (retries cannot stack forever)', async () => {
+    await post('int-lark');
+    settle();
+    expect((await post('int-lark')).status).toBe(202);
+    db.raw.prepare("UPDATE deliveries SET state='retrying', created_at='2020-01-01 00:00:00'").run();
+    expect((await post('int-lark')).status).toBe(202);
+  });
+
+  it('is atomic in the insert: a test that appears after the read still wins', async () => {
+    const real = db.d1.batch.bind(db.d1);
+    vi.spyOn(db.d1, 'batch').mockImplementationOnce((statements) => {
+      db.raw
+        .prepare(
+          "INSERT INTO deliveries(id,integration_id,organization_id,state,is_test,created_at) VALUES('race','int-lark','org-a','pending',1,CURRENT_TIMESTAMP)",
+        )
+        .run();
+      return real(statements);
+    });
+    const res = await post('int-lark');
+    expect(res.status).toBe(409);
+    expect((await json<{ reason: string }>(res)).reason).toBe('test_in_flight');
+    expect(count('deliveries')).toBe(1);
+    expect(count('notification_outbox')).toBe(0);
+  });
+
+  it('is per integration: another integration can be tested meanwhile', async () => {
+    await integration('other', 'lark');
+    db.raw.prepare("UPDATE integrations SET destination_host='other.test' WHERE id='other'").run();
+    await post('int-lark');
+    expect((await post('other')).status).toBe(202);
+  });
+});
+
+describe('a test to a custom webhook reveals only three buckets', () => {
+  async function genericIntegration(): Promise<void> {
+    db.raw
+      .prepare(
+        `INSERT INTO integrations(id,organization_id,repo,event_types,destination,destination_host,webhook_ciphertext,lark_secret_ciphertext,enabled)
+         VALUES('int-gen','org-a','acme/web','[]','generic_webhook','hooks.example.com',?,?,1)`,
+      )
+      .run(
+        await legacySeal('https://hooks.example.com/noti/inbound', K_LEGACY),
+        await legacySeal(generateSigningSecret(), K_LEGACY),
+      );
+  }
+
+  it.each([
+    [401, 'destination_unauthorized'],
+    [403, 'destination_unauthorized'],
+    [404, 'destination_unauthorized'],
+    [410, 'destination_unauthorized'],
+  ])('HTTP %i is shown as the single "refused" bucket, not as its status class', async (status, code) => {
+    await genericIntegration();
+    fetchMock.mockResolvedValueOnce(new Response('', { status }));
+    const id = await sendTest('int-gen');
+    await consumeQueued();
+    const v = await view(id);
+    expect(v.state).toBe('dead_lettered');
+    expect(v.error?.code).toBe(code);
+  });
+
+  it('a connection failure is the single "unreachable" bucket', async () => {
+    await genericIntegration();
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+    const id = await sendTest('int-gen');
+    await consumeQueued();
+    expect((await view(id)).error?.code).toBe('destination_unavailable');
+  });
+
+  it('other destinations keep their real classification', async () => {
+    await integration('int-slack', 'slack');
+    fetchMock.mockResolvedValueOnce(new Response('no_service', { status: 404 }));
+    const id = await sendTest('int-slack');
+    await consumeQueued();
+    expect((await view(id)).error?.code).toBe('destination_revoked');
   });
 });
 
@@ -330,6 +479,7 @@ describe('what is written', () => {
 
   it('every click is a new delivery (per-request nonce)', async () => {
     const a = await sendTest('int-lark');
+    settle();
     const b = await sendTest('int-lark');
     expect(a).not.toBe(b);
     expect(count('deliveries')).toBe(2);

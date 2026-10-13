@@ -186,14 +186,14 @@ requires our `Origin` and `application/json`.
 | --- | --- |
 | `202 {deliveryId}` | Queued. Nothing else is returned: no URL, credential or message body. Poll `GET /api/deliveries/:id`; the row has `isTest: true`. |
 | `404` | No such integration in this workspace (identical for another workspace's id; consumes no rate-limit budget). |
-| `409 {reason}` | `deletion_pending`, `disabled` (paused), `quarantined` (credentials need replacing), or `unavailable` (it changed while the request ran). |
-| `429` + `Retry-After` | More than 5 tests per integration or 20 per user in a minute (`reason: "rate_limited"`). |
+| `409 {reason}` | `deletion_pending`, `disabled` (paused), `quarantined` (credentials need replacing), `test_in_flight` (an earlier test for this integration is still pending, claimed or retrying and was created in the last 15 minutes), or `unavailable` (it changed while the request ran). |
+| `429` + `Retry-After` | More than 5 tests per integration, 20 per user, 30 per workspace, or 10 per destination host (across all workspaces) in a minute (`reason: "rate_limited"`). |
 
-A test is never held by noise control and never filtered by routing filters. It is excluded from
-the observability SLIs, the Overview's 24 hour counts and the "real event" setup step, and it is
+A test is never held or filtered because the route does not use those paths, not because of its event type: `test` and `noti.*` are reserved and refused (`400`) in a generic-webhook event's `type`. It is excluded from
+the observability SLIs, stall detection, the Overview's 24 hour counts and the "real event" setup step, and it is
 audited as `integration.test` (ids only). A replay of a test stays a test. The delivery state is
 the destination's real answer: `sent` (confirmed), `accepted` (accepted without confirmation, as
-with Teams), `retrying` or `dead_lettered` with the usual error code.
+with Teams), `retrying` or `dead_lettered` with the usual error code. For a custom webhook the error is one of two buckets only (`destination_unavailable`, `destination_unauthorized`), never the HTTP status class.
 
 ## Routing filters
 
@@ -563,7 +563,8 @@ type SetupProgress = {
   organizationId: string;
   steps: {
     id: 'source_connected' | 'integration_created' | 'destination_verified' | 'first_event_received';
-    done: boolean;
+    done: boolean;              // true only for status 'done'
+    status: 'done' | 'accepted' | 'todo';  // 'accepted': the destination accepted a message and never confirmed it
     since: string | null;       // ISO instant of the earliest evidence; null when not done
     nextAction: 'connect_source' | 'create_integration' | 'send_test' | 'trigger_real_event' | 'none';
   }[];
@@ -573,9 +574,10 @@ type SetupProgress = {
 };
 ```
 
-`source_connected`: an active GitHub installation or any generic, GitLab or Stripe source.
-`integration_created`: any integration. `destination_verified`: a delivery in `sent` or `accepted`
-within 30 days, test or real. `first_event_received`: any non-test delivery, in any state. Reads
+`source_connected`: an active GitHub installation or any **enabled** generic, GitLab or Stripe source.
+`integration_created`: any integration. `destination_verified`: a `sent` delivery (`done`) or, failing
+that, an `accepted` one (`accepted`) within 30 days, test or real, to an integration that still exists, is
+enabled and not quarantined. `complete` means no step is `todo`. `first_event_received`: any non-test delivery, in any state. Reads
 are limited to 120 per minute per user (`429` with `Retry-After`).
 
 ## Workspace export and deletion (admin)

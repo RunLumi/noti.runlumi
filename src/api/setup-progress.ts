@@ -44,10 +44,18 @@ const NEXT_ACTION: Readonly<Record<SetupStepId, NextActionKey>> = {
   first_event_received: 'trigger_real_event',
 };
 
+export type StepStatus = 'done' | 'accepted' | 'todo';
+
 export interface SetupStep {
   readonly id: SetupStepId;
+  /** True only for `status: 'done'`. */
   readonly done: boolean;
-  /** ISO instant of the earliest evidence, or null when not done. */
+  /**
+   * `accepted` is for `destination_verified` only: the destination accepted a message (Teams
+   * Workflows, or a Discord 204) but never confirmed it was shown. It is reported as what it is.
+   */
+  readonly status: StepStatus;
+  /** ISO instant of the earliest evidence, or null when there is none. */
   readonly since: string | null;
   /** What to do to finish this step; `none` once it is done. */
   readonly nextAction: NextActionKey;
@@ -64,44 +72,65 @@ export interface SetupProgress {
 export interface SetupEvidence {
   readonly source: string | null;
   readonly integration: string | null;
+  /** A `sent` delivery (the destination confirmed it) to a usable integration. */
   readonly verified: string | null;
+  /** An `accepted` delivery (accepted, not confirmed) to a usable integration. */
+  readonly verifiedAccepted: string | null;
   readonly firstEvent: string | null;
 }
 
-/** Pure derivation, so the table of cases is testable without a database. */
+/**
+ * Pure derivation, so the table of cases is testable without a database. `complete` means no
+ * step is still `todo`: an `accepted`-only destination does not keep the card on screen forever
+ * (a Teams-only workspace could never do better), but the step is reported as `accepted`.
+ */
 export function deriveProgress(evidence: SetupEvidence): SetupProgress {
-  const at: Record<SetupStepId, string | null> = {
-    source_connected: evidence.source,
-    integration_created: evidence.integration,
-    destination_verified: evidence.verified,
-    first_event_received: evidence.firstEvent,
-  };
+  const iso = (at: string): string => sqlTimeToIso(at) ?? at;
   const steps = STEP_IDS.map((id): SetupStep => {
-    const done = at[id] !== null;
-    return {
-      id,
-      done,
-      since: done ? (sqlTimeToIso(at[id]) ?? at[id]) : null,
-      nextAction: done ? 'none' : NEXT_ACTION[id],
+    const at: Record<SetupStepId, string | null> = {
+      source_connected: evidence.source,
+      integration_created: evidence.integration,
+      destination_verified: evidence.verified,
+      first_event_received: evidence.firstEvent,
     };
+    const own = at[id];
+    if (own !== null) return { id, done: true, status: 'done', since: iso(own), nextAction: 'none' };
+    if (id === 'destination_verified' && evidence.verifiedAccepted !== null)
+      return {
+        id,
+        done: false,
+        status: 'accepted',
+        since: iso(evidence.verifiedAccepted),
+        nextAction: NEXT_ACTION[id],
+      };
+    return { id, done: false, status: 'todo', since: null, nextAction: NEXT_ACTION[id] };
   });
-  const next = steps.find((s) => !s.done)?.id ?? null;
+  const next = steps.find((s) => s.status === 'todo')?.id ?? null;
   return { steps, complete: next === null, next };
 }
 
 /** Stand-in for a row that predates `created_at`: it exists, so the step is done; when is unknown. */
 const EPOCH = '1970-01-01 00:00:00';
 
-const EVIDENCE_SQL = `SELECT
-  (SELECT MIN(t) FROM (
-     SELECT MIN(COALESCE(created_at, ?3)) AS t FROM github_installations WHERE organization_id=?1 AND status='active'
-     UNION ALL
-     SELECT MIN(COALESCE(created_at, ?3)) FROM sources WHERE organization_id=?1)) AS source,
-  (SELECT MIN(COALESCE(created_at, updated_at, ?3)) FROM integrations WHERE organization_id=?1) AS integration,
-  (SELECT MIN(COALESCE(created_at, updated_at)) FROM deliveries
-     WHERE organization_id=?1 AND state IN ('sent','accepted') AND COALESCE(created_at, updated_at) >= ?2) AS verified,
-  (SELECT MIN(COALESCE(created_at, updated_at, ?3)) FROM deliveries
-     WHERE organization_id=?1 AND is_test=0) AS firstEvent`;
+/**
+ * Each statement reads one index. The delivery queries name `deliveries_org_created` (INDEXED BY)
+ * and take the first row in index order, so a missing migration fails loudly instead of scanning
+ * a workspace's whole ledger, and cost does not grow with the number of deliveries.
+ * ?1 organization · ?2 window start (or the epoch stand-in) · ?3 state.
+ */
+export const SOURCE_SQL = `SELECT MIN(t) AS t FROM (
+  SELECT MIN(COALESCE(created_at, ?2)) AS t FROM github_installations WHERE organization_id=?1 AND status='active'
+  UNION ALL
+  SELECT MIN(COALESCE(created_at, ?2)) FROM sources WHERE organization_id=?1 AND enabled=1)`;
+export const INTEGRATION_SQL = `SELECT MIN(COALESCE(created_at, updated_at, ?2)) AS t FROM integrations WHERE organization_id=?1`;
+export const VERIFIED_SQL = `SELECT d.created_at AS t FROM deliveries d INDEXED BY deliveries_org_created
+  WHERE d.organization_id=?1 AND d.created_at>=?2 AND d.state=?3
+    AND EXISTS (SELECT 1 FROM integrations i
+                WHERE i.id=d.integration_id AND i.organization_id=d.organization_id
+                  AND i.enabled=1 AND i.credentials_quarantined_at IS NULL)
+  ORDER BY d.created_at LIMIT 1`;
+export const FIRST_EVENT_SQL = `SELECT COALESCE(d.created_at, ?2) AS t FROM deliveries d INDEXED BY deliveries_org_created
+  WHERE d.organization_id=?1 AND d.is_test=0 ORDER BY d.created_at LIMIT 1`;
 
 const setup = new Hono<{ Bindings: Bindings }>();
 
@@ -117,20 +146,22 @@ setup.get('/progress', async (c) => {
     .toISOString()
     .slice(0, 19)
     .replace('T', ' ');
-  const row = await c.env.DB.prepare(EVIDENCE_SQL).bind(who.orgId, since, EPOCH).first<{
-    source: string | null;
-    integration: string | null;
-    verified: string | null;
-    firstEvent: string | null;
-  }>();
+  const read = async (sql: string, ...args: (string | number)[]): Promise<string | null> =>
+    (
+      await c.env.DB.prepare(sql)
+        .bind(...args)
+        .first<{ t: string | null }>()
+    )?.t ?? null;
+  const [source, integration, verified, verifiedAccepted, firstEvent] = await Promise.all([
+    read(SOURCE_SQL, who.orgId, EPOCH),
+    read(INTEGRATION_SQL, who.orgId, EPOCH),
+    read(VERIFIED_SQL, who.orgId, since, 'sent'),
+    read(VERIFIED_SQL, who.orgId, since, 'accepted'),
+    read(FIRST_EVENT_SQL, who.orgId, EPOCH),
+  ]);
   return c.json({
     organizationId: who.orgId,
-    ...deriveProgress({
-      source: row?.source ?? null,
-      integration: row?.integration ?? null,
-      verified: row?.verified ?? null,
-      firstEvent: row?.firstEvent ?? null,
-    }),
+    ...deriveProgress({ source, integration, verified, verifiedAccepted, firstEvent }),
     verifiedWindowDays: VERIFIED_WINDOW_DAYS,
   });
 });

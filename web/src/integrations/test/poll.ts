@@ -1,3 +1,4 @@
+import { ApiError } from '../../lib/api';
 import type { DeliveryItem, DeliveryState } from '../../deliveries/api';
 
 /**
@@ -21,6 +22,8 @@ export const POLL_INTERVAL_MS = 1_000;
 export const POLL_MAX_MS = 30_000;
 /** Consecutive failed reads tolerated before the error is surfaced. */
 export const POLL_MAX_READ_FAILURES = 3;
+/** Longest single wait after a 429 while polling. */
+export const RATE_LIMIT_WAIT_MAX_MS = 10_000;
 
 export type TestOutcome =
   | { readonly kind: 'sent' | 'accepted' | 'failed' | 'retrying'; readonly delivery: DeliveryItem }
@@ -64,6 +67,15 @@ export async function pollTest(deps: PollDeps): Promise<TestOutcome | null> {
       const outcome = outcomeOf(delivery);
       if (outcome) return deps.cancelled() ? null : outcome;
     } catch (error) {
+      // Rate limited while polling: not a failure. Wait as asked (bounded) and keep going; if the
+      // time runs out the result is `timeout` ("still waiting, see Activity"), never an error.
+      if (error instanceof ApiError && error.status === 429) {
+        if (deps.now() - started >= max) return { kind: 'timeout' };
+        await deps.sleep(
+          Math.min(Math.max(interval, (error.retryAfter ?? 0) * 1000), RATE_LIMIT_WAIT_MAX_MS),
+        );
+        continue;
+      }
       failures += 1;
       if (failures >= POLL_MAX_READ_FAILURES) throw error;
     }

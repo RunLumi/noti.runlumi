@@ -34,35 +34,55 @@ nothing about what was left to do.
 3. **`is_test` is a column (migration `0022`, `ADD COLUMN ... NOT NULL DEFAULT 0`).** Nothing in
    delivery reads it. It exists so reporting can tell a person's click from the service's work:
    the observability SLIs (success ratio, retry rate, latency, error codes, per-destination
-   breakdown) and the Overview's 24 hour counts exclude tests, and setup progress does not count
-   a test as a real event. Alternatives rejected: a marker in `dedup_key` (a hash, not
+   breakdown, backlog ages) and the Overview's 24 hour counts exclude tests, stall detection ignores
+   them, and setup progress does not count a test as a real event. The column has
+   `CHECK(is_test IN (0,1))`. **Deploy order: apply migration 0022 before the Worker that reads
+   `is_test`** (the previous Worker ignores the column, so applying first is safe). Alternatives rejected: a marker in `dedup_key` (a hash, not
    queryable), `replay_of` (a test is not a replay), or parsing the outbox payload (purged after
-   seven days while the delivery lives on). Backlog ages still include tests: a test stuck in the
-   queue is a stuck delivery. A replay of a test copies the flag, so redelivering a failed test
+   seven days while the delivery lives on). A replay of a test copies the flag, so redelivering a failed test
    does not pollute the SLIs either.
-4. **Noise control and routing filters do not apply.** The route never goes through the ingress
-   noise planner or the filter decider, so a test is never held. As defence in depth, event type
-   `test` is also treated as critical by `isCritical` (never held by quiet hours, grouping or
-   digests) and passes `evaluateCompiled` (no filter can block it). Real ingress never produces
-   that type; the bypass keys on the type, and `tests/routing/filters.test.ts` shows the same
-   config still blocks a real event.
+4. **Noise control and routing filters do not apply, by construction, not by a string.** The route
+   never goes through the ingress noise planner or the filter decider, so a test is never held and
+   never filtered. An earlier draft also bypassed both for event type `test`; the security review
+   found that a signed generic-webhook event can name its own type, so a sender could have used it
+   to skip a deny rule or quiet hours. Those bypasses are removed (`tests/routing/filters.test.ts`
+   and `tests/noise/decision.test.ts` assert `test` gets no special treatment), and nothing
+   downstream needs one: the test never enters a path that holds or filters. `test` and `noti.*`
+   are also reserved at generic ingress (`parseGenericEvent` refuses them with a `400` and a
+   field error on `type`, the route's existing contract for an invalid event), so no sender can
+   produce an event that looks like one of ours. Test-ness is the `is_test` column only, which
+   only `test-send` and a replay of a test set.
 5. **Authorization and abuse limits.** Capability `integration.update` (a member may test what
-   they may edit; no new capability, so no permission-matrix change). The central `requireSameOrigin`
-   middleware plus the same Origin and JSON content-type check as every mutation. Refused with
-   `409` and a `reason` while workspace deletion is pending, when the integration is paused, or
-   when its credentials are quarantined; a row in another workspace is a `404` identical to a
-   missing one and consumes no rate-limit budget (the tenant lookup comes first). Limits: 5 per
-   integration and 20 per user per minute, `429` with `Retry-After`: every click is an outbound
-   request into a customer's chat. The delivery insert repeats the usability and deletion guards
-   in SQL, so a pause that lands between the read and the write wins. An audit row
+   they may edit; no new capability). The central `requireSameOrigin` middleware plus the same
+   Origin and JSON content-type check as every mutation. Refused with `409` and a `reason` while
+   workspace deletion is pending, when the integration is paused, when its credentials are
+   quarantined, or while a test is already running; a row in another workspace is a `404`
+   identical to a missing one and consumes no budget (the tenant lookup comes first). Every click is
+   an outbound request into a customer-chosen destination, so the limits are layered, per minute:
+   5 per integration, 20 per user, 30 per workspace, and 10 per destination host **across all
+   tenants** (a shared host such as hooks.slack.com, or one custom-webhook host, cannot receive a
+   flood assembled from many workspaces). `429` with `Retry-After`. The windows are fixed, so a
+   caller can land up to twice a limit around a window boundary; the in-flight guard and the host
+   limit bound what that can do. **In-flight guard:** a new test is refused with `409
+   test_in_flight` while an `is_test` delivery for the same integration was created in the last 15
+   minutes and is `pending`, `claimed` or `retrying`. The check runs before any budget is spent and
+   again inside the insert's guard (atomic), so retries cannot stack: at most one test per
+   integration per 15 minutes can be retrying. The insert repeats the usability and deletion
+   guards in SQL, so a pause that lands between the read and the write wins. An audit row
    (`integration.test`, ids only) commits in the same batch and only if the delivery row was
-   written. The response is `202 {deliveryId}` and nothing else: no URL, no credential, no body.
+   written. The response is `202 {deliveryId}` and nothing else.
 6. **The result comes from polling `GET /api/deliveries/:id`.** The client waits at most 30
    seconds at a one-second interval (`web/src/integrations/test/poll.ts`, pure and unit-tested with
-   a fake clock), tolerates two failed reads, and stops on `sent`, `accepted`, `dead_lettered` or
+   a fake clock), tolerates two failed reads (a `429` while polling is not a failure: it waits as asked, capped, and ends as "still waiting" if the bound passes), and stops on `sent`, `accepted`, `dead_lettered` or
    `retrying`. `retrying` ends the wait because the person has something to read and nothing to
    do. After the bound the panel says it is still waiting and links to Activity; it never claims a
    result it did not see.
+   **A test to a custom webhook shows two buckets only.** With a tenant-chosen host, the HTTP
+   status class is an oracle for probing what answers where, so the delivery view of a test to a
+   `generic_webhook` reports `destination_unavailable` (could not reach it) or
+   `destination_unauthorized` (it answered and refused), never 401 versus 404 versus 429; a
+   success is the third bucket (reachable). Other destinations keep their real classification.
+
 7. **Plain-language results, honest about what each state proves.** `sent`: the destination
    confirmed it. `accepted`: it accepted the message and does not say whether it was shown; for
    Teams the copy says so in as many words and points at the workflow's run history. Failures use
@@ -72,15 +92,19 @@ nothing about what was left to do.
    is explained from what the dashboard already knows about the integration (paused, quarantined,
    or otherwise unavailable); the generic `409` copy talks about quotas and would mislead.
 8. **Setup progress is derived, never stored.** `GET /api/setup/progress` (`delivery.read`) returns
-   four steps from real rows: a source is connected (an active GitHub installation, or any generic,
-   GitLab or Stripe source), an integration exists, a destination is verified (a delivery in `sent`
-   or `accepted` within 30 days, test or real), and a real event was received (any non-test
-   delivery, in any state: even a failed one proves the source reached Noti). Each step carries
-   `done`, `since` (the earliest evidence) and a closed `nextAction` key the dashboard maps to an
-   existing route. This is a smaller model than F207's seven steps and two state machines; it is
-   what can be derived honestly from the tables that exist today, and `docs/specs/14` lists what
-   is not built. "Verified" is not sticky: a workspace whose only successes are older than 30 days
-   goes back to unverified, because the evidence aged out.
+   four steps from real rows: a source is connected (an active GitHub installation, or an
+   **enabled** generic, GitLab or Stripe source), an integration exists, a destination is
+   verified, and a real event was received (any non-test delivery, in any state: even a failed one
+   proves the source reached Noti). Each step carries `done`, `status`, `since` (the earliest
+   evidence) and a closed `nextAction` key. "Verified" counts only deliveries to an integration
+   that still exists, is enabled and is not quarantined, within 30 days, and is a tri-state:
+   `done` for a `sent` delivery (the destination confirmed), `accepted` for accepted-only
+   evidence (Teams Workflows, a Discord 204: "accepted, not confirmed", `done` false).
+   `complete` means no step is still `todo`, so an accepted-only workspace is not nagged forever;
+   the step still says what it is while the card is visible. The delivery queries are
+   `INDEXED BY deliveries_org_created` and take the first row in index order, so a missing
+   migration fails loudly and cost does not grow with the ledger (`EXPLAIN QUERY PLAN` test).
+   "Verified" is not sticky: evidence ages out after 30 days or when its integration goes away.
 9. **Dashboard.** A "Send a test notification" section on the integration settings page and a
    compact "Send test" button on each list row share one component (`TestSend`). The create wizard
    gains an optional seventh step, "Test it", shown after the integration is saved: skipping is

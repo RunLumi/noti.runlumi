@@ -39,6 +39,8 @@ function ErrorLine({ error, integration }: { error: unknown; integration: Integr
   useLocale();
   // A 409 here is about THIS integration (paused, quarantined, workspace being deleted); the
   // generic 409 copy talks about quotas, so it is replaced.
+  if (error instanceof ApiError && error.status === 409 && error.reason === 'test_in_flight')
+    return <p>{t('test.error.inFlight')}</p>;
   if (error instanceof ApiError && error.status === 409) {
     const blocked = blockedBy(integration);
     return (

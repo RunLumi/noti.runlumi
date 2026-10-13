@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { deriveProgress, STEP_IDS } from '../../src/api/setup-progress';
+import { FIRST_EVENT_SQL, VERIFIED_SQL, deriveProgress, STEP_IDS } from '../../src/api/setup-progress';
 import type { Bindings } from '../../src/env';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
@@ -27,7 +27,7 @@ const { default: worker } = await import('../../src/index');
 const T = '2026-10-01 08:00:00';
 
 describe('deriveProgress (pure, table-driven)', () => {
-  const none = { source: null, integration: null, verified: null, firstEvent: null };
+  const none = { source: null, integration: null, verified: null, verifiedAccepted: null, firstEvent: null };
   const cases: {
     name: string;
     evidence: Parameters<typeof deriveProgress>[0];
@@ -58,21 +58,21 @@ describe('deriveProgress (pure, table-driven)', () => {
     },
     {
       name: 'tested but no real event yet',
-      evidence: { source: T, integration: T, verified: T, firstEvent: null },
+      evidence: { source: T, integration: T, verified: T, verifiedAccepted: null, firstEvent: null },
       done: [true, true, true, false],
       next: 'first_event_received',
       action: ['none', 'none', 'none', 'trigger_real_event'],
     },
     {
       name: 'everything done',
-      evidence: { source: T, integration: T, verified: T, firstEvent: T },
+      evidence: { source: T, integration: T, verified: T, verifiedAccepted: null, firstEvent: T },
       done: [true, true, true, true],
       next: null,
       action: ['none', 'none', 'none', 'none'],
     },
     {
       name: 'steps are independent: an event arrived but the destination was never verified',
-      evidence: { source: T, integration: T, verified: null, firstEvent: T },
+      evidence: { source: T, integration: T, verified: null, verifiedAccepted: null, firstEvent: T },
       done: [true, true, false, true],
       next: 'destination_verified',
       action: ['none', 'none', 'send_test', 'none'],
@@ -86,6 +86,16 @@ describe('deriveProgress (pure, table-driven)', () => {
     expect(p.steps.map((s) => s.nextAction)).toEqual(action);
     expect(p.next).toBe(next);
     expect(p.complete).toBe(next === null);
+  });
+
+  it('accepted-only evidence is reported as accepted, not done, and does not keep the card forever', () => {
+    const p = deriveProgress({ ...none, source: T, integration: T, verifiedAccepted: T, firstEvent: T });
+    const step = p.steps[2];
+    expect(step).toMatchObject({ status: 'accepted', done: false, nextAction: 'send_test' });
+    expect(step?.since).toBe('2026-10-01T08:00:00.000Z');
+    expect(p.complete).toBe(true);
+    // Confirmed evidence wins over accepted.
+    expect(deriveProgress({ ...none, verified: T, verifiedAccepted: T }).steps[2]?.status).toBe('done');
   });
 
   it('since is an ISO instant for a done step and null otherwise', () => {
@@ -117,7 +127,7 @@ async function progress(as = 'bob'): Promise<Response> {
 
 interface Body {
   organizationId: string;
-  steps: { id: string; done: boolean; since: string | null }[];
+  steps: { id: string; done: boolean; status: string; since: string | null }[];
   complete: boolean;
   next: string | null;
 }
@@ -203,14 +213,14 @@ describe('GET /api/setup/progress', () => {
     expect(b.next).toBe('source_connected');
   });
 
-  it('accepted (Teams) verifies; failed, retrying and pending do not', async () => {
+  it('failed, retrying and pending verify nothing; accepted is reported separately (see below)', async () => {
     integration('int-a', 'org-a');
     delivery('f1', 'org-a', 'dead_lettered', { test: true });
     delivery('f2', 'org-a', 'retrying', { test: true });
     delivery('f3', 'org-a', 'pending', { test: true });
     expect(done(await body())).toEqual(['integration_created']);
     delivery('a1', 'org-a', 'accepted', { test: true });
-    expect(done(await body())).toContain('destination_verified');
+    expect(done(await body())).not.toContain('destination_verified');
   });
 
   it('a delivery older than 30 days does not verify', async () => {
@@ -241,5 +251,61 @@ describe('GET /api/setup/progress', () => {
     const b = await body();
     expect(b.organizationId).toBe('org-a');
     expect(done(b)).toEqual([]);
+  });
+});
+
+describe('destination_verified: usable integrations only, and accepted is its own state', () => {
+  const status = async (): Promise<string | undefined> =>
+    (await body()).steps.find((x) => x.id === 'destination_verified')?.status;
+
+  it('a delivery to a since-deleted integration verifies nothing', async () => {
+    integration('int-a', 'org-a');
+    delivery('s1', 'org-a', 'sent');
+    expect(await status()).toBe('done');
+    db.raw.prepare("DELETE FROM integrations WHERE id='int-a'").run();
+    expect(await status()).toBe('todo');
+  });
+
+  it('a quarantined or paused integration verifies nothing', async () => {
+    integration('int-a', 'org-a');
+    delivery('s1', 'org-a', 'sent');
+    db.raw.prepare("UPDATE integrations SET credentials_quarantined_at='2026-10-01 00:00:00'").run();
+    expect(await status()).toBe('todo');
+    db.raw.prepare('UPDATE integrations SET credentials_quarantined_at=NULL, enabled=0').run();
+    expect(await status()).toBe('todo');
+  });
+
+  it('accepted-only evidence (Teams) is `accepted`; a confirmed one upgrades it to `done`', async () => {
+    integration('int-a', 'org-a');
+    delivery('a1', 'org-a', 'accepted', { test: true });
+    expect(await status()).toBe('accepted');
+    expect(done(await body())).not.toContain('destination_verified');
+    delivery('s1', 'org-a', 'sent', { test: true });
+    expect(await status()).toBe('done');
+  });
+
+  it('a disabled source does not count as a connected source', async () => {
+    db.raw
+      .prepare(
+        `INSERT INTO sources(id,organization_id,kind,name,endpoint_id,secret_envelope,key_salt,dek_wrapped,kek_version,enabled,created_by)
+         VALUES('s1','org-a','generic','CI',?,x'0a',x'0b',x'0c',1,0,'bob')`,
+      )
+      .run('e'.repeat(24));
+    expect(done(await body())).toEqual([]);
+  });
+
+  it('every evidence query is index-driven: EXPLAIN QUERY PLAN names deliveries_org_created and no full scan of deliveries', async () => {
+    for (const [sql, args] of [
+      [VERIFIED_SQL, ['org-a', '2026-01-01 00:00:00', 'sent']],
+      [FIRST_EVENT_SQL, ['org-a', '1970-01-01 00:00:00']],
+    ] as const) {
+      const rows = await db.d1
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .bind(...args)
+        .all<{ detail: string }>();
+      const plan = rows.results.map((r) => r.detail).join('\n');
+      expect(plan).toContain('deliveries_org_created');
+      expect(plan).not.toMatch(/SCAN d(eliveries)?(?! USING)\b/);
+    }
   });
 });

@@ -47,6 +47,8 @@ export const setupEn = {
     'Noti stopped using this integration’s saved webhook URL. Paste the URL again in the credentials section, then send a test.',
   'test.error.unavailable':
     'This integration can’t receive a test right now. If the workspace is scheduled for deletion, cancel that in Settings first. Otherwise reload the page and try again.',
+  'test.error.inFlight':
+    'A test is already running for this integration. Wait for its result, then send another.',
   'test.error.rateLimited': 'You have sent a lot of tests. Wait {seconds} seconds, then try again.',
 
   'delivery.testBadge': 'Test',
@@ -66,6 +68,9 @@ export const setupEn = {
   'setup.listLabel': 'Setup steps',
   'setup.done': 'Done',
   'setup.todo': 'Not done yet',
+  'setup.accepted': 'Accepted, not confirmed',
+  'setup.step.destination_verified.accepted':
+    'A destination accepted a message but does not confirm it was shown (Microsoft Teams works this way). Look in the chat to be sure.',
   'setup.next': 'Next',
   'setup.since': 'Since {when}',
   'setup.step.source_connected': 'Connect a source',

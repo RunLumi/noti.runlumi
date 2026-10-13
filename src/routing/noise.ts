@@ -205,9 +205,6 @@ export function readStoredNoise(json: string | null): StoredNoise {
 /** Per-integration cap on events waiting to be released. Beyond it new events are delivered. */
 export const HELD_CAPACITY = 500;
 
-/** The event type of a user-requested test notification (ADR 0018). */
-export const TEST_EVENT_TYPE = 'test';
-
 /**
  * Critical updates bypass quiet hours, digests and grouping (F146, F148). Derived from the
  * canonical status the source mapped (never from a free-form payload field), so a failed
@@ -216,13 +213,7 @@ export const TEST_EVENT_TYPE = 'test';
  * be held by accident.
  */
 export function isCritical(status: string | undefined, eventType: string | undefined): boolean {
-  // A user-requested test notification (ADR 0018) is never held: its whole point is an
-  // immediate answer to "does this destination work?". Real ingress never produces this type.
-  return (
-    status === 'failure' ||
-    eventType === TEST_EVENT_TYPE ||
-    (eventType !== undefined && /^security[._]/.test(eventType))
-  );
+  return status === 'failure' || (eventType !== undefined && /^security[._]/.test(eventType));
 }
 
 export type HoldReason = 'quiet_hours' | 'digest' | 'grouped';

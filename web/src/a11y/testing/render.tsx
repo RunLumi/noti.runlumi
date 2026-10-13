@@ -105,7 +105,7 @@ export interface ApiState {
   /** `GET /api/setup/progress`; `'error'` makes it fail. */
   setup: unknown;
   /** Answer to `POST /api/integrations/:id/test`: accepted, or a failing status. */
-  testSend: 'ok' | 409 | 429 | 500;
+  testSend: 'ok' | 'in_flight' | 409 | 429 | 500;
   /** The delivery a test creates, as `GET /api/deliveries/:id` reports it. */
   testDelivery: Record<string, unknown>;
 }
@@ -235,6 +235,8 @@ export function installFetch(state: ApiState): void {
     }
     if (method === 'POST' && /^\/api\/integrations\/[^/]+\/test$/.test(path)) {
       if (state.testSend === 'ok') return Promise.resolve(json({ deliveryId: TEST_DELIVERY_ID }, 202));
+      if (state.testSend === 'in_flight')
+        return Promise.resolve(json({ error: 'refused', reason: 'test_in_flight' }, 409));
       return Promise.resolve(
         json({ error: 'refused' }, state.testSend, state.testSend === 429 ? { 'retry-after': '42' } : {}),
       );

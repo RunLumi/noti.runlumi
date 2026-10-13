@@ -87,6 +87,17 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+describe('reserved event types at ingress', () => {
+  it('a signed event of type "test" is refused with 400 and persists nothing', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    const res = await post(src, { ...EVENT, type: 'test' });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/reserved/);
+    expect(h.db.raw.prepare('SELECT COUNT(*) AS n FROM deliveries').get()).toEqual({ n: 0 });
+  });
+});
+
 describe('accepted events', () => {
   it('verifies, persists one delivery and one outbox row, and acknowledges with 202', async () => {
     const src = await createSource();
