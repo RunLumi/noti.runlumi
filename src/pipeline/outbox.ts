@@ -22,7 +22,13 @@ import {
   sqliteTimestamp,
   type Lease,
 } from '../delivery/claim';
-import { SUMMARY_MAX_CHARS, type Bindings, type DeliveryMessage } from '../env';
+import {
+  COMBINED_COUNT_MAX,
+  COMBINED_SUMMARY_MAX_CHARS,
+  SUMMARY_MAX_CHARS,
+  type Bindings,
+  type DeliveryMessage,
+} from '../env';
 import { asRecord, str } from '../lib/json';
 import { log } from '../platform/log';
 
@@ -54,7 +60,11 @@ function optionalDisplayFields(r: Record<string, unknown>): Partial<DeliveryMess
   const repo = bounded(r.repo, 200);
   const actor = bounded(r.actor, 100);
   const eventType = bounded(r.eventType, 100);
-  const summary = bounded(r.summary, SUMMARY_MAX_CHARS);
+  const count =
+    typeof r.count === 'number' && Number.isInteger(r.count) && r.count >= 1 && r.count <= COMBINED_COUNT_MAX
+      ? r.count
+      : undefined;
+  const summary = bounded(r.summary, count ? COMBINED_SUMMARY_MAX_CHARS : SUMMARY_MAX_CHARS);
   const status = STATUSES.has(r.status) ? (r.status as DeliveryMessage['status']) : undefined;
   return {
     ...(repo ? { repo } : {}),
@@ -62,6 +72,7 @@ function optionalDisplayFields(r: Record<string, unknown>): Partial<DeliveryMess
     ...(eventType ? { eventType } : {}),
     ...(summary ? { summary } : {}),
     ...(status ? { status } : {}),
+    ...(count ? { count } : {}),
   };
 }
 

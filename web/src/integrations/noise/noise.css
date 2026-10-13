@@ -1,0 +1,46 @@
+/* Quiet hours and summaries (ADR 0016). Reuses the filter group, check and field styles. */
+.noise-times {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: var(--space-4);
+}
+
+.noise-preview,
+.noise-status {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-4);
+  border: var(--border-archival);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-white);
+}
+
+.noise-preview h3,
+.noise-status h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--color-civic-navy);
+}
+
+.noise-preview ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.noise-status p {
+  margin: 0;
+}
+
+.noise-status {
+  margin-top: var(--space-4);
+}
+
+@media (forced-colors: active) {
+  .noise-preview,
+  .noise-status {
+    border: 1px solid CanvasText;
+  }
+}

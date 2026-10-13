@@ -15,12 +15,25 @@ import { extractGithubFacts } from './facts';
 import type { RoutingFacts } from '../../../routing/filters';
 import { createRouteDecider } from '../../../routing/ingress';
 import { decisionStatement, type RoutingDecisionRow } from '../../../routing/provenance';
+import { createNoisePlanner } from '../../../routing/noise-ingress';
+import {
+  closeFailureStatement,
+  failureKeyHash,
+  hasOpenFailure,
+  openFailureStatement,
+} from '../../../routing/noise-store';
+import { githubNoiseFacts, isWorkflowFailure } from './noise';
 import { ingressLimiter } from '../../../security/rate-limit';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
 const MAX_BODY_BYTES = 1024 * 1024;
 
-type IntegrationRow = { id: string; event_types: string; filters_json: string | null };
+type IntegrationRow = {
+  id: string;
+  event_types: string;
+  filters_json: string | null;
+  noise_json: string | null;
+};
 
 /**
  * Read one result from a `db.batch()` response, failing loudly if the batch returned a
@@ -84,6 +97,18 @@ function displayFields(event: Record<string, unknown>, eventType: string): Displ
     ...(repo ? { repo: repo.slice(0, 200) } : {}),
     ...(actor ? { actor: actor.slice(0, 100) } : {}),
     ...(summary ? { summary } : {}),
+  };
+}
+
+/** A success that closes an earlier failure of the same workflow on the same branch. */
+function resolvedDisplay(d: DisplayFields): DisplayFields {
+  return {
+    ...d,
+    title: `Resolved: ${d.title}`.slice(0, 300),
+    summary: `Back to passing after an earlier failure.${d.summary ? ` ${d.summary}` : ''}`.slice(
+      0,
+      SUMMARY_MAX_CHARS,
+    ),
   };
 }
 
@@ -182,7 +207,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // `repo` only narrows within the tenant. It is not authorization. GitHub owner and
   // repository names are case-insensitive, so the match is too.
   const rows = await c.env.DB.prepare(
-    'SELECT id,event_types,filters_json FROM integrations WHERE organization_id=? AND repo=? COLLATE NOCASE AND enabled=1',
+    'SELECT id,event_types,filters_json,noise_json FROM integrations WHERE organization_id=? AND repo=? COLLATE NOCASE AND enabled=1',
   )
     .bind(organizationId, repo)
     .all<IntegrationRow>();
@@ -197,6 +222,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     eventId: deliveryId,
   });
   let queued = 0;
+  let held = 0;
   // Facts are extracted and folded at most once, and each distinct stored filters document is
   // parsed and compiled at most once per request. They are the only part of the payload routing
   // reads, and are never stored (ADR 0010).
@@ -206,6 +232,9 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // never block or lose a delivery.
   const provenance: D1PreparedStatement[] = [];
   const decidedAt = Date.now();
+  // Noise control (ADR 0016) decides, per integration that has settings, deliver now or hold.
+  const planner = createNoisePlanner(c.env.DB, organizationId, decidedAt);
+  const noiseFacts = githubNoiseFacts(kind, event);
   for (const row of rows.results) {
     let types: unknown;
     try {
@@ -213,7 +242,40 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     } catch {
       continue;
     }
-    if (!Array.isArray(types) || !types.includes(eventType)) continue;
+    if (!Array.isArray(types)) continue;
+
+    const subscribed = types.includes(eventType);
+    // Only a success can be wanted without being subscribed (a resolution notice).
+    if (!subscribed && eventType !== 'workflow_run.success') continue;
+    const settings = planner.settingsOf(row.id, row.noise_json);
+    // A resolution notice may be wanted by an integration that follows failures only: a success
+    // it did not subscribe to is sent solely when it closes a failure that integration saw.
+    const resolutionOnly =
+      !subscribed &&
+      eventType === 'workflow_run.success' &&
+      settings?.resolution === true &&
+      (types.includes('workflow_run.failure') || types.includes('workflow_run.timed_out'));
+    if (!subscribed && !resolutionOnly) continue;
+
+    let failureKey: string | null = null;
+    let resolved = false;
+    if (
+      settings?.resolution &&
+      noiseFacts.workflow !== null &&
+      noiseFacts.branch !== null &&
+      (eventType === 'workflow_run.success' || isWorkflowFailure(eventType))
+    ) {
+      failureKey = await failureKeyHash({
+        organizationId,
+        integrationId: row.id,
+        repo,
+        workflow: noiseFacts.workflow,
+        branch: noiseFacts.branch,
+      });
+      if (eventType === 'workflow_run.success')
+        resolved = await hasOpenFailure(c.env.DB, organizationId, row.id, failureKey, decidedAt);
+    }
+    if (resolutionOnly && !resolved) continue;
 
     // F184 / D10: identity is (dedup_key, destination), hashed — never a hand-built string.
     const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
@@ -221,43 +283,89 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     // Rows written before 0009 used this id. A redelivery of such an event must not be
     // accepted a second time under the new id.
     const legacyId = `${deliveryId}:${row.id}`;
-    if (decision) {
-      const record: RoutingDecisionRow = {
-        id,
-        organizationId,
-        integrationId: row.id,
-        eventType,
-        outcome: decision.pass ? 'delivered' : 'filtered',
-        filterId: decision.filterId,
-        reason: decision.reason,
-        unknown: decision.unknown,
-        decidedAt,
-      };
-      provenance.push(decisionStatement(c.env.DB, record, [id, legacyId]));
-    }
+    const record = (over: Partial<RoutingDecisionRow>): RoutingDecisionRow => ({
+      id,
+      organizationId,
+      integrationId: row.id,
+      eventType,
+      outcome: decision?.pass === false ? 'filtered' : 'delivered',
+      filterId: decision?.filterId ?? null,
+      reason: decision?.reason ?? 'allowed',
+      unknown: decision?.unknown ?? false,
+      decidedAt,
+      ...over,
+    });
     if (decision && !decision.pass) {
       // Held back by this integration's own filters: nothing is queued, and the reason is
       // recorded so "why did I not get this" has an answer.
+      provenance.push(decisionStatement(c.env.DB, record({}), [id, legacyId]));
       continue;
     }
+
+    const itemDisplay: DisplayFields = resolved ? resolvedDisplay(display) : display;
+    const plan = await planner.plan({
+      integrationId: row.id,
+      noiseJson: row.noise_json,
+      deliveryId: id,
+      legacyId,
+      eventType,
+      subject: noiseFacts.subject,
+      // The RAW display: a held "resolved" update gets its wording once, at release time.
+      display,
+      resolved,
+    });
+    // Open or close this workflow's failure in the same transaction as what it accompanies. Opening
+    // runs FIRST (it checks that this event has no delivery or held row yet, so a redelivery cannot
+    // re-open a failure a later success closed); closing runs after and is idempotent.
+    const opening: D1PreparedStatement[] = [];
+    const closing: D1PreparedStatement[] = [];
+    if (failureKey) {
+      if (isWorkflowFailure(eventType))
+        opening.push(
+          openFailureStatement(c.env.DB, organizationId, row.id, failureKey, decidedAt, [id, legacyId]),
+        );
+      else if (resolved) closing.push(closeFailureStatement(c.env.DB, organizationId, row.id, failureKey));
+    }
+    // An event the noise settings changed the outcome of always leaves a provenance row, with
+    // the reason code (held for quiet hours / digest / grouping, critical bypass, backlog full).
+    if (decision || plan.reason !== null) {
+      provenance.push(
+        decisionStatement(c.env.DB, record(plan.reason !== null ? { reason: plan.reason } : {}), [
+          id,
+          legacyId,
+        ]),
+      );
+    }
+    if (plan.action === 'hold') {
+      // Durable before the 2xx, exactly like a delivery. Nothing is dropped: it has a release time.
+      const results = await c.env.DB.batch([...opening, plan.statement, ...closing]);
+      if (batchResult(results, opening.length).meta.changes) held++;
+      continue;
+    }
+
     // Identifiers and display text only. Credentials stay in D1 (D5).
-    const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...display };
+    const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...itemDisplay };
 
     // One batch, one transaction: the delivery row and the outbox row commit together.
     const notLegacy = 'WHERE NOT EXISTS (SELECT 1 FROM deliveries WHERE id=? AND organization_id=?)';
     const results = await c.env.DB.batch([
+      ...opening,
+      // Not when this very event is already waiting in `held_events` (it was held, then the
+      // settings changed and GitHub redelivered it): it is released on schedule, once.
       c.env.DB.prepare(
         `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)
-         SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP ${notLegacy}`,
-      ).bind(id, row.id, organizationId, dedup.hex, legacyId, organizationId),
+         SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP ${notLegacy}
+           AND NOT EXISTS (SELECT 1 FROM held_events WHERE id=? AND organization_id=?)`,
+      ).bind(id, row.id, organizationId, dedup.hex, legacyId, organizationId, id, organizationId),
       // Only when the delivery row above was new (`changes()` is the previous statement's row
       // count): a redelivery after the outbox row was purged must not be sent again.
       c.env.DB.prepare(
         `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
          SELECT ?,?,? ${notLegacy} AND changes() > 0`,
       ).bind(id, organizationId, JSON.stringify(message), legacyId, organizationId),
+      ...closing,
     ]);
-    if (batchResult(results, 1).meta.changes) queued++;
+    if (batchResult(results, opening.length + 1).meta.changes) queued++;
   }
   if (provenance.length > 0) {
     try {
@@ -272,5 +380,5 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // safe together because each row's claim is atomic (F172).
   if (queued > 0)
     c.executionCtx.waitUntil(dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }));
-  return c.json({ accepted: true, persisted: queued }, 202);
+  return c.json({ accepted: true, persisted: queued, ...(held > 0 ? { held } : {}) }, 202);
 }

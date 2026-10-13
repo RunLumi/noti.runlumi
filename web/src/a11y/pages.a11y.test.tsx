@@ -101,6 +101,11 @@ const SCENARIOS: readonly Scenario[] = [
     ready: () => screen.findByText(/Recent decisions|Các quyết định gần đây/),
   },
   {
+    name: 'integration settings (quiet hours, summaries and waiting updates)',
+    path: '/integrations/int_6',
+    ready: () => screen.findByText(/3 updates are waiting|3 cập nhật đang chờ/),
+  },
+  {
     name: 'integration settings (routes from a source)',
     path: '/integrations/int_4',
     ready: () => screen.findByRole('heading', { level: 1, name: 'Deploy alerts' }),

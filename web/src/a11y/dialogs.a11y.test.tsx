@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import './testing/environment';
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { audit, describeViolations } from './testing/axe';
@@ -211,6 +211,29 @@ describe('error and validation states', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(name.getAttribute('aria-invalid')).toBe('true'));
     await expectClean('settings with validation error');
+  });
+
+  it('integration settings: equal quiet-hours times show a linked, announced error', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_1');
+    await user.click(await screen.findByLabelText('Save updates during quiet hours'));
+    const end = await screen.findByLabelText('Quiet hours end');
+    fireEvent.change(end, { target: { value: '22:00' } });
+    await user.click(screen.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(end.getAttribute('aria-invalid')).toBe('true'));
+    expect(await screen.findByText('Start and end must be different times.')).toBeTruthy();
+    await expectClean('settings with a quiet-hours validation error');
+  });
+
+  it('integration settings: the noise section is accessible in Vietnamese with a validation error', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_1', { locale: 'vi' });
+    await user.click(await screen.findByLabelText('Lưu cập nhật trong giờ yên tĩnh'));
+    const end = await screen.findByLabelText('Giờ yên tĩnh kết thúc');
+    fireEvent.change(end, { target: { value: '22:00' } });
+    await user.click(screen.getByRole('button', { name: 'Lưu cài đặt' }));
+    await waitFor(() => expect(end.getAttribute('aria-invalid')).toBe('true'));
+    await expectClean('settings with a quiet-hours validation error (vi)');
   });
 
   it('sign in: a failed sign-in is announced as an alert', async () => {

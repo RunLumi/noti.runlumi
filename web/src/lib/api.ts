@@ -1,5 +1,6 @@
 import { parseFilters } from '../../../src/routing/filter-input';
 import type { FilterConfig } from '../../../src/routing/filters';
+import { parseNoise, type NoiseSettings } from '../../../src/routing/noise';
 import { authClient, assertAuthSuccess } from './auth-client';
 import { t } from '../i18n';
 
@@ -113,6 +114,12 @@ export interface Integration {
   readonly filtersInvalid: boolean;
   /** Saved by a newer release: this one cannot read them and sends every chosen update. */
   readonly filtersNewer: boolean;
+  /** Quiet hours, grouping, summaries and resolved notices; null when none are set. */
+  readonly noise: NoiseSettings | null;
+  /** The saved settings could not be read, so updates are being sent normally. */
+  readonly noiseInvalid: boolean;
+  /** Saved by a newer release: this one ignores them and sends updates normally. */
+  readonly noiseNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
 }
@@ -136,6 +143,7 @@ export interface CreateIntegrationBody {
   readonly webhookUrl: string;
   readonly signingSecret?: string;
   readonly filters?: FilterConfig;
+  readonly noise?: NoiseSettings | null;
 }
 
 /** An integration that sends every event of one generic source to one chat. */
@@ -156,6 +164,8 @@ export interface UpdateIntegrationBody {
   readonly enabled?: boolean;
   /** Replaces every filter; `{}` removes them all. */
   readonly filters?: FilterConfig;
+  /** Replaces the noise settings; `null` removes them. */
+  readonly noise?: NoiseSettings | null;
 }
 
 export interface RotateCredentialsBody {
@@ -174,6 +184,16 @@ function filtersOf(
     filters: parsed.ok ? parsed.value : {},
     filtersInvalid: value.filtersInvalid === true,
     filtersNewer: value.filtersNewer === true,
+  };
+}
+
+/** Re-validated with the server's own parser, so a malformed value reads as "no settings". */
+function noiseOf(value: Record<string, unknown>): Pick<Integration, 'noise' | 'noiseInvalid' | 'noiseNewer'> {
+  const parsed = parseNoise(value.noise ?? null);
+  return {
+    noise: parsed.ok ? parsed.value : null,
+    noiseInvalid: value.noiseInvalid === true,
+    noiseNewer: value.noiseNewer === true,
   };
 }
 
@@ -204,6 +224,7 @@ export function parseIntegration(value: unknown): Integration {
     enabled: value.enabled,
     credentials: value.credentials,
     ...filtersOf(value),
+    ...noiseOf(value),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   };
@@ -266,10 +287,26 @@ export const integrationsApi = {
     const query = `org=${encodeURIComponent(orgId)}&limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     return parseRoutingLog(await request(`${item(id)}/routing-log?${query}`));
   },
+  noiseStatus: async (orgId: string, id: string): Promise<NoiseStatus> =>
+    parseNoiseStatus(await request(withOrg(`${item(id)}/noise-status`, orgId))),
   remove: async (orgId: string, id: string): Promise<void> => {
     await request(withOrg(item(id), orgId), { method: 'DELETE' });
   },
 };
+
+/** How many updates are waiting for a quiet-hours, summary or grouping release, and when. */
+export interface NoiseStatus {
+  readonly count: number;
+  readonly nextReleaseAt: string | null;
+}
+
+export function parseNoiseStatus(body: unknown): NoiseStatus {
+  const held = isRecord(body) ? body.held : null;
+  if (!isRecord(held) || typeof held.count !== 'number') throw new ApiError('Unexpected response', 500);
+  const next = held.nextReleaseAt ?? null;
+  if (!nullableString(next)) throw new ApiError('Unexpected response', 500);
+  return { count: held.count, nextReleaseAt: next };
+}
 
 /** One row of "why was this sent or held back". Event type and a reason code, never content. */
 export interface RoutingLogEntry {

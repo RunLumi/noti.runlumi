@@ -31,7 +31,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | #16 |
 | 6c | Dashboard: accessibility gate (axe-core on every route, wizard step and dialog), route-change title/announcement/focus, skip link, palette-contrast and stylesheet-preference tests, Vietnamese catalogue with a language switcher, hard-coded-string and catalogue-drift tests | F221 (part), F223 (part), F224 (part) | — | 🟡 | this PR |
 | 7 | Per-integration routing filters with provenance (backend, API, dashboard); the F121 rule engine is not started | F124, F125, F127, F128, F136–F140 (each in part) | — | 🟡 | #25 |
-| 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
+| 8 | Noise control: quiet hours, burst grouping, hourly/daily digests, resolved notices, held-event store and release job, settings API and dashboard section. Not the preset library, preferences, silences or AI | F141–F146, F148, F152, F159, F165, F166 (each in part, see section) | — | 🟡 | this PR |
 | 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | #16 |
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
 | 10a | Generic signed-webhook source: Standard Webhooks verification, sealed per-source secrets, sources API and dashboard page, routing to source integrations | F74, F75, F76, F77, F78, F79, F80 (each in part, see section) | — | 🟡 | this PR |
@@ -820,6 +820,64 @@ Also fixed:
   diacritics), no axe or screen-reader pass, and no test against real GitHub deliveries.
 - The routing log is not yet on the activity page; the deliveries API was not on this
   branch's base.
+
+## Slice 8 — noise control (ADR 0016)
+
+**What changed**
+
+- `migrations/0021_noise_control.sql`: `integrations.noise_json` (`ADD COLUMN`, `CHECK` for valid
+  JSON up to 2 KiB), `held_events` (display fields only, `CHECK`s that bound every column, no
+  payload) and `noise_open_failures` (a key hash per failing workflow). Rollback note in the
+  header: the old Worker stops releasing, so held rows wait; they are not lost.
+- `src/routing/noise-time.ts` (time-zone arithmetic with `Intl`, DST gaps and overlaps),
+  `noise.ts` (settings, validation, stored-document reader, the pure `decideNoise`, group key),
+  `noise-store.ts` (SQL), `noise-ingress.ts` (the one place ingress asks "deliver or hold?"),
+  `noise-render.ts` (group and digest rendering), `github/noise.ts` (subject and workflow facts).
+- `src/pipeline/noise-release.ts` plus cron jobs `noise_release` (after `outbox_reconcile`) and
+  `noise_purge`: leased, budgeted (100 notifications per tick across integrations, decided before
+  claiming; 15 per D1 batch), atomic per notification, poison-proof (attempts, backoff, dead-letter
+  after 5), paused integrations wait, released rows blanked, creating ordinary deliveries and outbox
+  rows. Digests split into up to 3 messages before anything is left out.
+- Ingress wired into the GitHub, generic and provider (GitLab, Stripe) routes. `held_events` and
+  `noise_open_failures` are in `TENANT_TABLES` and deleted with an integration or a source cascade.
+  `DeliveryMessage.count` lets a combined notification carry a summary of up to 1400 characters.
+- API: `noise` on create and update (validated, audited by feature name), `noiseInvalid` /
+  `noiseNewer` on the view, `GET /api/integrations/:id/noise-status`, `heldReason` and
+  `groupedCount` on the delivery log, and the noise reason codes in the routing log
+  ([API.md](API.md#noise-control-quiet-hours-grouping-summaries-resolved-notices)).
+- Dashboard: "Quiet hours and summaries" section in integration settings, English and Vietnamese
+  copy, an a11y scenario set ([FRONTEND.md](FRONTEND.md)).
+
+**Verified by** (all over the real migrations and Worker entry point)
+
+- `tests/noise/*.test.ts`: time arithmetic (DST, odd offsets, rollovers), the decision table
+  (window edges, critical bypass, capacity), settings parsing, rendering, ingress end to end,
+  release (idempotent, concurrent, bounded, failure, lost lease, tenant isolation, scheduled job),
+  migration, retention and purge, API validation, authorization and CSRF, GitLab and generic
+  routes, and a **seeded property test** (30 seeds) that every ingested event is accounted for
+  exactly once. The property test found a real double delivery (a held event redelivered after
+  its settings were cleared was also sent at once); it is fixed and has its own regression test.
+- `web/src/integrations/noise/*.test.*` and the a11y scenarios in English and Vietnamese.
+
+**Not done (named, not hidden)** — see [ADR 0016](adr/0016-noise-control.md): the preset library
+and definitions (F154, F155), three-level preferences and a configurable critical lock (F147,
+F148), one-click unsubscribe, bot-suppression presets, per-destination budgets, silences,
+per-repository overrides, in-place updates and correlation tables, escalation, inhibition, noise
+reports and metrics, weekly digests, "send at least every", a link from a digest to an in-app view,
+resolved notices on run attempts and for non-GitHub sources, noise settings in the create wizard, and
+any AI summarisation.
+
+**Review round 2 (independent review of the pre-rebase branch):** a per-tick notification budget and
+batches of 15 (about 13 D1 calls per tick), `noise_release` after `outbox_reconcile`, continuation
+digests with an honest "not shown, details not kept", paused integrations wait, held rows rescheduled
+on settings change, poison rows (attempts, backoff, `failed`), released rows blanked, the cheaper
+ingress read, the settings in the workspace export, and a conservation test with injected D1
+failures, overlapping runs, pauses and deletion.
+
+**Not verified:** a browser pass of the new section (320 px reflow, contrast, native time pickers,
+Vietnamese diacritics), a screen reader, a long digest against real Slack, Lark and Teams, real D1
+semantics for `UPDATE ... RETURNING` with a subselect, `Intl` zone data on the Workers runtime, load,
+and any real-provider end-to-end run. Vietnamese copy has had no native-speaker review.
 
 ## Slice S2 — ingress flood control wired (F29)
 

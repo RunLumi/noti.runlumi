@@ -6,6 +6,9 @@ import { asRecord } from '../lib/json';
 import type { DestinationKind } from '../pipeline/allowlist';
 import { coverageIssue, parseFilters } from '../routing/filter-input';
 import type { FilterConfig } from '../routing/filters';
+import { noiseCoverageIssue, parseNoise, type NoiseSettings } from '../routing/noise';
+
+export { noiseCoverageIssue };
 
 /**
  * Validation for integration writes. Everything is checked before anything is sealed or
@@ -36,6 +39,8 @@ export interface CreateIntegrationInput {
   readonly signingSecret: string | null;
   /** Normalised routing filters; `{}` means none (ADR 0010). */
   readonly filters: FilterConfig;
+  /** Noise settings (quiet hours, grouping, digest, resolution); null means none (ADR 0016). */
+  readonly noise: NoiseSettings | null;
 }
 
 export interface UpdateIntegrationInput {
@@ -47,6 +52,8 @@ export interface UpdateIntegrationInput {
   readonly enabled?: boolean;
   /** Replaces all filters; `{}` clears them. */
   readonly filters?: FilterConfig;
+  /** Replaces the noise settings; `null` or `{}` clears them. */
+  readonly noise?: NoiseSettings | null;
   /** Present together: rotating credentials re-seals under fresh key material. */
   readonly credentials?: { readonly webhookUrl: string; readonly signingSecret: string | null };
 }
@@ -279,6 +286,17 @@ function parseFilterField(r: Record<string, unknown>, errors: FieldError[]): Fil
   return parsed.value;
 }
 
+/** `noise` absent is "none"; `null` or `{}` clears. Errors carry dotted field paths. */
+function parseNoiseField(r: Record<string, unknown>, errors: FieldError[]): NoiseSettings | null | undefined {
+  if (r.noise === undefined) return undefined;
+  const parsed = parseNoise(r.noise);
+  if (!parsed.ok) {
+    errors.push(...parsed.errors);
+    return undefined;
+  }
+  return parsed.value;
+}
+
 const SOURCE_ID = /^[A-Za-z0-9-]{8,64}$/;
 
 /**
@@ -300,6 +318,12 @@ function parseSourceIntegration(
   const name = parseName(r.name, errors);
   const destination = parseDestination(r.destination, errors, options);
   const credentials = parseCredentials(r, destination, errors, options);
+  const noise = parseNoiseField(r, errors) ?? null;
+  if (noise?.resolution)
+    errors.push({
+      field: 'noise.resolution',
+      message: 'Resolved notices apply to GitHub repositories only.',
+    });
   if (errors.length || !name || !destination || !credentials || typeof r.sourceId !== 'string')
     return { ok: false, errors };
   return {
@@ -311,6 +335,7 @@ function parseSourceIntegration(
       eventTypes: [],
       sourceEventTypes: sourceEventTypes ?? [],
       filters: {},
+      noise,
       destination,
       webhookUrl: credentials.webhookUrl,
       signingSecret: credentials.signingSecret,
@@ -332,9 +357,12 @@ export function parseCreateIntegration(
   const destination = parseDestination(r.destination, errors, options);
   const credentials = parseCredentials(r, destination, errors, options);
   const filters = parseFilterField(r, errors) ?? {};
+  const noise = parseNoiseField(r, errors) ?? null;
   if (eventTypes && errors.length === 0) {
     const issue = coverageIssue(filters, eventTypes);
     if (issue) errors.push(issue);
+    const noiseProblem = noiseCoverageIssue(noise, eventTypes);
+    if (noiseProblem) errors.push(noiseProblem);
   }
   if (errors.length || !name || !repo || !eventTypes || !destination || !credentials)
     return { ok: false, errors };
@@ -348,6 +376,7 @@ export function parseCreateIntegration(
       webhookUrl: credentials.webhookUrl,
       signingSecret: credentials.signingSecret,
       filters,
+      noise,
     },
   };
 }
@@ -367,6 +396,7 @@ export function parseUpdateIntegration(
     'eventTypes',
     'enabled',
     'filters',
+    'noise',
     'webhookUrl',
     'signingSecret',
     'triggerAuth',
@@ -388,6 +418,15 @@ export function parseUpdateIntegration(
     else errors.push({ field: 'enabled', message: 'Must be true or false.' });
   }
   if ('filters' in r) out.filters = parseFilterField(r, errors);
+  if ('noise' in r) {
+    const noise = parseNoiseField(r, errors);
+    if (noise !== undefined) out.noise = noise;
+    if (isSource && noise?.resolution)
+      errors.push({
+        field: 'noise.resolution',
+        message: 'Resolved notices apply to GitHub repositories only.',
+      });
+  }
   if ('webhookUrl' in r) {
     const credentials = parseCredentials(r, destination, errors, options);
     if (credentials) out.credentials = credentials;

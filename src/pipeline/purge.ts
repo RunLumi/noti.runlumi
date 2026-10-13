@@ -16,6 +16,8 @@ export const TENANT_TABLES = [
   'deliveries',
   'integrations',
   'routing_decisions',
+  'held_events',
+  'noise_open_failures',
   'sources',
 ] as const;
 

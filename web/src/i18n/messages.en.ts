@@ -7,12 +7,14 @@
  */
 import { destinationsEn } from './messages.destinations.en';
 import { filtersEn } from './messages.filters.en';
+import { noiseEn } from './messages.noise.en';
 import { providersEn } from './messages.providers.en';
 
 export type PluralMessage = { readonly one?: string; readonly other: string };
 
 export const en = {
   ...filtersEn,
+  ...noiseEn,
   ...providersEn,
   ...destinationsEn,
 

@@ -4,6 +4,7 @@ import type { RoutingLogEntry } from '../../lib/api';
 import { EVENT_LABEL, isGithubEventType } from '../events';
 import { useRoutingLog } from './hooks';
 import { describeDecision } from './model';
+import { isSavedReason, noiseLogText } from '../noise/model';
 import { useLocale } from '../../i18n/LocaleProvider';
 
 const WHEN = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' });
@@ -11,22 +12,27 @@ const WHEN = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'sh
 function Entry({ entry }: { entry: RoutingLogEntry }) {
   useLocale();
   const sent = entry.outcome === 'delivered';
+  // Noise control writes a "delivered" row whose reason says it was saved for later, or sent
+  // despite quiet hours (ADR 0016).
+  const saved = sent && isSavedReason(entry.reason);
+  const noiseText = sent ? noiseLogText(entry.reason) : null;
   const event = isGithubEventType(entry.eventType) ? t(EVENT_LABEL[entry.eventType]) : entry.eventType;
   const when = WHEN.format(new Date(entry.decidedAt));
   return (
     <li className="routing-log-entry">
-      <Badge variant={sent ? 'success' : 'warning'}>
-        {t(sent ? 'filters.log.sent' : 'filters.log.skipped')}
+      <Badge variant={sent && !saved ? 'success' : 'warning'}>
+        {t(saved ? 'noise.log.held' : sent ? 'filters.log.sent' : 'filters.log.skipped')}
       </Badge>
       <div className="routing-log-body">
         <p className="routing-log-event">{event}</p>
         <p className="routing-log-reason">
-          {describeDecision({
-            pass: sent,
-            unknown: entry.unknownFact,
-            filterId: entry.filterId,
-            reason: entry.reason,
-          })}
+          {noiseText ??
+            describeDecision({
+              pass: sent,
+              unknown: entry.unknownFact,
+              filterId: entry.filterId,
+              reason: entry.reason,
+            })}
         </p>
       </div>
       <time className="routing-log-time" dateTime={entry.decidedAt}>

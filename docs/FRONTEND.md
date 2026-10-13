@@ -135,7 +135,8 @@ Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
 | `github/` | Connection panel, `?github=` return messages, repository picker, coverage rules |
 | `wizard/` | Six-step create flow (filters are optional); `draft.ts` holds the pure step logic |
 | `filters/` | Routing filters ([ADR 0010](adr/0010-routing-filters.md)): `model.ts` (lines to API shape, error mapping, "Try it"), `FiltersEditor`, `FilterTester`, `RoutingLog` |
-| `settings/` | Per-integration screen: details form, filters, credential replacement, delete dialog |
+| `noise/` | Quiet hours and summaries ([ADR 0016](adr/0016-noise-control.md)): `model.ts` (draft, validation with the server parser, the preview sentences from the server's `decideNoise`, time-zone list), `NoiseEditor`, `NoiseSection`, `hooks.ts` (waiting count), `noise.css` |
+| `settings/` | Per-integration screen: details form, filters, quiet hours and summaries, credential replacement, delete dialog |
 | `destinations.ts` | One entry per destination: copy ids, numbered setup steps, docs link, `supportsSigningSecret` (Lark: a pasted secret) and `issuesSigningSecret` (custom webhook: server-generated, shown once) |
 | `IssuedSecret.tsx` | The custom webhook's one-time signing secret (create wizard and credential rotation); same behaviour as `sources/SecretReveal.tsx` |
 | `validation.ts` | Client checks mirroring `src/api/integration-input.ts` (imports the Worker allowlist) |
@@ -178,6 +179,40 @@ filters cannot be read, a blocking notice explains that updates are being held b
 editor stays hidden until the person chooses **Replace invalid filters**, so unreadable rules are
 never overwritten by an empty form. `npm test` runs
 `web/src/integrations/integrations.test.ts` with the Worker tests.
+
+Quiet hours and summaries (settings section, slice 8): four fieldsets or fields (quiet hours with
+two `<input type="time">` controls, "Combine updates for" as a select of Off / 1 / 5 / 15 / 60
+minutes, a summary choice of right away / hourly / daily with a daily time, and resolved
+notices) plus a time-zone select (the viewer's zone by default, `Intl.supportedValuesOf` where
+the browser has it). Design decisions, so they are reviewable:
+
+- **The preview is computed, not templated.** The sentences under the form (for example "During
+  quiet hours Noti will hold updates and send one summary at 08:00.") come from the Worker's own
+  `decideNoise`, evaluated for an update arriving just after quiet hours begin, so the form can
+  never promise something ingress will not do (a later daily summary changes the time shown).
+- **"Saved", not "held".** The filters copy already uses "held back" for an update that is NOT
+  sent, so a delayed update is "saved" and "waiting to be sent". A status block says how many are
+  waiting and when the next send is due, so a held update is never a black hole.
+- **Everything is off until chosen**, including resolved notices (spec 11 F152 asks for default
+  on; a missing setting must not change an existing integration, ADR 0016). Resolved notices are
+  hidden for a source integration and disabled, with the reason, when no failing run is selected.
+- Errors sit next to the control in our own catalogue copy (never the server's wording) and the
+  first invalid control takes focus. An unreadable stored document is a warning, not a block:
+  updates are being sent normally, and saving replaces it.
+- The delete confirmation says how many updates are still waiting and will be deleted with the
+  integration. A hint says that a window that ends at midnight uses 00:00. The preview takes the
+  instant as an argument (pure), and the time-zone list falls back to a built-in set of common zones
+  when the browser cannot list them.
+- The recent-decisions list shows a saved update as "Saved for later" with a sentence, and an
+  urgent bypass as such.
+- Every component calls `useLocale()`; every English id in `messages.noise.en.ts` has a
+  Vietnamese string in `messages.noise.vi.ts` (the catalogue tests enforce both).
+- **Verification:** jsdom tests for the model and the section (what a save sends, validation,
+  server refusal, keyboard, Vietnamese), axe scenarios in English and Vietnamese for the populated
+  section and for a validation error (`pages.a11y.test.tsx`, `dialogs.a11y.test.tsx`, following
+  the process notes in ADR 0013). **Not verified:** a real-browser pass (320 px reflow, contrast of
+  the new fieldsets and read-outs, native time-picker behaviour on phones, Vietnamese
+  diacritics) and a screen-reader pass.
 
 ## Sources feature (`web/src/sources/`)
 
@@ -234,6 +269,9 @@ the create wizard (ADR 0014); the two newest have **not** had a browser pass.
 Routing filters (settings section, create-wizard step, "Try it", recent decisions) are wired to
 the real API. They have **not** had a browser pass: reflow at 320 px, keyboard order, contrast
 and Vietnamese diacritics are open.
+
+Quiet hours and summaries (settings section) are wired to the real API and are covered by jsdom
+and axe tests only: no browser pass yet.
 
 Accessibility and Vietnamese (slice 6c, ADR 0013): every route, wizard step, dialog and error
 state is scanned by axe-core in the tests and in a real browser; the shell announces route

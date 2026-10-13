@@ -24,6 +24,7 @@ import {
   INSTALLATIONS,
   INTEGRATIONS,
   MEMBERS,
+  NOISE_STATUS,
   ORG_ID,
   PASSKEYS,
   ROUTING_LOG,
@@ -145,6 +146,12 @@ export function installFetch(state: ApiState): void {
       if (path === '/api/sources')
         return Promise.resolve(
           state.sources === 'error' ? json({ error: 'boom' }, 500) : json({ sources: state.sources }),
+        );
+      const noise = /^\/api\/integrations\/([^/]+)\/noise-status$/.exec(path);
+      // Only the quiet-hours fixture has updates waiting.
+      if (noise)
+        return Promise.resolve(
+          json(noise[1] === 'int_6' ? NOISE_STATUS : { held: { count: 0, nextReleaseAt: null }, failed: 0 }),
         );
       if (/^\/api\/integrations\/[^/]+\/routing-log$/.test(path))
         return Promise.resolve(json({ entries: ROUTING_LOG, nextCursor: null }));

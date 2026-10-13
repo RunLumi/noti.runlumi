@@ -4,7 +4,8 @@ import { useNavigate } from '@tanstack/react-router';
 import { IconTrash } from '@tabler/icons-react';
 import { Button, Input, Notice } from '../../components/ui';
 import type { Integration } from '../../lib/api';
-import { t } from '../../i18n';
+import { t, tp } from '../../i18n';
+import { useNoiseStatus } from '../noise/hooks';
 import { DESTINATIONS } from '../destinations';
 import { describeError } from '../errors';
 import { useDeleteIntegration } from '../hooks';
@@ -26,6 +27,8 @@ export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const cancelRef = useRef<HTMLButtonElement>(null);
+  // Updates still waiting for a quiet-hours, summary or grouping release go with the integration.
+  const waiting = useNoiseStatus(orgId, integration.id, open).data?.count ?? 0;
   const inputId = useId();
   const matches = typed.trim() === integration.name.trim();
   const destination = t(DESTINATIONS[integration.destination].name);
@@ -70,6 +73,7 @@ export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
               destination,
             })}
           </AlertDialog.Description>
+          {waiting > 0 && <p className="field-hint">{tp('noise.delete.waiting', waiting)}</p>}
           <form className="form-stack" onSubmit={(e) => void onSubmit(e)}>
             <div className="field">
               <label className="field-label" htmlFor={inputId}>

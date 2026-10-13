@@ -7,6 +7,8 @@ import type { Bindings, DeliveryMessage } from '../../env';
 import { readBodyCapped } from '../../lib/body';
 import { log } from '../../platform/log';
 import { dispatchOutbox } from '../../pipeline/outbox';
+import { createNoisePlanner } from '../../routing/noise-ingress';
+import { decisionStatement } from '../../routing/provenance';
 import { hit, sourceIngressLimiter } from '../../security/rate-limit';
 import { DECOY_MAX_BODY_BYTES } from './generic/route';
 import { openSourceSecretText, type SourceCredentialRow } from './generic/secret';
@@ -76,6 +78,28 @@ function toMessage(
     ...(repo ? { repo } : {}),
     ...(actor ? { actor } : {}),
   };
+}
+
+/** Best-effort provenance for an update noise control delayed or let through (ADR 0016). */
+async function recordNoiseDecision(
+  db: D1Database,
+  r: {
+    id: string;
+    organizationId: string;
+    integrationId: string;
+    eventType: string;
+    reason: Parameters<typeof decisionStatement>[1]['reason'];
+    decidedAt: number;
+  },
+): Promise<void> {
+  try {
+    await decisionStatement(db, { ...r, outcome: 'delivered', filterId: null, unknown: false }, [
+      r.id,
+      r.id,
+    ]).run();
+  } catch {
+    log('warn', 'routing_provenance_failed', { records: 1 });
+  }
 }
 
 export function providerWebhook(kind: ProviderKind) {
@@ -195,10 +219,10 @@ export function providerWebhook(kind: ProviderKind) {
     }
 
     const rows = await c.env.DB.prepare(
-      'SELECT id,event_types FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
+      'SELECT id,event_types,noise_json FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
     )
       .bind(organizationId, source.id)
-      .all<{ id: string; event_types: string }>();
+      .all<{ id: string; event_types: string; noise_json: string | null }>();
     const targets = rows.results.filter((row) => {
       const selection = subscribed(row.event_types);
       if (selection === 'invalid') {
@@ -226,14 +250,42 @@ export function providerWebhook(kind: ProviderKind) {
     });
 
     let queued = 0;
+    let held = 0;
+    const planner = createNoisePlanner(c.env.DB, organizationId, nowMs);
     for (const row of targets) {
       const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
       const message = toMessage({ id, integrationId: row.id, organizationId }, mapped.display);
+      // Noise control (ADR 0016): deliver now or hold; never drop.
+      const plan = await planner.plan({
+        integrationId: row.id,
+        noiseJson: row.noise_json,
+        deliveryId: id,
+        eventType: mapped.display.eventType ?? 'notification',
+        subject: '',
+        display: mapped.display,
+      });
+      if (plan.action === 'hold' || plan.reason !== null) {
+        await recordNoiseDecision(c.env.DB, {
+          id,
+          organizationId,
+          integrationId: row.id,
+          eventType: mapped.display.eventType ?? 'notification',
+          reason: plan.action === 'hold' ? plan.reason : (plan.reason ?? 'critical_bypass'),
+          decidedAt: nowMs,
+        });
+      }
+      if (plan.action === 'hold') {
+        const [stored] = await c.env.DB.batch([plan.statement]);
+        if (stored?.meta.changes) held++;
+        continue;
+      }
       const results = await c.env.DB.batch([
+        // Not when this event is already waiting in `held_events` (ADR 0016).
         c.env.DB.prepare(
           `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)
-           VALUES(?,?,?,'pending',?,CURRENT_TIMESTAMP)`,
-        ).bind(id, row.id, organizationId, dedup.hex),
+           SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP
+           WHERE NOT EXISTS (SELECT 1 FROM held_events WHERE id=? AND organization_id=?)`,
+        ).bind(id, row.id, organizationId, dedup.hex, id, organizationId),
         // Only if the delivery row was new: a repeat after outbox retention must not send again.
         c.env.DB.prepare(
           `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
@@ -252,7 +304,8 @@ export function providerWebhook(kind: ProviderKind) {
       {
         accepted: true,
         persisted: queued,
-        ...(targets.length > 0 && queued === 0 ? { duplicate: true } : {}),
+        ...(held > 0 ? { held } : {}),
+        ...(targets.length > 0 && queued === 0 && held === 0 ? { duplicate: true } : {}),
       },
       202,
     );
