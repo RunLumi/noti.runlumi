@@ -59,7 +59,11 @@ async function sign(body: string): Promise<string> {
   return 'sha256=' + Array.from(mac, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function postWebhook(event: Record<string, unknown>, deliveryId = 'gh-delivery-1'): Promise<Response> {
+async function postWebhook(
+  event: Record<string, unknown>,
+  deliveryId = 'gh-delivery-1',
+  githubEvent = 'issues',
+): Promise<Response> {
   const body = JSON.stringify(event);
   const waits: Promise<unknown>[] = [];
   const ctx = {
@@ -73,7 +77,7 @@ async function postWebhook(event: Record<string, unknown>, deliveryId = 'gh-deli
       headers: {
         'content-type': 'application/json',
         'x-hub-signature-256': await sign(body),
-        'x-github-event': 'issues',
+        'x-github-event': githubEvent,
         'x-github-delivery': deliveryId,
       },
     }),
@@ -202,9 +206,13 @@ describe('ingress tenant isolation', () => {
 
     expect(sent).toHaveLength(1);
     expect(Object.keys(sent[0] ?? {}).sort()).toEqual([
+      'eventType',
       'id',
       'integrationId',
       'organizationId',
+      'repo',
+      'status',
+      'summary',
       'title',
       'url',
     ]);
@@ -228,6 +236,98 @@ describe('ingress tenant isolation', () => {
     await integration('int-a', 'org-a', LARK_A, 'Acme/Web');
     await postWebhook(issueEvent(100, 'acme/web'));
     expect(sent.map((m) => m.integrationId)).toEqual(['int-a']);
+  });
+
+  describe('canonical notification fields', () => {
+    const all =
+      '["issues.opened","workflow_run.failure","workflow_run.timed_out","workflow_run.success","workflow_run.cancelled","pull_request.merged","pull_request.opened"]';
+
+    async function ingest(kind: string, event: Record<string, unknown>): Promise<DeliveryMessage> {
+      installation('org-a', '100');
+      await integration('int-a', 'org-a', LARK_A);
+      db.raw.prepare('UPDATE integrations SET event_types=?').run(all);
+      await postWebhook({ installation: { id: 100, app_id: Number(APP_ID) }, ...event }, 'gh-x', kind);
+      const m = sent[0];
+      if (!m) throw new Error('nothing queued');
+      return m;
+    }
+
+    const repository = { full_name: 'acme/web', html_url: 'https://github.com/acme/web' };
+
+    it.each([
+      ['failure', 'failure'],
+      ['timed_out', 'failure'],
+      ['success', 'success'],
+      ['cancelled', 'info'],
+    ])('workflow_run %s → status %s, with repo, actor and a bounded summary', async (conclusion, status) => {
+      const m = await ingest('workflow_run', {
+        action: 'completed',
+        repository,
+        sender: { login: 'octocat' },
+        workflow_run: {
+          name: 'CI',
+          head_branch: 'main',
+          conclusion,
+          html_url: 'https://github.com/acme/web/actions/runs/9',
+        },
+      });
+      expect(m).toMatchObject({
+        title: 'CI',
+        repo: 'acme/web',
+        actor: 'octocat',
+        status,
+        eventType: `workflow_run.${conclusion}`,
+        summary: `main · ${conclusion} · completed`,
+      });
+    });
+
+    it('a merged pull request is success; an opened one is info', async () => {
+      const pr = {
+        number: 12,
+        title: 'Add thing',
+        html_url: 'https://github.com/acme/web/pull/12',
+        head: { ref: 'feature' },
+        base: { ref: 'main' },
+        body: 'PRIVATE-BODY-TEXT',
+      };
+      const merged = await ingest('pull_request', {
+        action: 'closed',
+        repository,
+        sender: { login: 'octocat' },
+        pull_request: { ...pr, merged: true },
+      });
+      expect(merged).toMatchObject({ status: 'success', eventType: 'pull_request.merged' });
+      expect(merged.summary).toBe('#12 · feature → main · closed');
+    });
+
+    it('never carries the payload: no body text, no unknown keys, summary within 280 characters', async () => {
+      const m = await ingest('pull_request', {
+        action: 'opened',
+        repository,
+        sender: { login: 'octocat', email: 'private@example.test' },
+        pull_request: {
+          number: 1,
+          title: 'T',
+          html_url: 'https://github.com/acme/web/pull/1',
+          head: { ref: 'f'.repeat(400) },
+          base: { ref: 'main' },
+          body: 'PRIVATE-BODY-TEXT',
+        },
+      });
+      expect(m.status).toBe('info');
+      expect(m.summary?.length).toBeLessThanOrEqual(280);
+      expect(JSON.stringify(m)).not.toMatch(/PRIVATE-BODY-TEXT|private@example/);
+      const row = db.raw.prepare('SELECT payload_json FROM notification_outbox').get() as {
+        payload_json: string;
+      };
+      expect(row.payload_json).not.toMatch(/PRIVATE-BODY-TEXT|private@example/);
+    });
+
+    it('omits actor when the event has no sender', async () => {
+      const m = await ingest('issues', { ...issueEvent(100), sender: undefined });
+      expect(m.actor).toBeUndefined();
+      expect(m.status).toBe('info');
+    });
   });
 
   it('accepts a redelivered GitHub event once', async () => {

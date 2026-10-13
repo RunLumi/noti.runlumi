@@ -1,5 +1,5 @@
 import type { Context } from 'hono';
-import type { Bindings, DeliveryMessage } from '../../../env';
+import { SUMMARY_MAX_CHARS, type Bindings, type DeliveryMessage } from '../../../env';
 import { asRecord, str } from '../../../lib/json';
 import { newLeaseToken } from '../../../delivery/claim';
 import { dedupKey, deliveryId as deriveDeliveryId } from '../../../delivery/ids';
@@ -29,13 +29,56 @@ function batchResult<T>(results: T[], index: number): T {
   return value;
 }
 
-function displayFields(event: Record<string, unknown>, eventType: string): { title: string; url: string } {
+type DisplayFields = Pick<
+  DeliveryMessage,
+  'title' | 'url' | 'repo' | 'actor' | 'status' | 'eventType' | 'summary'
+>;
+
+/** Canonical status, derived from the catalog event type only. */
+export function statusOf(eventType: string): 'success' | 'failure' | 'info' {
+  if (eventType === 'workflow_run.failure' || eventType === 'workflow_run.timed_out') return 'failure';
+  if (eventType === 'workflow_run.success' || eventType === 'pull_request.merged') return 'success';
+  return 'info';
+}
+
+function scalar(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return str(value);
+}
+
+/**
+ * One short line from a few scalar fields (number, branch names, conclusion). Deliberately
+ * not the PR/issue body, a commit message or the payload: a summary is shown in a chat
+ * channel the repository's readers may not have access to, and privacy beats richness.
+ */
+function summaryOf(event: Record<string, unknown>, subject: Record<string, unknown>): string {
+  const number = scalar(subject.number);
+  const head = scalar(asRecord(subject.head)?.ref) ?? scalar(subject.head_branch);
+  const base = scalar(asRecord(subject.base)?.ref);
+  const parts = [
+    number ? `#${number}` : undefined,
+    head && base ? `${head} → ${base}` : head,
+    scalar(subject.conclusion),
+    scalar(event.action),
+  ].filter((p): p is string => p !== undefined);
+  return parts.join(' · ').slice(0, SUMMARY_MAX_CHARS);
+}
+
+function displayFields(event: Record<string, unknown>, eventType: string): DisplayFields {
   const repository = asRecord(event.repository);
   const subject =
     asRecord(event.issue) ?? asRecord(event.pull_request) ?? asRecord(event.workflow_run) ?? event;
+  const repo = str(repository?.full_name);
+  const actor = str(asRecord(event.sender)?.login);
+  const summary = summaryOf(event, subject);
   return {
     title: (str(subject.title) ?? str(subject.name) ?? eventType).slice(0, 300),
     url: str(subject.html_url) ?? str(repository?.html_url) ?? '',
+    status: statusOf(eventType),
+    eventType,
+    ...(repo ? { repo: repo.slice(0, 200) } : {}),
+    ...(actor ? { actor: actor.slice(0, 100) } : {}),
+    ...(summary ? { summary } : {}),
   };
 }
 

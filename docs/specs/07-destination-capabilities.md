@@ -19,7 +19,7 @@ unsupported feature **visible to the user** instead of silently degraded.
 
 ## F91 — Destination adapter contract
 
-**Priority** P0 · **Status** partial — contract, adapters and conformance suite in `src/connectors/destinations/` (ADR 0006); `validateConfig` is synchronous; not yet called by the consumer · **Fixes** D8
+**Priority** P0 · **Status** partial — contract, adapters and conformance suite in `src/connectors/destinations/` (ADR 0006); `validateConfig` is synchronous; the consumer re-validates and renders through the adapters (wired; fixture tests only, no real-provider test) · **Fixes** D8
 
 **Story** As a maintainer, I want one interface every destination implements, so that
 Slack stops being an inline string and starts being an adapter like Lark.
@@ -261,7 +261,7 @@ the same repo would collapse. Never rely on multiple embeds.
 
 ## F96 — Credential validation at write time
 
-**Priority** P0 · **Status** partial — `validateDestinationConfig` + send-time re-check exist; the integrations API (PR #9) still validates with the narrower `src/pipeline/allowlist.ts`, and switching it to `validateDestinationConfig` is pending · **Fixes** D9
+**Priority** P0 · **Status** done in code — `validateDestinationConfig` is the single validator for the integrations API, the consumer (before every send) and `sendRequest`; the duplicate allowlist is removed. Not exercised against real providers · **Fixes** D9
 
 **Story** As a security engineer, I want an invalid or malicious destination rejected when it
 is saved, so that a hostile URL is never persisted in the first place.
@@ -366,7 +366,7 @@ Lark/Slack webhook URL is a bearer secret that appears inside some card payloads
 
 ## F99 — Delivery result normalisation
 
-**Priority** P0 · **Status** partial — classifiers return `{outcome, reason, retryAfterMs?}` with RFC 9110 `Retry-After`; not yet persisted · **Fixes** part of D11
+**Priority** P0 · **Status** partial — classifiers return `{outcome, reason, retryAfterMs?}` with RFC 9110 `Retry-After`; wired into the retry policy and ledger via `src/delivery/classify.ts`; only the F13 code and a minted diagnostic are persisted, not the adapter `reason` · **Fixes** part of D11
 
 **Story** As an operator, I want every provider's response normalised into one result shape,
 so that the dashboard and retry policy do not special-case Slack forever.
@@ -591,7 +591,7 @@ proxy logs, browser history and support screenshots. The UI must warn about this
 
 ## F104 — Teams Workflows as the only MVP path
 
-**Priority** P0 · **Status** partial — Workflows adapter (Adaptive Cards only, host-pattern allowlist, `anyone` auth only, 28 KB budget); orphan-flow surfacing not started
+**Priority** P0 · **Status** partial — Workflows adapter (Adaptive Cards only, host-pattern allowlist, `anyone` auth only, 28 KB budget); end to end in code (API `teams`, `triggerAuth`, migration 0012, ledger `accepted`) but never tried against a real tenant; orphan-flow surfacing not started
 
 **Story** As a Microsoft 365 customer, I want a Teams destination that a non-technical
 administrator can set up, so that notifications actually reach my team.

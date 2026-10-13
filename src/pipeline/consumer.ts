@@ -1,14 +1,16 @@
-import { larkPayload } from '../connectors/destinations/lark/webhook';
+import {
+  classifyDeliveryResponse,
+  prepareDelivery,
+  sendRequest,
+  validateDestinationConfig,
+  type CanonicalNotification,
+  type ProviderResponse,
+  type ValidatedDestinationConfig,
+} from '../connectors/destinations';
 import { CryptoError, type Keyring } from '../crypto/envelope';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import { SCHEDULE_REDISPATCH_SQL, scheduleRedispatchParams } from '../delivery/claim';
-import {
-  classifyHttpFailure,
-  classifyLarkReply,
-  classifyRedirect,
-  classifyThrown,
-  type Classified,
-} from '../delivery/classify';
+import { attemptFromClassification, failed, type AttemptResult } from '../delivery/classify';
 import {
   DELIVERY_CLAIM_LEASE_MS,
   claimDelivery,
@@ -26,9 +28,8 @@ import {
 } from '../delivery/retry';
 import { isTerminal, transition, type DeliveryEvent } from '../delivery/state';
 import type { Bindings, DeliveryMessage } from '../env';
-import type { ErrorCode } from '../platform/errors';
 import { log } from '../platform/log';
-import { destinationAllowed, type DestinationKind } from './allowlist';
+import type { DestinationKind } from './allowlist';
 import { CREDENTIAL_COLUMNS, openCredentials, type CredentialRow } from './credentials';
 import { parseDeliveryMessage } from './outbox';
 
@@ -44,27 +45,6 @@ export const QUEUE_MAX_RETRIES = 5;
 
 /** F189: per-attempt deadline, far below the 15-minute consumer wall clock. */
 export const OUTBOUND_TIMEOUT_MS = 10_000;
-
-/** The result of one attempt: the outcome for the retry policy plus a minted diagnostic. */
-interface AttemptResult {
-  readonly outcome: AttemptOutcome;
-  readonly diagnostic: string | null;
-  readonly unmapped: boolean;
-}
-
-const DELIVERED: AttemptResult = { outcome: { kind: 'delivered' }, diagnostic: null, unmapped: false };
-
-function failed(code: ErrorCode, diagnostic: string, retryAfterSeconds: number | null = null): AttemptResult {
-  return { outcome: { kind: 'failed', code, retryAfterSeconds }, diagnostic, unmapped: false };
-}
-
-function fromClassified(c: Classified): AttemptResult {
-  return {
-    outcome: { kind: 'failed', code: c.code, retryAfterSeconds: c.retryAfterSeconds },
-    diagnostic: c.diagnostic,
-    unmapped: c.unmapped,
-  };
-}
 
 async function loadIntegration(env: Bindings, d: DeliveryMessage): Promise<IntegrationRow | null> {
   // Tenant re-check: the row must belong to the organization the ingress resolved.
@@ -87,8 +67,13 @@ function classifyCryptoError(e: CryptoError): AttemptResult {
   return failed('internal_error', `provider_config_${e.code}`);
 }
 
-type Target = { url: URL; payload: unknown; destination: DestinationKind } | AttemptResult;
+type Target = { config: ValidatedDestinationConfig } | AttemptResult;
 
+/**
+ * Re-validate the stored destination with the same policy the API applies at write time
+ * (`validateDestinationConfig`), so a row altered after it was written, or a legacy row that
+ * predates the policy, cannot reach the network. Rejections carry a rule name, never the URL.
+ */
 async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage): Promise<Target> {
   const row = await loadIntegration(env, d);
   if (!row) return failed('config_invalid', 'integration_unavailable');
@@ -99,81 +84,61 @@ async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage
     if (e instanceof CryptoError) return classifyCryptoError(e);
     throw e;
   }
-  let url: URL;
-  try {
-    url = new URL(credentials.webhookUrl);
-  } catch {
-    // The URL parser's message echoes its input, which is a secret. Never surface it.
-    return failed('destination_url_rejected', 'destination_url_invalid');
-  }
-  if (!destinationAllowed(url, row.destination))
-    return failed('destination_url_rejected', 'destination_not_allowed');
-  const payload =
-    row.destination === 'slack'
-      ? { text: `${d.title}\n${d.url}` }
-      : await larkPayload({ title: d.title, url: d.url }, credentials.signingSecret ?? undefined);
-  return { url, payload, destination: row.destination };
+  const checked = validateDestinationConfig({
+    kind: row.destination,
+    webhookUrl: credentials.webhookUrl,
+    // Only Lark has a signing secret; a stray value on a Slack or Teams row is ignored.
+    ...(row.destination === 'lark' && credentials.signingSecret
+      ? { signingSecret: credentials.signingSecret }
+      : {}),
+  });
+  if (checked.ok) return { config: checked.config };
+  return checked.reason === 'destination_url_rejected'
+    ? failed('destination_url_rejected', 'destination_not_allowed')
+    : failed('config_invalid', 'destination_config_invalid');
 }
 
-async function post(url: URL, payload: unknown): Promise<Response | AttemptResult> {
-  try {
-    return await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-      // `manual`, not `error`: a redirect is then an observable 3xx we classify as permanent,
-      // instead of a TypeError indistinguishable from a network fault (F189). Never followed.
-      redirect: 'manual',
-      signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
-    });
-  } catch (e) {
-    return fromClassified(classifyThrown(e));
-  }
+/** The canonical notification the adapters render. Legacy messages lack the new fields. */
+export function toNotification(d: DeliveryMessage): CanonicalNotification {
+  return {
+    title: d.title,
+    eventType: d.eventType ?? DEFAULT_EVENT_TYPE,
+    ...(d.url ? { url: d.url } : {}),
+    ...(d.repo ? { repo: d.repo } : {}),
+    ...(d.actor ? { actor: d.actor } : {}),
+    ...(d.status ? { status: d.status } : {}),
+    ...(d.summary ? { summary: d.summary } : {}),
+  };
 }
 
-const UNCONFIRMED: AttemptResult = {
-  outcome: { kind: 'accepted' },
-  diagnostic: 'provider_reply_unreadable',
-  unmapped: true,
-};
-
-async function readLarkReply(res: Response): Promise<AttemptResult> {
-  let reply: unknown;
-  try {
-    reply = await res.json();
-  } catch {
-    reply = null;
-  }
-  const verdict = classifyLarkReply(reply);
-  if (verdict.kind === 'delivered') return DELIVERED;
-  if (verdict.kind === 'unconfirmed') return UNCONFIRMED;
-  return fromClassified(verdict.classified);
-}
+const DEFAULT_EVENT_TYPE = 'notification';
 
 async function attemptDelivery(
   env: Bindings,
   keyring: Keyring,
   d: DeliveryMessage,
-  nowMs: number,
+  deps: ConsumerDeps,
 ): Promise<AttemptResult> {
   const target = await resolveTarget(env, keyring, d);
   if ('outcome' in target) return target;
-  const res = await post(target.url, target.payload);
-  if (!(res instanceof Response)) return res;
-  if (res.status >= 300 && res.status < 400) {
-    await res.body?.cancel();
-    return fromClassified(classifyRedirect(res.status));
+  const { config } = target;
+  const prepared = await prepareDelivery(config, toNotification(d), { now: deps.now() });
+  if (!prepared.ok) {
+    // Permanent by construction: the same text re-renders to the same failure.
+    return prepared.reason === 'payload_too_large'
+      ? failed('payload_too_large', 'render_payload_too_large')
+      : failed('render_failed', 'render_failed');
   }
-  if (!res.ok) {
-    // Release the connection; the body is never read, so it can never reach a log.
-    await res.body?.cancel();
-    return fromClassified(classifyHttpFailure(res.status, res.headers, nowMs));
-  }
-  if (target.destination === 'slack') {
-    await res.body?.cancel();
-    return DELIVERED;
-  }
-  return readLarkReply(res);
+  const seen: { res: ProviderResponse | null } = { res: null };
+  const classification = await sendRequest(
+    prepared.request,
+    (res, at) => {
+      seen.res = res;
+      return classifyDeliveryResponse(config.kind, res, at);
+    },
+    { timeoutMs: OUTBOUND_TIMEOUT_MS, now: deps.now },
+  );
+  return attemptFromClassification(classification, config.kind, seen.res);
 }
 
 export interface ConsumerDeps {
@@ -311,10 +276,10 @@ async function attemptSafely(
   env: Bindings,
   keyring: Keyring,
   d: DeliveryMessage,
-  nowMs: number,
+  deps: ConsumerDeps,
 ): Promise<AttemptResult> {
   try {
-    return await attemptDelivery(env, keyring, d, nowMs);
+    return await attemptDelivery(env, keyring, d, deps);
   } catch (e) {
     // Anything unexpected after the claim still produces an outcome, so the claim is
     // released through the normal (bounded) retry path rather than held forever (H1).
@@ -357,7 +322,7 @@ async function handleMessage(
   }
   // The attempt number comes from the claim's RETURNING row, not the earlier read (M2).
   const attempt = claim.attempts + 1;
-  const result = await attemptSafely(env, keyring, d, deps.now());
+  const result = await attemptSafely(env, keyring, d, deps);
   const decision = effectiveDecision(
     decideRetry({ attempt, outcome: result.outcome, random: deps.random }),
     msg,

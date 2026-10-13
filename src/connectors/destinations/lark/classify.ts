@@ -84,10 +84,3 @@ export function classifyLarkResponse(res: ProviderResponse, now: number): Classi
   if (code !== undefined || (res.status >= 200 && res.status <= 299)) return unmapped(res.status);
   return classifyHttpStatus(res, now);
 }
-
-/** Legacy helper retained for existing callers: true only for a success body. */
-export function larkAccepted(body: unknown): boolean {
-  if (!body || typeof body !== 'object') return false;
-  const obj = body as { code?: unknown; StatusCode?: unknown };
-  return obj.code === 0 || obj.StatusCode === 0;
-}

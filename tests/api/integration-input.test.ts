@@ -100,7 +100,7 @@ describe('create validation', () => {
   });
 
   it('reports every invalid field at once', () => {
-    expect(fields(parseCreateIntegration({ destination: 'teams' })).sort()).toEqual(
+    expect(fields(parseCreateIntegration({ destination: 'discord' })).sort()).toEqual(
       ['destination', 'eventTypes', 'name', 'repo', 'webhookUrl'].sort(),
     );
     expect(fields(parseCreateIntegration([]))).toEqual(['body']);
@@ -135,5 +135,46 @@ describe('update validation', () => {
     expect(parseUpdateIntegration({ organizationId: 'org-b' }, 'slack').ok).toBe(false);
     expect(parseUpdateIntegration({}, 'slack').ok).toBe(false);
     expect(parseUpdateIntegration({ enabled: 'yes' }, 'slack').ok).toBe(false);
+  });
+});
+
+const TEAMS =
+  'https://prod-12.westus.logic.azure.com/workflows/abc123/triggers/manual/paths/invoke?sig=s3cr3t';
+
+describe('Microsoft Teams destination (ADR 0006)', () => {
+  const teams = { ...valid, destination: 'teams', webhookUrl: TEAMS };
+
+  it('accepts a Workflows trigger URL, with triggerAuth defaulting to anyone', () => {
+    const r = parseCreateIntegration(teams);
+    expect(r.ok && r.value).toMatchObject({ destination: 'teams', webhookUrl: TEAMS, signingSecret: null });
+    expect(parseCreateIntegration({ ...teams, triggerAuth: 'anyone' }).ok).toBe(true);
+  });
+
+  it.each(['tenant_users', 'specific_users', 'bogus', 7])('rejects triggerAuth %s', (triggerAuth) => {
+    const r = parseCreateIntegration({ ...teams, triggerAuth });
+    expect(fields(r)).toEqual(['triggerAuth']);
+    expect(JSON.stringify(r)).not.toContain('s3cr3t');
+  });
+
+  it('applies the single URL policy: URLs of other destinations are refused', () => {
+    expect(fields(parseCreateIntegration({ ...teams, webhookUrl: SLACK }))).toEqual(['webhookUrl']);
+    expect(fields(parseCreateIntegration({ ...valid, webhookUrl: TEAMS }))).toEqual(['webhookUrl']);
+    expect(
+      fields(parseCreateIntegration({ ...teams, webhookUrl: 'https://evil.test/logic.azure.com' })),
+    ).toEqual(['webhookUrl']);
+  });
+
+  it('refuses a signing secret, and triggerAuth on other destinations', () => {
+    expect(fields(parseCreateIntegration({ ...teams, signingSecret: 'x' }))).toEqual(['signingSecret']);
+    expect(fields(parseCreateIntegration({ ...valid, triggerAuth: 'anyone' }))).toEqual(['triggerAuth']);
+  });
+
+  it('rotates Teams credentials and still validates triggerAuth', () => {
+    const ok = parseUpdateIntegration({ webhookUrl: TEAMS, triggerAuth: 'anyone' }, 'teams');
+    expect(ok.ok && ok.value.credentials).toEqual({ webhookUrl: TEAMS, signingSecret: null });
+    expect(parseUpdateIntegration({ webhookUrl: TEAMS, triggerAuth: 'tenant_users' }, 'teams').ok).toBe(
+      false,
+    );
+    expect(parseUpdateIntegration({ triggerAuth: 'anyone' }, 'teams').ok).toBe(false);
   });
 });

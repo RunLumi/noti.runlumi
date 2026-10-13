@@ -53,6 +53,10 @@ export type ConfigValidation =
   | { readonly ok: false; readonly reason: 'config_unsupported'; readonly field: ConfigField };
 
 const MAX_SECRET_LENGTH = 256;
+// A pasted secret never contains whitespace, control characters or bidi overrides; one that
+// does was copied wrongly and would fail every signed request (F96).
+// eslint-disable-next-line no-control-regex -- matching control characters is the point.
+const UNSAFE_SECRET = /[\s\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/;
 
 type Raw = Readonly<Record<string, unknown>>;
 
@@ -89,7 +93,10 @@ function validateLark(raw: Raw, url: URL, webhookUrl: string): ConfigValidation 
   const domain = larkDomainOf(url);
   if (!domain) return invalid('webhookUrl');
   const secret = raw.signingSecret;
-  if (secret !== undefined && (typeof secret !== 'string' || !secret || secret.length > MAX_SECRET_LENGTH)) {
+  if (
+    secret !== undefined &&
+    (typeof secret !== 'string' || !secret || secret.length > MAX_SECRET_LENGTH || UNSAFE_SECRET.test(secret))
+  ) {
     return invalid('signingSecret');
   }
   const base = { kind: 'lark', mode: 'custom_bot', webhookUrl, domain } as const;

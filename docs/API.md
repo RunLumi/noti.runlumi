@@ -48,7 +48,7 @@ type Integration = {
   name: string;
   repo: string;                       // owner/repository, a filter within the workspace
   eventTypes: string[];               // from GITHUB_EVENT_TYPES (src/connectors/sources/github/catalog.ts)
-  destination: 'lark' | 'slack';
+  destination: 'lark' | 'slack' | 'teams';
   destinationHost: string | null;     // e.g. "hooks.slack.com"
   enabled: boolean;
   credentials: 'ok' | 'legacy' | 'quarantined';
@@ -61,8 +61,8 @@ type Integration = {
 | --- | --- | --- |
 | `GET /api/integrations` | — | `200 {organizationId, integrations: Integration[], truncated}` (max 200) |
 | `GET /api/integrations/:id` | — | `200 {integration}` |
-| `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?}` | `201 {integration}`; `409` at 100 per workspace |
-| `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled}`, and/or `{webhookUrl, signingSecret?}` to rotate credentials | `200 {integration}` |
+| `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?, triggerAuth?}` | `201 {integration}`; `409` at 100 per workspace |
+| `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled}`, and/or `{webhookUrl, signingSecret?, triggerAuth?}` to rotate credentials | `200 {integration}` |
 | `DELETE /api/integrations/:id` | — | `204` |
 
 Validation failures return `422 {"error":"Validation failed","fields":[{field,message}]}`. Every
@@ -74,8 +74,16 @@ Rules enforced at write time:
   - Slack: `https://hooks.slack.com/services/…`.
   - Lark: `https://open.larksuite.com/open-apis/bot/v2/hook/…` or the `open.feishu.cn`
     equivalent.
+  - Microsoft Teams: the HTTP URL of a Workflows trigger, on a `*.logic.azure.com` host.
   - No userinfo, no explicit port, no other host.
+  - The rules live in one place, `validateDestinationConfig`; the API only adapts its verdict
+    to the `fields` shape.
 - `signingSecret` is Lark only. It is optional, at most 256 characters, with no whitespace.
+- `triggerAuth` is Teams only and optional. Only `"anyone"` is accepted (the default);
+  `"tenant_users"`, `"specific_users"` and anything else return `422` on `triggerAuth`,
+  because those triggers need an Entra token Noti does not send. It is validated, not stored.
+  Teams delivery is recorded as `accepted`, never `delivered`, because the Workflows trigger
+  answers `202` without confirming that the flow posted the message.
 - `eventTypes` must be a non-empty subset of the catalog. Duplicates are removed.
 - `destination` cannot be changed after creation, because the credentials are bound to it.
   Create a new integration instead.

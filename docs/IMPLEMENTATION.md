@@ -1,12 +1,12 @@
 # Running slice
 
-This is an engineering alpha, not a production-ready multi-tenant product. It receives signed GitHub repository webhooks and routes configured events to Slack or unsigned Lark custom webhooks.
+This is an engineering alpha, not a production-ready multi-tenant product. It receives signed GitHub repository webhooks and routes configured events to Slack, Microsoft Teams (Workflows) or Lark custom bots (signed or unsigned).
 
 ## Setup
 1. npm install; npm run typecheck; npm test
 2. Create D1 database: `npx wrangler d1 create lumi-noti`, replace ID in wrangler.jsonc.
 3. Create queues: `npx wrangler queues create noti-deliveries` and `npx wrangler queues create noti-dead-letters`.
-4. Apply schema: `npx wrangler d1 migrations apply lumi-noti --remote`.
+4. Apply schema: `npx wrangler d1 migrations apply lumi-noti --remote`. Migration `0012_teams_destination.sql` rebuilds the `integrations` table to admit `teams`; rehearse it on a staging database first (it was only run on the Node SQLite test fake).
 5. Set secrets: `wrangler secret put GITHUB_WEBHOOK_SECRET`, `wrangler secret put KEK_V1` (`openssl rand -hex 32`), and — only if you have pre-envelope (v0) rows — `wrangler secret put ENCRYPTION_KEY`. `KMS_ACTIVE_VERSION` is a var in `wrangler.jsonc`. `GET /health` returns 503 and names the binding if the key ring is invalid.
 6. Integrations are created through the tenant-scoped API (slice 3, not yet shipped). Legacy v0 rows are re-sealed automatically by the cron job; see ADR 0004.
 7. Deploy with `npm run deploy`; configure GitHub repository webhook for `/webhooks/github`, content type JSON, shared signing secret.
@@ -16,7 +16,7 @@ This is an engineering alpha, not a production-ready multi-tenant product. It re
 - Delivery is at least once. Each outbox row is claimed atomically under a lease before `queue.send()` (F172), and the consumer claims the delivery row before calling the provider (F175). A crash between the provider accepting and the ledger write can still duplicate a notification; nothing here makes that impossible.
 - The every-minute cron (`dispatchOutbox`) is the **recovery mechanism**, not a redundant second path (F174): it re-dispatches due `pending` rows, reclaims claims whose lease expired, and re-enqueues retries parked by the Tier 2 ladder. The ingress `waitUntil` kick is only the fast path.
 - `noti-dead-letters` is consumed by the same Worker (F180). It only moves the ledger row to `dead_lettered`, so the failure is visible and can be replayed. Create the queue before deploying (step 3). The main consumer parks retries on the outbox once a message has used its queue retries, so the DLQ mainly receives batches retried on a key-configuration fault.
-- No real-provider E2E test or deploy has been performed. Validate Slack and Lark response contracts, retry/DLQ behavior and credential encryption before production.
+- No real-provider E2E test or deploy has been performed. Validate Slack, Teams and Lark response contracts (Teams records `accepted`, never `delivered`), retry/DLQ behavior and credential encryption before production.
 - Use real GitHub event fixtures (F71).
 
 ## Key rotation (KEK)

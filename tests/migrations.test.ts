@@ -1,3 +1,4 @@
+import type { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { applyMigration, createFakeD1 } from './support/d1';
 
@@ -183,5 +184,200 @@ describe('migration 0009', () => {
       },
       { id: 's', state: 'sent', last_error: null, last_error_code: null },
     ]);
+  });
+});
+
+describe('migration 0012', () => {
+  const COLUMNS = [
+    'id',
+    'repo',
+    'event_types',
+    'destination',
+    'webhook_ciphertext',
+    'enabled',
+    'lark_secret_ciphertext',
+    'organization_id',
+    'key_salt',
+    'dek_wrapped',
+    'kek_version',
+    'webhook_envelope',
+    'lark_secret_envelope',
+    'credentials_quarantined_at',
+    'credentials_quarantine_reason',
+    'name',
+    'destination_host',
+    'created_by',
+    'created_at',
+    'updated_at',
+  ];
+
+  function schemaNames(raw: DatabaseSync, type: 'index' | 'trigger'): string[] {
+    const sql =
+      "SELECT name FROM sqlite_master WHERE type=? AND tbl_name='integrations' AND name NOT LIKE 'sqlite_%' ORDER BY name";
+    return (raw.prepare(sql).all(type) as { name: string }[]).map((r) => r.name);
+  }
+
+  function seed(raw: DatabaseSync): void {
+    const insert = raw.prepare(
+      `INSERT INTO integrations(id,repo,event_types,destination,webhook_ciphertext,enabled,lark_secret_ciphertext,
+         organization_id,key_salt,dek_wrapped,kek_version,webhook_envelope,lark_secret_envelope,
+         credentials_quarantined_at,credentials_quarantine_reason,name,destination_host,created_by,created_at,updated_at)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    );
+    const blob = (...bytes: number[]) => new Uint8Array(bytes);
+    // A fully populated sealed row, a v0 row, a quarantined row, and a row from before 0008.
+    insert.run(
+      'sealed',
+      'acme/web',
+      '["push"]',
+      'slack',
+      '',
+      1,
+      null,
+      'org-a',
+      blob(1, 2, 3),
+      blob(4, 5, 6),
+      2,
+      blob(7, 8),
+      blob(9),
+      null,
+      null,
+      'Alerts',
+      'hooks.slack.com',
+      'user-1',
+      '2026-01-01 00:00:00',
+      '2026-01-02 00:00:00',
+    );
+    insert.run(
+      'legacy',
+      'acme/api',
+      '["issues.opened"]',
+      'lark',
+      'Y2lwaGVy',
+      0,
+      'c2VjcmV0',
+      'org-b',
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+    insert.run(
+      'quarantined',
+      'acme/ui',
+      '[]',
+      'lark',
+      'x',
+      1,
+      null,
+      'org-a',
+      blob(1),
+      blob(2),
+      1,
+      blob(3),
+      null,
+      '2026-02-02 00:00:00',
+      'malformed_envelope',
+      'Broken',
+      'open.larksuite.com',
+      null,
+      '2026-02-01',
+      '2026-02-02',
+    );
+    // 0008 made organization_id mandatory for new rows only; legacy rows stay readable.
+    raw.exec('DROP TRIGGER integrations_org_required_insert');
+    insert.run(
+      'orphan',
+      'old/repo',
+      '[]',
+      'slack',
+      'b2xk',
+      1,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    );
+  }
+
+  const rows = (raw: DatabaseSync): unknown[] => raw.prepare('SELECT * FROM integrations ORDER BY id').all();
+
+  it('preserves every row, column, index and trigger', () => {
+    const { raw } = createFakeD1({ before: '0012' });
+    seed(raw);
+    raw.exec(
+      "INSERT INTO deliveries(id,integration_id,organization_id,state) VALUES('d','sealed','org-a','sent')",
+    );
+    const beforeRows = rows(raw);
+    const beforeIndexes = schemaNames(raw, 'index');
+    expect(beforeRows).toHaveLength(4);
+    expect(beforeIndexes).toEqual(
+      expect.arrayContaining([
+        'integrations_kek_version',
+        'integrations_org_created',
+        'integrations_org_idx',
+        'integrations_repo',
+      ]),
+    );
+
+    applyMigration(raw, '0012_teams_destination.sql');
+
+    const columns = (raw.prepare('PRAGMA table_info(integrations)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    expect(columns).toEqual(COLUMNS);
+    // Values, NULLs and BLOBs survive unchanged.
+    expect(rows(raw)).toEqual(beforeRows);
+    expect(schemaNames(raw, 'index')).toEqual(beforeIndexes);
+    // Triggers are dropped with the table, so 0012 must have recreated them.
+    expect(schemaNames(raw, 'trigger')).toEqual([
+      'integrations_org_immutable',
+      'integrations_org_required_insert',
+    ]);
+    expect(raw.prepare("SELECT id,state FROM deliveries WHERE id='d'").get()).toEqual({
+      id: 'd',
+      state: 'sent',
+    });
+  });
+
+  const insertRow = (raw: DatabaseSync, id: string, destination: string, org: string | null) =>
+    raw
+      .prepare(
+        'INSERT INTO integrations(id,repo,event_types,destination,webhook_ciphertext,organization_id) VALUES(?,?,?,?,?,?)',
+      )
+      .run(id, 'a/b', '[]', destination, '', org);
+
+  it('the recreated triggers still enforce the tenant contract', () => {
+    const { raw } = createFakeD1();
+    expect(() => insertRow(raw, 'x', 'slack', null)).toThrow(/organization_id is required/);
+    expect(() => insertRow(raw, 'y', 'slack', '')).toThrow(/organization_id is required/);
+    insertRow(raw, 'ok', 'slack', 'org-a');
+    expect(() => raw.prepare("UPDATE integrations SET organization_id='org-b' WHERE id='ok'").run()).toThrow(
+      /cannot change/,
+    );
+  });
+
+  it('accepts teams and still rejects unknown destinations', () => {
+    const { raw } = createFakeD1();
+    for (const kind of ['lark', 'slack', 'teams']) insertRow(raw, kind, kind, 'org-a');
+    expect(() => insertRow(raw, 'd', 'discord', 'org-a')).toThrow();
   });
 });
