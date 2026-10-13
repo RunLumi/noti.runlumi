@@ -15,7 +15,7 @@ import { asRecord } from '../../../lib/json';
  * Every non-`ok` outcome is a rejection. There is no fallback to "route it everywhere".
  */
 export type TenantResolution =
-  | { kind: 'ok'; organizationId: string }
+  | { kind: 'ok'; organizationId: string; installationId: string }
   | { kind: 'no-installation' }
   | { kind: 'app-mismatch' }
   | { kind: 'unknown-installation' }
@@ -61,7 +61,7 @@ export async function resolveTenant(
 
   if (!row) return { kind: 'unknown-installation' };
   if (row.status !== 'active') return { kind: 'not-active' };
-  return { kind: 'ok', organizationId: row.organization_id };
+  return { kind: 'ok', organizationId: row.organization_id, installationId: block.installationId };
 }
 
 /**

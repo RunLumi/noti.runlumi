@@ -1,6 +1,8 @@
 import type { Context } from 'hono';
 import type { Bindings, DeliveryMessage } from '../../../env';
 import { asRecord, str } from '../../../lib/json';
+import { newLeaseToken } from '../../../delivery/claim';
+import { dedupKey, deliveryId as deriveDeliveryId } from '../../../delivery/ids';
 import { dispatchOutbox } from '../../../pipeline/outbox';
 import { isGithubEventType } from './catalog';
 import { classifyGithubEvent, verifyGithubSignature } from './events';
@@ -123,6 +125,14 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     .all<IntegrationRow>();
 
   const display = displayFields(event, eventType);
+  // F170: transport identity, tenant-bound. GitHub keeps X-GitHub-Delivery on a manual
+  // redelivery, so the same event maps to the same key and is accepted once.
+  const dedup = await dedupKey({
+    orgId: organizationId,
+    connectionId: tenant.installationId,
+    source: 'github',
+    eventId: deliveryId,
+  });
   let queued = 0;
   for (const row of rows.results) {
     let types: unknown;
@@ -133,26 +143,32 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     }
     if (!Array.isArray(types) || !types.includes(eventType)) continue;
 
+    // F184 / D10: identity is (dedup_key, destination), hashed — never a hand-built string.
+    const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
+    // Rows written before 0009 used this id. A redelivery of such an event must not be
+    // accepted a second time under the new id.
+    const legacyId = `${deliveryId}:${row.id}`;
     // Identifiers and display text only. Credentials stay in D1 (D5).
-    const message: DeliveryMessage = {
-      id: `${deliveryId}:${row.id}`,
-      integrationId: row.id,
-      organizationId,
-      ...display,
-    };
+    const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...display };
 
     // One batch, one transaction: the delivery row and the outbox row commit together.
+    const notLegacy = 'WHERE NOT EXISTS (SELECT 1 FROM deliveries WHERE id=? AND organization_id=?)';
     const results = await c.env.DB.batch([
       c.env.DB.prepare(
-        "INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state) VALUES(?,?,?,'pending')",
-      ).bind(message.id, row.id, organizationId),
+        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)
+         SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP ${notLegacy}`,
+      ).bind(id, row.id, organizationId, dedup.hex, legacyId, organizationId),
       c.env.DB.prepare(
-        'INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json) VALUES(?,?,?)',
-      ).bind(message.id, organizationId, JSON.stringify(message)),
+        `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
+         SELECT ?,?,? ${notLegacy}`,
+      ).bind(id, organizationId, JSON.stringify(message), legacyId, organizationId),
     ]);
     if (batchResult(results, 1).meta.changes) queued++;
   }
 
-  if (queued > 0) c.executionCtx.waitUntil(dispatchOutbox(c.env));
+  // The prompt path; the every-minute reconciler is the recovery path (F174). Both are
+  // safe together because each row's claim is atomic (F172).
+  if (queued > 0)
+    c.executionCtx.waitUntil(dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }));
   return c.json({ accepted: true, persisted: queued }, 202);
 }

@@ -291,7 +291,7 @@ describe('consumer', () => {
     await consume([msg]);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(msg.acked).toBe(true);
-    expect(delivery(m.id)).toEqual({ state: 'failed', last_error: 'destination_credentials_invalid' });
+    expect(delivery(m.id)).toEqual({ state: 'dead_lettered', last_error: 'destination_credentials_invalid' });
   });
 
   it('refuses a message whose organization does not own the integration', async () => {

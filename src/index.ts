@@ -9,6 +9,7 @@ import type { Bindings } from './env';
 import { consumeDeliveries } from './pipeline/consumer';
 import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
 import { dispatchOutbox } from './pipeline/outbox';
+import { log } from './platform/log';
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -40,7 +41,7 @@ async function maintainCredentials(env: Bindings): Promise<void> {
     : null;
   const rewrapped = await rewrapStaleKeys(env.DB, keyring);
   const remaining = await credentialStatus(env.DB, keyring.activeVersion);
-  console.info(JSON.stringify({ job: 'credential_maintenance', migrated, rewrapped, remaining }));
+  log('info', 'credential_maintenance', { migrated, rewrapped, remaining });
 }
 
 export default {
@@ -48,9 +49,12 @@ export default {
 
   // Awaited, not waitUntil: a failing job must fail the invocation visibly, not vanish.
   async scheduled(_event: ScheduledEvent, env: Bindings) {
-    await dispatchOutbox(env);
+    // F174 reconciler: due pending rows, expired leases, and scheduled retries.
+    const dispatch = await dispatchOutbox(env);
+    log('info', 'outbox_reconcile', { ...dispatch });
     await maintainCredentials(env);
   },
 
-  queue: consumeDeliveries,
+  // Wrapped so the runtime's third argument (ExecutionContext) is never taken for deps.
+  queue: (batch: MessageBatch<unknown>, env: Bindings) => consumeDeliveries(batch, env),
 };

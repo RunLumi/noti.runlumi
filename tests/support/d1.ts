@@ -30,15 +30,34 @@ function normaliseRow(row: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
+/**
+ * D1 accepts SQLite's ordered `?NNN` parameters; node:sqlite treats them as named and will
+ * not bind them positionally. Rewrite each `?NNN` to `?` and expand the values in order of
+ * appearance, which is exactly what `?NNN` means.
+ */
+function expandOrdered(sql: string, params: readonly SQLInputValue[]): [string, SQLInputValue[]] {
+  const order = Array.from(sql.matchAll(/\?(\d+)/g), (m) => Number(m[1]));
+  // An unbound statement (prepare without bind) is checked when bind() is called.
+  if (order.length === 0 || params.length === 0) return [sql, [...params]];
+  const max = Math.max(...order);
+  if (params.length !== max) throw new RangeError(`expected ${max} bindings, got ${params.length}`);
+  return [sql.replace(/\?(\d+)/g, '?'), order.map((n) => params[n - 1] ?? null)];
+}
+
 class FakeStatement {
+  readonly sql: string;
+  readonly params: readonly SQLInputValue[];
+
   constructor(
     private readonly db: DatabaseSync,
-    readonly sql: string,
-    readonly params: readonly SQLInputValue[] = [],
-  ) {}
+    readonly source: string,
+    bound: readonly SQLInputValue[] = [],
+  ) {
+    [this.sql, this.params] = expandOrdered(source, bound);
+  }
 
   bind(...values: unknown[]): FakeStatement {
-    return new FakeStatement(this.db, this.sql, values.map(normaliseBinding));
+    return new FakeStatement(this.db, this.source, values.map(normaliseBinding));
   }
 
   first<T>(): Promise<T | null> {

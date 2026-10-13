@@ -6,6 +6,12 @@ import {
   OUTBOX_STATEMENTS,
   OUTBOX_STALL_THRESHOLD_MS,
   RECLAIM_EXPIRED_LEASE_SQL,
+  SELECT_DUE_WORKSPACES_SQL,
+  DEFAULT_WORKSPACE_LIMIT,
+  claimedRow,
+  dueWorkspacesParams,
+  markInvalidParams,
+  scheduleRedispatchParams,
   buildClaim,
   claimWon,
   isOutboxStalled,
@@ -31,7 +37,9 @@ describe('outbox claim SQL (F172/F174)', () => {
   it('the claim is a single conditional UPDATE … RETURNING, never read-then-write', () => {
     expect(CLAIM_OUTBOX_ROW_SQL).toMatch(/^UPDATE notification_outbox/);
     expect(CLAIM_OUTBOX_ROW_SQL).toContain("AND state = 'pending'");
-    expect(CLAIM_OUTBOX_ROW_SQL).toMatch(/RETURNING id, organization_id, lease_token, lease_expires_at$/);
+    expect(CLAIM_OUTBOX_ROW_SQL).toMatch(
+      /RETURNING id, organization_id, lease_token, lease_expires_at, payload_json$/,
+    );
     expect(CLAIM_OUTBOX_ROW_SQL).not.toMatch(/SELECT/i);
   });
 
@@ -81,7 +89,13 @@ describe('buildClaim', () => {
 
 describe('claimWon', () => {
   const claim = buildClaim(request);
-  const row = { id: 'row_1', organization_id: 'org_1', lease_token: 'lease-1', lease_expires_at: NOW + 1 };
+  const row = {
+    id: 'row_1',
+    organization_id: 'org_1',
+    lease_token: 'lease-1',
+    lease_expires_at: NOW + 1,
+    payload_json: '{}',
+  };
 
   it('is true only for exactly our row with our token', () => {
     expect(claimWon([row], claim)).toBe(true);
@@ -98,6 +112,7 @@ describe('claimWon', () => {
     [[{ ...row, lease_token: 'other' }]],
     [[{ ...row, organization_id: 'org_2' }]],
     [[{ ...row, id: 'row_2' }]],
+    [[{ ...row, payload_json: null }]],
   ])('rejects %o', (rows) => {
     expect(claimWon(rows, claim)).toBe(false);
   });
@@ -126,6 +141,38 @@ describe('follow-up statement params', () => {
 
   it('bounds the reconciler sweep', () => {
     expect(() => reconcileCandidatesParams('org_1', NOW, 0)).toThrow(RangeError);
+  });
+});
+
+describe('reconciler workspace enumeration and scheduling', () => {
+  it('enumerates only workspaces, never rows, and skips rows with no tenant', () => {
+    expect(SELECT_DUE_WORKSPACES_SQL).toMatch(/^SELECT DISTINCT organization_id FROM/);
+    expect(SELECT_DUE_WORKSPACES_SQL).toContain('organization_id IS NOT NULL');
+    expect(dueWorkspacesParams(NOW)).toEqual([NOW, DEFAULT_WORKSPACE_LIMIT]);
+    expect(() => dueWorkspacesParams(NOW, 0)).toThrow(RangeError);
+  });
+
+  it('a parked row is not claimable before not_before', () => {
+    expect(CLAIM_OUTBOX_ROW_SQL).toContain('(not_before IS NULL OR not_before <= ?1)');
+    expect(scheduleRedispatchParams('org_1', 'row_1', NOW)).toEqual([NOW, 'org_1', 'row_1']);
+  });
+
+  it('invalid rows are fenced by the lease too', () => {
+    const lease = buildClaim(request).lease;
+    expect(markInvalidParams('org_1', 'row_1', lease)).toEqual(['org_1', 'row_1', 'lease-1']);
+  });
+
+  it('claimedRow returns the payload of a won claim', () => {
+    const claim = buildClaim(request);
+    const won = {
+      id: 'row_1',
+      organization_id: 'org_1',
+      lease_token: 'lease-1',
+      lease_expires_at: 1,
+      payload_json: '{}',
+    };
+    expect(claimedRow([won], claim)).toEqual(won);
+    expect(claimedRow([], claim)).toBeNull();
   });
 });
 

@@ -76,7 +76,7 @@ quote. Never silently `202`.
 
 ## F170 — Deduplication key derivation
 
-**Priority** P0 · **Status** partial
+**Priority** P0 · **Status** partial (slice 4: key derived per F170 and stored on `deliveries.dedup_key`; no `event_dedup` table)
 
 **Story** As a customer, I want GitHub's redelivery button to not spam my team, so that I can
 use it for debugging.
@@ -174,7 +174,7 @@ that the dedup table does not grow without limit.
 
 ## F172 — Atomic outbox claim
 
-**Priority** P0 · **Status** not started · **Fixes** the core of D4
+**Priority** P0 · **Status** implemented (slice 4) · **Fixes** the core of D4
 
 **Story** As an operator, I want an outbox row dispatched exactly once, so that a cron tick
 and a `waitUntil` kick cannot both enqueue the same event.
@@ -216,7 +216,7 @@ racing is the design working.
 
 ## F173 — Outbox pump
 
-**Priority** P0 · **Status** partial
+**Priority** P0 · **Status** partial (slice 4: claim-then-send, ids-only messages; `outbox_stalled` alert not built)
 
 **Acceptance**
 - [ ] `queue.send()` is **awaited**, never `waitUntil`-wrapped (F169).
@@ -252,7 +252,7 @@ backlog) is a transient pump failure; record and retry.
 
 ## F174 — Outbox reconciler
 
-**Priority** P0 · **Status** partial
+**Priority** P0 · **Status** partial (slice 4: per-workspace reconciler, lease reclaim, scheduled retries; reconciler-failure alert not built)
 
 **Story** As an operator, I want a scheduled sweeper, so that an event which reached the outbox
 is eventually dispatched even if every prompt path failed.
@@ -289,7 +289,7 @@ failure mode is now: crash-after-enqueue-before-mark (F172 handles) and pump-dow
 
 ## F175 — Idempotent consumer
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** implemented (slice 4: the claim is a conditional UPDATE on the ledger row, not a separate `delivery_claims` table)
 
 **Story** As a customer, I want a duplicate queue message to not become a duplicate
 notification, so that a crash never costs me a spam wave.
@@ -331,7 +331,7 @@ collision is a leak and is tested.
 
 ## F176 — Per-message acknowledgement
 
-**Priority** P0 · **Status** not started · **Fixes** part of D8
+**Priority** P0 · **Status** partial (per-message ack/retry; delivery `max_batch_size` is still 10, not 1–5) · **Fixes** part of D8
 
 **Story** As a customer, I want one bad message not to re-send nine good ones, so that a
 single poison event does not multiply into spam.
@@ -370,7 +370,7 @@ message will not melt the concurrency budget either.
 
 ## F177 — Retry policy: two-tier backoff
 
-**Priority** P0 · **Status** not started · **Fixes** part of D4/D11
+**Priority** P0 · **Status** implemented (slice 4) · **Fixes** part of D4/D11
 
 **Story** As an operator, I want a transient outage ridden out and a chronic one given up on
 predictably, so that retries neither hammer a recovering destination nor give up too early.
@@ -410,7 +410,7 @@ RNG.
 
 ## F178 — `Retry-After` handling
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 4: RFC 9110 header parsed and honoured; Discord body, `x-ratelimit-*` and Lark 400 throttle not parsed)
 
 **Story** As an operator, I want a rate-limited destination to tell us when to come back, so
 that we stop making a throttle worse.
@@ -449,7 +449,7 @@ it as standardized.
 
 ## F179 — Error classification
 
-**Priority** P0 · **Status** not started · **Fixes** D11 · **Extends** F13
+**Priority** P0 · **Status** partial (slice 4: generic HTTP + F179 Lark codes; Slack API, Teams and Discord adapters are slice 5; unmapped errors are logged, no metric) · **Fixes** D11 · **Extends** F13
 
 **Story** As an operator, I want permanent failures to stop burning retries, so that a
 revoked webhook does not cost me 13 attempts.
@@ -494,7 +494,7 @@ punitive action against a shared IP.
 
 ## F180 — Dead-letter queue
 
-**Priority** P0 · **Status** not started · **Fixes** part of D11
+**Priority** P0 · **Status** partial (slice 4: terminal `dead_lettered` state with taxonomy code; no DLQ consumer, no attempt-log table) · **Fixes** part of D11
 
 **Story** As an operator, I want exhausted deliveries to land somewhere I can see, so that
 they are never silently dropped.
@@ -566,7 +566,7 @@ redacted exactly as F98 does for the test preview.
 
 ## F182 — Manual replay
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 4: idempotent tenant-scoped service; no route, `delivery.replay` capability check or audit yet)
 
 **Story** As a customer, I want to retry a failed notification myself, so that I do not have
 to wait for you to notice.
@@ -640,7 +640,7 @@ holding Worker invocations open costs real money.
 
 ## F184 — Delivery ledger
 
-**Priority** P0 · **Status** partial
+**Priority** P0 · **Status** partial (slice 4: hashed `(dedup_key, destination)` id and new ledger columns; no `delivery_attempts` table)
 
 **Story** As a support engineer, I want one row per notification attempt, so that a customer
 question can be answered from data rather than guesswork.
@@ -831,7 +831,7 @@ the delivery id so that cannot happen.
 
 ## F189 — Outbound request budget
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 4: 10 s `AbortSignal.timeout`, `redirect: 'error'`; response bodies not size-capped)
 
 **Story** As an operator, I want outbound calls bounded, so that a slow destination cannot
 exhaust a Worker invocation.

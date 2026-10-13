@@ -13,7 +13,9 @@ This is an engineering alpha, not a production-ready multi-tenant product. It re
 
 ## Explicit gaps before public release
 - No authenticated dashboard, workspace model, GitHub App installation verification, or safe credential onboarding yet. Do not accept arbitrary public users.
-- Queue insertion and D1 idempotency claim are not atomic; failed enqueue after claim requires a reconciliation job/outbox.
+- Delivery is at least once. Each outbox row is claimed atomically under a lease before `queue.send()` (F172), and the consumer claims the delivery row before calling the provider (F175). A crash between the provider accepting and the ledger write can still duplicate a notification; nothing here makes that impossible.
+- The every-minute cron (`dispatchOutbox`) is the **recovery mechanism**, not a redundant second path (F174): it re-dispatches due `pending` rows, reclaims claims whose lease expired, and re-enqueues retries parked by the Tier 2 ladder. The ingress `waitUntil` kick is only the fast path.
+- No consumer reads `noti-dead-letters` yet (F180). A message that exhausts the queue's own retries lands there and, with no consumer, is deleted after four days. The consumer avoids this by parking retries on the outbox once a message has used its queue retries, but a batch-level `retryAll()` (misconfigured keys) still spends them.
 - No real-provider E2E test or deploy has been performed. Validate Slack and Lark response contracts, retry/DLQ behavior and credential encryption before production.
 - Use real GitHub event fixtures (F71).
 
