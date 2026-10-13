@@ -22,6 +22,25 @@
 > secrets, not a captured-fixture corpus), F80 in part (a Sources page, not the wizard with a
 > send-test step). F73 and F81 onward are unchanged.
 
+> **Implementation status, slice 10b (2026-10-13).** GitLab and Stripe ship in part behind a typed
+> connector registry; see [ADR 0015](../adr/0015-provider-sources.md). Done in part: **F81**
+> (GitLab.com only; one credential per source chosen by the person, either the signing token via
+> the shared Standard Webhooks verifier or `X-Gitlab-Token` in constant time, no fallback between
+> them; instance header checked; `Idempotency-Key`/`webhook-id` as identity, event UUID unused),
+> **F83** (a closed 11-type catalogue: push, tag push, merge request opened/merged/closed/reopened,
+> issue opened/closed/reopened, pipeline failed/succeeded; action from the body; confidential
+> issues never copy the title; no emails), **F84** (Stripe `v1` over the raw body, secret as a
+> string, `v0` ignored, several `v1`, five-minute tolerance, test and live as separate sources) and
+> the transport half of **F86** (dedup on event id; same id with a new signature is one
+> notification). **F82** in part: GitLab floods are absorbed with a 2xx instead of a 429. **F89** is
+> resolved as a refusal, re-verified today (the documented recipe still signs `JSON.stringify` of
+> the body, with no replay window): no Sentry source, API `422`, test fails if one is registered.
+> **Not done:** GitLab self-managed, dual credentials, the F82 health model (72 h prompt, plan
+> tiers, disable inference), `Note`/`Job`/`Release`/`Wiki` hooks and `data.extra`; Stripe thin
+> events and enrichment (F85), semantic dedup and reconciliation (rest of F86); Linear (F87, F88),
+> Cloudflare (F90); fixture capture from real providers (F79). Deviation from F85: a Stripe event
+> of the other livemode is acknowledged and ignored (200), not refused with 401.
+
 ## The finding that orders this file
 
 Two sources in this file have a **verified, documented signature scheme** we can implement
@@ -713,7 +732,7 @@ analytics, and never included in a support-bundle export (F30's export omits cre
 
 ## F81 — GitLab signature verification
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partly implemented: GitLab.com, one credential per source (slice 10b)
 
 **Story** As a GitLab customer, I want my GitLab webhook verified against the documented
 scheme, so that a forged event cannot enter my workspace.
@@ -797,7 +816,7 @@ migrated knows why their integration is weaker than the one next to it.
 
 ## F82 — GitLab lifecycle, auto-disable and limits
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partly implemented: floods absorbed with 2xx; no health model (slice 10b)
 
 **Story** As a GitLab customer, I want to know when GitLab has stopped sending me events, so
 that a silent outage does not look like "nothing happened".
@@ -915,7 +934,7 @@ a GitLab personal access token for this source.
 
 ## F83 — GitLab event catalog and silent drops
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partly implemented: 11-type catalogue (slice 10b)
 
 **Story** As a GitLab customer, I want a finite list of GitLab events mapped onto Noti's
 model, so that my filter list is the same shape as my GitHub one.
@@ -1000,7 +1019,7 @@ never rendered.
 
 ## F84 — Stripe signature verification
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partly implemented: snapshot events (slice 10b)
 
 **Story** As a Stripe customer, I want Stripe events verified exactly as Stripe documents
 them, so that a forged `invoice.paid` cannot mark an invoice as settled.
@@ -1173,7 +1192,7 @@ silently re-routed.
 
 ## F86 — Stripe deduplication and retry horizon
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partly implemented: transport dedup only (slice 10b)
 
 **Story** As a Stripe customer, I want Stripe's three-day retry window covered exactly once,
 so that I get one `invoice.paid` notification and not five.
@@ -1450,7 +1469,7 @@ the local flag, or a leaked token stays valid at Linear.
 
 ## F89 — Sentry: pull-based, and honest about the webhook
 
-**Priority** P2 · **Status** not started · **Decision: no push source without real evidence**
+**Priority** P2 · **Status** resolved as a refusal, re-verified 2026-10-13 (slice 10b) · **Decision: no push source without real evidence**
 
 **Story** As a security reviewer, I want us to refuse to ship a webhook source whose
 authentication we cannot verify, so that no Sentry customer has an unverified endpoint

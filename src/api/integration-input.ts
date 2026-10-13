@@ -23,6 +23,12 @@ export interface CreateIntegrationInput {
   /** Set when the integration routes events from a generic source instead of a repository. */
   readonly sourceId?: string;
   readonly eventTypes: readonly GithubEventType[];
+  /**
+   * Source integrations only: the provider event types selected (empty means every event the
+   * source sends). Shape-checked here; the handler checks membership in the catalogue of the
+   * source's kind, which only the source row knows.
+   */
+  readonly sourceEventTypes?: readonly string[];
   readonly destination: DestinationKind;
   readonly webhookUrl: string;
   readonly signingSecret: string | null;
@@ -34,6 +40,8 @@ export interface UpdateIntegrationInput {
   readonly name?: string;
   readonly repo?: string;
   readonly eventTypes?: readonly GithubEventType[];
+  /** Source integrations only; see CreateIntegrationInput.sourceEventTypes. */
+  readonly sourceEventTypes?: readonly string[];
   readonly enabled?: boolean;
   /** Replaces all filters; `{}` clears them. */
   readonly filters?: FilterConfig;
@@ -81,6 +89,22 @@ function parseEventTypes(value: unknown, errors: FieldError[]): GithubEventType[
     return undefined;
   }
   return [...new Set(value)];
+}
+
+const SOURCE_EVENT_TYPE = /^[a-z][a-z_.]{0,59}$/;
+const MAX_SOURCE_EVENT_TYPES = 30;
+
+/** Shape only. An empty list is valid and means "every event the source sends". */
+function parseSourceEventTypes(value: unknown, errors: FieldError[]): string[] | undefined {
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_SOURCE_EVENT_TYPES ||
+    !value.every((v) => typeof v === 'string' && SOURCE_EVENT_TYPE.test(v))
+  ) {
+    errors.push({ field: 'eventTypes', message: 'Choose event types from the list for this source.' });
+    return undefined;
+  }
+  return [...new Set(value as string[])];
 }
 
 function parseDestination(value: unknown, errors: FieldError[]): DestinationKind | undefined {
@@ -190,16 +214,18 @@ function parseFilterField(r: Record<string, unknown>, errors: FieldError[]): Fil
 const SOURCE_ID = /^[A-Za-z0-9-]{8,64}$/;
 
 /**
- * A source integration receives every event its source sends (filters arrive with slice 7),
- * so it carries no repository, GitHub event types or routing filters.
+ * A source integration carries no repository and no routing filters (they are GitHub-only). It
+ * receives every event its source sends unless `eventTypes` selects some of the source kind's
+ * catalogue (GitLab, Stripe); the generic kind has no catalogue, which the handler enforces.
  */
 function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegrationInput> {
   const errors: FieldError[] = [];
   if (typeof r.sourceId !== 'string' || !SOURCE_ID.test(r.sourceId))
     errors.push({ field: 'sourceId', message: 'Choose one of your sources.' });
-  for (const field of ['repo', 'eventTypes', 'filters'])
+  for (const field of ['repo', 'filters'])
     if (field in r)
       errors.push({ field, message: 'Not used with a source: it receives every event the source sends.' });
+  const sourceEventTypes = 'eventTypes' in r ? parseSourceEventTypes(r.eventTypes, errors) : [];
   const name = parseName(r.name, errors);
   const destination = parseDestination(r.destination, errors);
   const credentials = parseCredentials(r, destination, errors);
@@ -212,6 +238,7 @@ function parseSourceIntegration(r: Record<string, unknown>): Parsed<CreateIntegr
       repo: '',
       sourceId: r.sourceId,
       eventTypes: [],
+      sourceEventTypes: sourceEventTypes ?? [],
       filters: {},
       destination,
       webhookUrl: credentials.webhookUrl,
@@ -255,6 +282,7 @@ export function parseCreateIntegration(body: unknown): Parsed<CreateIntegrationI
 export function parseUpdateIntegration(
   body: unknown,
   destination: DestinationKind,
+  isSource = false,
 ): Parsed<UpdateIntegrationInput> {
   const r = asRecord(body);
   if (!r) return { ok: false, errors: [{ field: 'body', message: 'Expected a JSON object.' }] };
@@ -276,7 +304,10 @@ export function parseUpdateIntegration(
   const out: { -readonly [K in keyof UpdateIntegrationInput]: UpdateIntegrationInput[K] } = {};
   if ('name' in r) out.name = parseName(r.name, errors);
   if ('repo' in r) out.repo = parseRepo(r.repo, errors);
-  if ('eventTypes' in r) out.eventTypes = parseEventTypes(r.eventTypes, errors);
+  if ('eventTypes' in r) {
+    if (isSource) out.sourceEventTypes = parseSourceEventTypes(r.eventTypes, errors);
+    else out.eventTypes = parseEventTypes(r.eventTypes, errors);
+  }
   if ('enabled' in r) {
     if (typeof r.enabled === 'boolean') out.enabled = r.enabled;
     else errors.push({ field: 'enabled', message: 'Must be true or false.' });

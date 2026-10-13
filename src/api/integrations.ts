@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono';
 import { auditStatement, requestOrigin, type AuditMetadata } from '../audit/audit';
 import { authorize, isFailure, type Resolved } from '../auth/workspace';
 import type { Capability } from '../auth/permissions';
+import { eventCatalogFor } from '../connectors/sources/registry';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import type { Bindings } from '../env';
 import { sealCredentials, blob, type DestinationCredentials } from '../pipeline/credentials';
@@ -32,6 +33,24 @@ const LIST_LIMIT = 200;
 export const MAX_INTEGRATIONS_PER_WORKSPACE = 100;
 /** Abuse limit on mutations, per user, per minute. */
 export const MUTATIONS_PER_MINUTE = 30;
+
+/**
+ * A source integration may select event types only from the catalogue of its source's kind.
+ * The generic kind has no catalogue (its types are free-form labels), so selecting any is an
+ * error; an empty selection always means "every event the source sends".
+ */
+function sourceEventTypeError(kind: string, selected: readonly string[]): FieldError | null {
+  if (selected.length === 0) return null;
+  const catalog = eventCatalogFor(kind);
+  if (!catalog)
+    return {
+      field: 'eventTypes',
+      message: 'This source sends free-form events and cannot be filtered by type.',
+    };
+  return selected.every((t) => catalog.includes(t))
+    ? null
+    : { field: 'eventTypes', message: 'Contains an event type this source does not offer.' };
+}
 
 interface IntegrationRow {
   id: string;
@@ -255,12 +274,17 @@ integrations.post('/', async (c) => {
   if (!parsed.ok) return invalid(c, parsed.errors);
 
   let repo: string | null;
+  let storedEventTypes: readonly string[] = parsed.value.eventTypes;
   if (parsed.value.sourceId) {
     // The source must belong to this workspace; another workspace's source is "not found".
-    const owned = await c.env.DB.prepare('SELECT id FROM sources WHERE id=? AND organization_id=?')
+    const owned = await c.env.DB.prepare('SELECT id,kind FROM sources WHERE id=? AND organization_id=?')
       .bind(parsed.value.sourceId, who.orgId)
-      .first();
+      .first<{ id: string; kind: string }>();
     if (!owned) return invalid(c, [{ field: 'sourceId', message: 'Choose one of your sources.' }]);
+    const selected = parsed.value.sourceEventTypes ?? [];
+    const typeError = sourceEventTypeError(owned.kind, selected);
+    if (typeError) return invalid(c, [typeError]);
+    storedEventTypes = selected;
     // A value no GitHub owner/name can equal, so repository routing can never select it.
     repo = `source:${parsed.value.sourceId}`;
   } else {
@@ -295,7 +319,7 @@ integrations.post('/', async (c) => {
       input.name,
       input.repo,
       input.sourceId ?? null,
-      JSON.stringify(input.eventTypes),
+      JSON.stringify(storedEventTypes),
       input.destination,
       host,
       blob(sealed.keySalt),
@@ -315,7 +339,7 @@ integrations.post('/', async (c) => {
         ...(input.sourceId ? { sourceId: input.sourceId } : { repo: input.repo }),
         destination: input.destination,
         destinationHost: host,
-        eventTypes: input.eventTypes,
+        eventTypes: storedEventTypes,
         signed: input.signingSecret !== null,
         // Ids only: filter values (branch names, logins, labels) never enter the audit log.
         filters: activeFilterIds(input.filters),
@@ -339,25 +363,23 @@ integrations.patch('/:id', async (c) => {
   if (!existing) return c.json({ error: 'Not found' }, 404);
   const read = await readJson(c);
   if (!read.ok) return read.response;
-  const parsed = parseUpdateIntegration(read.body, existing.destination);
+  const parsed = parseUpdateIntegration(read.body, existing.destination, existing.source_id !== null);
   if (!parsed.ok) return invalid(c, parsed.errors);
-  if (
-    existing.source_id &&
-    (parsed.value.repo !== undefined ||
-      parsed.value.eventTypes !== undefined ||
-      parsed.value.filters !== undefined)
-  )
+  if (existing.source_id && (parsed.value.repo !== undefined || parsed.value.filters !== undefined))
     return invalid(c, [
       {
-        field:
-          parsed.value.repo !== undefined
-            ? 'repo'
-            : parsed.value.eventTypes !== undefined
-              ? 'eventTypes'
-              : 'filters',
-        message: 'This integration receives every event from its source; this cannot be changed.',
+        field: parsed.value.repo !== undefined ? 'repo' : 'filters',
+        message: 'This integration receives events from its source; this cannot be changed.',
       },
     ]);
+  if (existing.source_id && parsed.value.sourceEventTypes !== undefined) {
+    const owner = await c.env.DB.prepare('SELECT kind FROM sources WHERE id=? AND organization_id=?')
+      .bind(existing.source_id, who.orgId)
+      .first<{ kind: string }>();
+    const typeError = owner ? sourceEventTypeError(owner.kind, parsed.value.sourceEventTypes) : null;
+    if (!owner || typeError)
+      return invalid(c, [typeError ?? { field: 'eventTypes', message: 'This source no longer exists.' }]);
+  }
   let input = parsed.value;
   if (input.repo !== undefined) {
     const repo = await canonicalRepository(c.env.DB, who.orgId, input.repo);
@@ -378,6 +400,8 @@ integrations.patch('/:id', async (c) => {
   if (input.name !== undefined) assignments.push(['name', input.name]);
   if (input.repo !== undefined) assignments.push(['repo', input.repo]);
   if (input.eventTypes !== undefined) assignments.push(['event_types', JSON.stringify(input.eventTypes)]);
+  if (input.sourceEventTypes !== undefined)
+    assignments.push(['event_types', JSON.stringify(input.sourceEventTypes)]);
   if (input.enabled !== undefined) assignments.push(['enabled', input.enabled ? 1 : 0]);
   if (input.filters !== undefined) assignments.push(['filters_json', serializeFilters(input.filters)]);
   const sets: string[] = ['updated_at=CURRENT_TIMESTAMP'];
@@ -421,13 +445,16 @@ integrations.patch('/:id', async (c) => {
     );
   }
 
-  const changed = Object.keys(input).filter((k) => k !== 'credentials');
+  const changed = Object.keys(input)
+    .filter((k) => k !== 'credentials')
+    .map((k) => (k === 'sourceEventTypes' ? 'eventTypes' : k));
   if (changed.length) {
     statements.push(
       audit(c, who, 'integration.update', id, {
         fields: changed,
         ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
         ...(input.eventTypes ? { eventTypes: input.eventTypes } : {}),
+        ...(input.sourceEventTypes ? { eventTypes: input.sourceEventTypes } : {}),
         ...(input.repo ? { repo: input.repo } : {}),
         ...(input.filters ? { filters: changedFilterIds(currentFilters(existing), input.filters) } : {}),
       }),

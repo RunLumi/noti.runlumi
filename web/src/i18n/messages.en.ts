@@ -6,11 +6,13 @@
  * and what to do next, never blame the reader, never claim a success the system has not seen.
  */
 import { filtersEn } from './messages.filters.en';
+import { providersEn } from './messages.providers.en';
 
 export type PluralMessage = { readonly one?: string; readonly other: string };
 
 export const en = {
   ...filtersEn,
+  ...providersEn,
 
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'CONNECTIONS',

@@ -15,6 +15,8 @@ export interface ConnectDraft {
   readonly name: string;
   readonly webhookUrl: string;
   readonly signingSecret: string;
+  /** GitLab and Stripe sources: chosen catalogue types (empty or absent: every event). */
+  readonly eventTypes?: readonly string[];
 }
 
 export type ConnectErrors = FieldErrors & { destination?: string };
@@ -49,5 +51,6 @@ export function toConnectBody(sourceId: string, draft: ConnectDraft): CreateSour
     ...(DESTINATIONS[draft.destination].supportsSigningSecret && draft.signingSecret !== ''
       ? { signingSecret: draft.signingSecret }
       : {}),
+    ...(draft.eventTypes && draft.eventTypes.length > 0 ? { eventTypes: [...draft.eventTypes] } : {}),
   };
 }

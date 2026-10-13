@@ -19,6 +19,8 @@ const row = {
   id: 's1',
   name: 'CI',
   kind: 'generic',
+  authMode: null,
+  livemode: null,
   endpointId: 'AbCdEfGhIjKlMnOpQrStUvWx',
   endpointUrl: URL_,
   enabled: true,

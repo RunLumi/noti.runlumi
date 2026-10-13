@@ -1,4 +1,5 @@
 import { ApiError, api } from '../lib/api';
+import type { AuthMode, SourceKind } from './providers';
 
 /**
  * Generic sources (docs/API.md "Sources", ADR 0012). The server returns the signing secret
@@ -8,6 +9,11 @@ import { ApiError, api } from '../lib/api';
 export interface Source {
   readonly id: string;
   readonly name: string;
+  readonly kind: SourceKind;
+  /** GitLab only: which credential the source verifies. Never the credential. */
+  readonly authMode: AuthMode | null;
+  /** Stripe only: true for live, false for test. */
+  readonly livemode: boolean | null;
   readonly endpointId: string;
   readonly endpointUrl: string;
   readonly enabled: boolean;
@@ -19,10 +25,14 @@ export interface Source {
   readonly integrationCount: number;
 }
 
-/** A source together with the one-time secret from a create or rotate response. */
+/**
+ * A source from a create or rotate response. `secret` is present only for a generic source,
+ * whose secret Noti generates and shows once; GitLab and Stripe credentials are pasted by the
+ * person and are never returned.
+ */
 export interface SourceWithSecret {
   readonly source: Source;
-  readonly secret: string;
+  readonly secret: string | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -37,6 +47,9 @@ export function parseSource(value: unknown): Source {
     !isRecord(value) ||
     typeof value.id !== 'string' ||
     typeof value.name !== 'string' ||
+    (value.kind !== 'generic' && value.kind !== 'gitlab' && value.kind !== 'stripe') ||
+    (value.authMode !== null && value.authMode !== 'signing_token' && value.authMode !== 'secret_token') ||
+    (value.livemode !== null && typeof value.livemode !== 'boolean') ||
     typeof value.endpointId !== 'string' ||
     typeof value.endpointUrl !== 'string' ||
     typeof value.enabled !== 'boolean' ||
@@ -50,6 +63,9 @@ export function parseSource(value: unknown): Source {
   return {
     id: value.id,
     name: value.name,
+    kind: value.kind,
+    authMode: value.authMode,
+    livemode: value.livemode,
     endpointId: value.endpointId,
     endpointUrl: value.endpointUrl,
     enabled: value.enabled,
@@ -62,9 +78,16 @@ export function parseSource(value: unknown): Source {
 }
 
 export function parseSourceWithSecret(body: unknown): SourceWithSecret {
-  if (!isRecord(body) || typeof body.secret !== 'string' || !body.secret.startsWith('whsec_'))
-    throw new ApiError('Unexpected response', 500);
-  return { source: parseSource(body.source), secret: body.secret };
+  if (!isRecord(body)) throw new ApiError('Unexpected response', 500);
+  const source = parseSource(body.source);
+  // A generic source must come with its one-time secret; a provider source must not.
+  if (source.kind === 'generic') {
+    if (typeof body.secret !== 'string' || !body.secret.startsWith('whsec_'))
+      throw new ApiError('Unexpected response', 500);
+    return { source, secret: body.secret };
+  }
+  if ('secret' in body) throw new ApiError('Unexpected response', 500);
+  return { source, secret: null };
 }
 
 const withOrg = (path: string, orgId: string) => `${path}?org=${encodeURIComponent(orgId)}`;
@@ -77,9 +100,9 @@ export const sourcesApi = {
     if (!isRecord(body) || !Array.isArray(body.sources)) throw new ApiError('Unexpected response', 500);
     return body.sources.map(parseSource);
   },
-  create: async (orgId: string, name: string): Promise<SourceWithSecret> =>
+  create: async (orgId: string, body: Record<string, unknown>): Promise<SourceWithSecret> =>
     parseSourceWithSecret(
-      await api<unknown>(withOrg(base, orgId), { method: 'POST', body: JSON.stringify({ name }) }),
+      await api<unknown>(withOrg(base, orgId), { method: 'POST', body: JSON.stringify(body) }),
     ),
   update: async (
     orgId: string,
@@ -93,9 +116,13 @@ export const sourcesApi = {
     if (!isRecord(body)) throw new ApiError('Unexpected response', 500);
     return parseSource(body.source);
   },
-  rotate: async (orgId: string, id: string): Promise<SourceWithSecret> =>
+  /** Generic: no body (Noti generates the secret). GitLab and Stripe: the new pasted credential. */
+  rotate: async (orgId: string, id: string, body: Record<string, unknown> = {}): Promise<SourceWithSecret> =>
     parseSourceWithSecret(
-      await api<unknown>(withOrg(`${item(id)}/rotate`, orgId), { method: 'POST', body: '{}' }),
+      await api<unknown>(withOrg(`${item(id)}/rotate`, orgId), {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     ),
   /** `cascade` must be true when chats are connected: they are deleted with the source. */
   remove: async (orgId: string, id: string, cascade: boolean): Promise<void> => {

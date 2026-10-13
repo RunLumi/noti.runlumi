@@ -9,6 +9,8 @@ import workspaceLifecycle from './api/workspace-lifecycle';
 import workspace from './auth/workspace';
 import { githubWebhook } from './connectors/sources/github/route';
 import { genericWebhook } from './connectors/sources/generic/route';
+import { providerWebhook } from './connectors/sources/provider-route';
+import { PROVIDER_KINDS } from './connectors/sources/types';
 import { rewrapStaleSourceKeys } from './connectors/sources/generic/secret';
 import { keyringFromEnv, keyringProblem } from './crypto/keyring-env';
 import type { Bindings } from './env';
@@ -56,6 +58,8 @@ app.get('/health', (c) => {
 
 app.post('/webhooks/github', githubWebhook);
 app.post('/webhooks/generic/:endpointId', genericWebhook);
+// GitLab and Stripe (ADR 0015); the kind selects the connector, so there is no per-provider route code.
+for (const kind of PROVIDER_KINDS) app.post(`/webhooks/${kind}/:endpointId`, providerWebhook(kind));
 
 /**
  * Credential maintenance, bounded per tick: v0 → v1 migration, then KEK rewrap (F37).

@@ -2,6 +2,8 @@ import { Hono, type Context } from 'hono';
 import { auditStatement, requestOrigin, type AuditMetadata } from '../audit/audit';
 import { authorize, isFailure, type Resolved } from '../auth/workspace';
 import type { Capability } from '../auth/permissions';
+import { connectorFor, isProviderKind } from '../connectors/sources/registry';
+import type { AuthMode } from '../connectors/sources/types';
 import {
   generateEndpointId,
   generateSigningSecret,
@@ -33,10 +35,12 @@ const NAME_MAX = 80;
 // eslint-disable-next-line no-control-regex -- matching control characters is the point.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
+export type SourceKind = 'generic' | 'gitlab' | 'stripe';
+
 interface SourceRow {
   id: string;
   name: string;
-  kind: 'generic';
+  kind: SourceKind;
   endpoint_id: string;
   enabled: number;
   created_at: string;
@@ -45,17 +49,19 @@ interface SourceRow {
   secret_rotated_at: string | null;
   reused_id_rejections: number;
   last_reuse_rejected_at: string | null;
+  auth_mode: AuthMode | null;
+  livemode: number | null;
   integration_count: number;
 }
 
 const SELECT = `s.id,s.name,s.kind,s.endpoint_id,s.enabled,s.created_at,s.updated_at,s.last_received_at,
-  s.secret_rotated_at,s.reused_id_rejections,s.last_reuse_rejected_at,
+  s.secret_rotated_at,s.reused_id_rejections,s.last_reuse_rejected_at,s.auth_mode,s.livemode,
   (SELECT COUNT(*) FROM integrations i WHERE i.source_id=s.id AND i.organization_id=s.organization_id) AS integration_count`;
 
 export interface SourceView {
   readonly id: string;
   readonly name: string;
-  readonly kind: 'generic';
+  readonly kind: SourceKind;
   readonly endpointId: string;
   /** Absolute ingest URL. The endpoint id is public by design; the signature authorizes. */
   readonly endpointUrl: string;
@@ -67,11 +73,15 @@ export interface SourceView {
   /** Events refused because their webhook-id was already used with a different body. */
   readonly reusedIdRejections: number;
   readonly lastReuseRejectedAt: string | null;
+  /** GitLab only: which credential the source verifies (never the credential itself). */
+  readonly authMode: AuthMode | null;
+  /** Stripe only: true for live events, false for test events. */
+  readonly livemode: boolean | null;
   readonly integrationCount: number;
 }
 
-export function endpointUrl(appOrigin: string, endpointId: string): string {
-  return new URL(`/webhooks/generic/${endpointId}`, appOrigin).href;
+export function endpointUrl(appOrigin: string, endpointId: string, kind: SourceKind = 'generic'): string {
+  return new URL(`/webhooks/${kind}/${endpointId}`, appOrigin).href;
 }
 
 function toView(row: SourceRow, appOrigin: string): SourceView {
@@ -80,7 +90,7 @@ function toView(row: SourceRow, appOrigin: string): SourceView {
     name: row.name,
     kind: row.kind,
     endpointId: row.endpoint_id,
-    endpointUrl: endpointUrl(appOrigin, row.endpoint_id),
+    endpointUrl: endpointUrl(appOrigin, row.endpoint_id, row.kind),
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -88,6 +98,8 @@ function toView(row: SourceRow, appOrigin: string): SourceView {
     secretRotatedAt: row.secret_rotated_at,
     reusedIdRejections: row.reused_id_rejections,
     lastReuseRejectedAt: row.last_reuse_rejected_at,
+    authMode: row.auth_mode,
+    livemode: row.livemode === null ? null : row.livemode === 1,
     integrationCount: row.integration_count,
   };
 }
@@ -205,6 +217,26 @@ sources.get('/:id', async (c) => {
   return row ? c.json({ source: toView(row, c.env.APP_ORIGIN) }) : c.json({ error: 'Not found' }, 404);
 });
 
+/** Why Sentry is not offered as a source (spec 06 F89, ADR 0015). */
+const SENTRY_REFUSAL =
+  'Sentry is not available as a source. Its webhook signature is documented over a re-serialised body with no replay window, which Noti does not implement without a verified capture. Use Sentry\u2019s alert integration with a chat app, or the generic source with a signed sender.';
+
+type ProviderSecret = { secret: string; authMode: AuthMode | null; livemode: boolean | null };
+
+/** Parse the pasted credential of a provider source, or answer 422 with field messages. */
+function providerSecret(
+  c: Ctx,
+  kind: SourceKind,
+  body: Record<string, unknown>,
+  mode: 'create' | 'rotate',
+): ProviderSecret | Response {
+  if (!isProviderKind(kind)) return c.json({ error: 'Not a provider source.' }, 422);
+  const parsed = connectorFor(kind).parseSecret(body, mode);
+  return parsed.ok
+    ? { secret: parsed.secret, authMode: parsed.authMode, livemode: parsed.livemode }
+    : c.json({ error: 'Validation failed', fields: parsed.errors }, 422);
+}
+
 sources.post('/', async (c) => {
   const who = await mutationGate(c, 'source.create');
   if (who instanceof Response) return who;
@@ -213,9 +245,32 @@ sources.post('/', async (c) => {
   const body = asRecord(read.body);
   const name = parseName(body?.name);
   if (!body || !name) return invalidName(c);
+  const requested = body.kind ?? 'generic';
+  if (requested === 'sentry')
+    return c.json({ error: 'Validation failed', fields: [{ field: 'kind', message: SENTRY_REFUSAL }] }, 422);
+  if (requested !== 'generic' && !isProviderKind(requested))
+    return c.json(
+      {
+        error: 'Validation failed',
+        fields: [{ field: 'kind', message: 'Choose generic, gitlab or stripe.' }],
+      },
+      422,
+    );
+  const kind: SourceKind = requested;
   const id = crypto.randomUUID();
   const endpointId = generateEndpointId();
-  const secret = generateSigningSecret();
+  // Generic: we generate the secret and show it once. Providers generate their own (a GitLab
+  // token, a Stripe endpoint secret): it is pasted, sealed on write and never shown again.
+  let secret: string;
+  let authMode: AuthMode | null = null;
+  let livemode: boolean | null = null;
+  if (kind === 'generic') {
+    secret = generateSigningSecret();
+  } else {
+    const pasted = providerSecret(c, kind, body, 'create');
+    if (pasted instanceof Response) return pasted;
+    ({ secret, authMode, livemode } = pasted);
+  }
   const sealed = await sealSourceSecret(
     { organizationId: who.orgId, sourceId: id },
     secret,
@@ -225,12 +280,13 @@ sources.post('/', async (c) => {
   const results = await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO sources(id,organization_id,kind,name,endpoint_id,secret_envelope,key_salt,dek_wrapped,
-         kek_version,enabled,created_by)
-       SELECT ?,?,'generic',?,?,?,?,?,?,1,?
+         kek_version,enabled,created_by,auth_mode,livemode)
+       SELECT ?,?,?,?,?,?,?,?,?,1,?,?,?
        WHERE (SELECT COUNT(*) FROM sources WHERE organization_id=?) < ?`,
     ).bind(
       id,
       who.orgId,
+      kind,
       name,
       endpointId,
       sealed.secretEnvelope,
@@ -238,16 +294,25 @@ sources.post('/', async (c) => {
       sealed.dekWrapped,
       sealed.kekVersion,
       who.userId,
+      authMode,
+      livemode === null ? null : livemode ? 1 : 0,
       who.orgId,
       MAX_SOURCES_PER_WORKSPACE,
     ),
-    audit(c, who, 'source.create', id, { kind: 'generic' }),
+    audit(c, who, 'source.create', id, {
+      kind,
+      ...(authMode ? { authMode } : {}),
+      ...(livemode !== null ? { livemode } : {}),
+    }),
   ]);
   if (results[0]?.meta.changes !== 1)
     return c.json({ error: `A workspace can have at most ${MAX_SOURCES_PER_WORKSPACE} sources.` }, 409);
   const row = await load(c, who.orgId, id);
   if (!row) return c.json({ error: 'Not found' }, 404);
-  return c.json({ source: toView(row, c.env.APP_ORIGIN), secret }, 201, NO_STORE);
+  // Only a generated secret is returned. A pasted one is never echoed.
+  return kind === 'generic'
+    ? c.json({ source: toView(row, c.env.APP_ORIGIN), secret }, 201, NO_STORE)
+    : c.json({ source: toView(row, c.env.APP_ORIGIN) }, 201, NO_STORE);
 });
 
 sources.patch('/:id', async (c) => {
@@ -319,7 +384,24 @@ sources.post('/:id/rotate', async (c) => {
   const who = await mutationGate(c, 'source.rotate');
   if (who instanceof Response) return who;
   const id = c.req.param('id');
-  if (!(await load(c, who.orgId, id))) return c.json({ error: 'Not found' }, 404);
+  const existing = await load(c, who.orgId, id);
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+  // Generic: Noti generates the new secret. Providers: the new credential is pasted, because
+  // GitLab and Stripe generate it. Neither is ever read back.
+  let secret: string;
+  let authMode: AuthMode | null = existing.auth_mode;
+  if (existing.kind === 'generic') {
+    secret = generateSigningSecret();
+  } else {
+    const read = await readJson(c);
+    if (!read.ok) return read.response;
+    const body = asRecord(read.body);
+    if (!body) return c.json({ error: 'Expected a JSON object.' }, 422);
+    const pasted = providerSecret(c, existing.kind, body, 'rotate');
+    if (pasted instanceof Response) return pasted;
+    secret = pasted.secret;
+    authMode = pasted.authMode;
+  }
   // The wrapped key we saw. The UPDATE below applies only if it is still current, so a
   // concurrent rotation or the KEK rewrap job makes this a 409 instead of a lost update.
   const seen = await c.env.DB.prepare('SELECT dek_wrapped FROM sources WHERE id=? AND organization_id=?')
@@ -327,7 +409,6 @@ sources.post('/:id/rotate', async (c) => {
     .first<{ dek_wrapped: unknown }>();
   const seenWrap = seen ? blob(toBytes(seen.dek_wrapped)) : null;
   if (!seenWrap) return c.json({ error: 'Not found' }, 404);
-  const secret = generateSigningSecret();
   const sealed = await sealSourceSecret(
     { organizationId: who.orgId, sourceId: id },
     secret,
@@ -335,7 +416,7 @@ sources.post('/:id/rotate', async (c) => {
   );
   const results = await c.env.DB.batch([
     c.env.DB.prepare(
-      `UPDATE sources SET secret_envelope=?,key_salt=?,dek_wrapped=?,kek_version=?,
+      `UPDATE sources SET secret_envelope=?,key_salt=?,dek_wrapped=?,kek_version=?,auth_mode=?,
          secret_rotated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
        WHERE id=? AND organization_id=? AND dek_wrapped=?`,
     ).bind(
@@ -343,11 +424,12 @@ sources.post('/:id/rotate', async (c) => {
       sealed.keySalt,
       sealed.dekWrapped,
       sealed.kekVersion,
+      authMode,
       id,
       who.orgId,
       seenWrap,
     ),
-    audit(c, who, 'source.secret.rotate', id, {}),
+    audit(c, who, 'source.secret.rotate', id, { kind: existing.kind, ...(authMode ? { authMode } : {}) }),
   ]);
   if (results[0]?.meta.changes !== 1) {
     return (await load(c, who.orgId, id))
@@ -355,9 +437,10 @@ sources.post('/:id/rotate', async (c) => {
       : c.json({ error: 'Not found' }, 404);
   }
   const row = await load(c, who.orgId, id);
-  return row
+  if (!row) return c.json({ error: 'Not found' }, 404);
+  return existing.kind === 'generic'
     ? c.json({ source: toView(row, c.env.APP_ORIGIN), secret }, 200, NO_STORE)
-    : c.json({ error: 'Not found' }, 404);
+    : c.json({ source: toView(row, c.env.APP_ORIGIN) }, 200, NO_STORE);
 });
 
 /**
