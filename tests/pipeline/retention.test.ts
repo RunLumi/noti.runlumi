@@ -1,7 +1,13 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sqliteTimestamp } from '../../src/delivery/claim';
 import {
   AUDIT_RETENTION,
+  invalidRetentionVars,
+  PURGE_AUDIT_SQL,
+  PURGE_DELIVERIES_NO_CREATED_SQL,
+  PURGE_DELIVERIES_SQL,
+  PURGE_ORPHAN_OUTBOX_SQL,
+  RETENTION_INTERVAL_MS,
   DELIVERY_RETENTION,
   parseRetentionDays,
   purgeExpiredRecords,
@@ -140,6 +146,7 @@ describe('purgeExpiredRecords: deliveries', () => {
     delivery('sent', 100);
     await purgeExpiredRecords({ DB: db.d1, DELIVERY_RETENTION_DAYS: '30' }, NOW);
     expect(ids('deliveries')).toEqual([]);
+    db.raw.prepare('DELETE FROM ops_state').run(); // lift the hourly throttle
     delivery('sent', 40);
     // "1" is below the 30-day floor, so the 90-day default applies and the row stays.
     await purgeExpiredRecords({ DB: db.d1, DELIVERY_RETENTION_DAYS: '1' }, NOW);
@@ -195,5 +202,109 @@ describe('purgeExpiredRecords: audit events', () => {
   it('leaves audit events append-only for updates (the purge is delete-only)', () => {
     audit(1);
     expect(() => db.raw.prepare("UPDATE audit_events SET action='x'").run()).toThrow(/append-only/);
+  });
+});
+
+describe('purgeExpiredRecords: hourly throttle and resilience', () => {
+  it('runs at most once an hour, and records when it last completed', async () => {
+    delivery('sent', 100);
+    expect((await purgeExpiredRecords({ DB: db.d1 }, NOW)).skipped).toBe(false);
+    delivery('sent', 100);
+    const again = await purgeExpiredRecords({ DB: db.d1 }, NOW + RETENTION_INTERVAL_MS - 1);
+    expect(again).toMatchObject({ skipped: true, deliveries: 0 });
+    expect(ids('deliveries')).toHaveLength(1);
+    const later = await purgeExpiredRecords({ DB: db.d1 }, NOW + RETENTION_INTERVAL_MS);
+    expect(later).toMatchObject({ skipped: false, deliveries: 1 });
+  });
+
+  it('does not advance the throttle while a backlog remains, so the next tick continues', async () => {
+    db.raw
+      .prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?)
+         INSERT INTO deliveries(id,integration_id,organization_id,state,created_at,updated_at)
+         SELECT 'bulk'||i,'i','org-a','sent',?,? FROM n`,
+      )
+      .run(
+        RETENTION_BATCH * RETENTION_MAX_ROUNDS + 1,
+        sqliteTimestamp(NOW - 100 * DAY),
+        sqliteTimestamp(NOW - 100 * DAY),
+      );
+    expect((await purgeExpiredRecords({ DB: db.d1 }, NOW)).more).toBe(true);
+    const next = await purgeExpiredRecords({ DB: db.d1 }, NOW + 60_000);
+    expect(next).toMatchObject({ skipped: false, deliveries: 1, more: false });
+  });
+
+  it('still purges when ops_state is missing', async () => {
+    db.raw.exec('DROP TABLE ops_state');
+    delivery('sent', 100);
+    const report = await purgeExpiredRecords({ DB: db.d1 }, NOW);
+    expect(report).toMatchObject({ skipped: false, deliveries: 1 });
+    expect(ids('deliveries')).toEqual([]);
+  });
+
+  it('purges legacy rows without created_at in a separate statement', async () => {
+    db.raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,organization_id,state,updated_at) VALUES('legacy-new','i','org-a','sent',?)",
+      )
+      .run(sqliteTimestamp(NOW - 5 * DAY));
+    db.raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,organization_id,state,updated_at) VALUES('legacy-old','i','org-a','sent',?)",
+      )
+      .run(sqliteTimestamp(NOW - 200 * DAY));
+    await purgeExpiredRecords({ DB: db.d1 }, NOW);
+    expect(ids('deliveries')).toEqual(['legacy-new']);
+  });
+});
+
+describe('retention statements seek indexes', () => {
+  const stamp = sqliteTimestamp(NOW - 100 * DAY);
+  const cases: [string, string, unknown[]][] = [
+    ['deliveries', PURGE_DELIVERIES_SQL, [stamp, NOW, 500]],
+    ['deliveries (no created_at)', PURGE_DELIVERIES_NO_CREATED_SQL, [stamp, NOW, 500]],
+    ['outbox orphans', PURGE_ORPHAN_OUTBOX_SQL, [stamp, 500]],
+    ['audit', PURGE_AUDIT_SQL, [stamp, 500]],
+  ];
+  it.each(cases)('%s has no full table scan', async (_name, sql, binds) => {
+    const rows = await db.d1
+      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .bind(...binds)
+      .all<{ detail: string }>();
+    const details = rows.results.map((r) => r.detail);
+    // The correlated NOT EXISTS probe on deliveries is by primary key; the driving scan must be indexed.
+    expect(
+      details.filter((d) =>
+        /^SCAN (deliveries|notification_outbox|audit_events)\b(?!.*(INDEX|COVERING))/.test(d),
+      ),
+    ).toEqual([]);
+    expect(details.some((d) => /USING (COVERING )?INDEX/.test(d))).toBe(true);
+  });
+});
+
+describe('retention config warnings', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('names invalid vars without echoing their values', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const env = { DB: db.d1, DELIVERY_RETENTION_DAYS: '7', AUDIT_RETENTION_DAYS: 'banana' };
+    expect(invalidRetentionVars({ ...env, DB: undefined } as never)).toEqual([
+      'DELIVERY_RETENTION_DAYS',
+      'AUDIT_RETENTION_DAYS',
+    ]);
+    await purgeExpiredRecords(env, NOW);
+    expect(warn).toHaveBeenCalledTimes(2);
+    const lines = warn.mock.calls.map((c) => String(c[0]));
+    expect(lines.join('')).toContain('retention_config_invalid');
+    expect(lines.join('')).toContain('DELIVERY_RETENTION_DAYS');
+    expect(lines.join('')).not.toContain('banana');
+    // The warning repeats every tick, even while the purge itself is throttled.
+    await purgeExpiredRecords(env, NOW + 60_000);
+    expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  it('is silent for unset, empty and valid values', () => {
+    expect(invalidRetentionVars({})).toEqual([]);
+    expect(invalidRetentionVars({ DELIVERY_RETENTION_DAYS: '', AUDIT_RETENTION_DAYS: '365' })).toEqual([]);
   });
 });

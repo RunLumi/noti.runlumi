@@ -17,6 +17,8 @@
  * `sent_at`: the end-to-end figure is `last_attempt_at` (the attempt that reached the
  * terminal state) minus `created_at`, so it carries up to one second of resolution error.
  *
+ * Every ratio is a cohort by creation time: rows CREATED inside the window, counted by their
+ * CURRENT state (a row created before the window that finishes inside it is not counted).
  * Every statement is scoped by `organization_id` (F24).
  */
 import { sqliteTimestamp } from '../delivery/claim';
@@ -95,6 +97,7 @@ export interface ObservabilitySummary {
     readonly oldestPendingAgeMs: number | null;
     readonly oldestClaimedAgeMs: number | null;
     readonly oldestRetryOverdueMs: number | null;
+    /** Over DUE outbox rows only (`not_before` empty or past): a parked retry is waiting by design. */
     readonly oldestOutboxPendingAgeMs: number | null;
   };
   readonly byDestination: readonly DestinationSli[];
@@ -145,10 +148,10 @@ const ZERO_STATES: Readonly<Record<DeliveryState, number>> = {
 };
 
 const SUCCESS_DEFINITION =
-  '(sent + accepted) / (sent + accepted + dead_lettered). `accepted` means the provider accepted the request ' +
+  'Cohort by creation time: rows created inside the window, by their current state. (sent + accepted) / (sent + accepted + dead_lettered). `accepted` means the provider accepted the request ' +
   'but cannot confirm delivery (Teams Workflows); it is counted as success here and reported separately per destination.';
 const RETRY_DEFINITION =
-  'deliveries with more than one recorded attempt / deliveries with at least one recorded attempt.';
+  'Cohort by creation time: rows created inside the window. Deliveries with more than one recorded attempt / deliveries with at least one recorded attempt.';
 
 interface StateRow {
   readonly state: string;
@@ -168,47 +171,39 @@ function terminalDenominator(s: Readonly<Record<DeliveryState, number>>): number
   return s.sent + s.accepted + s.dead_lettered;
 }
 
-/** Nearest-rank percentile index (0-based) for `n` samples. */
-export function nearestRankIndex(n: number, p: number): number {
-  return Math.max(0, Math.ceil(p * n) - 1);
-}
-
-async function percentile(
-  db: Db,
-  valueSql: string,
-  org: string,
-  since: string,
-  n: number,
-  p: number,
-): Promise<number | null> {
-  if (n === 0) return null;
-  const row = await db
-    .prepare(
-      `SELECT v FROM (SELECT ${valueSql} AS v FROM deliveries
-         WHERE organization_id=?1 AND created_at>=?2 AND state IN ('sent','accepted')
-           AND created_at IS NOT NULL AND ${valueSql} IS NOT NULL AND ${valueSql} >= 0)
-       ORDER BY v LIMIT 1 OFFSET ?3`,
-    )
-    .bind(org, since, nearestRankIndex(n, p))
-    .first<{ v: number }>();
-  return row?.v ?? null;
+/**
+ * One statement per latency summary: the sample count, both percentiles and the terminal
+ * row count are read in a single SELECT, so they describe the same snapshot (no count/fetch
+ * race between statements). Nearest rank: the value at 0-based index
+ * `ceil(p * n) - 1`, written with integer arithmetic as `(n * pct + 99) / 100 - 1`.
+ * Uses `deliveries_org_created` (0013) for the workspace and window.
+ * ?1 organization_id · ?2 text cutoff
+ */
+function latencySql(valueSql: string): string {
+  const pct = (q: number): string =>
+    `(SELECT v FROM s ORDER BY v LIMIT 1 OFFSET (SELECT MAX(0, (COUNT(*) * ${q} + 99) / 100 - 1) FROM s))`;
+  return `WITH s AS (
+    SELECT ${valueSql} AS v FROM deliveries
+    WHERE organization_id=?1 AND created_at>=?2 AND state IN ('sent','accepted')
+      AND ${valueSql} IS NOT NULL AND ${valueSql} >= 0)
+  SELECT (SELECT COUNT(*) FROM s) AS samples,
+         ${pct(50)} AS p50,
+         ${pct(95)} AS p95,
+         (SELECT COUNT(*) FROM deliveries
+            WHERE organization_id=?1 AND created_at>=?2 AND state IN ('sent','accepted')) AS terminal`;
 }
 
 async function latency(db: Db, valueSql: string, org: string, since: string): Promise<LatencySummary> {
-  const counts = await db
-    .prepare(
-      `SELECT COUNT(*) AS terminal,
-              SUM(CASE WHEN ${valueSql} IS NOT NULL AND ${valueSql} >= 0 THEN 1 ELSE 0 END) AS usable
-       FROM deliveries WHERE organization_id=?1 AND created_at>=?2 AND state IN ('sent','accepted')`,
-    )
+  const row = await db
+    .prepare(latencySql(valueSql))
     .bind(org, since)
-    .first<{ terminal: number; usable: number | null }>();
-  const samples = counts?.usable ?? 0;
+    .first<{ samples: number; p50: number | null; p95: number | null; terminal: number }>();
+  const samples = row?.samples ?? 0;
   return {
     samples,
-    excluded: (counts?.terminal ?? 0) - samples,
-    p50Ms: await percentile(db, valueSql, org, since, samples, 0.5),
-    p95Ms: await percentile(db, valueSql, org, since, samples, 0.95),
+    excluded: (row?.terminal ?? 0) - samples,
+    p50Ms: row?.p50 ?? null,
+    p95Ms: row?.p95 ?? null,
     resolutionMs: 1000,
   };
 }
@@ -259,9 +254,10 @@ async function backlog(db: Db, org: string, nowMs: number): Promise<Observabilit
   const o = await db
     .prepare(
       `SELECT MIN(CAST(strftime('%s', created_at) AS INTEGER) * 1000) AS at
-       FROM notification_outbox WHERE organization_id=?1 AND state='pending'`,
+       FROM notification_outbox
+       WHERE organization_id=?1 AND state='pending' AND (not_before IS NULL OR not_before<=?2)`,
     )
-    .bind(org)
+    .bind(org, nowMs)
     .first<{ at: number | null }>();
   const age = (at: number | null | undefined): number | null =>
     typeof at === 'number' ? Math.max(0, nowMs - at) : null;

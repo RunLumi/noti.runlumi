@@ -57,11 +57,14 @@ warn line, `GET /api/observability/summary` and a person looking.
 
 1. `GET /health` on the Worker. 503 names the misconfigured binding (key ring) and nothing
    else; 200 only proves the Worker boots.
-2. Is the cron running? `SELECT key, value, updated_at FROM ops_state;` and the latest
-   `outbox_reconcile` log line. The cron is `* * * * *` (wrangler.jsonc). If neither moves,
-   the Worker may not be deployed with its cron trigger or is failing every tick (check
-   `wrangler tail`). A failed `scheduled()` throws, so a failing job shows as a failed
-   invocation. There is no `job_runs` table yet (spec 13 F192 not built).
+2. Is the cron running? Every tick upserts a heartbeat first:
+   `SELECT value AS last_tick_ms, updated_at FROM ops_state WHERE key='cron_heartbeat';`
+   Compare with `strftime('%s','now')*1000`; it should be under about two minutes old. The
+   cron is `* * * * *` (wrangler.jsonc). If it is stale, the Worker may not be deployed with
+   its cron trigger, or D1 is unreachable (check `wrangler tail`). Each job is isolated: a
+   failing job logs `cron_job_failed` with the job name and the invocation still fails at the
+   end, but the other jobs (stall detection, retention) still run. There is no `job_runs`
+   table yet (spec 13 F192 not built).
 3. Backlog **age**, not depth (spec 13 F198). Platform-wide, in one query:
 
    ```sql
@@ -114,8 +117,8 @@ checked `dead_lettered`.
 
 ## Dead-letter inspection and redelivery
 
-`dead_lettered` is terminal. A delivery reaches it when the retry budget is spent (13
-attempts, src/delivery/retry.ts), on a permanent error, or when the queue's own retries run
+`dead_lettered` is terminal. A delivery reaches it when the retry budget is spent (the
+attempt budget is `maxAttempts()` in src/delivery/retry.ts), on a permanent error, or when the queue's own retries run
 out and the `noti-dead-letters` consumer marks it (`last_error='queue_retries_exhausted'`).
 
 ```sql
@@ -136,8 +139,11 @@ Error codes are the closed taxonomy in src/platform/errors.ts. Common ones:
 Replay: `src/delivery/redeliver.ts` implements a manual replay that creates a **new** delivery
 (`replay_of` points at the original) and never mutates the original row. At the time of
 writing, **no HTTP route exposes it** (the deliveries API is a parallel slice, docs/API.md).
-Until it ships there is no operator-facing replay. Do not hand-insert rows. Replay needs the
-original outbox message, so those rows are kept for as long as the delivery row is (src/pipeline/retention.ts).
+Until it ships there is no operator-facing replay. Do not hand-insert rows. Replay re-reads
+the original outbox message. Only the outbox rows of **dead-lettered** deliveries are kept
+(and, once their delivery row is purged by retention, removed as orphans). Outbox rows of
+delivered deliveries are purged after 7 days (`PURGE_OUTBOX_SQL`, `OUTBOX_RETENTION_MS` in
+src/delivery/claim.ts), so an old delivered notification cannot be replayed.
 
 The dead-letter **queue** itself: the Worker consumes it (`noti-dead-letters`, one message at
 a time) only to mark the ledger. Browsing queue messages from the CLI is **UNVERIFIED**;
@@ -161,8 +167,9 @@ GROUP BY organization_id ORDER BY oldest_due_ms LIMIT 20;
 
 A retry that is due but not running means the outbox row was not re-enqueued (see "Stuck
 outbox") or the consumer is not running. Check `wrangler tail` for consumer errors. A claimed
-delivery older than 10 minutes (`CLAIM_STALL_MS`) means the 5-minute stale-claim sweep
-(`sweepStaleClaims`) is not running. Depth alone is not the signal: thousands of messages that
+delivery older than 10 minutes (`CLAIM_STALL_MS`) means the stale-claim sweep
+(`sweepStaleClaims`) is not working: it runs every minute and reclaims claims older than the
+5-minute lease (`DELIVERY_CLAIM_LEASE_MS`). Depth alone is not the signal: thousands of messages that
 drain are healthy; a handful that never move is the incident.
 
 D1 overload errors in logs ("D1 DB is overloaded" per spec 13 F200): that is a sharding signal
@@ -224,9 +231,10 @@ SELECT MAX(created_at) FROM deliveries WHERE organization_id='<org>';
 
 ## Retention and storage
 
-`purgeExpiredRecords` runs every cron tick (src/pipeline/retention.ts), bounded to 5 rounds of
-500 rows per table. Vars in wrangler.jsonc: `DELIVERY_RETENTION_DAYS` (30-365, default 90),
-`AUDIT_RETENTION_DAYS` (30-3650, default 365). Invalid values fall back to the default.
+`purgeExpiredRecords` is attempted every cron tick but runs at most once an hour
+(`ops_state` key `last_retention_at`; it is only advanced after a complete pass, so a backlog
+continues on the next tick). Each pass is bounded to 5 rounds of 500 rows per table. Vars in wrangler.jsonc: `DELIVERY_RETENTION_DAYS` (30-365, default 90),
+`AUDIT_RETENTION_DAYS` (30-3650, default 365). Invalid values fall back to the default and log a `retention_config_invalid` warn (variable name only) every tick.
 It deletes only terminal delivery rows; a dead-lettered row is kept until its failure is also
 older than the cutoff. The `retention_purge` log line carries `more: true` while it is still
 catching up. If it never reaches `more: false`, volume exceeds the per-tick bound: raise the

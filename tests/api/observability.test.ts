@@ -136,3 +136,13 @@ describe('x-request-id on the Worker', () => {
     expect((await get('/api/observability/summary')).headers.get('x-request-id')).toMatch(/^[0-9a-f-]{36}$/);
   });
 });
+
+describe('rate limit', () => {
+  it('limits a user to 30 summaries a minute with Retry-After, per user', async () => {
+    for (let i = 0; i < 30; i++) expect((await get('/api/observability/summary', 'alice')).status).toBe(200);
+    const limited = await get('/api/observability/summary', 'alice');
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
+    expect((await get('/api/observability/summary', 'bob')).status).toBe(200);
+  });
+});

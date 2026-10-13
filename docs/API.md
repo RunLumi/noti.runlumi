@@ -168,9 +168,9 @@ While a deletion is pending, integration mutations and `POST /api/github/install
 
 | Method and path | Capability | Result |
 | --- | --- | --- |
-| `GET /api/observability/summary?window=24h` | `delivery.read` | `200` JSON, workspace-scoped, `Cache-Control: no-store`. `window` is `<n>h` or `<n>d` from `1h` to `30d` (default `24h`); anything else is `400`. |
+| `GET /api/observability/summary?window=24h` | `delivery.read` | `200` JSON, workspace-scoped, `Cache-Control: no-store`. `window` is `<n>h` or `<n>d` from `1h` to `30d` (default `24h`); anything else is `400`. Limited to 30 requests a minute per user (`429` with `Retry-After`). |
 
-The body is exact, computed from the delivery ledger on request. Shape (abridged):
+The body is exact, computed from the delivery ledger on request. Ratios are a **cohort by creation time**: rows created inside the window, counted by their current state. `oldestOutboxPendingAgeMs` covers due outbox rows only (a retry parked for later does not count). Shape (abridged):
 
 ```ts
 type Ratio = { value: number | null; numerator: number; denominator: number }; // null = no data

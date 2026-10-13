@@ -673,7 +673,8 @@ Also fixed:
   `null`, never 0 or 1.
 - `src/observability/stall.ts`: cron stall detection with transition-based logging; state in
   the new `ops_state` table (migration 0016).
-- `src/pipeline/retention.ts`: bounded age-based purge of terminal deliveries, orphan outbox
+- `src/observability/cron.ts`: isolated cron jobs with a heartbeat; one failing job no longer skips stall detection or retention.
+- `src/pipeline/retention.ts`: hourly-throttled, index-seeking, bounded age-based purge of terminal deliveries, orphan outbox
   rows and audit events; `DELIVERY_RETENTION_DAYS` (90) and `AUDIT_RETENTION_DAYS` (365).
 - `docs/RUNBOOK.md`, ADR 0011, API and release-gate rows.
 
@@ -696,5 +697,5 @@ Also fixed:
   paging; evidence bundle; the SLI publication gate; any dashboard view of the summary.
 - The runbook has not been rehearsed. Several Cloudflare behaviours in it are marked
   UNVERIFIED.
-- Retention has not run against real data volumes; the per-tick bound is 2,500 rows per table.
+- Retention has not run against real data volumes; the per-tick bound is 2,500 rows per table, and real-D1 `meta.changes` semantics for the drain loops are unverified.
 

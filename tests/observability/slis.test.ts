@@ -4,7 +4,6 @@ import {
   computeSummary,
   DEFAULT_WINDOW_MS,
   MAX_WINDOW_MS,
-  nearestRankIndex,
   NOT_MEASURABLE,
   parseWindow,
   ratio,
@@ -94,13 +93,6 @@ describe('ratio and percentile helpers', () => {
   it('has no value (not 0, not 1) when the denominator is zero', () => {
     expect(ratio(0, 0).value).toBeNull();
     expect(ratio(3, 4)).toEqual({ value: 0.75, numerator: 3, denominator: 4 });
-  });
-
-  it('uses nearest-rank indexes', () => {
-    expect(nearestRankIndex(1, 0.95)).toBe(0);
-    expect(nearestRankIndex(10, 0.5)).toBe(4);
-    expect(nearestRankIndex(10, 0.95)).toBe(9);
-    expect(nearestRankIndex(100, 0.95)).toBe(94);
   });
 });
 
@@ -259,5 +251,76 @@ describe('computeSummary', () => {
   it('does not use the words exactly-once', async () => {
     const s = JSON.stringify(await computeSummary(db.d1, 'org-a', DEFAULT_WINDOW_MS, NOW));
     expect(s.toLowerCase()).not.toMatch(/exactly[- ]once/);
+  });
+
+  it.each([
+    [1, 1_000, 1_000],
+    [10, 5_000, 10_000],
+    [100, 50_000, 95_000],
+    [101, 51_000, 96_000],
+  ])('uses nearest rank for n=%i (p50 %i ms, p95 %i ms)', async (n, p50, p95) => {
+    for (let i = 1; i <= n; i++) delivery({ state: 'sent', lastAttemptAfterS: i });
+    const s = await computeSummary(db.d1, 'org-a', DEFAULT_WINDOW_MS, NOW);
+    expect(s.latency.endToEnd).toMatchObject({ samples: n, p50Ms: p50, p95Ms: p95 });
+  });
+
+  it('computes samples and percentiles in one statement per latency summary', async () => {
+    const seen: string[] = [];
+    const spy = {
+      prepare: (sql: string) => {
+        seen.push(sql);
+        return db.d1.prepare(sql);
+      },
+    };
+    await computeSummary(spy, 'org-a', DEFAULT_WINDOW_MS, NOW);
+    expect(seen.filter((q) => q.includes('OFFSET'))).toHaveLength(2);
+  });
+
+  it('measures outbox age over due rows only, so a parked retry does not inflate it', async () => {
+    const put = (id: string, ageMin: number, notBefore: number | null) =>
+      db.raw
+        .prepare(
+          'INSERT INTO notification_outbox(id,payload_json,state,organization_id,created_at,not_before) VALUES(?,?,?,?,?,?)',
+        )
+        .run(id, '{}', 'pending', 'org-a', sqliteTimestamp(NOW - ageMin * MIN), notBefore);
+    put('parked', 600, NOW + 60 * MIN);
+    put('due', 4, null);
+    put('past-due', 3, NOW - MIN);
+    const s = await computeSummary(db.d1, 'org-a', DEFAULT_WINDOW_MS, NOW);
+    expect(s.backlog.oldestOutboxPendingAgeMs).toBe(4 * MIN);
+  });
+
+  it('says the ratios are a cohort by creation time', async () => {
+    const s = await computeSummary(db.d1, 'org-a', DEFAULT_WINDOW_MS, NOW);
+    expect(s.successRatio.definition).toMatch(/cohort by creation time/i);
+    expect(s.retryRate.definition).toMatch(/cohort by creation time/i);
+  });
+
+  it('seeks indexes instead of scanning: every statement has an indexed plan', async () => {
+    for (let i = 0; i < 5; i++) delivery({ state: 'sent', lastAttemptAfterS: 1 });
+    const seen: { sql: string; values: unknown[] }[] = [];
+    const spy = {
+      prepare: (sql: string) => ({
+        bind: (...values: unknown[]) => {
+          seen.push({ sql, values });
+          return db.d1.prepare(sql).bind(...values);
+        },
+      }),
+    };
+    await computeSummary(spy as never, 'org-a', DEFAULT_WINDOW_MS, NOW);
+    expect(seen.length).toBeGreaterThan(5);
+    const plans: string[] = [];
+    for (const q of seen) {
+      const rows = await db.d1
+        .prepare(`EXPLAIN QUERY PLAN ${q.sql}`)
+        .bind(...q.values)
+        .all<{ detail: string }>();
+      plans.push(...rows.results.map((r) => r.detail));
+    }
+    const fullScans = plans.filter((d) =>
+      /^SCAN (deliveries|notification_outbox)\b(?!.*(INDEX|COVERING))/.test(d),
+    );
+    expect(fullScans).toEqual([]);
+    expect(plans.some((d) => d.includes('deliveries_org_created'))).toBe(true);
   });
 });

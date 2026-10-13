@@ -73,3 +73,28 @@ product analytics (F199), the evidence bundle (F202), the refusal list and publi
 (F203), capability gates for recovery actions (F204 beyond the existing `delivery.*`
 capabilities), the dashboard view of the summary, propagation to queue and rows, and any
 rehearsal of the runbook.
+
+## Review follow-ups (post-review amendments)
+
+- **Isolated cron jobs.** `scheduled()` now runs a heartbeat upsert and stall detection first,
+  then each job inside its own try/catch (`src/observability/cron.ts`). A failure logs a
+  redacted `cron_job_failed` line and the invocation still rejects after every job has run.
+- **Retention cost.** The purge statements range-seek `deliveries_state_created` (the
+  `COALESCE(created_at, updated_at)` form could not), with a separate rare statement for rows
+  with no `created_at`. The purge runs at most hourly, throttled through `ops_state`
+  (`last_retention_at`, advanced only when a pass completes). If `ops_state` is unreadable the
+  purge runs anyway. Invalid retention vars log `retention_config_invalid` (name only). An
+  EXPLAIN QUERY PLAN test covers each statement. Real-D1 `meta.changes` semantics for the
+  drain loops are unverified.
+- **Summary cost.** Per-user limit of 30 reads a minute (the `hit()` limiter used by the
+  deliveries API). It relies on `deliveries_org_created` from migration 0013 (not redefined
+  here). Each latency summary is one statement returning the sample count, p50, p95 and
+  terminal count, so the figures come from one snapshot. Ratios are a cohort by creation time
+  and the definitions say so. The outbox age is over due rows only.
+- **Heartbeat.** One UPSERT per tick (`ops_state.cron_heartbeat`) backs the runbook's cron
+  liveness check.
+- **Audit retention and workspace deletion.** The `workspace.purged` audit row has a NULL
+  organization and therefore ages out with `AUDIT_RETENTION_DAYS` like any other audit row.
+  `workspace_deletions` is the permanent evidence that a purge happened and when; it is not
+  subject to this retention.
+
