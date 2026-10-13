@@ -37,13 +37,11 @@ export interface RetryPolicy {
 const HOUR = 3600;
 
 /**
- * UNVERIFIED: the maximum `delaySeconds` Cloudflare Queues accepts is not recorded in the
- * repo docs (docs/specs/01-platform-runtime.md only fixes *our* cap at 24 h, F08). 12 h is
- * the value we believe Cloudflare documents; re-verify against
- * developers.cloudflare.com/queues before relying on it. Being too low is safe here — it
- * only moves more waits onto the D1 schedule path.
+ * Cloudflare Queues accepts `delaySeconds` up to 24 hours (86,400 s). Source: Cloudflare
+ * Queues documentation, developers.cloudflare.com/queues, as confirmed in the PR #10 review
+ * on 2026-10-13. Longer waits are parked in D1 instead.
  */
-export const QUEUE_MAX_DELAY_SECONDS_UNVERIFIED = 12 * HOUR;
+export const QUEUE_MAX_DELAY_SECONDS = 24 * HOUR;
 
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   baseSeconds: 2,
@@ -54,7 +52,7 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   // absurd value (86400) from consuming the attempt budget while still honouring any
   // realistic throttle window.
   retryAfterCapSeconds: HOUR,
-  queueMaxDelaySeconds: QUEUE_MAX_DELAY_SECONDS_UNVERIFIED,
+  queueMaxDelaySeconds: QUEUE_MAX_DELAY_SECONDS,
 };
 
 /**

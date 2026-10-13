@@ -400,5 +400,22 @@ Decisions and their rationale are in [ADR 0005](adr/0005-delivery-reliability.md
 - No `outbox_stalled` or reconciler-failure alert, and no metric for unmapped provider
   errors.
 - Per-provider classification for Slack API, Teams and Discord waits for slice 5.
-- The 12 h queue delay maximum is UNVERIFIED against Cloudflare's docs.
 - No real-provider validation.
+
+**Review fixes (PR #10 review of 5d7d5cb)**
+
+All HIGH, MEDIUM and LOW findings are fixed, each with a regression test in
+`tests/pipeline/reliability.test.ts`, `tests/migrations.test.ts` or the unit suites:
+- no claim can be stranded (H1): release on throw, a cron backstop, the DLQ dead-letters any
+  non-terminal row, and a capped claim-busy retry;
+- fenced and conditional outcome writes (H2);
+- due-time claims (M1) and attempt numbers taken from `RETURNING` (M2);
+- per-row clock, oldest-first workspaces and send back-off (M3);
+- `failed` kept legal for rollback (M4);
+- tenantless rows retired (M5);
+- indexes and a bounded retention purge (M6);
+- invalid payloads dead-letter their delivery (M7);
+- manual redirects, unconfirmed Lark bodies, a claim-token fence, a 60 s key-ring back-off,
+  and a 24 h queue delay maximum.
+
+See [ADR 0005](adr/0005-delivery-reliability.md) §12.

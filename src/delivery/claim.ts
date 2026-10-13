@@ -58,10 +58,16 @@ export const MARK_INVALID_SQL = `UPDATE ${OUTBOX_TABLE}
 SET state = 'invalid', lease_token = NULL, lease_expires_at = NULL
 WHERE organization_id = ?1 AND id = ?2 AND state = 'claimed' AND lease_token = ?3`;
 
-/** F173 send failure → back to `pending` for the reconciler. ?1 last_error_code · ?2 org · ?3 id · ?4 lease_token */
+/**
+ * F173 send failure → back to `pending`, not before ?5, so a failing queue is not hammered
+ * every tick. ?1 last_error_code · ?2 org · ?3 id · ?4 lease_token · ?5 not_before
+ */
 export const RELEASE_CLAIM_SQL = `UPDATE ${OUTBOX_TABLE}
-SET state = 'pending', last_error_code = ?1, claimed_at = NULL, lease_token = NULL, lease_expires_at = NULL
+SET state = 'pending', last_error_code = ?1, not_before = ?5, claimed_at = NULL, lease_token = NULL, lease_expires_at = NULL
 WHERE organization_id = ?2 AND id = ?3 AND state = 'claimed' AND lease_token = ?4`;
+
+/** Engineering judgment: wait this long before re-sending a row whose `queue.send()` failed. */
+export const RELEASE_BACKOFF_MS = 30_000;
 
 /** F174 reclaim of a crashed claim. ?1 now (epoch ms) · ?2 organization_id · ?3 id */
 export const RECLAIM_EXPIRED_LEASE_SQL = `UPDATE ${OUTBOX_TABLE}
@@ -70,12 +76,58 @@ WHERE organization_id = ?2 AND id = ?3 AND state = 'claimed' AND lease_expires_a
 RETURNING id`;
 
 /**
- * F177 Tier 2: a wait longer than a queue delay is parked on the outbox row and re-enqueued
- * by the reconciler once due. ?1 not_before (epoch ms) · ?2 organization_id · ?3 id
+ * F177 Tier 2: a wait the queue cannot hold is parked on the outbox row and re-enqueued by
+ * the reconciler once due. Guarded on the ledger: it only parks when the delivery really is
+ * `retrying` with exactly this `next_attempt_at`, so a ledger write that lost its claim (0
+ * rows changed) can never schedule a redispatch. ?1 not_before (epoch ms) · ?2 org · ?3 id
  */
 export const SCHEDULE_REDISPATCH_SQL = `UPDATE ${OUTBOX_TABLE}
 SET state = 'pending', not_before = ?1, dispatched_at = NULL, claimed_at = NULL, lease_token = NULL, lease_expires_at = NULL
-WHERE organization_id = ?2 AND id = ?3 AND state IN ('pending', 'dispatched', 'claimed')`;
+WHERE organization_id = ?2 AND id = ?3 AND state IN ('pending', 'dispatched', 'claimed')
+  AND EXISTS (SELECT 1 FROM deliveries d
+              WHERE d.id = ?3 AND d.organization_id = ?2 AND d.state = 'retrying' AND d.next_attempt_at = ?1)`;
+
+/**
+ * M7 / F180: a payload the dispatcher cannot use dead-letters its delivery in the same
+ * batch as {@link MARK_INVALID_SQL}, so the ledger never waits on it forever.
+ * ?1 organization_id · ?2 id · ?3 now (epoch ms)
+ */
+export const DEAD_LETTER_INVALID_DELIVERY_SQL = `UPDATE deliveries
+SET state = 'dead_lettered', last_error_code = 'config_invalid', last_error = 'outbox_payload_invalid',
+    dead_lettered_at = ?3, next_attempt_at = NULL, claim_token = NULL, claimed_at = NULL,
+    updated_at = CURRENT_TIMESTAMP
+WHERE organization_id = ?1 AND id = ?2 AND state IN ('pending', 'retrying', 'claimed')`;
+
+/**
+ * Retention (bounded per tick, per workspace): an outbox row is only needed to dispatch and,
+ * for a failed delivery, to replay it (F182). Rows whose delivery succeeded, and invalid
+ * rows, are deleted once older than the cutoff. Dead-lettered deliveries keep theirs.
+ * ?1 organization_id · ?2 cutoff (`YYYY-MM-DD HH:MM:SS`, UTC) · ?3 limit
+ */
+export const PURGE_OUTBOX_SQL = `DELETE FROM ${OUTBOX_TABLE}
+WHERE rowid IN (
+  SELECT o.rowid FROM ${OUTBOX_TABLE} o
+  WHERE o.organization_id = ?1 AND o.created_at < ?2
+    AND (o.state = 'invalid'
+      OR (o.state = 'dispatched' AND EXISTS (
+            SELECT 1 FROM deliveries d
+            WHERE d.id = o.id AND d.organization_id = o.organization_id
+              AND d.state IN ('sent', 'accepted', 'suppressed'))))
+  LIMIT ?3)`;
+
+/** Workspaces with purgeable rows. ?1 cutoff · ?2 limit */
+export const SELECT_PURGE_WORKSPACES_SQL = `SELECT organization_id FROM ${OUTBOX_TABLE}
+WHERE organization_id IS NOT NULL AND created_at < ?1 AND state IN ('dispatched', 'invalid')
+GROUP BY organization_id ORDER BY MIN(created_at) LIMIT ?2`;
+
+/** Engineering judgment: 7 days, matching the F171 dedup horizon. */
+export const OUTBOX_RETENTION_MS = 7 * 24 * 3_600_000;
+export const PURGE_ROW_LIMIT = 200;
+
+/** SQLite `CURRENT_TIMESTAMP` text form, UTC, for comparing with `created_at`. */
+export function sqliteTimestamp(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
 
 /**
  * F174 candidates for one workspace: due `pending` rows, and `claimed` rows whose lease has
@@ -97,18 +149,23 @@ export const OUTBOX_STATEMENTS = {
   reclaimExpired: RECLAIM_EXPIRED_LEASE_SQL,
   scheduleRedispatch: SCHEDULE_REDISPATCH_SQL,
   reconcileCandidates: SELECT_RECONCILE_CANDIDATES_SQL,
+  deadLetterInvalid: DEAD_LETTER_INVALID_DELIVERY_SQL,
+  purge: PURGE_OUTBOX_SQL,
 } as const;
 
 /**
  * The reconciler's only cross-tenant read: *which* workspaces have due work. It returns
  * organization ids and nothing else; every subsequent read and write is scoped to one of
  * them. Rows with no organization (written before 0006) are excluded — they cannot be
- * routed safely. ?1 now (epoch ms) · ?2 limit
+ * routed safely. Oldest work first, so one busy workspace cannot starve the rest.
+ * ?1 now (epoch ms) · ?2 limit
  */
-export const SELECT_DUE_WORKSPACES_SQL = `SELECT DISTINCT organization_id FROM ${OUTBOX_TABLE}
+export const SELECT_DUE_WORKSPACES_SQL = `SELECT organization_id FROM ${OUTBOX_TABLE}
 WHERE organization_id IS NOT NULL
   AND ((state = 'pending' AND (not_before IS NULL OR not_before <= ?1))
     OR (state = 'claimed' AND lease_expires_at <= ?1))
+GROUP BY organization_id
+ORDER BY MIN(created_at)
 LIMIT ?2`;
 
 export interface ClaimRequest {
@@ -202,8 +259,9 @@ export function releaseClaimParams(
   rowId: string,
   lease: Lease,
   code: ErrorCode,
-): readonly [ErrorCode, string, string, string] {
-  return [code, orgId, rowId, lease.token];
+  nowMs: number,
+): readonly [ErrorCode, string, string, string, number] {
+  return [code, orgId, rowId, lease.token, nowMs + RELEASE_BACKOFF_MS];
 }
 
 export function reclaimExpiredParams(

@@ -56,7 +56,11 @@ describe('migration 0009', () => {
         "INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES('o1','{}','dispatched','org')",
       )
       .run();
-    raw.prepare("INSERT INTO notification_outbox(id,payload_json,state) VALUES('o2','{}','invalid')").run();
+    raw
+      .prepare(
+        "INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES('o2','{}','invalid','org')",
+      )
+      .run();
     const insert = raw.prepare(
       'INSERT INTO deliveries(id,integration_id,state,attempts,last_error,organization_id) VALUES(?,?,?,?,?,?)',
     );
@@ -73,7 +77,7 @@ describe('migration 0009', () => {
     expect(raw.prepare('SELECT id,state,organization_id FROM notification_outbox ORDER BY id').all()).toEqual(
       [
         { id: 'o1', state: 'dispatched', organization_id: 'org' },
-        { id: 'o2', state: 'invalid', organization_id: null },
+        { id: 'o2', state: 'invalid', organization_id: 'org' },
       ],
     );
     const dead = (id: string, lastError: string, code: string) => ({
@@ -117,12 +121,67 @@ describe('migration 0009', () => {
         'deliveries_org_idx',
         'deliveries_state_next',
         'deliveries_replay_of',
+        'deliveries_state_claimed',
+        'notification_outbox_org_due',
       ]),
     );
     raw.prepare("INSERT INTO notification_outbox(id,payload_json,state) VALUES('a','{}','claimed')").run();
     raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('d','i','dead_lettered')").run();
     expect(() =>
-      raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('e','i','failed')").run(),
+      raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('e','i','bogus')").run(),
     ).toThrow();
+  });
+
+  it('keeps legacy failed writable for one release, so a Worker rollback still works (M4)', () => {
+    const { raw } = createFakeD1();
+    // Exactly the statement the slice 2 consumer runs for a permanent failure.
+    raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,organization_id,state) VALUES('d','i','org','pending')",
+      )
+      .run();
+    raw
+      .prepare(
+        'UPDATE deliveries SET state=?,attempts=attempts+1,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND integration_id=?',
+      )
+      .run('failed', 'destination_credentials_invalid', 'd', 'org', 'i');
+    expect(raw.prepare("SELECT state FROM deliveries WHERE id='d'").get()).toEqual({ state: 'failed' });
+  });
+
+  it('retires rows that have no organization instead of stranding them (M5)', () => {
+    const { raw } = createFakeD1({ before: '0009' });
+    raw.prepare("INSERT INTO notification_outbox(id,payload_json,state) VALUES('o','{}','pending')").run();
+    raw
+      .prepare("INSERT INTO notification_outbox(id,payload_json,state) VALUES('od','{}','dispatched')")
+      .run();
+    raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('o','i','pending')").run();
+    raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('r','i','retrying')").run();
+    raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('s','i','sent')").run();
+
+    applyMigration(raw, '0009_delivery_reliability.sql');
+
+    expect(raw.prepare('SELECT id,state,last_error_code FROM notification_outbox ORDER BY id').all()).toEqual(
+      [
+        { id: 'o', state: 'invalid', last_error_code: 'config_invalid' },
+        { id: 'od', state: 'dispatched', last_error_code: null },
+      ],
+    );
+    expect(
+      raw.prepare('SELECT id,state,last_error,last_error_code FROM deliveries ORDER BY id').all(),
+    ).toEqual([
+      {
+        id: 'o',
+        state: 'dead_lettered',
+        last_error: 'organization_missing',
+        last_error_code: 'config_invalid',
+      },
+      {
+        id: 'r',
+        state: 'dead_lettered',
+        last_error: 'organization_missing',
+        last_error_code: 'config_invalid',
+      },
+      { id: 's', state: 'sent', last_error: null, last_error_code: null },
+    ]);
   });
 });

@@ -9,7 +9,8 @@ import type { Bindings } from './env';
 import { consumeDeliveries } from './pipeline/consumer';
 import { DEAD_LETTER_QUEUE, consumeDeadLetters } from './pipeline/dead-letter';
 import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
-import { dispatchOutbox } from './pipeline/outbox';
+import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
+import { sweepStaleClaims } from './pipeline/sweep';
 import { log } from './platform/log';
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -50,9 +51,12 @@ export default {
 
   // Awaited, not waitUntil: a failing job must fail the invocation visibly, not vanish.
   async scheduled(_event: ScheduledEvent, env: Bindings) {
+    // Backstop first, so a released claim is redispatched in the same tick (H1).
+    const releasedClaims = await sweepStaleClaims(env);
     // F174 reconciler: due pending rows, expired leases, and scheduled retries.
     const dispatch = await dispatchOutbox(env);
-    log('info', 'outbox_reconcile', { ...dispatch });
+    const purged = await purgeOutbox(env);
+    log('info', 'outbox_reconcile', { ...dispatch, released_claims: releasedClaims, purged });
     await maintainCredentials(env);
   },
 

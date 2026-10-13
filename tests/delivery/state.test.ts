@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DELIVERY_STATES,
   isTerminal,
+  normalizeDeliveryState,
   planReplay,
   transition,
   type DeliveryEvent,
@@ -71,6 +72,14 @@ describe('delivery state machine', () => {
   it('throws on an impossible event type', () => {
     expect(() => transition('pending', { type: 'suppress', reason: 'duplicate' })).not.toThrow();
     expect(() => transition('pending', { type: 'bogus' } as never)).toThrow('Unhandled delivery event');
+  });
+});
+
+describe('normalizeDeliveryState (0009 rollback window)', () => {
+  it('reads legacy failed, and anything unknown, as dead_lettered', () => {
+    expect(normalizeDeliveryState('failed')).toBe('dead_lettered');
+    expect(normalizeDeliveryState('weird')).toBe('dead_lettered');
+    expect(normalizeDeliveryState('retrying')).toBe('retrying');
   });
 });
 

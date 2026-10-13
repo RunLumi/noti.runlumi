@@ -5,6 +5,7 @@ import { SCHEDULE_REDISPATCH_SQL, scheduleRedispatchParams } from '../delivery/c
 import {
   classifyHttpFailure,
   classifyLarkReply,
+  classifyRedirect,
   classifyThrown,
   type Classified,
 } from '../delivery/classify';
@@ -13,9 +14,16 @@ import {
   claimDelivery,
   loadDelivery,
   recordOutcomeStatement,
+  type Claim,
   type OutcomeRecord,
 } from '../delivery/ledger';
-import { decideRetry, type AttemptOutcome, type RandomSource, type RetryDecision } from '../delivery/retry';
+import {
+  QUEUE_MAX_DELAY_SECONDS,
+  decideRetry,
+  type AttemptOutcome,
+  type RandomSource,
+  type RetryDecision,
+} from '../delivery/retry';
 import { isTerminal, transition, type DeliveryEvent } from '../delivery/state';
 import type { Bindings, DeliveryMessage } from '../env';
 import type { ErrorCode } from '../platform/errors';
@@ -113,13 +121,21 @@ async function post(url: URL, payload: unknown): Promise<Response | AttemptResul
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
-      redirect: 'error',
+      // `manual`, not `error`: a redirect is then an observable 3xx we classify as permanent,
+      // instead of a TypeError indistinguishable from a network fault (F189). Never followed.
+      redirect: 'manual',
       signal: AbortSignal.timeout(OUTBOUND_TIMEOUT_MS),
     });
   } catch (e) {
     return fromClassified(classifyThrown(e));
   }
 }
+
+const UNCONFIRMED: AttemptResult = {
+  outcome: { kind: 'accepted' },
+  diagnostic: 'provider_reply_unreadable',
+  unmapped: true,
+};
 
 async function readLarkReply(res: Response): Promise<AttemptResult> {
   let reply: unknown;
@@ -128,8 +144,10 @@ async function readLarkReply(res: Response): Promise<AttemptResult> {
   } catch {
     reply = null;
   }
-  const rejected = classifyLarkReply(reply);
-  return rejected ? fromClassified(rejected) : DELIVERED;
+  const verdict = classifyLarkReply(reply);
+  if (verdict.kind === 'delivered') return DELIVERED;
+  if (verdict.kind === 'unconfirmed') return UNCONFIRMED;
+  return fromClassified(verdict.classified);
 }
 
 async function attemptDelivery(
@@ -142,6 +160,10 @@ async function attemptDelivery(
   if ('outcome' in target) return target;
   const res = await post(target.url, target.payload);
   if (!(res instanceof Response)) return res;
+  if (res.status >= 300 && res.status < 400) {
+    await res.body?.cancel();
+    return fromClassified(classifyRedirect(res.status));
+  }
   if (!res.ok) {
     // Release the connection; the body is never read, so it can never reach a log.
     await res.body?.cancel();
@@ -157,9 +179,14 @@ async function attemptDelivery(
 export interface ConsumerDeps {
   readonly random: RandomSource;
   readonly now: () => number;
+  readonly newClaimToken: () => string;
 }
 
-const DEFAULT_DEPS: ConsumerDeps = { random: Math.random, now: () => Date.now() };
+const DEFAULT_DEPS: ConsumerDeps = {
+  random: Math.random,
+  now: () => Date.now(),
+  newClaimToken: () => crypto.randomUUID(),
+};
 
 /** The queue-facing subset of `Message` we use, so tests can supply plain objects. */
 interface QueueMessage {
@@ -169,11 +196,18 @@ interface QueueMessage {
   retry(options?: QueueRetryOptions): void;
 }
 
-/** Queue retries are only safe while the message has retries left (see QUEUE_MAX_RETRIES). */
+/**
+ * Whether `msg.retry()` is still safe. On the message's last allowed delivery, a retry
+ * would hand it to the dead-letter queue, so every path parks or acks instead.
+ */
+function queueRetriesLeft(msg: QueueMessage): boolean {
+  const attempts = typeof msg.attempts === 'number' ? msg.attempts : 1;
+  return attempts < QUEUE_MAX_RETRIES;
+}
+
 function effectiveDecision(decision: RetryDecision, msg: QueueMessage): RetryDecision {
   if (decision.action !== 'retry' || decision.transport !== 'queue') return decision;
-  const attempts = typeof msg.attempts === 'number' ? msg.attempts : 1;
-  return attempts >= QUEUE_MAX_RETRIES ? { ...decision, transport: 'schedule' } : decision;
+  return queueRetriesLeft(msg) ? decision : { ...decision, transport: 'schedule' };
 }
 
 function outcomeEvent(decision: RetryDecision, outcome: AttemptOutcome): DeliveryEvent {
@@ -191,8 +225,7 @@ function outcomeRecord(
   nowMs: number,
 ): OutcomeRecord {
   const code = result.outcome.kind === 'failed' ? result.outcome.code : null;
-  const event = outcomeEvent(decision, result.outcome);
-  const moved = transition('claimed', event);
+  const moved = transition('claimed', outcomeEvent(decision, result.outcome));
   if (!moved.ok) throw new Error(`illegal ledger transition ${moved.from} → ${moved.event}`);
   return {
     state: moved.to as OutcomeRecord['state'],
@@ -204,28 +237,90 @@ function outcomeRecord(
   };
 }
 
+function scheduleStatement(env: Bindings, d: DeliveryMessage, notBeforeMs: number): D1PreparedStatement {
+  return env.DB.prepare(SCHEDULE_REDISPATCH_SQL).bind(
+    ...scheduleRedispatchParams(d.organizationId, d.id, notBeforeMs),
+  );
+}
+
+/**
+ * Persist the outcome, then act on the message. Nothing downstream happens unless the
+ * fenced write changed exactly our row (H2): a consumer that lost its claim acks and leaves
+ * the delivery to the new holder.
+ */
 async function applyDecision(
   env: Bindings,
   msg: QueueMessage,
   d: DeliveryMessage,
+  claim: Claim,
   decision: RetryDecision,
   record: OutcomeRecord,
-): Promise<void> {
-  const write = recordOutcomeStatement(env.DB, d, record);
+): Promise<boolean> {
+  const write = recordOutcomeStatement(env.DB, d, claim.token, record);
   if (decision.action === 'retry' && decision.transport === 'schedule' && record.nextAttemptAtMs !== null) {
-    // One transaction: the ledger says `retrying` exactly when the outbox row is parked.
-    await env.DB.batch([
-      write,
-      env.DB.prepare(SCHEDULE_REDISPATCH_SQL).bind(
-        ...scheduleRedispatchParams(d.organizationId, d.id, record.nextAttemptAtMs),
-      ),
-    ]);
+    // One transaction. The park statement is itself guarded on the ledger row being
+    // `retrying` at exactly this time, so it is a no-op if the write changed nothing.
+    const [written] = await env.DB.batch([write, scheduleStatement(env, d, record.nextAttemptAtMs)]);
+    msg.ack();
+    return written?.meta.changes === 1;
+  }
+  const recorded = (await write.run()).meta.changes === 1;
+  if (recorded && decision.action === 'retry') msg.retry({ delaySeconds: decision.delaySeconds });
+  else msg.ack();
+  return recorded;
+}
+
+/** Seconds until `atMs`, at least 1. */
+function secondsUntil(atMs: number, nowMs: number): number {
+  return Math.max(1, Math.ceil((atMs - nowMs) / 1000));
+}
+
+/**
+ * The row exists and is not terminal, but we could not claim it.
+ * - `retrying` and not yet due (M1): wait out the remainder — by queue delay while retries
+ *   remain and the wait fits, otherwise by parking the outbox row.
+ * - `claimed` by a live consumer: check back after the lease while retries remain; on the
+ *   last one, ack — the holder finishes, or the cron backstop releases a dead claim (H1).
+ */
+async function handleUnclaimable(
+  env: Bindings,
+  msg: QueueMessage,
+  d: DeliveryMessage,
+  nowMs: number,
+): Promise<void> {
+  const row = await loadDelivery(env.DB, d);
+  if (!row || isTerminal(row.state)) {
     msg.ack();
     return;
   }
-  await write.run();
-  if (decision.action === 'retry') msg.retry({ delaySeconds: decision.delaySeconds });
+  if (row.state === 'retrying' && row.next_attempt_at !== null && row.next_attempt_at > nowMs) {
+    const wait = secondsUntil(row.next_attempt_at, nowMs);
+    if (queueRetriesLeft(msg) && wait <= QUEUE_MAX_DELAY_SECONDS) {
+      msg.retry({ delaySeconds: wait });
+      return;
+    }
+    await scheduleStatement(env, d, row.next_attempt_at).run();
+    msg.ack();
+    return;
+  }
+  if (queueRetriesLeft(msg)) msg.retry({ delaySeconds: Math.ceil(DELIVERY_CLAIM_LEASE_MS / 1000) });
   else msg.ack();
+}
+
+async function attemptSafely(
+  env: Bindings,
+  keyring: Keyring,
+  d: DeliveryMessage,
+  nowMs: number,
+): Promise<AttemptResult> {
+  try {
+    return await attemptDelivery(env, keyring, d, nowMs);
+  } catch (e) {
+    // Anything unexpected after the claim still produces an outcome, so the claim is
+    // released through the normal (bounded) retry path rather than held forever (H1).
+    log('error', 'delivery_attempt_failed', { delivery_id: d.id, error: e });
+    return failed('internal_error', 'consumer_error');
+  }
 }
 
 async function handleMessage(
@@ -254,29 +349,34 @@ async function handleMessage(
     msg.ack();
     return;
   }
-  if (!(await claimDelivery(env.DB, d, deps.now()))) {
-    // Another consumer holds a live claim. Check back once it must have finished.
-    msg.retry({ delaySeconds: Math.ceil(DELIVERY_CLAIM_LEASE_MS / 1000) });
+  const claimedAt = deps.now();
+  const claim = await claimDelivery(env.DB, d, claimedAt, deps.newClaimToken());
+  if (!claim) {
+    await handleUnclaimable(env, msg, d, claimedAt);
     return;
   }
-  const attempt = row.attempts + 1;
-  const result = await attemptDelivery(env, keyring, d, deps.now());
+  // The attempt number comes from the claim's RETURNING row, not the earlier read (M2).
+  const attempt = claim.attempts + 1;
+  const result = await attemptSafely(env, keyring, d, deps.now());
   const decision = effectiveDecision(
     decideRetry({ attempt, outcome: result.outcome, random: deps.random }),
     msg,
   );
   const record = outcomeRecord(decision, result, attempt, deps.now());
-  await applyDecision(env, msg, d, decision, record);
+  const recorded = await applyDecision(env, msg, d, claim, decision, record);
   log(decision.action === 'dead_letter' ? 'warn' : 'info', 'delivery_attempt', {
     delivery_id: d.id,
     workspace_id: d.organizationId,
     integration_id: d.integrationId,
     attempt,
-    outcome: record.state,
+    outcome: recorded ? record.state : 'claim_lost',
     error_code: record.code,
     unmapped_provider_error: result.unmapped,
   });
 }
+
+/** Back-off for a whole batch when the key ring is unusable (F04): an operator must act. */
+export const KEYRING_RETRY_DELAY_SECONDS = 60;
 
 export async function consumeDeliveries(
   batch: MessageBatch<unknown>,
@@ -288,16 +388,18 @@ export async function consumeDeliveries(
     keyring = keyringFromEnv(env);
   } catch {
     // Misconfigured keys: nothing in this batch can be delivered, and nothing is lost.
-    // /health reports which binding is wrong.
-    batch.retryAll();
+    // /health reports which binding is wrong. If the fault outlasts the queue's retries,
+    // the DLQ consumer dead-letters the rows, so they stay visible and replayable.
+    batch.retryAll({ delaySeconds: KEYRING_RETRY_DELAY_SECONDS });
     return;
   }
   for (const msg of batch.messages) {
     try {
       await handleMessage(msg, env, keyring, deps);
     } catch (e) {
-      // A ledger or platform failure: nothing was recorded, so the message is retried
-      // (F176: per message, never the batch).
+      // A ledger or platform failure (D1 down). Retried per message (F176). If the claim
+      // was taken, the cron backstop releases it after the lease, and once queue retries
+      // run out the DLQ consumer dead-letters the row (H1).
       log('error', 'delivery_consumer_failed', { error: e });
       msg.retry();
     }

@@ -96,6 +96,17 @@ export function isTerminal(state: DeliveryState): boolean {
   return TERMINAL_STATES.has(state);
 }
 
+const STATE_SET: ReadonlySet<string> = new Set(DELIVERY_STATES);
+
+/**
+ * Read a stored state. Migration 0009 keeps the legacy `failed` value legal for one release
+ * so a Worker rollback still works; it means "permanently failed and acknowledged", which is
+ * `dead_lettered`. Anything else unknown is also treated as terminal, never as work to redo.
+ */
+export function normalizeDeliveryState(raw: string): DeliveryState {
+  return STATE_SET.has(raw) ? (raw as DeliveryState) : 'dead_lettered';
+}
+
 /** Pure transition. Illegal moves are returned as values, never thrown. */
 export function transition(from: DeliveryState, event: DeliveryEvent): TransitionResult {
   // Resolve the target first so an impossible event fails loudly in `assertNever`.

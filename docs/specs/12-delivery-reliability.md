@@ -831,7 +831,7 @@ the delivery id so that cannot happen.
 
 ## F189 — Outbound request budget
 
-**Priority** P0 · **Status** partial (slice 4: 10 s `AbortSignal.timeout`, `redirect: 'error'`; response bodies not size-capped)
+**Priority** P0 · **Status** partial (slice 4: 10 s `AbortSignal.timeout`, `redirect: 'manual'` with 3xx classified permanent; response bodies not size-capped)
 
 **Story** As an operator, I want outbound calls bounded, so that a slow destination cannot
 exhaust a Worker invocation.

@@ -6,6 +6,10 @@ import {
   OUTBOX_STATEMENTS,
   OUTBOX_STALL_THRESHOLD_MS,
   RECLAIM_EXPIRED_LEASE_SQL,
+  RELEASE_BACKOFF_MS,
+  SCHEDULE_REDISPATCH_SQL,
+  SELECT_PURGE_WORKSPACES_SQL,
+  sqliteTimestamp,
   SELECT_DUE_WORKSPACES_SQL,
   DEFAULT_WORKSPACE_LIMIT,
   claimedRow,
@@ -31,7 +35,7 @@ function placeholders(sql: string): number[] {
 
 describe('outbox claim SQL (F172/F174)', () => {
   it.each(Object.entries(OUTBOX_STATEMENTS))('%s carries the tenant predicate', (_name, sql) => {
-    expect(sql).toMatch(/WHERE\s+organization_id = \?\d/);
+    expect(sql).toMatch(/WHERE\s+(?:o\.)?organization_id = \?\d/);
   });
 
   it('the claim is a single conditional UPDATE … RETURNING, never read-then-write', () => {
@@ -128,11 +132,12 @@ describe('follow-up statement params', () => {
       'row_1',
       'lease-1',
     ]);
-    expect(releaseClaimParams('org_1', 'row_1', lease, 'destination_unavailable')).toEqual([
+    expect(releaseClaimParams('org_1', 'row_1', lease, 'destination_unavailable', NOW)).toEqual([
       'destination_unavailable',
       'org_1',
       'row_1',
       'lease-1',
+      NOW + RELEASE_BACKOFF_MS,
     ]);
     expect(reclaimExpiredParams('org_1', 'row_1', NOW)).toEqual([NOW, 'org_1', 'row_1']);
     expect(reconcileCandidatesParams('org_1', NOW)).toEqual(['org_1', NOW, DEFAULT_SWEEP_LIMIT]);
@@ -146,7 +151,8 @@ describe('follow-up statement params', () => {
 
 describe('reconciler workspace enumeration and scheduling', () => {
   it('enumerates only workspaces, never rows, and skips rows with no tenant', () => {
-    expect(SELECT_DUE_WORKSPACES_SQL).toMatch(/^SELECT DISTINCT organization_id FROM/);
+    expect(SELECT_DUE_WORKSPACES_SQL).toMatch(/^SELECT organization_id FROM/);
+    expect(SELECT_DUE_WORKSPACES_SQL).toContain('GROUP BY organization_id');
     expect(SELECT_DUE_WORKSPACES_SQL).toContain('organization_id IS NOT NULL');
     expect(dueWorkspacesParams(NOW)).toEqual([NOW, DEFAULT_WORKSPACE_LIMIT]);
     expect(() => dueWorkspacesParams(NOW, 0)).toThrow(RangeError);
@@ -173,6 +179,21 @@ describe('reconciler workspace enumeration and scheduling', () => {
     };
     expect(claimedRow([won], claim)).toEqual(won);
     expect(claimedRow([], claim)).toBeNull();
+  });
+});
+
+describe('review fixes (PR #10)', () => {
+  it('parking is guarded on the ledger row being retrying at that exact time (H2)', () => {
+    expect(SCHEDULE_REDISPATCH_SQL).toContain("d.state = 'retrying' AND d.next_attempt_at = ?1");
+  });
+
+  it('workspace enumeration is oldest-first (M3)', () => {
+    expect(SELECT_DUE_WORKSPACES_SQL).toContain('ORDER BY MIN(created_at)');
+    expect(SELECT_PURGE_WORKSPACES_SQL).toContain('ORDER BY MIN(created_at)');
+  });
+
+  it('formats SQLite timestamps in UTC', () => {
+    expect(sqliteTimestamp(Date.UTC(2026, 9, 13, 1, 2, 3))).toBe('2026-10-13 01:02:03');
   });
 });
 

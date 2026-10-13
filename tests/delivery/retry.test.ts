@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_RETRY_POLICY,
   FIXED_DELAY_JITTER_FRACTION,
-  QUEUE_MAX_DELAY_SECONDS_UNVERIFIED,
+  QUEUE_MAX_DELAY_SECONDS,
   additiveJitter,
   backoffDelay,
   clampRetryAfter,
@@ -220,8 +220,15 @@ describe('decideRetry', () => {
       outcome: { kind: 'failed', code: 'destination_unavailable' },
       random: zero,
     });
-    expect(longer).toMatchObject({ action: 'retry', delaySeconds: 24 * HOUR, transport: 'schedule' });
-    expect(QUEUE_MAX_DELAY_SECONDS_UNVERIFIED).toBe(12 * HOUR);
+    // 24 h is exactly the queue maximum, so it still fits.
+    expect(longer).toMatchObject({ action: 'retry', delaySeconds: 24 * HOUR, transport: 'queue' });
+    const longest = decideRetry({
+      attempt: 10,
+      outcome: { kind: 'failed', code: 'destination_unavailable' },
+      random: zero,
+    });
+    expect(longest).toMatchObject({ action: 'retry', delaySeconds: 48 * HOUR, transport: 'schedule' });
+    expect(QUEUE_MAX_DELAY_SECONDS).toBe(24 * HOUR);
   });
 
   it('exhausted_delivery_reaches_a_terminal_dead_letter_state', () => {

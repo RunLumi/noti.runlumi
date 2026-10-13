@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHttpFailure, classifyLarkReply, classifyThrown } from '../../src/delivery/classify';
+import {
+  classifyHttpFailure,
+  classifyLarkReply,
+  classifyRedirect,
+  classifyThrown,
+} from '../../src/delivery/classify';
 
 const NOW = Date.UTC(2026, 9, 13, 12, 0, 0);
 const none = new Headers();
@@ -34,8 +39,8 @@ describe('classifyHttpFailure (F179)', () => {
 
 describe('classifyLarkReply (F179)', () => {
   it('accepts code 0 and legacy StatusCode 0', () => {
-    expect(classifyLarkReply({ code: 0 })).toBeNull();
-    expect(classifyLarkReply({ StatusCode: 0 })).toBeNull();
+    expect(classifyLarkReply({ code: 0 })).toEqual({ kind: 'delivered' });
+    expect(classifyLarkReply({ StatusCode: 0 })).toEqual({ kind: 'delivered' });
   });
 
   it.each([
@@ -52,18 +57,28 @@ describe('classifyLarkReply (F179)', () => {
     [9499, 'destination_unavailable'],
   ] as const)('code %i → %s', (larkCode, code) => {
     expect(classifyLarkReply({ code: larkCode, msg: 'echoed text' })).toEqual({
-      code,
-      retryAfterSeconds: null,
-      diagnostic: `provider_lark_${larkCode}`,
-      unmapped: false,
+      kind: 'failed',
+      classified: { code, retryAfterSeconds: null, diagnostic: `provider_lark_${larkCode}`, unmapped: false },
     });
   });
 
-  it('flags unknown codes and unknown shapes', () => {
-    expect(classifyLarkReply({ code: 12345 })).toMatchObject({ code: 'internal_error', unmapped: true });
-    expect(classifyLarkReply(null)).toMatchObject({ diagnostic: 'provider_rejected', unmapped: true });
-    expect(classifyLarkReply({ code: 1.5 })).toMatchObject({ diagnostic: 'provider_rejected' });
-    expect(classifyLarkReply('x')).toMatchObject({ diagnostic: 'provider_rejected' });
+  it('flags unknown codes; an unreadable 2xx body is unconfirmed, never retried', () => {
+    expect(classifyLarkReply({ code: 12345 })).toMatchObject({
+      kind: 'failed',
+      classified: { code: 'internal_error', unmapped: true },
+    });
+    expect(classifyLarkReply(null)).toEqual({ kind: 'unconfirmed' });
+    expect(classifyLarkReply({ code: 1.5 })).toEqual({ kind: 'unconfirmed' });
+    expect(classifyLarkReply('x')).toEqual({ kind: 'unconfirmed' });
+  });
+
+  it('a redirect is a permanent url rejection', () => {
+    expect(classifyRedirect(302)).toEqual({
+      code: 'destination_url_rejected',
+      retryAfterSeconds: null,
+      diagnostic: 'provider_redirect_302',
+      unmapped: false,
+    });
   });
 });
 

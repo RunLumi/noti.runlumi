@@ -28,14 +28,14 @@ state sets.
    `claimed` row whose claimer has been silent for 5 minutes). It does not use a separate
    `delivery_claims` table. Terminal rows are acknowledged without a provider call, which
    generalises the old `alreadySent` check.
-3. **Queue delay maximum: UNVERIFIED.** The repo docs never state Cloudflare's maximum
-   `delaySeconds`. We use 12 h (`QUEUE_MAX_DELAY_SECONDS_UNVERIFIED`). Any longer wait is
-   parked on the outbox row (`not_before`), the message is acknowledged, and the reconciler
+3. **Queue delay maximum: 24 h.** Cloudflare Queues accepts `delaySeconds` up to 86,400 s,
+   per the Cloudflare Queues documentation (developers.cloudflare.com/queues), as confirmed
+   in the PR #10 review on 2026-10-13 (`QUEUE_MAX_DELAY_SECONDS`). Any longer wait is parked
+   on the outbox row (`not_before`), the message is acknowledged, and the reconciler
    re-enqueues the row once it is due. Attempts are counted in the ledger, not by
    `msg.attempts`. A message that has used `max_retries` (5, mirrored in
    `QUEUE_MAX_RETRIES` and asserted against `wrangler.jsonc`) is also parked rather than
-   retried. Otherwise the queue would hand it to an unconsumed DLQ while the ledger still
-   said `retrying`.
+   retried, so it never reaches the DLQ while the ledger still says `retrying`.
 4. **The F177 ladder as written.** The spec says "13 attempts over ~7 days", but its own
    ladder (2+6+12+24+48+72+96 h) adds up to 260 h, about 10.8 days. We kept the ladder and
    the test asserts 260 h. F08's "capped at 24 h" also conflicts with the 48–96 h rungs.
@@ -79,7 +79,7 @@ state sets.
 11. **A minimal DLQ consumer.** Messages in a dead-letter queue with no consumer are deleted
     after four days, and nothing would have marked the ledger. `src/pipeline/dead-letter.ts`
     consumes `noti-dead-letters` in the same Worker (`batch.queue` selects it). It moves a
-    non-terminal row (`pending`, `retrying`, or a `claimed` row whose claim is stale) to
+    non-terminal row (`pending`, `retrying`, or `claimed` of any age — see 12) to
     `dead_lettered`, keeping any earlier error code, or `internal_error` with
     `queue_retries_exhausted`. It never calls a provider and never re-enqueues. For this,
     the state machine also allows `pending → dead_lettered`. `max_batch_size` for
@@ -87,6 +87,48 @@ state sets.
 
 Crypto handling is unchanged from ADR 0004. Row defects are dead-lettered without a provider
 call. Key or config faults are `internal_error`, which is retryable.
+
+12. **Review fixes (PR #10 review of 5d7d5cb).**
+    - *No stranded claims (H1).* Any throw after a claim still yields an outcome
+      (`internal_error`, `consumer_error`) through the bounded retry path, so the claim is
+      released. If D1 itself is down, three things cover it:
+      - every minute, a cron backstop (`src/pipeline/sweep.ts`) releases claims older than
+        the 5-minute lease, counts the abandoned attempt, and redispatches or dead-letters;
+      - the DLQ consumer dead-letters any non-terminal row, `claimed` included;
+      - a claim-busy duplicate is retried after the lease only while queue retries remain,
+        and acknowledged on the last one.
+    - *Fenced, conditional writes (H2).* The consumer's outcome write is fenced on a
+      per-claim token (`deliveries.claim_token`). `msg.retry` happens only when that write
+      changed exactly one row. The outbox park is guarded on the ledger row being `retrying`
+      with exactly that `next_attempt_at`, so a write that lost its claim cannot schedule a
+      redispatch.
+    - *Due-time claim (M1).* A `retrying` row is claimable only once `next_attempt_at` has
+      passed. An early duplicate waits out the remainder, by queue delay or by parking.
+    - *Attempt number (M2).* The attempt number comes from the claim's `RETURNING attempts`.
+    - *Dispatcher hygiene (M3).*
+      - each row reads the clock afresh;
+      - due workspaces are visited oldest-work-first (`GROUP BY … ORDER BY MIN(created_at)`);
+      - a row whose `send()` failed waits 30 s (`not_before`), our own figure.
+    - *Rollback (M4).* `deliveries.state='failed'` stays legal for one release and is read
+      as `dead_lettered` (`normalizeDeliveryState`). A Worker rollback to slice 2 keeps
+      working.
+    - *No silent strands from old rows (M5, M7).*
+      - 0009 marks tenantless pending outbox rows `invalid`, and dead-letters their
+        non-terminal deliveries (`config_invalid`).
+      - An outbox row the dispatcher cannot parse dead-letters its delivery in the same
+        transaction.
+    - *Bounded scans (M6).* New indexes `(organization_id, state, not_before)` on the outbox
+      and `(state, claimed_at)` on deliveries. A bounded per-tick retention purge deletes
+      outbox rows older than 7 days, but only for successful deliveries and invalid rows;
+      dead-lettered deliveries keep their row so they can still be replayed. The 7 days is
+      our own figure.
+    - *Smaller fixes.*
+      - Outbound calls use `redirect: 'manual'`, so a 3xx is a permanent
+        `destination_url_rejected` instead of a TypeError retried 13 times. This deviates
+        from F189's note to keep `redirect: 'error'`; a redirect is still never followed.
+      - A 2xx Lark reply we cannot read is recorded as `accepted` (unconfirmed), never
+        retried, to avoid duplicates.
+      - A key-ring fault retries the batch after 60 s.
 
 ## Not done (honest list)
 

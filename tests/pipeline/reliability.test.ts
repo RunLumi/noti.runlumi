@@ -1,13 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index';
-import { MARK_DISPATCHED_SQL, markDispatchedParams } from '../../src/delivery/claim';
+import {
+  MARK_DISPATCHED_SQL,
+  RELEASE_BACKOFF_MS,
+  SELECT_DUE_WORKSPACES_SQL,
+  markDispatchedParams,
+} from '../../src/delivery/claim';
 import { dedupKey, deliveryId } from '../../src/delivery/ids';
 import { redeliver } from '../../src/delivery/redeliver';
 import type { Bindings, DeliveryMessage } from '../../src/env';
-import { QUEUE_MAX_RETRIES, consumeDeliveries, type ConsumerDeps } from '../../src/pipeline/consumer';
+import {
+  KEYRING_RETRY_DELAY_SECONDS,
+  QUEUE_MAX_RETRIES,
+  consumeDeliveries,
+  type ConsumerDeps,
+} from '../../src/pipeline/consumer';
 import { DEAD_LETTER_QUEUE, QUEUE_EXHAUSTED, consumeDeadLetters } from '../../src/pipeline/dead-letter';
-import { dispatchOutbox, type DispatchDeps } from '../../src/pipeline/outbox';
+import { dispatchOutbox, purgeOutbox, type DispatchDeps } from '../../src/pipeline/outbox';
+import { sweepStaleClaims } from '../../src/pipeline/sweep';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 import { legacySeal } from '../support/legacy';
 
@@ -49,7 +60,28 @@ function makeEnv(send?: (m: DeliveryMessage) => Promise<void>): Bindings {
 }
 
 const dispatchDeps = (): DispatchDeps => ({ now: () => clock, newLeaseToken: () => `lease-${++tokens}` });
-const consumerDeps = (random = 0.999999): ConsumerDeps => ({ random: () => random, now: () => clock });
+let claimTokens = 0;
+const consumerDeps = (random = 0.999999): ConsumerDeps => ({
+  random: () => random,
+  now: () => clock,
+  newClaimToken: () => `claim-${++claimTokens}`,
+});
+
+/** A D1 whose `prepare` runs `hook` first for statements matching `pattern`. */
+function hookedDb(pattern: RegExp, hook: () => void, times = 1): D1Database {
+  let remaining = times;
+  return {
+    ...db.d1,
+    batch: db.d1.batch.bind(db.d1),
+    prepare: (sql: string) => {
+      if (remaining > 0 && pattern.test(sql)) {
+        remaining--;
+        hook();
+      }
+      return db.d1.prepare(sql);
+    },
+  } as D1Database;
+}
 
 async function integration(id: string, org = 'org-a'): Promise<void> {
   db.raw
@@ -177,7 +209,11 @@ describe('atomic outbox claim (F172, D4)', () => {
     env = makeEnv(() => Promise.reject(new Error('Too Many Requests')));
     const report = await dispatchOutbox(env, dispatchDeps());
     expect(report.released).toBe(1);
-    expect(outbox('d1')).toEqual({ state: 'pending', not_before: null, lease_token: null });
+    expect(outbox('d1')).toEqual({
+      state: 'pending',
+      not_before: NOW + RELEASE_BACKOFF_MS,
+      lease_token: null,
+    });
   });
 
   it('crashed_claim_is_reclaimed_after_lease_expiry, and the stale holder is fenced out', async () => {
@@ -238,6 +274,7 @@ describe('consumer retry policy (F175–F180, D11)', () => {
     fetchMock.mockImplementation(() => Promise.resolve(new Response('', { status: 503 })));
     const delays: (number | undefined)[] = [];
     for (let attempt = 1; attempt < QUEUE_MAX_RETRIES; attempt++) {
+      clock = row('d1')?.next_attempt_at ?? clock;
       const msg = await consume(message(m, attempt));
       delays.push(msg.retried?.delaySeconds);
     }
@@ -248,7 +285,7 @@ describe('consumer retry policy (F175–F180, D11)', () => {
       attempts: 4,
       last_error: 'provider_http_503',
       last_error_code: 'destination_unavailable',
-      next_attempt_at: NOW + 32_000,
+      next_attempt_at: NOW + (4 + 8 + 16 + 32) * 1000,
     });
   });
 
@@ -272,13 +309,13 @@ describe('consumer retry policy (F175–F180, D11)', () => {
 
   it('uses the Tier 2 ladder via the D1 schedule for long waits', async () => {
     const m = enqueue('d1');
-    db.raw.prepare("UPDATE deliveries SET attempts=8 WHERE id='d1'").run();
+    db.raw.prepare("UPDATE deliveries SET attempts=9 WHERE id='d1'").run();
     fetchMock.mockResolvedValueOnce(new Response('', { status: 502 }));
     const msg = await consume(message(m), 0);
-    // Attempt 9 failed: the next rung is +24 h, longer than any queue delay.
+    // Attempt 10 failed: the next rung is +48 h, beyond the 24 h queue maximum.
     expect(msg.acked).toBe(true);
-    expect(row('d1')?.next_attempt_at).toBe(NOW + 24 * HOUR_MS);
-    expect(outbox('d1').not_before).toBe(NOW + 24 * HOUR_MS);
+    expect(row('d1')?.next_attempt_at).toBe(NOW + 48 * HOUR_MS);
+    expect(outbox('d1').not_before).toBe(NOW + 48 * HOUR_MS);
   });
 
   it('retry_after_overrides_computed_backoff', async () => {
@@ -340,6 +377,112 @@ describe('consumer retry policy (F175–F180, D11)', () => {
     expect(row('d1')).toMatchObject({ state: 'retrying', last_error: 'provider_timeout' });
   });
 
+  it('a duplicate message for a retry not yet due waits out the remainder (M1)', async () => {
+    const m = enqueue('d1', 'int-a', 'org-a', 'retrying');
+    db.raw.prepare("UPDATE deliveries SET next_attempt_at=? WHERE id='d1'").run(NOW + 120_500);
+    const early = await consume(message(m));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(early.retried).toEqual({ delaySeconds: 121 });
+
+    // On the message's last queue retry it parks the outbox row instead.
+    db.raw.prepare("UPDATE notification_outbox SET state='dispatched' WHERE id='d1'").run();
+    const last = await consume(message(m, QUEUE_MAX_RETRIES));
+    expect(last).toMatchObject({ acked: true, retried: null });
+    expect(outbox('d1')).toMatchObject({ state: 'pending', not_before: NOW + 120_500 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('on its last queue retry, a duplicate during a live claim is acknowledged (H1)', async () => {
+    const m = enqueue('d1');
+    db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=? WHERE id='d1'").run(NOW - 1000);
+    const msg = await consume(message(m, QUEUE_MAX_RETRIES));
+    expect(msg).toMatchObject({ acked: true, retried: null });
+  });
+
+  it('takes the attempt number from the claim, not the earlier read (M2)', async () => {
+    const m = enqueue('d1');
+    env = {
+      ...env,
+      DB: hookedDb(/SET state='claimed'/, () => {
+        db.raw.prepare("UPDATE deliveries SET attempts=5 WHERE id='d1'").run();
+      }),
+    };
+    await consume(message(m));
+    expect(row('d1')).toMatchObject({ state: 'sent', attempts: 6 });
+  });
+
+  it('an unexpected throw after the claim releases it through the retry path (H1)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const m = enqueue('d1');
+    env = {
+      ...env,
+      DB: hookedDb(/FROM integrations/, () => {
+        throw new Error('D1 hiccup');
+      }),
+    };
+    const msg = await consume(message(m));
+    expect(msg.retried).not.toBeNull();
+    expect(row('d1')).toMatchObject({
+      state: 'retrying',
+      attempts: 1,
+      last_error: 'consumer_error',
+      last_error_code: 'internal_error',
+    });
+  });
+
+  it('a lost claim neither retries nor parks (H2, fenced write)', async () => {
+    const steal = () => {
+      db.raw.prepare("UPDATE deliveries SET claim_token='someone-else' WHERE id='d1'").run();
+    };
+    const m = enqueue('d1');
+    db.raw.prepare("UPDATE notification_outbox SET state='dispatched' WHERE id='d1'").run();
+    fetchMock.mockResolvedValue(new Response('', { status: 503 }));
+    env = { ...env, DB: hookedDb(/SET state=\?4/, steal) };
+    const queued = await consume(message(m));
+    expect(queued).toMatchObject({ acked: true, retried: null });
+    expect(row('d1')).toMatchObject({ state: 'claimed', attempts: 0 });
+
+    // Park path: the guarded schedule must not move the outbox row either.
+    db.raw.prepare("UPDATE deliveries SET state='pending',claim_token=NULL WHERE id='d1'").run();
+    env = { ...env, DB: hookedDb(/SET state=\?4/, steal) };
+    const parked = await consume(message(m, QUEUE_MAX_RETRIES));
+    expect(parked.acked).toBe(true);
+    expect(outbox('d1')).toMatchObject({ state: 'dispatched', not_before: null });
+  });
+
+  it('a redirect is permanent and is never followed', async () => {
+    const m = enqueue('d1');
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { location: 'https://x.test' } }),
+    );
+    await consume(message(m));
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ redirect: 'manual' });
+    expect(row('d1')).toMatchObject({
+      state: 'dead_lettered',
+      last_error: 'provider_redirect_302',
+      last_error_code: 'destination_url_rejected',
+    });
+  });
+
+  it('an unreadable 2xx Lark body is recorded as accepted, not retried', async () => {
+    const m = enqueue('d1');
+    fetchMock.mockResolvedValueOnce(new Response('<html>ok</html>', { status: 200 }));
+    const msg = await consume(message(m));
+    expect(msg).toMatchObject({ acked: true, retried: null });
+    expect(row('d1')).toMatchObject({ state: 'accepted', last_error: 'provider_reply_unreadable' });
+  });
+
+  it('backs off a whole batch for a minute when the key ring is unusable', async () => {
+    const m = enqueue('d1');
+    const calls: unknown[] = [];
+    const batch = {
+      messages: [message(m)],
+      retryAll: (o: unknown) => calls.push(o),
+    } as unknown as MessageBatch<unknown>;
+    await consumeDeliveries(batch, { ...env, KEK_V1: 'bad' }, consumerDeps());
+    expect(calls).toEqual([{ delaySeconds: KEYRING_RETRY_DELAY_SECONDS }]);
+  });
+
   it('a duplicate message during a live claim is retried later, not sent twice', async () => {
     const m = enqueue('d1');
     db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=? WHERE id='d1'").run(NOW - 1000);
@@ -353,6 +496,41 @@ describe('consumer retry policy (F175–F180, D11)', () => {
     db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=? WHERE id='d1'").run(NOW - 10 * 60_000);
     await consume(message(m));
     expect(row('d1')?.state).toBe('sent');
+  });
+
+  it('a claim stranded by a ledger outage is released by the cron backstop (H1)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const m = enqueue('d1');
+    db.raw.prepare("UPDATE notification_outbox SET state='dispatched' WHERE id='d1'").run();
+    env = {
+      ...env,
+      DB: hookedDb(/SET state=\?4/, () => {
+        throw new Error('D1 down');
+      }),
+    };
+    const msg = await consume(message(m));
+    expect(msg.retried).toEqual({});
+    expect(row('d1')?.state).toBe('claimed');
+
+    env = makeEnv();
+    expect(await sweepStaleClaims(env, NOW + 60_000)).toBe(0); // lease still live
+    clock = NOW + 6 * 60_000;
+    expect(await sweepStaleClaims(env, clock)).toBe(1);
+    expect(row('d1')).toMatchObject({ state: 'retrying', attempts: 1, last_error: 'claim_expired' });
+    expect(outbox('d1')).toMatchObject({ state: 'pending', not_before: clock });
+
+    expect((await dispatchOutbox(env, dispatchDeps())).dispatched).toBe(1);
+    await consume(message(sent[0]));
+    expect(row('d1')).toMatchObject({ state: 'sent', attempts: 2 });
+  });
+
+  it('the backstop dead-letters a stranded claim whose budget is spent', async () => {
+    enqueue('d1');
+    db.raw.prepare("UPDATE notification_outbox SET state='dispatched' WHERE id='d1'").run();
+    db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=1,attempts=12 WHERE id='d1'").run();
+    expect(await sweepStaleClaims(env, NOW)).toBe(1);
+    expect(row('d1')).toMatchObject({ state: 'dead_lettered', attempts: 13, dead_lettered_at: NOW });
+    expect(outbox('d1').state).toBe('dispatched');
   });
 
   it('a ledger failure retries the message instead of losing it', async () => {
@@ -382,6 +560,68 @@ describe('consumer retry policy (F175–F180, D11)', () => {
     await consume(message(m));
     expect(lines.length).toBeGreaterThan(0);
     expect(lines.join('\n')).not.toContain('reliability-fixture');
+  });
+});
+
+describe('outbox sweep hygiene (M3, M6, M7)', () => {
+  it('stamps each row with its own clock reading', async () => {
+    enqueue('d1');
+    enqueue('d2');
+    let tick = NOW;
+    await dispatchOutbox(env, { now: () => (tick += 1000), newLeaseToken: () => `lease-${++tokens}` });
+    const stamps = db.raw.prepare('SELECT dispatched_at FROM notification_outbox ORDER BY id').all() as {
+      dispatched_at: string;
+    }[];
+    expect(new Set(stamps.map((r) => r.dispatched_at)).size).toBe(2);
+  });
+
+  it('serves the workspace with the oldest work first', async () => {
+    enqueue('new', 'int-a', 'org-a');
+    db.raw.prepare("UPDATE notification_outbox SET created_at='2026-10-13 10:00:00' WHERE id='new'").run();
+    enqueue('old', 'int-a', 'org-b');
+    db.raw.prepare("UPDATE notification_outbox SET created_at='2026-10-01 10:00:00' WHERE id='old'").run();
+    const due = await db.d1.prepare(SELECT_DUE_WORKSPACES_SQL).bind(NOW, 1).all();
+    expect(due.results).toEqual([{ organization_id: 'org-b' }]);
+  });
+
+  it('a released row waits out a back-off before the next send', async () => {
+    enqueue('d1');
+    env = makeEnv(() => Promise.reject(new Error('queue full')));
+    expect((await dispatchOutbox(env, dispatchDeps())).released).toBe(1);
+    env = makeEnv();
+    expect((await dispatchOutbox(env, dispatchDeps())).dispatched).toBe(0);
+    clock = NOW + RELEASE_BACKOFF_MS;
+    expect((await dispatchOutbox(env, dispatchDeps())).dispatched).toBe(1);
+  });
+
+  it('an invalid outbox row dead-letters its delivery in the same transaction (M7)', async () => {
+    enqueue('d1');
+    db.raw.prepare("UPDATE notification_outbox SET payload_json='nope' WHERE id='d1'").run();
+    await dispatchOutbox(env, dispatchDeps());
+    expect(outbox('d1').state).toBe('invalid');
+    expect(row('d1')).toMatchObject({
+      state: 'dead_lettered',
+      last_error_code: 'config_invalid',
+      last_error: 'outbox_payload_invalid',
+    });
+  });
+
+  it('purges old rows of successful deliveries but keeps what replay needs (M6)', async () => {
+    const old = '2026-09-01 00:00:00';
+    for (const [id, state] of [
+      ['ok', 'sent'],
+      ['dead', 'dead_lettered'],
+      ['fresh', 'sent'],
+    ] as const) {
+      enqueue(id, 'int-a', 'org-a', state);
+      db.raw.prepare("UPDATE notification_outbox SET state='dispatched' WHERE id=?").run(id);
+    }
+    db.raw.prepare("UPDATE notification_outbox SET created_at=? WHERE id IN ('ok','dead')").run(old);
+    expect(await purgeOutbox(env, NOW)).toBe(1);
+    const left = (
+      db.raw.prepare('SELECT id FROM notification_outbox ORDER BY id').all() as { id: string }[]
+    ).map((r) => r.id);
+    expect(left).toEqual(['dead', 'fresh']);
   });
 });
 
@@ -534,15 +774,17 @@ describe('dead-letter queue consumer (F180)', () => {
     });
   });
 
-  it('leaves terminal rows and live claims alone, and takes over a stale claim', async () => {
+  it('leaves terminal rows alone and dead-letters a claim of any age (H1)', async () => {
     const sentMsg = enqueue('d1', 'int-a', 'org-a', 'sent');
     await deadLetter(sentMsg);
     expect(row('d1')?.state).toBe('sent');
 
+    // The queue has given up on this message, so even a fresh claim is not waited on: a
+    // holder that is somehow still alive writes nothing, because its write is fenced.
     const live = enqueue('d2');
     db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=? WHERE id='d2'").run(Date.now());
     await deadLetter(live);
-    expect(row('d2')?.state).toBe('claimed');
+    expect(row('d2')?.state).toBe('dead_lettered');
 
     const stale = enqueue('d3');
     db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=? WHERE id='d3'").run(1);

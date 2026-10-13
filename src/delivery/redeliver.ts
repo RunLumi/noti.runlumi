@@ -14,7 +14,7 @@
  * are NOT implemented yet — there is no route.
  */
 import { replayDeliveryId } from './ids';
-import { planReplay, type DeliveryState } from './state';
+import { normalizeDeliveryState, planReplay } from './state';
 
 export interface RedeliverRequest {
   readonly organizationId: string;
@@ -31,7 +31,7 @@ export type RedeliverResult =
 type SourceRow = {
   id: string;
   integration_id: string;
-  state: DeliveryState;
+  state: string;
   dedup_key: string | null;
   replay_count: number;
   payload_json: string | null;
@@ -72,7 +72,7 @@ function replayPayload(
 export async function redeliver(db: D1Database, req: RedeliverRequest): Promise<RedeliverResult> {
   const source = await readSource(db, req);
   if (!source) return { ok: false, error: 'not_found' };
-  const plan = planReplay({ id: source.id, state: source.state });
+  const plan = planReplay({ id: source.id, state: normalizeDeliveryState(source.state) });
   if (!plan.ok) return { ok: false, error: plan.error };
 
   const sequence = source.replay_count + 1;

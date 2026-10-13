@@ -67,24 +67,42 @@ function larkCode(body: unknown): number | null {
   return typeof code === 'number' && Number.isInteger(code) ? code : null;
 }
 
-/** `null` when Lark accepted the message (`code: 0`); otherwise the classification. */
-export function classifyLarkReply(body: unknown): Classified | null {
+export type LarkVerdict =
+  | { readonly kind: 'delivered' }
+  /**
+   * A 2xx whose body we cannot read (not JSON, or no `code`). The provider took the request,
+   * so a retry risks a duplicate; it is recorded as `accepted` (delivery unconfirmed, F100)
+   * and flagged, never retried.
+   */
+  | { readonly kind: 'unconfirmed' }
+  | { readonly kind: 'failed'; readonly classified: Classified };
+
+export function classifyLarkReply(body: unknown): LarkVerdict {
   const code = larkCode(body);
-  if (code === 0) return null;
-  if (code === null) {
-    return {
-      code: 'internal_error',
-      retryAfterSeconds: null,
-      diagnostic: 'provider_rejected',
-      unmapped: true,
-    };
-  }
+  if (code === 0) return { kind: 'delivered' };
+  if (code === null) return { kind: 'unconfirmed' };
   const mapped = LARK_CODES.get(code);
   return {
-    code: mapped ?? 'internal_error',
+    kind: 'failed',
+    classified: {
+      code: mapped ?? 'internal_error',
+      retryAfterSeconds: null,
+      diagnostic: `provider_lark_${code}`,
+      unmapped: mapped === undefined,
+    },
+  };
+}
+
+/**
+ * A 3xx: outbound calls use `redirect: 'manual'` so a redirect is observed, never followed
+ * (F189, SSRF). A webhook that redirects is misconfigured or moved; retrying cannot help.
+ */
+export function classifyRedirect(status: number): Classified {
+  return {
+    code: 'destination_url_rejected',
     retryAfterSeconds: null,
-    diagnostic: `provider_lark_${code}`,
-    unmapped: mapped === undefined,
+    diagnostic: `provider_redirect_${status}`,
+    unmapped: false,
   };
 }
 

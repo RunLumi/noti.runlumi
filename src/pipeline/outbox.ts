@@ -1,5 +1,10 @@
 import {
+  DEAD_LETTER_INVALID_DELIVERY_SQL,
   MARK_DISPATCHED_SQL,
+  OUTBOX_RETENTION_MS,
+  PURGE_OUTBOX_SQL,
+  PURGE_ROW_LIMIT,
+  SELECT_PURGE_WORKSPACES_SQL,
   MARK_INVALID_SQL,
   RECLAIM_EXPIRED_LEASE_SQL,
   RELEASE_CLAIM_SQL,
@@ -14,6 +19,7 @@ import {
   reclaimExpiredParams,
   reconcileCandidatesParams,
   releaseClaimParams,
+  sqliteTimestamp,
   type Lease,
 } from '../delivery/claim';
 import type { Bindings, DeliveryMessage } from '../env';
@@ -95,7 +101,7 @@ async function publish(
     await env.DELIVERY_QUEUE.send(message);
   } catch {
     await env.DB.prepare(RELEASE_CLAIM_SQL)
-      .bind(...releaseClaimParams(orgId, rowId, lease, 'internal_error'))
+      .bind(...releaseClaimParams(orgId, rowId, lease, 'internal_error', now))
       .run();
     return 'released';
   }
@@ -115,9 +121,11 @@ async function dispatchRow(
   env: Bindings,
   orgId: string,
   row: CandidateRow,
-  now: number,
   deps: DispatchDeps,
 ): Promise<{ reclaimed: boolean; outcome: RowOutcome }> {
+  // Read per row: a pass can visit many rows serially, and a lease stamped with a stale
+  // clock would expire early (M3).
+  const now = deps.now();
   const reclaimed = await reclaimIfExpired(env, orgId, row, now);
   if (row.state === 'claimed' && !reclaimed) return { reclaimed, outcome: 'lost_race' };
   const claim = buildClaim({ orgId, rowId: row.id, nowMs: now, leaseToken: deps.newLeaseToken() });
@@ -128,9 +136,12 @@ async function dispatchRow(
   if (!claimed) return { reclaimed, outcome: 'lost_race' };
   const message = parseClaimedPayload(claimed.payload_json, orgId, row.id);
   if (!message) {
-    await env.DB.prepare(MARK_INVALID_SQL)
-      .bind(...markInvalidParams(orgId, row.id, claim.lease))
-      .run();
+    // One transaction: the outbox row is retired and its delivery reaches a terminal state,
+    // so the ledger never waits on a row that will not be sent (F180).
+    await env.DB.batch([
+      env.DB.prepare(MARK_INVALID_SQL).bind(...markInvalidParams(orgId, row.id, claim.lease)),
+      env.DB.prepare(DEAD_LETTER_INVALID_DELIVERY_SQL).bind(orgId, row.id, now),
+    ]);
     return { reclaimed, outcome: 'invalid' };
   }
   return { reclaimed, outcome: await publish(env, orgId, row.id, claim.lease, message, now) };
@@ -181,10 +192,28 @@ export async function dispatchOutbox(
       .bind(...reconcileCandidatesParams(orgId, now))
       .all<CandidateRow>();
     for (const row of candidates.results) {
-      const { reclaimed, outcome } = await dispatchRow(env, orgId, row, now, deps);
+      const { reclaimed, outcome } = await dispatchRow(env, orgId, row, deps);
       report = tally(report, reclaimed, outcome);
     }
   }
   if (report.released > 0 || report.invalid > 0) log('warn', 'outbox_dispatch_incomplete', { ...report });
   return report;
+}
+
+/**
+ * Retention for the outbox (bounded per tick): deletes rows whose delivery succeeded, and
+ * invalid rows, once older than {@link OUTBOX_RETENTION_MS}. Rows of failed deliveries are
+ * kept because replay (F182) re-reads their message.
+ */
+export async function purgeOutbox(env: Bindings, nowMs: number = Date.now()): Promise<number> {
+  const cutoff = sqliteTimestamp(nowMs - OUTBOX_RETENTION_MS);
+  const workspaces = await env.DB.prepare(SELECT_PURGE_WORKSPACES_SQL)
+    .bind(cutoff, 10)
+    .all<{ organization_id: string }>();
+  let purged = 0;
+  for (const { organization_id: orgId } of workspaces.results) {
+    const result = await env.DB.prepare(PURGE_OUTBOX_SQL).bind(orgId, cutoff, PURGE_ROW_LIMIT).run();
+    purged += result.meta.changes;
+  }
+  return purged;
 }

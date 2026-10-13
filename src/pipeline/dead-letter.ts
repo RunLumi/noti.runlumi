@@ -9,7 +9,7 @@
  * It never calls a provider and never retries. Every write is scoped by
  * `id AND organization_id AND integration_id`, like the main consumer.
  */
-import { DELIVERY_CLAIM_LEASE_MS, type DeliveryRef } from '../delivery/ledger';
+import type { DeliveryRef } from '../delivery/ledger';
 import type { Bindings } from '../env';
 import { log } from '../platform/log';
 import { parseDeliveryMessage } from './outbox';
@@ -21,22 +21,24 @@ export const DEAD_LETTER_QUEUE = 'noti-dead-letters';
 export const QUEUE_EXHAUSTED = 'queue_retries_exhausted';
 
 /**
- * Only non-terminal rows move. A `claimed` row moves only once its claim is stale, so a
- * consumer that is still mid-attempt keeps ownership. Existing error codes are kept: they
- * say why the earlier attempts failed.
+ * Any non-terminal row moves, including a `claimed` one whatever its age: the queue has
+ * given up on this message, and a consumer that still held the claim had failed it on every
+ * retry (H1). A live holder's later outcome write is fenced on its claim token and changes
+ * nothing. Existing error codes are kept: they say why the earlier attempts failed.
  */
 const MARK_DEAD_LETTERED_SQL = `UPDATE deliveries
 SET state = 'dead_lettered',
     last_error_code = COALESCE(last_error_code, 'internal_error'),
     last_error = COALESCE(last_error, '${QUEUE_EXHAUSTED}'),
-    dead_lettered_at = ?4, next_attempt_at = NULL, claimed_at = NULL, updated_at = CURRENT_TIMESTAMP
+    dead_lettered_at = ?4, next_attempt_at = NULL, claimed_at = NULL, claim_token = NULL,
+    updated_at = CURRENT_TIMESTAMP
 WHERE id = ?1 AND organization_id = ?2 AND integration_id = ?3
-  AND (state IN ('pending', 'retrying') OR (state = 'claimed' AND claimed_at <= ?5))`;
+  AND state IN ('pending', 'retrying', 'claimed')`;
 
 export async function markDeadLettered(db: D1Database, ref: DeliveryRef, nowMs: number): Promise<boolean> {
   const result = await db
     .prepare(MARK_DEAD_LETTERED_SQL)
-    .bind(ref.id, ref.organizationId, ref.integrationId, nowMs, nowMs - DELIVERY_CLAIM_LEASE_MS)
+    .bind(ref.id, ref.organizationId, ref.integrationId, nowMs)
     .run();
   return result.meta.changes === 1;
 }
