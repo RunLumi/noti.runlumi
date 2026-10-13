@@ -42,6 +42,7 @@ app.post('/webhooks/github',async c=>{
     ]);
     if(results[1].meta.changes)queued++;
   }
+  if(queued>0)c.executionCtx.waitUntil(dispatchOutbox(c.env));
   return c.json({accepted:true,persisted:queued},202);
 });
 async function dispatchOutbox(env:Bindings) {
