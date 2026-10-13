@@ -13,6 +13,7 @@ import { CredentialsSection } from './CredentialsSection';
 import { DeleteDialog } from './DeleteDialog';
 import { DetailsForm } from './DetailsForm';
 import { FiltersSection } from './FiltersSection';
+import { NoiseSection } from '../noise/NoiseSection';
 import '../integrations.css';
 import { useLocale } from '../../i18n/LocaleProvider';
 
@@ -52,7 +53,7 @@ function Section({
 
 /**
  * One screen per integration with a stable section order (F217): status, repository and
- * updates, filters, destination and webhook URL, then delete. Each section saves on its own.
+ * updates, filters, quiet hours and summaries, destination and webhook URL, then delete. Each section saves on its own.
  */
 export function IntegrationSettings() {
   useLocale();
@@ -145,6 +146,9 @@ export function IntegrationSettings() {
         </Section>
         <Section id="filters" title={t('filters.title')}>
           <FiltersSection orgId={orgId} integration={integration} />
+        </Section>
+        <Section id="noise" title={t('noise.title')}>
+          <NoiseSection key={integration.id} orgId={orgId} integration={integration} />
         </Section>
         <Section id="credentials" title={t('settings.credentials.title')}>
           <CredentialsSection orgId={orgId} integration={integration} />

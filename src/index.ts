@@ -25,6 +25,7 @@ import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { purgeDueWorkspace } from './pipeline/purge';
 import { pruneRateLimits } from './security/rate-limit';
 import { purgeRoutingDecisions } from './routing/provenance';
+import { purgeNoiseRecords, releaseHeldEvents } from './pipeline/noise-release';
 import { sweepStaleClaims } from './pipeline/sweep';
 import { correlation } from './platform/correlation';
 import { log } from './platform/log';
@@ -103,6 +104,17 @@ async function purgeRouting(env: Bindings): Promise<void> {
   if (deleted > 0) log('info', 'routing_decisions_purged', { deleted });
 }
 
+/** Noise control (ADR 0016): release due held events through the outbox, bounded and leased. */
+async function releaseNoise(env: Bindings): Promise<void> {
+  const report = await releaseHeldEvents(env);
+  if (report.events > 0 || report.reclaimed > 0) log('info', 'noise_release', { ...report });
+}
+
+async function purgeNoiseState(env: Bindings): Promise<void> {
+  const purged = await purgeNoiseRecords(env);
+  if (purged.held + purged.openFailures > 0) log('info', 'noise_purged', { ...purged });
+}
+
 async function purgeRetention(env: Bindings): Promise<void> {
   const retention = await purgeExpiredRecords(env);
   if (retention.deliveries + retention.outbox + retention.audit > 0)
@@ -119,12 +131,15 @@ export default {
     await runCronJobs([
       { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
       { name: 'stall_detection', run: () => detectStalls(env) },
+      // Before the outbox reconcile so a released notification is dispatched in the same tick.
+      { name: 'noise_release', run: () => releaseNoise(env) },
       { name: 'outbox_reconcile', run: () => reconcileOutbox(env) },
       { name: 'credential_maintenance', run: () => maintainCredentials(env) },
       { name: 'rate_limit_prune', run: () => pruneRateLimitWindows(env) },
       { name: 'workspace_purge', run: () => purgeWorkspace(env) },
       { name: 'retention_purge', run: () => purgeRetention(env) },
       { name: 'routing_decisions_purge', run: () => purgeRouting(env) },
+      { name: 'noise_purge', run: () => purgeNoiseState(env) },
     ]);
   },
 

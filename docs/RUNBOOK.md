@@ -115,6 +115,40 @@ Customer message: "We are investigating delayed notifications. Delayed notificat
 retried and may arrive late or, rarely, twice." Do not say none were lost until you have
 checked `dead_lettered`.
 
+## Held updates (noise control)
+
+Symptom: a customer says updates are late, or "quiet hours are not ending". Noise control
+(ADR 0016) holds non-urgent updates for quiet hours, digests and grouping, and a cron job
+(`noise_release`, before `outbox_reconcile`) releases them.
+
+Confirm what is waiting and whether it is overdue (counts and ids only; the table holds display
+fields, never a payload):
+
+```sql
+SELECT organization_id, integration_id, state, hold_reason,
+       COUNT(*) AS n, MIN(release_at) AS next_release_at, MAX(claim_expires_at) AS lease_until
+FROM held_events WHERE state IN ('held','claimed') GROUP BY 1,2,3,4 ORDER BY next_release_at LIMIT 50;
+```
+
+Interpretation (src/pipeline/noise-release.ts):
+
+- `held`, `release_at` in the future: working as configured. The dashboard shows the same count and
+  next send time (`GET /api/integrations/:id/noise-status`).
+- `held`, `release_at` in the past for more than a few minutes: the cron is not running (see
+  "What to check first") or `noise_release` is failing; look for `cron_job_failed` with
+  `job: noise_release` and `noise_release_failed` (integration id only). At most 20 integrations are
+  released per tick, so a very large backlog drains over several ticks.
+- `claimed`, `lease_until` in the past: a run died mid-release. The next tick returns the rows to
+  `held` and releases them; the release is atomic, so nothing was half-sent.
+- A `noise_hold_capacity` warn: an integration has 500 updates waiting, and further updates are being
+  delivered immediately instead of held (by design, to bound storage).
+- `noise_settings_unusable` error: an integration's `noise_json` cannot be read, so its updates are
+  being delivered normally; the dashboard shows the notice and saving replaces the document.
+
+Mitigation: wait one tick. **Never** `DELETE` or hand-edit rows to "release" them; to stop holding
+for an integration set its settings off in the dashboard (rows already held still release on
+schedule). Released rows are kept 7 days and removed by the `noise_purge` job.
+
 ## Dead-letter inspection and redelivery
 
 `dead_lettered` is terminal. A delivery reaches it when the retry budget is spent (the
@@ -280,6 +314,7 @@ What the files themselves say:
 | 0011 workspace deletion | Triggers recreated with a purge exemption | Do not run a purge with the old triggers in place |
 | 0012 Teams destination | Old Worker cannot deliver `teams` rows | Disable Teams integrations first. Restoring the old CHECK is another rebuild after deleting or retargeting `teams` rows |
 | 0014 rate-limit index | Harmless | `DROP INDEX api_rate_limits_window` |
+| 0021 noise control | Old Worker ignores the column and both tables, but it **stops releasing**: rows in `held`/`claimed` wait until a Worker that knows about them runs again (nothing is lost). Turn noise settings off and let `held_events` drain before rolling back if updates must not be delayed | `DROP TABLE held_events; DROP TABLE noise_open_failures;` is safe only once nothing is waiting; the column stays (dropping it needs a rebuild) |
 | 0016 observability | Old Worker ignores `ops_state` and the two indexes | `DROP TABLE ops_state; DROP INDEX deliveries_state_created; DROP INDEX audit_events_created;` |
 
 A rollback rehearsal has **not** been performed (docs/RELEASE_GATES.md). A restore from D1

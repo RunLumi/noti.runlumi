@@ -86,6 +86,9 @@ type Integration = {
   filters: FilterConfig;              // {} when none; see "Routing filters"
   filtersInvalid: boolean;            // stored filters corrupt/invalid: events are HELD BACK until replaced
   filtersNewer: boolean;              // saved by a newer release (rollback): sent unfiltered
+  noise: NoiseSettings | null;        // quiet hours, grouping, summaries, resolved notices; see "Noise control"
+  noiseInvalid: boolean;              // stored noise settings unreadable: updates are delivered normally
+  noiseNewer: boolean;                // saved by a newer release (rollback): ignored, delivered normally
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -95,8 +98,8 @@ type Integration = {
 | --- | --- | --- |
 | `GET /api/integrations` | — | `200 {organizationId, integrations: Integration[], truncated}` (max 200) |
 | `GET /api/integrations/:id` | — | `200 {integration}` |
-| `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?, triggerAuth?, filters?}` | `201 {integration, warnings}` (plus `signingSecret` once for `generic_webhook`, with `Cache-Control: no-store`); `409` at 100 per workspace |
-| `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled, filters}` (`filters` replaces all filters; `null` or `{}` clears them), and/or `{webhookUrl, signingSecret?, triggerAuth?}` to rotate credentials | `200 {integration, warnings}` (rotating a `generic_webhook` also returns a new `signingSecret`, once) |
+| `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?, triggerAuth?, filters?, noise?}` | `201 {integration, warnings}` (plus `signingSecret` once for `generic_webhook`, with `Cache-Control: no-store`); `409` at 100 per workspace |
+| `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled, filters, noise}` (`filters` and `noise` replace everything; `null` or `{}` clears them), and/or `{webhookUrl, signingSecret?, triggerAuth?}` to rotate credentials | `200 {integration, warnings}` (rotating a `generic_webhook` also returns a new `signingSecret`, once) |
 | `DELETE /api/integrations/:id` | — | `204` |
 
 Validation failures return `422 {"error":"Validation failed","fields":[{field,message}]}`. Every
@@ -232,7 +235,9 @@ Capability `integration.read`; another workspace's integration is `404`.
 - `outcome` is `delivered` or `filtered`. `filterId` is set when filtered. `reason` is one of a
   closed vocabulary: `allowed`, `not_in_allow_list`, `in_deny_list`, `unknown_fact`,
   `draft_excluded`, `bot_excluded`, `not_a_bot`, `ghost_exempt`, `config_invalid`,
-  `config_newer`. A routing-log row exists for every integration **with filters** that was
+  `config_newer`, plus the noise-control codes under "Noise control" (`quiet_hours`, `digest`,
+  `grouped`, `critical_bypass`, `hold_capacity`, which are always `delivered` rows). A
+  routing-log row exists for every integration **with filters** that was
   enabled, on the repository and subscribed to the event type; integrations without filters
   write none (their delivery row is the record). It holds ids, the event type, the outcome and
   the reason code, never field values or payload, is written best effort after (never inside)
@@ -252,6 +257,76 @@ for a `generic_webhook` destination, as above). It receives every event its sour
 accepts. Sending `repo` or `eventTypes` with `sourceId` is `422`, as is a `sourceId` from another
 workspace (indistinguishable from an unknown one). `PATCH` may rename, pause or replace
 credentials on it, but a `repo` or `eventTypes` change is `422`.
+
+## Noise control (quiet hours, grouping, summaries, resolved notices)
+
+Per-integration settings that **delay and combine** updates; they never drop one
+([ADR 0016](adr/0016-noise-control.md)). They apply to repository integrations and to source
+integrations (generic, GitLab, Stripe). `noise` is a closed object; every key is optional:
+
+```ts
+type NoiseSettings = {
+  timezone: string;                                   // IANA zone, e.g. "Asia/Ho_Chi_Minh"; default "UTC"
+  quietHours: { start: string; end: string } | null;  // local "HH:MM"; may wrap midnight; start != end
+  groupWindowSec: 0 | 60 | 300 | 900 | 3600;          // 0 = off (the default)
+  digest: 'off' | 'hourly' | 'daily';
+  digestAt: string;                                   // local "HH:MM"; used by the daily digest
+  resolution: boolean;                                // "Resolved" notice when a failing workflow passes again
+};
+```
+
+- `null`, absent and `{}` mean "none" and store `NULL`. Settings that change nothing also store
+  `NULL`. Unknown keys, a zone the runtime does not know (including `+05:00` style offsets), equal
+  quiet-hours times, a window off the menu and a weekly digest are `422` with dotted paths such as
+  `noise.quietHours.end`; messages never echo input. At most 2 KiB is stored.
+- **What happens to an update** (decided at ingress, after subscription and routing filters):
+  1. A **critical** update is delivered at once, always. Critical means the source mapped it to
+     status `failure`: a failed or timed-out GitHub workflow run, a generic event with severity
+     `error` or `critical`, a failed GitLab pipeline or Stripe payment (or an event type starting
+     `security.`).
+  2. Otherwise, inside quiet hours it is **held** until they end (or the next summary boundary
+     after that).
+  3. Otherwise, with a summary on, it is held until the next hourly or daily boundary; a boundary
+     inside quiet hours moves to the end of quiet hours.
+  4. Otherwise, with a group window, it joins the open group for its **group key** or opens one.
+     The key is `(organization, integration, event type, repository, subject)` where subject is the
+     pull request or issue number, workflow run id, pushed branch, deployment or release tag; updates
+     about different things are never combined.
+  5. Otherwise it is delivered.
+  If 500 updates are already waiting for the integration the update is delivered instead.
+- A held update is stored as small display fields only (title, link, repo, actor, status, event
+  type, summary line), never the payload. A cron job releases due updates through the normal outbox:
+  one notification per group (the newest item, a count and a list capped at 5 with "and N more not
+  shown"), a lone held update as itself, or one digest per integration (failures first, collapsed by
+  group key with `(×N)`, capped at 10 entries and 1800 characters, with "and N more items not
+  shown"). A digest that would be empty is not sent. Released notifications are ordinary deliveries:
+  retries, dead-lettering, replay and the delivery log apply.
+- `resolution: true` (GitHub repository integrations only) sends **"Resolved: ..."** when a
+  `workflow_run.success` follows a delivered failure of the same repository, workflow and head
+  branch, even to an integration that follows failures only. It is `422` on `noise.resolution` for
+  a source integration, and for a repository integration whose `eventTypes` contain neither
+  `workflow_run.failure` nor `workflow_run.timed_out` (checked on create and on every update of
+  either side). It defaults to **off**.
+- Stored settings that are unreadable (`noiseInvalid`) or written by a newer release
+  (`noiseNewer`) are **ignored and updates are delivered normally** (fail open, the opposite of
+  filters); `PATCH` replaces them.
+- The audit entry for a create or update lists feature names (`noise: ["quietHours","grouping"]`),
+  never times, zones or windows. Deleting an integration (or a source with `cascade=true`) deletes
+  what it was holding. Clearing the settings (`null` or `{}`) makes what is already held due at the
+  next cron tick; changing them leaves held updates on their original schedule.
+
+| Method and path | Capability | Result |
+| --- | --- | --- |
+| `GET /api/integrations/:id/noise-status` | `integration.read` | `200 {held: {count, nextReleaseAt}}`: updates waiting for this integration and the earliest scheduled release (ISO), or `null`. Another workspace's integration is `404`. |
+
+Ingress responses (`POST /webhooks/...`) add `held: <n>` when updates were held for some
+integration of the event; a held update is not reported as `duplicate`.
+
+Why an update was held or let through is recorded as a **reason code** in the routing log
+(`outcome: "delivered"`, `reason`: `quiet_hours`, `digest`, `grouped`, `critical_bypass` or
+`hold_capacity`) whether or not the integration has filters, and a released delivery in the
+delivery log carries `heldReason` (`quiet_hours`, `digest`, `grouped` or `null`) and
+`groupedCount` (how many held updates it stands for, `0` for an ordinary delivery).
 
 ## Sources (generic signed webhook source)
 

@@ -1,4 +1,5 @@
 import type { FilterId, ReasonCode } from './filters';
+import type { DeliverReason, HoldReason } from './noise';
 
 /**
  * Routing provenance: why an event was delivered to, or held back from, one integration
@@ -16,7 +17,13 @@ export const ROUTING_PURGE_ROWS_PER_TICK = 500;
  * `config_invalid`: the stored filters did not re-validate, so the event was held back (fail
  * closed). `config_newer`: they were written by a newer release (a rollback), so it was sent.
  */
-export type DecisionReason = ReasonCode | 'config_invalid' | 'config_newer';
+export type DecisionReason =
+  | ReasonCode
+  | 'config_invalid'
+  | 'config_newer'
+  // Noise control (ADR 0016): a delivered row whose reason says why it was delayed or not.
+  | HoldReason
+  | Extract<DeliverReason, 'critical_bypass' | 'hold_capacity'>;
 
 export interface RoutingDecisionRow {
   /** The deterministic delivery id for (dedup key, integration). A redelivery maps to the same row. */

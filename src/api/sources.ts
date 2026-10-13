@@ -494,11 +494,16 @@ sources.delete('/:id', async (c) => {
       409,
     );
   const results = await c.env.DB.batch([
+    // Updates held for these integrations go with them (ADR 0016); the subquery must run first.
+    c.env.DB.prepare(
+      `DELETE FROM held_events WHERE organization_id=? AND integration_id IN
+         (SELECT id FROM integrations WHERE source_id=? AND organization_id=?)`,
+    ).bind(who.orgId, id, who.orgId),
     c.env.DB.prepare('DELETE FROM integrations WHERE source_id=? AND organization_id=?').bind(id, who.orgId),
     c.env.DB.prepare('DELETE FROM sources WHERE id=? AND organization_id=?').bind(id, who.orgId),
     audit(c, who, 'source.delete', id, { integrationsDeleted: existing.integration_count }),
   ]);
-  if (results[1]?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
+  if (results[2]?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
   return c.body(null, 204);
 });
 

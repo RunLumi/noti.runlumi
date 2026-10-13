@@ -4,6 +4,7 @@ import type { Bindings } from '../env';
 import { asRecord } from '../lib/json';
 import { parseFacts, parseFilters, readStoredFilters } from '../routing/filter-input';
 import { evaluateFilters } from '../routing/filters';
+import { heldStatus } from '../routing/noise-store';
 import { decodeCursor, listRoutingLog, LOG_PAGE_DEFAULT, LOG_PAGE_MAX } from '../routing/provenance';
 import { gate, invalid, loadRow, mutationRejected, rateLimited, readJson } from './integrations';
 
@@ -35,6 +36,24 @@ routing.get('/:id/routing-log', async (c) => {
 
   const page = await listRoutingLog(c.env.DB, who.orgId, id, limit, after);
   return c.json({ entries: page.entries, nextCursor: page.nextCursor });
+});
+
+/**
+ * How many updates noise control is holding for this integration and when the next release is
+ * due, so held updates are visible and never a black hole (spec 11 F146).
+ */
+routing.get('/:id/noise-status', async (c) => {
+  const who = await gate(c, 'integration.read');
+  if (who instanceof Response) return who;
+  const id = c.req.param('id');
+  if (!(await loadRow(c, who.orgId, id))) return c.json({ error: 'Not found' }, 404);
+  const status = await heldStatus(c.env.DB, who.orgId, id);
+  return c.json({
+    held: {
+      count: status.count,
+      nextReleaseAt: status.nextReleaseAt === null ? null : new Date(status.nextReleaseAt).toISOString(),
+    },
+  });
 });
 
 routing.post('/:id/filters/preview', async (c) => {

@@ -7,6 +7,8 @@ import type { Bindings, DeliveryMessage } from '../../../env';
 import { readBodyCapped } from '../../../lib/body';
 import { log } from '../../../platform/log';
 import { dispatchOutbox } from '../../../pipeline/outbox';
+import { createNoisePlanner } from '../../../routing/noise-ingress';
+import { decisionStatement } from '../../../routing/provenance';
 import { sourceIngressLimiter } from '../../../security/rate-limit';
 import { parseGenericEvent, toDisplayFields } from './event';
 import { openSourceSecret, type SourceCredentialRow } from './secret';
@@ -109,10 +111,10 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
 
   const organizationId = source.organization_id;
   const rows = await c.env.DB.prepare(
-    'SELECT id FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
+    'SELECT id,noise_json FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
   )
     .bind(organizationId, source.id)
-    .all<{ id: string }>();
+    .all<{ id: string; noise_json: string | null }>();
 
   // F170: tenant-bound transport identity. A sender retry or replay inside the tolerance
   // window repeats `webhook-id`, so the same event is accepted once per destination.
@@ -150,14 +152,54 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
   }
 
   let queued = 0;
+  let held = 0;
+  const planner = createNoisePlanner(c.env.DB, organizationId, nowMs);
   for (const row of rows.results) {
     const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
     const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...display };
+    // Noise control (ADR 0016): deliver now or hold; never drop. A failure-class event
+    // (severity error or critical) bypasses every hold.
+    const plan = await planner.plan({
+      integrationId: row.id,
+      noiseJson: row.noise_json,
+      deliveryId: id,
+      eventType: display.eventType ?? 'notification',
+      subject: '',
+      display,
+    });
+    if (plan.action === 'hold' || plan.reason !== null) {
+      try {
+        await decisionStatement(
+          c.env.DB,
+          {
+            id,
+            organizationId,
+            integrationId: row.id,
+            eventType: display.eventType ?? 'notification',
+            outcome: 'delivered',
+            filterId: null,
+            reason: plan.action === 'hold' ? plan.reason : (plan.reason ?? 'critical_bypass'),
+            unknown: false,
+            decidedAt: nowMs,
+          },
+          [id, id],
+        ).run();
+      } catch {
+        log('warn', 'routing_provenance_failed', { records: 1 });
+      }
+    }
+    if (plan.action === 'hold') {
+      const [stored] = await c.env.DB.batch([plan.statement]);
+      if (stored?.meta.changes) held++;
+      continue;
+    }
     const results = await c.env.DB.batch([
+      // Not when this event is already waiting in `held_events` (ADR 0016).
       c.env.DB.prepare(
         `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,body_hash,created_at)
-         VALUES(?,?,?,'pending',?,?,CURRENT_TIMESTAMP)`,
-      ).bind(id, row.id, organizationId, dedup.hex, bodyHash),
+         SELECT ?,?,?,'pending',?,?,CURRENT_TIMESTAMP
+         WHERE NOT EXISTS (SELECT 1 FROM held_events WHERE id=? AND organization_id=?)`,
+      ).bind(id, row.id, organizationId, dedup.hex, bodyHash, id, organizationId),
       // Only if the delivery row above was NEW (`changes()` is the previous statement's row
       // count). Otherwise a repeat after the outbox row was purged (retention drops dispatched
       // outbox rows after 7 days while the delivery lives on) would send the event again.
@@ -186,7 +228,8 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
     {
       accepted: true,
       persisted: queued,
-      ...(rows.results.length > 0 && queued === 0 ? { duplicate: true } : {}),
+      ...(held > 0 ? { held } : {}),
+      ...(rows.results.length > 0 && queued === 0 && held === 0 ? { duplicate: true } : {}),
     },
     202,
   );

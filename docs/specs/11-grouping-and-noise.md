@@ -42,7 +42,7 @@ evaluated. Any pricing model that charges for suppression will make this product
 
 ## F141 — Grouping key
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 key derived from normalised fields, organization first, hashed to 32 hex; `group_by` is NOT user-configurable (a fixed subject per event kind: PR/issue number, run id, branch, deployment, release tag) (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a user, I want related events combined, so that 40 comments on one PR produce one
 notification instead of 40.
@@ -82,7 +82,7 @@ structurally impossible rather than merely filtered.
 
 ## F142 — Group window
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 Off / 1 / 5 / 15 / 60 minutes, default off, plain-language preview; "Send at least every" is not built (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a user, I want a window I can reason about, so that grouping is predictable.
 
@@ -116,7 +116,7 @@ knobs are correct and opaque; ours ship as four labelled choices.
 
 ## F143 — Collapse into one message
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 one message with the newest item, a count and a capped list that says what is not shown; Slack top-level `text` and Discord URL rules are not separately tested (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a user, I want one message listing related events, so that I can scan rather than
 scroll.
@@ -144,7 +144,7 @@ scroll.
 
 ## F144 — Digest scheduling
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 hourly and daily at a local time, empty digest sends nothing, retry follows the normal ladder; weekly is not built (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a user, I want low-value chatter batched into a scheduled summary, so that my
 chat is quiet but I still know what happened.
@@ -175,7 +175,7 @@ the same machinery with a different trigger.
 
 ## F145 — Digest content model
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 failures first then newest first, same-key entries collapsed with a count, text markers, capped with "N more not shown"; not grouped by category and repository, no link to an in-app view (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a user, I want a digest that is actually readable, so that I scan it in ten
 seconds.
@@ -205,7 +205,7 @@ That division is what lets the digest stay small without losing information.
 
 ## F146 — Quiet hours
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 per-integration (not per-workspace) window with a time zone, critical bypass, held updates released as one digest and visible as "N waiting"; no separate emergency override beyond the critical rule (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a user, I want non-urgent notifications held while I sleep, so that I am not
 woken by a routine build.
@@ -276,7 +276,7 @@ user-controlled input.
 
 ## F148 — Critical-event lock
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 a FIXED critical rule (failed workflow runs, generic `error`/`critical`, provider failures) bypasses quiet hours, digests and grouping; no admin-configurable critical flag, no member-mute explanation (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a workspace admin, I want to guarantee that failures always reach someone, so
 that a member cannot mute an alert into oblivion.
@@ -415,7 +415,7 @@ does not populate the field, and catastrophically wrong for `ghost`.
 
 ## F152 — Resolution notices
 
-**Priority** P1 · **Status** not started · **Differentiator**
+**Priority** P1 · **Status** 🟡 GitHub workflow failure then success on the same repository, workflow and branch, default OFF, run attempts not in the key, no "no longer retained" wording (slice 8, [ADR 0016](../adr/0016-noise-control.md)) · **Differentiator**
 
 **Story** As a user, I want to know when a failure resolved, so that I can stop holding it in
 my head.
@@ -652,7 +652,7 @@ the conversation stays readable.
 
 ## F159 — Severity and priority
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 only a derived critical rule and failure-first ordering in digests; no `neutral`/unknown-outcome metric (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Story** As a user, I want failures to sort above comments, so that triage starts at the top.
 
@@ -830,7 +830,7 @@ was lost.
 
 ## F165 — Grouping safety invariants
 
-**Priority** P0 · **Status** not started · **Reliability, not feature**
+**Priority** P0 · **Status** 🟡 organization is the first component of the key and every held-event query is organization-scoped; the primary key is the deterministic delivery id, not `(organization, key)`; two-organization test exists (slice 8, [ADR 0016](../adr/0016-noise-control.md)) · **Reliability, not feature**
 
 **Story** As a security reviewer, I want grouping to be structurally incapable of crossing a
 tenant boundary, so that a merge bug cannot become a data leak.
@@ -862,7 +862,7 @@ boundary. It must be designed so the mistake is impossible rather than merely un
 
 ## F166 — Grouping observability
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 log lines only (`noise_release`, `noise_hold_capacity`, `noise_settings_unusable`); no metrics store (slice 8, [ADR 0016](../adr/0016-noise-control.md))
 
 **Acceptance**
 - [ ] Metrics: group size distribution, time-to-first-delivery, digest size, suppression

@@ -35,6 +35,9 @@ const integration = (over: Partial<Integration> & Pick<Integration, 'id' | 'name
   filters: {},
   filtersInvalid: false,
   filtersNewer: false,
+  noise: null,
+  noiseInvalid: false,
+  noiseNewer: false,
   createdAt: '2026-10-01T09:00:00Z',
   updatedAt: '2026-10-02T09:00:00Z',
   ...over,
@@ -60,6 +63,20 @@ export const INTEGRATIONS: readonly Integration[] = [
       branch: { allow: ['main', 'release/*'], deny: [] },
       actor: { allow: [], deny: ['dependabot[bot]'], bots: 'exclude' },
       draft: 'exclude',
+    },
+  }),
+  integration({
+    id: 'int_6',
+    name: 'Night-quiet builds',
+    repo: 'acme/platform',
+    eventTypes: ['workflow_run.failure', 'workflow_run.success', 'issue_comment.created'],
+    noise: {
+      timezone: 'Asia/Ho_Chi_Minh',
+      quietHours: { start: '22:00', end: '08:00' },
+      groupWindowSec: 300,
+      digest: 'daily',
+      digestAt: '08:00',
+      resolution: true,
     },
   }),
   integration({
@@ -138,7 +155,28 @@ export const ROUTING_LOG = [
     unknownFact: false,
     decidedAt: '2026-10-13T08:05:00Z',
   },
+  {
+    id: 'rl_3',
+    eventType: 'issue_comment.created',
+    outcome: 'delivered',
+    filterId: null,
+    reason: 'quiet_hours',
+    unknownFact: false,
+    decidedAt: '2026-10-13T16:10:00Z',
+  },
+  {
+    id: 'rl_4',
+    eventType: 'workflow_run.failure',
+    outcome: 'delivered',
+    filterId: null,
+    reason: 'critical_bypass',
+    unknownFact: false,
+    decidedAt: '2026-10-13T16:20:00Z',
+  },
 ] as const;
+
+/** What `GET /api/integrations/:id/noise-status` returns while updates are waiting. */
+export const NOISE_STATUS = { held: { count: 3, nextReleaseAt: '2026-10-14T01:00:00Z' } } as const;
 
 export const INSTALLATIONS: readonly GithubInstallation[] = [
   {

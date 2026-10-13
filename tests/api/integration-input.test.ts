@@ -19,7 +19,7 @@ function fields(result: ReturnType<typeof parseCreateIntegration>): string[] {
 describe('create validation', () => {
   it('accepts a valid Slack integration', () => {
     const r = parseCreateIntegration(valid);
-    expect(r.ok && r.value).toEqual({ ...valid, signingSecret: null, filters: {} });
+    expect(r.ok && r.value).toEqual({ ...valid, signingSecret: null, filters: {}, noise: null });
   });
 
   it('accepts a signed Lark integration', () => {

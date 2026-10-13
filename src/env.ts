@@ -25,9 +25,18 @@ export interface DeliveryMessage {
   readonly eventType?: string;
   /** At most {@link SUMMARY_MAX_CHARS}; derived from a few scalar fields, not the body. */
   readonly summary?: string;
+  /**
+   * Set only on a notification that stands for several updates (a group or a digest, noise
+   * control). It raises the summary bound to {@link COMBINED_SUMMARY_MAX_CHARS}, because the
+   * summary then lists the items. 1..500.
+   */
+  readonly count?: number;
 }
 
 export const SUMMARY_MAX_CHARS = 280;
+/** Summary bound for a combined notification; destination adapters still fit it to their caps. */
+export const COMBINED_SUMMARY_MAX_CHARS = 1800;
+export const COMBINED_COUNT_MAX = 500;
 
 export type Bindings = AuthBindings & {
   /** Static assets of the dashboard build (ADR 0017). Absent only under `vite dev`. */

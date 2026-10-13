@@ -137,6 +137,9 @@ export interface DeliveryRowRecord {
   integration_enabled: number | null;
   integration_quarantined_at: string | null;
   latest_replay_state: string | null;
+  /** Held events this delivery carries (noise control); 0 for an ordinary delivery. */
+  held_count: number | null;
+  held_reason: string | null;
 }
 
 export interface DeliveryErrorView {
@@ -182,6 +185,12 @@ export interface DeliveryView {
   /** State of the most recent replay of this row, if one was requested. */
   readonly latestReplayState: DeliveryState | null;
   readonly canReplay: boolean;
+  /**
+   * Why this notification was delayed or combined, as a reason code (noise control, ADR 0016),
+   * or null for an ordinary one. `groupedCount` is how many held updates it stands for.
+   */
+  readonly heldReason: 'quiet_hours' | 'digest' | 'grouped' | null;
+  readonly groupedCount: number;
 }
 
 /** SQLite `CURRENT_TIMESTAMP` (`YYYY-MM-DD HH:MM:SS`, UTC) to an ISO instant. */
@@ -206,6 +215,8 @@ function errorView(code: string | null): DeliveryErrorView | null {
     userActionable: spec.userActionable,
   };
 }
+
+const HELD_REASONS: ReadonlySet<string> = new Set(['quiet_hours', 'digest', 'grouped']);
 
 export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): DeliveryView {
   const state = normalizeDeliveryState(row.state);
@@ -237,6 +248,11 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
       state === 'dead_lettered' &&
       status === 'available' &&
       (latest === null || latest === 'dead_lettered'),
+    heldReason:
+      row.held_reason !== null && HELD_REASONS.has(row.held_reason)
+        ? (row.held_reason as 'quiet_hours' | 'digest' | 'grouped')
+        : null,
+    groupedCount: row.held_count ?? 0,
   };
 }
 

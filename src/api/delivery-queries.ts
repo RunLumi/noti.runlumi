@@ -13,7 +13,11 @@ export const SELECT_VIEW = `
   i.enabled AS integration_enabled, i.credentials_quarantined_at AS integration_quarantined_at,
   (SELECT r.state FROM deliveries r
      WHERE r.replay_of = d.id AND r.organization_id = d.organization_id
-     ORDER BY r.rowid DESC LIMIT 1) AS latest_replay_state`;
+     ORDER BY r.rowid DESC LIMIT 1) AS latest_replay_state,
+  (SELECT COUNT(*) FROM held_events h
+     WHERE h.organization_id = d.organization_id AND h.released_in = d.id) AS held_count,
+  (SELECT h.hold_reason FROM held_events h
+     WHERE h.organization_id = d.organization_id AND h.released_in = d.id LIMIT 1) AS held_reason`;
 
 export const FROM_VIEW = `FROM deliveries d
   LEFT JOIN integrations i ON i.id = d.integration_id AND i.organization_id = d.organization_id`;

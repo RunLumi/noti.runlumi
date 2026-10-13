@@ -17,6 +17,7 @@ import {
   type FieldError,
   type ParseOptions,
 } from './integration-input';
+import { noiseCoverageIssue, readStoredNoise, serializeNoise, type NoiseSettings } from '../routing/noise';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
 import { isDeletionPending } from './workspace-lifecycle';
 import {
@@ -82,11 +83,12 @@ interface IntegrationRow {
   credentials_quarantined_at: string | null;
   credentials_quarantine_reason: string | null;
   filters_json: string | null;
+  noise_json: string | null;
   sealed: number;
 }
 
 const SELECT_COLUMNS = `id,name,repo,source_id,event_types,destination,destination_host,enabled,created_at,updated_at,
-  credentials_quarantined_at,credentials_quarantine_reason,filters_json,(webhook_envelope IS NOT NULL) AS sealed`;
+  credentials_quarantined_at,credentials_quarantine_reason,filters_json,noise_json,(webhook_envelope IS NOT NULL) AS sealed`;
 
 export interface IntegrationView {
   readonly id: string;
@@ -109,6 +111,12 @@ export interface IntegrationView {
   readonly filtersInvalid: boolean;
   /** True when the stored filters were written by a newer release (rollback): sent unfiltered. */
   readonly filtersNewer: boolean;
+  /** Noise settings (quiet hours, grouping, digest, resolution); null when none. */
+  readonly noise: NoiseSettings | null;
+  /** The stored noise settings are unreadable: updates are delivered normally (fail open). */
+  readonly noiseInvalid: boolean;
+  /** Written by a newer release (rollback): ignored, updates are delivered normally. */
+  readonly noiseNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
 }
@@ -124,6 +132,7 @@ function eventTypesOf(json: string): string[] {
 
 export function toView(row: IntegrationRow): IntegrationView {
   const stored = readStoredFilters(row.filters_json);
+  const noise = readStoredNoise(row.noise_json);
   return {
     id: row.id,
     name: row.name ?? row.repo,
@@ -137,6 +146,9 @@ export function toView(row: IntegrationRow): IntegrationView {
     filters: stored.kind === 'ok' ? stored.config : {},
     filtersInvalid: stored.kind === 'invalid',
     filtersNewer: stored.kind === 'newer',
+    noise: noise.kind === 'ok' ? noise.settings : null,
+    noiseInvalid: noise.kind === 'invalid',
+    noiseNewer: noise.kind === 'newer',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -250,6 +262,23 @@ async function seal(c: Ctx, orgId: string, id: string, credentials: DestinationC
   return sealCredentials({ organizationId: orgId, connectionId: id }, credentials, keyringFromEnv(c.env));
 }
 
+/** Feature names only, for audit metadata: times, zones and windows never enter the log. */
+function activeNoiseFeatures(noise: NoiseSettings | null): string[] {
+  if (!noise) return [];
+  return [
+    ...(noise.quietHours ? ['quietHours'] : []),
+    ...(noise.groupWindowSec > 0 ? ['grouping'] : []),
+    ...(noise.digest !== 'off' ? ['digest'] : []),
+    ...(noise.resolution ? ['resolution'] : []),
+  ];
+}
+
+/** The noise settings currently stored, or null when none or unreadable. */
+function currentNoise(row: IntegrationRow): NoiseSettings | null {
+  const stored = readStoredNoise(row.noise_json);
+  return stored.kind === 'ok' ? stored.settings : null;
+}
+
 /** The filters currently stored, or `{}` when none or unreadable. */
 function currentFilters(row: IntegrationRow): FilterConfig {
   const stored = readStoredFilters(row.filters_json);
@@ -343,8 +372,8 @@ integrations.post('/', async (c) => {
     c.env.DB.prepare(
       `INSERT INTO integrations(id,organization_id,name,repo,source_id,event_types,destination,destination_host,
          webhook_ciphertext,key_salt,dek_wrapped,kek_version,webhook_envelope,lark_secret_envelope,
-         enabled,created_by,created_at,updated_at,filters_json)
-       VALUES(?,?,?,?,?,?,?,?,'',?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?)`,
+         enabled,created_by,created_at,updated_at,filters_json,noise_json)
+       VALUES(?,?,?,?,?,?,?,?,'',?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?,?)`,
     ).bind(
       id,
       who.orgId,
@@ -361,6 +390,7 @@ integrations.post('/', async (c) => {
       blob(sealed.signingSecretEnvelope),
       who.userId,
       serializeFilters(input.filters),
+      serializeNoise(input.noise),
     ),
     audit(
       c,
@@ -375,6 +405,7 @@ integrations.post('/', async (c) => {
         signed: input.signingSecret !== null,
         // Ids only: filter values (branch names, logins, labels) never enter the audit log.
         filters: activeFilterIds(input.filters),
+        noise: activeNoiseFeatures(input.noise),
       },
       false,
     ),
@@ -464,6 +495,14 @@ integrations.patch('/:id', async (c) => {
     const issue = coverageIssue(effectiveFilters, effectiveEvents);
     if (issue) return invalid(c, [issue]);
   }
+  // Resolved notices need failing workflow runs among the selected updates (ADR 0016).
+  if (!existing.source_id && (input.noise !== undefined || input.eventTypes !== undefined)) {
+    const problem = noiseCoverageIssue(
+      input.noise !== undefined ? input.noise : currentNoise(existing),
+      effectiveEvents,
+    );
+    if (problem) return invalid(c, [problem]);
+  }
 
   type SqlValue = string | number | ArrayBuffer | null;
   const assignments: [column: string, value: SqlValue][] = [];
@@ -474,6 +513,7 @@ integrations.patch('/:id', async (c) => {
     assignments.push(['event_types', JSON.stringify(input.sourceEventTypes)]);
   if (input.enabled !== undefined) assignments.push(['enabled', input.enabled ? 1 : 0]);
   if (input.filters !== undefined) assignments.push(['filters_json', serializeFilters(input.filters)]);
+  if (input.noise !== undefined) assignments.push(['noise_json', serializeNoise(input.noise)]);
   const sets: string[] = ['updated_at=CURRENT_TIMESTAMP'];
   const values: SqlValue[] = [];
   for (const [column, value] of assignments) {
@@ -515,6 +555,17 @@ integrations.patch('/:id', async (c) => {
     );
   }
 
+  // Turning every noise setting off releases what is already held at the next cron tick instead
+  // of leaving it waiting for a schedule the person has just removed (nothing was ever lost).
+  if (input.noise === null) {
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE held_events SET release_at=? WHERE organization_id=? AND integration_id=?
+           AND state='held' AND release_at>?`,
+      ).bind(Date.now(), who.orgId, id, Date.now()),
+    );
+  }
+
   const changed = Object.keys(input)
     .filter((k) => k !== 'credentials')
     .map((k) => (k === 'sourceEventTypes' ? 'eventTypes' : k));
@@ -527,6 +578,7 @@ integrations.patch('/:id', async (c) => {
         ...(input.sourceEventTypes ? { eventTypes: input.sourceEventTypes } : {}),
         ...(input.repo ? { repo: input.repo } : {}),
         ...(input.filters ? { filters: changedFilterIds(currentFilters(existing), input.filters) } : {}),
+        ...(input.noise !== undefined ? { noise: activeNoiseFeatures(input.noise) } : {}),
       }),
     );
   }
@@ -581,6 +633,15 @@ integrations.delete('/:id', async (c) => {
     audit(c, who, 'integration.delete', id, { repo: existing.repo, destination: existing.destination }),
     // Routing provenance for this integration goes with it, in the same transaction.
     c.env.DB.prepare('DELETE FROM routing_decisions WHERE integration_id=? AND organization_id=?').bind(
+      id,
+      who.orgId,
+    ),
+    // Held updates and open failures belong to the integration too (ADR 0016).
+    c.env.DB.prepare('DELETE FROM held_events WHERE integration_id=? AND organization_id=?').bind(
+      id,
+      who.orgId,
+    ),
+    c.env.DB.prepare('DELETE FROM noise_open_failures WHERE integration_id=? AND organization_id=?').bind(
       id,
       who.orgId,
     ),

@@ -24,6 +24,7 @@ import {
   INSTALLATIONS,
   INTEGRATIONS,
   MEMBERS,
+  NOISE_STATUS,
   ORG_ID,
   PASSKEYS,
   ROUTING_LOG,
@@ -146,6 +147,7 @@ export function installFetch(state: ApiState): void {
         return Promise.resolve(
           state.sources === 'error' ? json({ error: 'boom' }, 500) : json({ sources: state.sources }),
         );
+      if (/^\/api\/integrations\/[^/]+\/noise-status$/.test(path)) return Promise.resolve(json(NOISE_STATUS));
       if (/^\/api\/integrations\/[^/]+\/routing-log$/.test(path))
         return Promise.resolve(json({ entries: ROUTING_LOG, nextCursor: null }));
       const one = /^\/api\/integrations\/([^/]+)$/.exec(path);
