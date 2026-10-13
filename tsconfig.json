@@ -13,5 +13,14 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true
-  }
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "web",
+    "node_modules",
+    "generated"
+  ]
 }

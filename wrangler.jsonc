@@ -29,5 +29,17 @@
     "crons": [
       "* * * * *"
     ]
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "send_email": [
+    {
+      "name": "AUTH_EMAIL"
+    }
+  ],
+  "vars": {
+    "APP_ORIGIN": "https://noti.runlumi.app",
+    "AUTH_FROM_EMAIL": "noreply@runlumi.app"
   }
 }

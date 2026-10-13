@@ -1,7 +1,9 @@
+import { createAuth, type AuthBindings } from './auth/better-auth';
+import workspace from './auth/workspace';
 import {classifyGithubEvent,verifyGithubSignature} from './connectors/sources/github/events';
 import { larkPayload, larkAccepted } from './connectors/destinations/lark/webhook';
 import { Hono } from 'hono';
-type Bindings = { DB: D1Database; DELIVERY_QUEUE: Queue<Delivery>; GITHUB_WEBHOOK_SECRET: string; ENCRYPTION_KEY: string };
+type Bindings = AuthBindings & { DELIVERY_QUEUE: Queue<Delivery>; GITHUB_WEBHOOK_SECRET: string; ENCRYPTION_KEY: string };
 type Delivery = { id: string; integrationId: string; destination: 'lark'|'slack'; ciphertext: string; larkSecretCiphertext?: string | null; title: string; url: string };
 const app = new Hono<{Bindings: Bindings}>();
 const enc = new TextEncoder();
@@ -12,6 +14,8 @@ async function decrypt(ciphertext:string, keyHex:string) {
   const bytes = Uint8Array.from(atob(ciphertext),c=>c.charCodeAt(0));
   return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes.slice(0,12)},key,bytes.slice(12)));
 }
+app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
+app.route('/api/workspace', workspace);
 app.get('/health',c=>c.json({ok:true,service:'lumi-noti'}));
 app.post('/webhooks/github',async c=>{
   if (!c.env.GITHUB_WEBHOOK_SECRET) return c.text('Not configured',503);
