@@ -268,7 +268,7 @@ export const token = {
 
 **Security** — F206 is the layer that makes F120 (redaction) enforceable in the view: a
 component that renders a `DestinationConfig` **cannot** receive the ciphertext column because
-the type it accepts omits it (F097). Redaction at render time is a fallback, not the mechanism.
+the type it accepts omits it (F97). Redaction at render time is a fallback, not the mechanism.
 
 **Tests**
 - `no_hardcoded_colour_values_outside_the_token_module`
@@ -329,7 +329,7 @@ type SetupStep = {
 ```
 
 - [ ] ⭐ **A step is `done` only when verified, never when asserted.**
-      `github_connected` requires a bound installation row (F056/F057), not a redirect that
+      `github_connected` requires a bound installation row (F56/F57), not a redirect that
       returned. `destination_connected` requires `F98` test delivery success **or** an explicit
       user choice `skip_test` recorded as such — and `skip_test` means the step reports
       *"Not verified — you skipped the test message"*, never a green tick.
@@ -389,7 +389,7 @@ CREATE INDEX ix_setup_progress_current ON setup_progress(org_id, scope, scope_re
 | All steps done, user returns | Overview shows the maintenance view, not the wizard |
 | Step cannot be derived | `internal_error`, 500; metric `setup_state_unresolvable` raised |
 
-**Security** — `setup_progress` is tenant-scoped on every read and write (F024/F026). No step
+**Security** — `setup_progress` is tenant-scoped on every read and write (F24/F26). No step
 records a credential, a webhook URL or a token; `note` is free text and is **not** an escape
 hatch — it is size-capped and rendered as text only.
 
@@ -403,7 +403,7 @@ hatch — it is size-capped and rendered as text only.
 - `setup_progress_is_tenant_scoped_on_every_query`
 - `steps_may_be_completed_out_of_order`
 
-**Deps** — F056, F057, F098, F191.
+**Deps** — F56, F57, F98, F191.
 
 ---
 
@@ -423,8 +423,8 @@ back to the right screen, so that I never end up lost on a GitHub page.
       Safari and iOS, and the destination provider (Microsoft) will also hand back a popup-shaped
       callback. Cost of a full-page redirect: one extra browser back. Cost of a blocked popup: a
       dead end for the target user.
-- [ ] `state` is generated and consumed exactly as F056 specifies — signed, single-use,
-      expiring, bound to `{org_id, user_id, expiry}`. This feature is the **UI** for F056 and
+- [ ] `state` is generated and consumed exactly as F56 specifies — signed, single-use,
+      expiring, bound to `{org_id, user_id, expiry}`. This feature is the **UI** for F56 and
       must not re-derive tenant binding client-side.
 - [ ] The callback screen states three things in order, without a spinner-only state:
       1. *"You're connected as @<github_login>."*
@@ -443,7 +443,7 @@ back to the right screen, so that I never end up lost on a GitHub page.
       | Already connected | *"Connected as @x"* + *"Manage repositories"* → F209, never a second install |
       | Install on a GitHub org where SSO blocks the App | GitHub shows its own error page; we surface *"Your organization restricts which GitHub Apps it allows. Ask an administrator to approve Lumi Noti."* and nothing more |
       | Reinstall after uninstall | Fresh `state`; the old installation row is reconciled, never silently reused |
-      | `installation_id` in the query string | **Ignored** (F056). The UI must not display it |
+      | `installation_id` in the query string | **Ignored** (F56). The UI must not display it |
 - [ ] Progress through the flow is announced to assistive technology as a live region; the GitHub
       redirect is a navigation, so the landing screen re-announces its own title.
 - [ ] A **copyable** fallback line — *"or ask your administrator to install Lumi Noti for the
@@ -451,7 +451,7 @@ back to the right screen, so that I never end up lost on a GitHub page.
       Grafana and incident.io all offer per-block test actions for the same reason: the person
       reading the instructions is frequently not the person who holds admin rights.
 - [ ] The screen carries the **permission list we actually request**, rendered from the App
-      manifest (F055), not from a hand-written string that drifts.
+      manifest (F55), not from a hand-written string that drifts.
 
 **Design** — The instructions-instructions problem: the person reading "Approve the permissions
 request" is often not the person who can approve it. So this screen is written for two
@@ -481,14 +481,14 @@ type GitHubConnectUi = {
 | Condition | Behaviour |
 | --- | --- |
 | `state` missing/expired/replayed | 400 page: *"This link has expired. Start again."* + a Connect button. No detail |
-| `installation.created` for an unknown `state` | Stored `unclaimed` (F056); UI says *"You're connected, but not to this workspace. Ask an administrator, or sign in with the account you used."* |
+| `installation.created` for an unknown `state` | Stored `unclaimed` (F56); UI says *"You're connected, but not to this workspace. Ask an administrator, or sign in with the account you used."* |
 | Installation bound to a different `org_id` | **Refuse**, audit (F222), message says only *"This GitHub installation is already connected to another workspace."* |
 | GitHub unreachable during confirm | Retry with backoff, then *"We couldn't confirm with GitHub. Try again in a minute."* — never a dead spinner |
 
 **Security** — `installation_id` from the query string is never trusted, never displayed and
-never used to authorise; only the signed `installation.created` event binds (F056). The install
+never used to authorise; only the signed `installation.created` event binds (F56). The install
 link is a **capability URL** — anyone holding it can install the App into a GitHub account — so
-it is never logged in full (F012) and its `state` is single-use.
+it is never logged in full (F12) and its `state` is single-use.
 
 **Tests**
 - `install_flow_is_a_full_page_navigation_not_a_popup`
@@ -500,7 +500,7 @@ it is never logged in full (F012) and its `state` is single-use.
 - `permission_list_is_rendered_from_the_app_manifest`
 - `administrator_instructions_are_copyable`
 
-**Deps** — F055, F056, F057.
+**Deps** — F55, F56, F57.
 
 ---
 
@@ -539,7 +539,7 @@ control exactly what leaves my GitHub account.
       when the token's scopes do not cover it, or when it was archived. The picker distinguishes
       these where it can and otherwise links to a named troubleshooting page that lists all
       four.
-- [ ] The selection is **enforced server-side** (F067). A repository added later, directly in
+- [ ] The selection is **enforced server-side** (F67). A repository added later, directly in
       GitHub, does not become deliverable until our webhook authorises it. The UI never
       implies otherwise.
 - [ ] Removing a repository is a **stop**, not a delete: its history remains in the delivery log
@@ -555,7 +555,7 @@ subscribed to everything they own.
 **Schema**
 
 ```sql
--- F067 enforces this; the UI reads it and never writes around it.
+-- F67 enforces this; the UI reads it and never writes around it.
 CREATE TABLE github_installation_repositories (
   installation_id TEXT NOT NULL,
   repository_id   INTEGER NOT NULL,     -- GitHub numeric id, not the name
@@ -577,7 +577,7 @@ CREATE TABLE github_installation_repositories (
 | Token lacks `repo` scope on a private repo | Exclude it and name the reason; never silently drop |
 
 **Security** — The repository list is read with the **installation token**, not a user's PAT
-(F066). A PAT has a wider blast radius than an installation and cannot be scoped to the repos
+(F66). A PAT has a wider blast radius than an installation and cannot be scoped to the repos
 that were actually selected. Private repository names are themselves sensitive — they are
 visible only to members of the organisation, and this API is member-only and tenant-scoped.
 
@@ -591,7 +591,7 @@ visible only to members of the organisation, and this API is member-only and ten
 - `removal_stops_delivery_and_preserves_history`
 - `repository_picker_reads_via_the_installation_token`
 
-**Deps** — F067, F057, F070.
+**Deps** — F67, F57, F70.
 
 ---
 
@@ -621,8 +621,8 @@ anything.
       setting. You can change it any time."* The user can accept the default with one keypress —
       this is the step most likely to decide the F226 median.
 - [ ] Raw event-type selection is **present but collapsed** under *"Show exactly which events
-      this includes"* — a read-only checklist of the closed F042 catalog, not an authoring
-      surface. "Custom" in F042/D16 is a trap: it is a parse fallback, not a user feature.
+      this includes"* — a read-only checklist of the closed F42 catalog, not an authoring
+      surface. "Custom" in F42/D16 is a trap: it is a parse fallback, not a user feature.
 - [ ] Applying or changing a preset shows the **previewed diff** F154 requires, in the same
       plain language: *"This will stop sending 3 types of update and combine comments for 5
       minutes."* Changing a preset **never** silently discards hand-edited filters — the diff
@@ -647,7 +647,7 @@ traffic, explicitly labelled with its window and its uncertainty, closes that ga
 **derived from the customer's own data, never a global average**, because a global average would
 be a fabricated number.
 
-**Schema** — none. This feature reads F154/F155's preset data and F042's closed event catalog
+**Schema** — none. This feature reads F154/F155's preset data and F42's closed event catalog
 and defines neither. The only type it owns is the screen-local view model:
 
 ```ts
@@ -678,7 +678,7 @@ rendered in the picker — only counts, which are already tenant-scoped aggregat
 - `raw_event_checklist_is_read_only`
 - `quick_setup_completes_from_a_preset_alone`
 
-**Deps** — F154, F155, F042, F167.
+**Deps** — F154, F155, F42, F167.
 
 ---
 
@@ -703,7 +703,7 @@ by our preference (from `docs/DESTINATION_API_REFERENCE.md` §0):
 - [ ] For every destination the flow states, **before** asking for anything: *"Where should
       notifications go?"* → *"To the channel you pick in Slack"* / *"To a group you create in
       Lark"*, plus what the message will look like.
-- [ ] ⭐ **Credential handling** (F096/F097) is uniform:
+- [ ] ⭐ **Credential handling** (F96/F97) is uniform:
       - The field is `type="password"`, `autocomplete="off"`, `spellcheck="false"`,
         `data-1p-ignore`, and labelled **"Webhook URL"**, not "API endpoint".
       - A persistent warning sits above it: *"Anyone with this URL can post to your channel.
@@ -715,7 +715,7 @@ by our preference (from `docs/DESTINATION_API_REFERENCE.md` §0):
         auto-trims or reformats a pasted URL, because doing so silently corrupts the secret.
       - Clipboard write-back ("copy your webhook again") is **not offered**; if the destination
         exposes the URL to the user again it is a leak by definition.
-- [ ] **Capability honesty at save time** (F092/F093): options this destination cannot honour
+- [ ] **Capability honesty at save time** (F92/F93): options this destination cannot honour
       are rendered **disabled with the reason inline**, e.g. *"Update the same message when CI
       finishes again — not available with a Slack incoming webhook."* Never selected-then-
       degraded.
@@ -769,8 +769,8 @@ type DestinationSetupState = {
 | Slack OAuth returns a URL outside `hooks.slack.com` | Rejected; the value is never stored |
 
 **Security** — `credential_ref` is the only thing the client ever receives. SSRF validation is a
-**write-time** gate (F096) and re-checked at send time (F091). The credential is never returned
-by any read endpoint, never logged (F012), never included in an error body, and never placed in
+**write-time** gate (F96) and re-checked at send time (F91). The credential is never returned
+by any read endpoint, never logged (F12), never included in an error body, and never placed in
 a client-side analytics event. Redirects are `redirect: 'error'`.
 
 **Tests**
@@ -783,7 +783,7 @@ a client-side analytics event. Redirects are `redirect: 'error'`.
 - `saving_a_non_secret_field_preserves_the_existing_secret`
 - `credential_appears_in_no_read_endpoint_and_no_log_line`
 
-**Deps** — F091, F092, F093, F096, F097, F102.
+**Deps** — F91, F92, F93, F96, F97, F102.
 
 ---
 
@@ -944,7 +944,7 @@ records what was removed. No customer tenant is ever used for capture.
 - `missing_captures_render_written_instructions_and_a_labelled_gap`
 - `lark_chinese_menu_labels_are_called_out_verbatim`
 
-**Deps** — F211, F098, F104.
+**Deps** — F211, F98, F104.
 
 ---
 
@@ -988,9 +988,9 @@ it, so that I can trust the product enough to hand it real alerting.
       once. A notification may occasionally be delivered more than once."* — shown once at the
       top of the detail panel, not repeated per row.
 - [ ] **Detail panel** contains: full canonical envelope fields, the **redacted** rendered
-      payload as it was sent, the degradation rung used (F093), the attempt table (F184
+      payload as it was sent, the degradation rung used (F93), the attempt table (F184
       `delivery_attempts`: attempt number, started, finished, HTTP status, provider code,
-      taxonomy code, latency, `Retry-After`), the correlation id (F011), the dedup key, the
+      taxonomy code, latency, `Retry-After`), the correlation id (F11), the dedup key, the
       provider message id where one exists, and **"Why did I get this?"** (F149) rendering
       GitHub's `reasons` array as the matched rule.
 - [ ] A Slack `internal_error` / `fatal_error` is surfaced as *"this may have been delivered"*
@@ -1023,7 +1023,7 @@ type DeliveryRow = {
   destination: { id: string; name: string; type: DestinationId };
   state: 'pending'|'claimed'|'sent'|'accepted'|'failed'|'dead_lettered'|'suppressed'|'held';
   provider_message_id: string | null;
-  degradation_rung: string | null;   // F093
+  degradation_rung: string | null;   // F93
   suppressed_reason: 'duplicate'|'muted'|'filtered'|'quiet_hours'|'digest_pending'|'budget' | null;
   attempts: number;
   next_attempt_at: string | null;
@@ -1055,13 +1055,13 @@ benefit is that the most common support question is answerable in the list view.
 | Condition | Behaviour |
 | --- | --- |
 | Ledger query fails | Error state above the table; the table area keeps its last good rows with a "may be out of date" note. Never an empty table pretending to be empty |
-| One delivery's payload exceeds the render budget | The payload panel shows the **byte count and the elision notice** (F095), never a silent truncation |
+| One delivery's payload exceeds the render budget | The payload panel shows the **byte count and the elision notice** (F95), never a silent truncation |
 | Provider status is absent | Outcome renders `—` with *"we don't know"* — F100 honesty, not a green chip |
-| `error_code` has no user message (should be impossible — F013) | Fails a unit test; renders the code only in the support bundle |
+| `error_code` has no user message (should be impossible — F13) | Fails a unit test; renders the code only in the support bundle |
 
-**Security** — Redaction (F012/F120) is applied **server-side** in the read endpoint, not by the
+**Security** — Redaction (F12/F120) is applied **server-side** in the read endpoint, not by the
 client, because a client-side redactor is a client-side leak. No `error_detail` containing a
-provider body, no webhook URL, no ciphertext. Every query is tenant-scoped (F026). The export is
+provider body, no webhook URL, no ciphertext. Every query is tenant-scoped (F26). The export is
 audited and rate-limited.
 
 **Tests**
@@ -1074,7 +1074,7 @@ audited and rate-limited.
 - `delivery_log_renders_no_rows_until_the_ledger_exists`
 - `log_is_tenant_scoped_and_redacted_server_side`
 
-**Deps** — F184, F185, F186, F093, F099, F100, F149, F011.
+**Deps** — F184, F185, F186, F93, F99, F100, F149, F11.
 
 ---
 
@@ -1112,10 +1112,10 @@ workflow_run.completed  failure   run #482 on acme/api
       scope) · `quiet_hours` (F146) · `digest_pending` (F144) · `critical_lock` (F148)
       · `dedup_suppressed` (F186) · `destination_unavailable`.
 - [ ] The payload viewer is **redacted** and **size-capped** with the byte count shown. Retention
-      boundary is stated on the screen: *"Events are kept for 30 days."* (F051) — stated rather
+      boundary is stated on the screen: *"Events are kept for 30 days."* (F51) — stated rather
       than assumed, matching `docs/COMPETITIVE-FEATURE-SET.md`'s finding that users need to be
       told about retention.
-- [ ] An unknown/unparsed event type (the F042 passthrough case) shows its raw type and
+- [ ] An unknown/unparsed event type (the F42 passthrough case) shows its raw type and
       *"we don't have a detailed view for this event type"* — never a blank or a wrong label.
 - [ ] A rejected signature appears **only** to admins and is a security signal, not an error a
       customer caused; the copy is *"This request was rejected. No notification was sent."*
@@ -1160,7 +1160,7 @@ type EventTraceNode = {
 | Fan-out produced no leaves | Show the root with *"no destination matched"* and the list of checked integrations |
 
 **Security** — Event payloads are **private repository content** and are tenant-scoped on every
-read (F026). The viewer is not available to non-members of the workspace. Signature-rejected
+read (F26). The viewer is not available to non-members of the workspace. Signature-rejected
 rows are admin-only. Redaction applies to the payload view. No event payload leaves the tenant
 through an error tracker or an analytics event — `docs/SECURITY.md` requires this explicitly.
 
@@ -1173,7 +1173,7 @@ through an error tracker or an analytics event — `docs/SECURITY.md` requires t
 - `unknown_event_type_shows_its_raw_type_and_says_so`
 - `event_log_is_tenant_scoped_and_admin_only_where_required`
 
-**Deps** — F041, F042, F048, F051, F151, F186, F026.
+**Deps** — F41, F42, F48, F51, F151, F186, F26.
 
 ---
 
@@ -1187,23 +1187,23 @@ it, so that I know the setup was worth finishing.
 **Acceptance**
 
 - [ ] ⭐ **Reachable from every stage of setup**, including *before* an event type is selected
-      (F098 requires this) and at any later time from the integration. It is a first-class screen,
+      (F98 requires this) and at any later time from the integration. It is a first-class screen,
       not a debug panel.
-- [ ] The test goes through the **real renderer and the real send path** (F098). There is no
+- [ ] The test goes through the **real renderer and the real send path** (F98). There is no
       "simulated success" mode, and no way to make it look successful.
 - [ ] **Event choice**, two options, both honest:
       | Option | What it sends |
       |---|---|
       | **A real recent event** (default when history exists) | The most recent real event from the selected repositories, re-rendered and re-sent |
-      | **A sample event** | A versioned fixture (F072), clearly labelled *"Sample — this is not a real event from your repository"* |
+      | **A sample event** | A versioned fixture (F72), clearly labelled *"Sample — this is not a real event from your repository"* |
       The real-event option is the one that teaches: the user recognises their own repository
       and their own colleague's name in the message.
 - [ ] **The result panel has four parts**, all present on success *and* failure:
       1. **Did it arrive?** — for destinations that confirm, the state from F100. For Teams, an
          explicit *"Accepted by Teams at 14:03. This confirms the flow ran, not that the message
          appeared. Did you see it in the channel?"*
-      2. **What we sent** — the rendered payload, **redacted** (F098/F120).
-      3. **What this did and did not prove** — capability honesty (F098/F093), e.g. *"This
+      2. **What we sent** — the rendered payload, **redacted** (F98/F120).
+      3. **What this did and did not prove** — capability honesty (F98/F93), e.g. *"This
          proves the webhook works. It does not prove messages can be edited later — incoming
          webhooks cannot do that."*
       4. **If it failed** — the plain-language explanation and the **exact next action**, with a
@@ -1212,7 +1212,7 @@ it, so that I know the setup was worth finishing.
       the user answers *"Yes, I see it"* / *"No message"*. This is recorded, and it is the only
       thing that can move `destination_connected` to `done` for that destination. Framing: *"Only
       you can tell us whether it arrived."*
-- [ ] The test is **free and unmetered** and is excluded from statistics (F098) — and the UI
+- [ ] The test is **free and unmetered** and is excluded from statistics (F98) — and the UI
       says so, because a test message that appears in the customer's real message count is a
       confusing support ticket.
 - [ ] Retry from the failure panel is one click and creates a **new** delivery row marked
@@ -1259,13 +1259,13 @@ type TestResult = {
 
 | Condition | Behaviour |
 | --- | --- |
-| No history and no fixture available | Sample-event option is always available — F072 fixtures are mandatory |
+| No history and no fixture available | Sample-event option is always available — F72 fixtures are mandatory |
 | Credential invalid | `destination_credentials_invalid` → *"Reconnect the destination"* as the primary action |
-| Payload exceeds the destination cap | `payload_too_large` with the byte count (F095), never truncated |
+| Payload exceeds the destination cap | `payload_too_large` with the byte count (F95), never truncated |
 | Provider accepted but user says no message | Recorded as a **confirmed failure**, surfaced on the integration as *"Teams accepted it but no message appeared — the flow is probably switched off in Teams."* |
 | Test fails | Non-blocking; the wizard continues |
 
-**Security** — The rendered payload preview is **redacted** (F098/F120): a Lark or Slack card
+**Security** — The rendered payload preview is **redacted** (F98/F120): a Lark or Slack card
 can embed the destination webhook URL, which is a bearer secret. The preview is generated
 server-side by the same redactor used for the delivery log, so the client never holds the
 unredacted payload at all.
@@ -1279,7 +1279,7 @@ unredacted payload at all.
 - `test_deliveries_are_excluded_from_metrics_and_marked_in_history`
 - `a_failed_test_does_not_block_the_wizard`
 
-**Deps** — F098, F099, F100, F072.
+**Deps** — F98, F99, F100, F72.
 
 ---
 
@@ -1322,7 +1322,7 @@ const STEPS: SetupStepDef[] = [
       non-technical users.
 - [ ] **Third-party waits are named and non-blocking.** A step waiting on a Teams/Lark admin is
       marked `Waiting for your administrator` with the exact instruction to forward, and the user
-      can leave and be notified when the credential becomes valid (F098's daily health job).
+      can leave and be notified when the credential becomes valid (F98's daily health job).
 - [ ] The wizard is **additive**, not exclusive: a user can reach Integrations and build an
       integration by hand at any time. The wizard is the easy path, never the only path.
 - [ ] The step indicator itself is accessible: it is an ordered list with
@@ -1360,7 +1360,7 @@ screen cannot desynchronise the wizard's model.
 | User already completed setup | Redirect to Overview with a *"Your connection is live"* summary |
 
 **Security** — The wizard performs **no privileged work of its own**; it sequences
-capability-checked calls (F024). The install link it redirects to is a capability URL and is
+capability-checked calls (F24). The install link it redirects to is a capability URL and is
 never logged in full (F208). All writes are tenant-scoped and audited where F222 applies.
 
 **Tests**
@@ -1440,11 +1440,11 @@ Pause button with a stated consequence.
 | Save rejected by server validation | Field-level error next to the field, the section stays dirty, nothing else is lost (3.3.1, 3.3.3) |
 | Save partially applied | Must be impossible — each section is one transactional call, or explicitly non-transactional and stated |
 | Configuration invalid for the current schema | Repair panel; the invalid value is quarantined and shown as raw text, never discarded |
-| Destination capability changed since it was saved | Warning banner with the specific option that is now unsupported (F093) |
+| Destination capability changed since it was saved | Warning banner with the specific option that is now unsupported (F93) |
 
 **Security** — Credentials are write-only (F211). The settings read endpoint never returns a
 ciphertext, a webhook URL, or a partial secret beyond a host plus a four-character tail. Delete
-destroys the credential rather than orphaning it. Every write is capability-checked (F024) and
+destroys the credential rather than orphaning it. Every write is capability-checked (F24) and
 audited (F222).
 
 **Tests**
@@ -1456,7 +1456,7 @@ audited (F222).
 - `every_settings_mutation_is_audited`
 - `settings_are_tenant_scoped`
 
-**Deps** — F024, F093, F097, F184, F222.
+**Deps** — F24, F93, F97, F184, F222.
 
 ---
 
@@ -1544,7 +1544,7 @@ type DeadLetterGroup = {
 
 **Security** — Replay re-sends content that may have been retracted (F182), so it requires a
 capability, not membership, and is audited. The rendered payload is redacted exactly as in the
-test preview (F098/F120). Replay is tenant-scoped: a user can never replay into another
+test preview (F98/F120). Replay is tenant-scoped: a user can never replay into another
 workspace's destination, and the destination used is resolved from the delivery's own
 `destination_id`, never from a client-supplied one.
 
@@ -1659,12 +1659,12 @@ them without reading a log.
       | Stack traces, `at Foo.bar (file:12)` | Unactionable; implies a bug report is the next step |
       | Raw taxonomy codes as the *primary* message | `destination_revoked` is a support key, not a sentence |
       | HTTP status codes as the primary message | "HTTP 410" means nothing to this user |
-      | Provider response bodies | These routinely echo back webhook URLs and tokens (F013) |
+      | Provider response bodies | These routinely echo back webhook URLs and tokens (F13) |
       | "Invalid", "Error", "Something went wrong" **alone** | No next action |
       | "Unexpected error" | Same |
       | Blaming the user ("you entered an invalid…", "you don't have permission" unless they do) | Say what the system could not do |
       | Any claim of success | Forbidden globally — see F185, F100 |
-- [ ] The F013 taxonomy maps to copy, and the **primary** message never shows the code:
+- [ ] The F13 taxonomy maps to copy, and the **primary** message never shows the code:
 
 | Code | Primary message | Next action |
 | --- | --- | --- |
@@ -1680,7 +1680,7 @@ them without reading a log.
 | `internal_error` | Something went wrong on our side. Your notifications are still queued. | None. `correlation_id` shown |
 
 - [ ] The **code** appears only inside the collapsed *"Details for support"* block, alongside
-      the correlation id (F011) — which is also copyable, because it is what makes a support
+      the correlation id (F11) — which is also copyable, because it is what makes a support
       reply useful.
 - [ ] `signature_invalid`, `replay_detected` and `unauthorized_tenant` **never surface**. They
       are not user errors and their visibility teaches an attacker about the verification
@@ -1722,13 +1722,13 @@ type UserMessage = {
 
 | Condition | Behaviour |
 | --- | --- |
-| Taxonomy code has no message | Unit test fails the build (F013 already requires a message for every code) |
+| Taxonomy code has no message | Unit test fails the build (F13 already requires a message for every code) |
 | Message renders `undefined` in a param | Development build shows `«n»`; production logs a metric and renders a safe fallback — never the literal word `undefined` |
 | Provider string would be shown | Structurally impossible: the message catalogue has no field for provider text |
 
 **Security** — The server selects the message by code; **the client never renders a server
 string**. Provider text reaches the client only inside the redacted diagnostic bundle, behind
-the collapsed disclosure, and is itself passed through F012 first. This removes an entire class
+the collapsed disclosure, and is itself passed through F12 first. This removes an entire class
 of reflected-content bug.
 
 **Tests**
@@ -1741,7 +1741,7 @@ of reflected-content bug.
 - `messages_are_selected_by_id_not_rendered_from_server_text`
 - `rate_limited_and_unavailable_show_no_action_button`
 
-**Deps** — F011, F012, F013, F099, F224.
+**Deps** — F11, F12, F13, F99, F224.
 
 ---
 
@@ -1792,7 +1792,7 @@ they are the ones a 2.1-era audit misses.
       (`docs/DESTINATION_API_REFERENCE.md` §1.6). Therefore the Slack renderer **must always
       populate the top-level `text` field as a complete, meaningful fallback** — not a
       placeholder, not "New notification". It carries the same summary as the card and the same
-      source link. This is a rendering requirement (F094/F143) surfaced here because it is an
+      source link. This is a rendering requirement (F94/F143) surfaced here because it is an
       accessibility requirement, and it is covered again because getting it wrong is invisible
       to sighted QA. The same principle applies to every destination with a fallback field.
 - [ ] ⚠️ **Do not claim a conformance level we have not tested.** No "WCAG 2.2 AA compliant"
@@ -1845,7 +1845,7 @@ elements in the wizard.
 | --- | --- |
 | Automated scan finds a serious/critical violation | Build fails |
 | A new component has no focus-visible style | Lint/test fails |
-| A destination adapter omits the fallback field | Adapter conformance suite fails (F091 suite, extended here) |
+| A destination adapter omits the fallback field | Adapter conformance suite fails (F91 suite, extended here) |
 
 **Security** — n/a. One adjacent rule: accessibility exceptions are never granted to avoid
 building a feature ("it's fine, it's a preview").
@@ -1864,7 +1864,7 @@ building a feature ("it's fine, it's a preview").
 - `glass_navigation_passes_contrast_over_lightest_and_darkest_overlap`
 - `forced_colors_mode_degrades_glass_to_a_solid_system_colour`
 
-**Deps** — F206, F091, F094, F143, F216, `DESIGN.md`.
+**Deps** — F206, F91, F94, F143, F216, `DESIGN.md`.
 
 ---
 
@@ -1888,7 +1888,7 @@ answer "who turned that off?" and prove nothing changed silently.
       disabled / deleted · destination added / replaced / removed · credential rotated ·
       **replay executed** (F182) · mute created (F162) · preference changed (F219) · member
       invited / removed / role changed · export generated · workspace deletion requested
-      (F030) · AI enabled or disabled (fwd ref `16:F252`) · plan or quota changed
+      (F30) · AI enabled or disabled (fwd ref `16:F252`) · plan or quota changed
       (fwd ref `16:F253`).
 - [ ] **Read side**: `/audit`, filterable by actor, action, target type, target, time range and
       correlation id; filter state in the URL; paginated with a stated total.
@@ -1903,7 +1903,7 @@ answer "who turned that off?" and prove nothing changed silently.
       case — an action taken by GitHub on someone else's behalf — is the one that explains most
       confusing audit entries.
 - [ ] Retention is stated and enforced: audit rows follow the workspace retention policy
-      (F051) and export is available before deletion (F030). The screen says what will be
+      (F51) and export is available before deletion (F30). The screen says what will be
       removed when a workspace is deleted.
 - [ ] **Non-members cannot read the audit trail**, including support staff acting on a user's
       behalf; support access uses a separate, disclosed, time-boxed mechanism.
@@ -1948,7 +1948,7 @@ CREATE INDEX ix_audit_org_actor ON audit_events(org_id, actor_id, occurred_at DE
 | Audit write fails | The **action** fails. There is no unaudited write path |
 | Export too large | Bounded job, tenant-scoped, rate-limited, audited, delivered as a signed link with an expiry |
 
-**Security** — Tenant-scoped on read **and** write (F026). Diff values pass through an explicit
+**Security** — Tenant-scoped on read **and** write (F26). Diff values pass through an explicit
 denylist of field names (`webhook_url`, `token`, `secret`, `signing_key`, `client_secret`,
 `ciphertext`, `private_key`) rendered as `"changed"` **in the writer**, not in the renderer.
 Exports are tenant-scoped, time-limited, and themselves audited. No audit row contains a
@@ -1963,7 +1963,7 @@ webhook URL, a token, or a raw event payload.
 - `unauthenticated_write_is_impossible`
 - `actors_distinguish_user_system_and_installation`
 
-**Deps** — F028, F026, F024, F068, F182.
+**Deps** — F28, F26, F24, F68, F182.
 
 ---
 
@@ -2036,7 +2036,7 @@ answer the only question that matters on day one.
 **Security** — n/a, with two adjacent rules that are not. Mobile layouts must **not** introduce a
 second, weaker authorisation path: there is no privileged action reachable from a compact layout
 that is absent from the desktop layout, and the drawer's nav items are subject to the same
-capability checks (F024). And the 320 px matrix is a **regression harness, not a publication
+capability checks (F24). And the 320 px matrix is a **regression harness, not a publication
 channel** — its screenshots live in CI artefacts, never in `docs/assets/` (F212 forbids
 publishing a captured image as a product screenshot, and a CI baseline screenshot of a test
 fixture would breach that by accident).
@@ -2153,7 +2153,7 @@ export type MessageId = keyof typeof messages;
 | String exceeds the layout | Wraps; no truncation of an error message, ever |
 
 **Security** — Translated strings are **not** HTML. No `dangerouslySetInnerHTML` for catalogue
-values (F094's rendering-safety rule applies to the dashboard as well as the destination
+values (F94's rendering-safety rule applies to the dashboard as well as the destination
 payloads). Interpolation of user-supplied values — repository names, actor names — is escaped
 by the template layer, not by the translator.
 
@@ -2220,7 +2220,7 @@ staring at a blank page wondering whether something broke.
   shows only failures trains users to distrust it.
 - [ ] **Stale state**: data older than its refresh window shows *"Updated 4 minutes ago · Refresh"*;
   data older than 15 minutes additionally shows *"This may be out of date."* Health-check data
-  (F098's daily job) is labelled with **when it last ran** — a stale green is worse than an
+  (F98's daily job) is labelled with **when it last ran** — a stale green is worse than an
   honest grey.
 - [ ] **Error state**: per F220 — plain message, next action, collapsed support detail.
 - [ ] ⚠️ **An empty table is never rendered when the query failed.** The distinction between
@@ -2304,7 +2304,7 @@ before we add connectors, so that we spend effort on observed friction rather th
 - [ ] **Method**: **moderated, unassisted, in person or screen-share.** Moderator does not help;
       help is only given after the participant has explicitly given up, and every intervention
       is recorded with a timestamp. Recording is screen + audio **with written consent**, with a
-      stated retention period and a deletion process (F051).
+      stated retention period and a deletion process (F51).
 - [ ] **Task script** (read verbatim, identical for every participant):
       1. *"Set up Lumi Noti so that when a pull request fails its checks on `acme/api`, someone
          in `#engineering` in Slack finds out. Do it however you would normally do it."*
@@ -2407,7 +2407,7 @@ type StudySession = {
 **Security** — Recordings of non-technical participants include names, employers and screen
 content with real data. Consent is written and specific; recordings are stored encrypted with a
 stated expiry; **test workspaces only** — no participant's production workspace is used without
-explicit written agreement; deletion is exercised at least once before V1 (F030).
+explicit written agreement; deletion is exercised at least once before V1 (F30).
 `docs/PRODUCT.md` participants are colleagues and external staff: this is personal data.
 
 **Tests**

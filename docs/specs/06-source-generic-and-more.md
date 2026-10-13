@@ -127,8 +127,8 @@ one code path, so that adding a new producer costs no new crypto.
       The spec: *"It's important that both the message id and the timestamp not be user
       controlled, or at the very least not be allowed to include any `.` to prevent certain
       attacks."* Otherwise an attacker who controls the id can shift bytes across the field
-      boundary. `webhook-id` is additionally capped at 255 chars, `webhook-timestamp` must be
-      `/^[0-9]{1,20}$/`.
+      boundary. The following limits are **ours**, chosen because the spec leaves them open:
+      `webhook-id` is capped at 255 chars and `webhook-timestamp` must match `/^[0-9]{1,20}$/`.
 - [ ] Comparison is **constant-time** on the decoded 32-byte digest, never `===` on strings.
       The spec: *"Failing to do so can expose consumers to timing-attacks and turn them into
       signing oracles."* Shape-guard the scheme prefix and the decoded length **before**
@@ -273,9 +273,8 @@ nobody can inject events into my workspace or discover my endpoint.
 - [ ] **The key is a bearer credential and is treated as one**: displayed exactly once,
       copy-to-clipboard in the wizard, masked thereafter, never in a URL we log, never in an
       error message, never in analytics, never in a referrer.
-- [ ] Lookup is a single indexed equality read: `SELECT orgid, connectionid FROM
-      ingress_keys WHERE key_hash = ?`. The key is stored as a **hash**, not in plaintext, so a
-      D1 dump does not yield working endpoints.
+- [ ] Lookup is a single indexed equality read. The key is stored as a **hash**, not in
+      plaintext, so a D1 dump does not yield working endpoints.
 - [ ] ⚠️ **The key is not the whole credential for the generic source.** F74's HMAC is the
       authentication; the path key is the **routing and rate-limiting** identifier. Both are
       required. A leaked path key without the secret yields `401`, not a forged event.
@@ -289,6 +288,26 @@ nobody can inject events into my workspace or discover my endpoint.
 - [ ] Revocation is immediate and is an audited action (F28).
 - [ ] The key is **per connection**, not per workspace. A customer with three Stripe
       endpoints has three keys, so revoking one does not break the others.
+
+**Schema**
+```sql
+-- F76. One row per live path key. `key_hash` is SHA-256(key) with an orgid-scoped
+-- salt so a hash from one workspace cannot be tested against another. The plaintext
+-- key exists exactly once, in the wizard response, and is never stored.
+CREATE TABLE ingress_keys (
+  orgid         TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+  connectionid  TEXT NOT NULL,
+  source_id     TEXT NOT NULL,                 -- 'generic' | 'cloudflare' | 'stripe' | …
+  key_hash      BLOB NOT NULL,                 -- full 256-bit digest, never truncated
+  created_at    INTEGER NOT NULL,
+  expires_at    INTEGER,                       -- overlap window end; NULL = live
+  revoked_at    INTEGER,
+  PRIMARY KEY (orgid, key_hash)
+);
+CREATE INDEX ingress_keys_connection ON ingress_keys(orgid, connectionid);
+-- Deliberately NOT indexed on a tenant-supplied workspace slug, org name or
+-- sequential id: those are guessable and would defeat the entire feature.
+```
 
 **Design** — This is the structural fix for D3. Today's code resolves the tenant from
 `event.repository.full_name` — a field in the request body, i.e. chosen by the sender. For
@@ -362,6 +381,38 @@ so that I never have to choose between a compromised credential and a broken int
 - [ ] The spec's warning against key reuse applies: secrets are never shared across
       connections, even for the same customer.
 
+**Schema**
+```ts
+// F77. Ciphertext is bound to its row via AAD (F36) so a secret cannot be moved
+// between connections. `supports_dual_signature` is a property of the PRODUCER,
+// read from the connector's own verification, and it decides whether the wizard
+// offers zero-downtime rotation or an honest cutover.
+export type SourceSecretRow = {
+  readonly id: string;
+  readonly orgid: string;
+  readonly connectionid: string;
+  readonly ciphertext: string;      // whsec_-prefixed, base64 — encrypted before D1
+  readonly keyVersion: number;
+  readonly createdAt: number;
+  readonly revokedAt: number | null;
+  readonly state: 'active' | 'overlap' | 'revoked';
+};
+export type SourceAuthMode =
+  | 'standard_webhooks_v1'   // F74 — base64-decode the whsec_ key
+  | 'standard_webhooks_v1a'  // declared unsupported, never accepted
+  | 'gitlab_signing_token'   // F81 — same core as standard_webhooks_v1
+  | 'gitlab_secret_token'    // F81 — weaker, constant-time plaintext compare
+  | 'stripe'                 // F84 — whsec_ used as a string, NOT base64-decoded
+  | 'linear'                 // F87 — hex HMAC over the body only
+  | 'static_bearer';         // F90 — cf-webhook-auth, no body integrity
+export type SourceConnection = {
+  readonly authMode: SourceAuthMode;
+  readonly supportsDualSignature: boolean;
+  readonly toleranceSeconds: number;   // 300 generic/gitlab/stripe, 60 linear
+  readonly providerIdStability: 'spec-guaranteed' | 'observed-only' | 'unknown';
+};
+```
+
 **Design** — The distinction between *multi-signature producers* and *single-signature
 producers* is the difference between a zero-downtime rotation and a service incident, and it
 is not visible anywhere in the provider's UI. Making it an explicit property of the connection
@@ -406,28 +457,7 @@ model without writing code, so that my deploy tool can page my team.
 **Acceptance**
 - [ ] The generic source normalizes to the canonical envelope (F41) with **no provider-specific
       passthrough**. The customer maps fields; we never render a raw provider body.
-- [ ] The mapping is a **declared, validated mapping** stored per connection:
-
-```ts
-// F78 — generic source mapping. Stored as JSON on ingress_connections.mapping_json,
-// validated against this shape at save time. Only these source paths may be referenced.
-export interface GenericMapping {
-  version: 1;
-  /** Dotted path into the verified payload, e.g. "data.repository.full_name". */
-  readonly fields: {
-    readonly title: string;        // required — a notification with no title is not sendable
-    readonly url?: string;         // must be https: and length-capped at render time
-    readonly actor?: string;
-    readonly branch?: string;
-    readonly labels?: string[];    // max 20, each ≤ 64 chars
-    readonly body?: string;        // ≤ 2000 chars after truncation
-  };
-  /** Flattened into a single dotted key. Used to select one canonical event type. */
-  readonly eventTypePath: string;   // e.g. "kind" → maps into the closed catalog (F42)
-  readonly outcomePath?: string;    // mapped into the closed outcome enum (F44)
-}
-```
-
+- [ ] The mapping is a **declared, validated mapping** stored per connection (see **Schema**).
 - [ ] A path that resolves to a non-scalar, exceeds the depth limit (8 segments) or exceeds
   the total mapped bytes (8 KiB of the envelope budget, F45) is a **save-time** rejection, not
   a delivery-time surprise.
@@ -449,14 +479,43 @@ export interface GenericMapping {
       full-stop delimited per the spec and is resolved against the closed catalog (F42).
 - [ ] `adapterVersion` is recorded per event (F62's rule) so a mapping change is replayable.
 
+**Schema**
+```ts
+// F78 — the generic source's ONLY configuration surface.
+// Stored as validated JSON on the connection row; re-validated on every update and
+// at delivery. Adding an expression evaluator to this type would require changing
+// it, not extending it — that is the design intent, not an accident.
+export interface GenericMapping {
+  readonly version: 1;
+  readonly fields: {
+    /** Required. A notification with no title is not sendable. */
+    readonly title: string;        // dotted path, e.g. "data.repository.full_name"
+    readonly url?: string;         // https: only, length-capped at render time
+    readonly actor?: string;
+    readonly branch?: string;
+    readonly labels?: string[];    // max 20 entries, each ≤ 64 chars
+    readonly body?: string;        // ≤ 2000 chars after truncation
+  };
+  /** Resolves to a single value and selects one canonical event type (F42). */
+  readonly eventTypePath: string;
+  readonly outcomePath?: string;   // mapped into the closed outcome enum (F44)
+}
+
+export interface GenericSourceLimits {
+  readonly maxBodyBytes: 1048576;      // 1 MiB hard; 413 beyond, permanent (F63)
+  readonly softWarnBodyBytes: 65536;  // Standard Webhooks recommends "smaller than 20kb"
+  readonly maxPathDepth: 8;
+  readonly maxMappedBytes: 8192;       // of the envelope budget (F45)
+  readonly allowedContentTypes: readonly ['application/json', 'application/cloudevents+json'];
+}
+```
+
 **Design** — A generic source with a free-form template language would be a Zapier clone and
 is out of scope per `AGENTS.md`. A **declarative, bounded, validated field mapping** is not:
 it has no evaluation, no loops and no code, and its output is schema-checked before it can be
 stored. That is the entire line between "configurable" and "arbitrary code execution", and the
 mapping type above is written so that adding an expression evaluator to it would require
-changing the type, not extending it.
-
-The CloudEvents-shape detection matters for a product reason: a producer that already follows
+changing the type, not extending it.The CloudEvents-shape detection matters for a product reason: a producer that already follows
 Standard Webhooks has already made the decisions we would otherwise ask the customer to make
 (type naming, timestamp semantics). Honouring it means zero-configuration onboarding for the
 customers who are most likely to have the volume to care.
@@ -782,6 +841,23 @@ that a silent outage does not look like "nothing happened".
       retrying on our side achieves nothing.
 - [ ] The 10-second GitLab timeout is a hard budget: the handler performs verify → resolve →
       dedup → one D1 batch → ack. No outbound calls, ever (F64).
+
+**Schema**
+```sql
+-- F82. We cannot observe GitLab's disable state, so we model the two states we CAN
+-- infer and always show the one we cannot. `provider_state_known` is the honest bit.
+ALTER TABLE ingress_connections ADD COLUMN gitlab_plan_tier TEXT;   -- free|premium|ultimate
+ALTER TABLE ingress_connections ADD COLUMN namespace_rate_limit_per_min INTEGER;
+ALTER TABLE ingress_connections ADD COLUMN last_success_at INTEGER;
+
+CREATE TABLE provider_disable_inference (
+  connectionid  TEXT PRIMARY KEY REFERENCES ingress_connections(id) ON DELETE CASCADE,
+  provider_state_known INTEGER NOT NULL DEFAULT 0,  -- 0 for GitLab: we cannot observe it
+  consecutive_permanent_failures INTEGER NOT NULL DEFAULT 0,
+  idle_threshold_seconds INTEGER NOT NULL DEFAULT 259200, -- 72 h, the only signal available
+  last_prompted_at INTEGER
+);
+```
 
 **Design** — GitLab is the clearest illustration of why a source cannot simply inherit F50's
 response table. The generic advice "return 429 when rate limited" is actively harmful here,
@@ -1123,6 +1199,26 @@ so that I get one `invoice.paid` notification and not five.
         connection and off by default on the free tier.
 - [ ] A manually replayed event that we already processed returns `200` and stops Stripe's
       retries. Stripe: *"skip it and return a `200` response to stop further retries."*
+
+**Schema**
+```sql
+-- F86. Stripe is the ONLY source in this file with two distinct notions of "the same
+-- event", so it is the only one needing a second, separately-TTL'd table (F171).
+-- Transport dedup lives in event_dedup (F170); this is the semantic layer, opt-in.
+CREATE TABLE semantic_dedup (
+  orgid        TEXT NOT NULL,
+  dedup_key    BLOB NOT NULL,   -- SHA-256(0x00‖orgid‖0x00‖connid‖0x00‖object_id‖0x00‖type)
+  connectionid TEXT NOT NULL,
+  object_id    TEXT NOT NULL,   -- data.object.id
+  event_type   TEXT NOT NULL,   -- event.type
+  first_seen_at INTEGER NOT NULL,
+  last_seen_at  INTEGER NOT NULL,
+  suppressed_count INTEGER NOT NULL DEFAULT 0, -- how often the trade-off actually bit
+  PRIMARY KEY (orgid, dedup_key)
+);
+-- TTL must exceed Stripe's documented 3-day live retry horizon. Asserted in a test.
+-- Reconciled envelopes reuse event_dedup with providerid_synthesized = 1 (F69).
+```
 
 **Design** — Two-level dedup exists because Stripe has two distinct notions of "the same
 event" and conflating them either double-notifies (one key) or drops real events (one key

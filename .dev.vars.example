@@ -1,3 +1,32 @@
 # Local development only. Never commit real secrets.
-ENCRYPTION_KEY_BASE64=replace-with-random-32-byte-base64-key
+#
+# Every key here must match a binding or secret referenced in `src/`.
+# `npm run typecheck` will not catch a mismatch — see the test note below.
+
+# --- Secrets (set with `wrangler secret put <NAME>` in deployed environments) ---
+
+# AES-256-GCM key for encrypting destination credentials at rest.
+# Exactly 64 hexadecimal characters (32 bytes). Decryption fails closed on any
+# other length — see `decrypt()` in src/index.ts.
+ENCRYPTION_KEY=replace-with-64-hex-characters
+
+# Shared secret used to verify GitHub webhook signatures (X-Hub-Signature-256).
 GITHUB_WEBHOOK_SECRET=replace-me
+
+# Better Auth signing key for session cookies. Minimum 32 characters; use a
+# high-entropy random value, not a memorable phrase.
+BETTER_AUTH_SECRET=replace-with-at-least-32-characters-of-entropy
+
+# --- Non-secret configuration -----------------------------------------------
+# These are also declared as `vars` in wrangler.jsonc. Override locally only if
+# your dev origin differs (e.g. http://localhost:5173).
+APP_ORIGIN=http://localhost:5173
+AUTH_FROM_EMAIL=noreply@runlumi.app
+
+# --- Notes -----------------------------------------------------------------
+# `AUTH_EMAIL` is a Cloudflare Email Sending binding declared in wrangler.jsonc,
+# not an environment variable, so it does not belong in this file. Local email
+# delivery requires a verified account; see docs/AUTH_SETUP.md.
+#
+# This file is asserted against `Bindings` by tests/config.dev_vars.test.ts, so
+# adding a secret here without wiring it into code will fail CI.

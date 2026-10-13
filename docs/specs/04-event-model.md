@@ -501,3 +501,120 @@ a test that asserts the row is gone, not merely flagged.
 - `r2_prefix_delete_is_scoped_to_one_org`
 
 **Deps** — F184, F192.
+---
+
+## F52 — Event schema registry
+
+**Priority** P1 · **Status** not started
+
+**Story** As a customer integrating against us programmatically, I want a published schema
+I can validate against, so that my consumer breaks in CI rather than in a chat channel.
+
+**Acceptance**
+- [ ] Every `dataschema` URI in F41 resolves to a JSON Schema document.
+- [ ] Schemas are versioned and served from a stable, documented base
+      (e.g. `https://schemas.lumi.run/github/pull_request.opened/v1.json`).
+- [ ] Published schemas use `additionalProperties: false` on the pinned version, so an
+      unexpected field fails validation rather than passing silently.
+- [ ] A schema is published **before** an event type using it is enabled for customers.
+- [ ] Schemas are generated from the same definitions the normalizer uses, so the published
+      contract cannot drift from the implementation.
+
+**Design** — CloudEvents is explicit that `dataschema` is *"expected to be informational"* and
+that the producer decides versioning. Publishing it anyway turns that advisory into a real
+contract. The risk to avoid is publishing a schema generated from a hand-written copy of the
+types: it will drift within one release.
+
+**Errors** — an envelope whose `dataschema` is unknown is accepted and marked
+`schema_unknown` (F46), never rejected. Forward compatibility beats strictness for inbound
+traffic.
+
+**Security** — schemas are public. They must never contain internal hostnames, tenant ids or
+field names that reveal internal structure beyond what the event already exposes.
+
+**Tests**
+- `every_dataschema_uri_resolves_to_a_published_document`
+- `published_schema_matches_the_normalizer_output`
+- `unknown_dataschema_is_accepted_and_flagged`
+
+**Deps** — F41, F46.
+
+---
+
+## F53 — Ingress coalescing and backpressure
+
+**Priority** P2 · **Status** not started
+
+**Story** As an operator, I want a burst of traffic to be absorbed rather than amplified, so
+that one busy repository cannot consume the whole delivery budget.
+
+**Acceptance**
+- [ ] Ingress applies a **per-connection** token bucket. A single connection cannot consume
+      the shared capacity.
+- [ ] When the bucket is exhausted, the response is `429` with `Retry-After` (F50), not a
+      silent drop and not a queue-backup that blocks the request handler.
+- [ ] ⚠️ **Grouping is the preferred absorber, not rejection.** A burst of comment events is
+      legitimate load; it should collapse (F141–F143) rather than be refused. Rejection is a
+      last resort for genuinely malformed floods.
+- [ ] Coalescing never changes the durable receipt: every event that is accepted is stored,
+      even when its delivery is later merged into a group.
+- [ ] Per-connection counters are independent of the auth rate limits (F22) and of billing
+      meters (F253).
+
+**Design** — The pressure point is the queue, not the request handler. Because ingress must
+acknowledge within the provider deadline (F64) and because GitHub does not retry at all
+(F65), refusing aggressively is dangerous: a refused event may simply vanish. Coalescing at
+ingress preserves the receipt and defers the work.
+
+**Errors** — bucket exhaustion is `429 destination_rate_limited`; it is a throttle, not a
+failure, and is never counted as a delivery failure.
+
+**Security** — the bucket key is `connection_id`, which is server-derived. An attacker cannot
+choose a key that exempts them.
+
+**Tests**
+- `one_connection_cannot_exceed_its_own_budget`
+- `burst_is_coalesced_rather_than_refused`
+- `refusal_returns_429_with_retry_after`
+- `every_accepted_event_is_durably_stored`
+
+**Deps** — F141, F50.
+
+---
+
+## F54 — Normalization versioning and replay compatibility
+
+**Priority** P1 · **Status** not started
+
+**Story** As a customer, I want old notifications to keep rendering correctly after we
+improve our parsing, so that my delivery history stays meaningful.
+
+**Acceptance**
+- [ ] Every event records the `adapter_version` that produced it.
+- [ ] Renderers are **pure functions of the stored envelope** (F48). Re-normalizing an old
+      raw payload is never required to render a historical delivery.
+- [ ] An adapter may change its mapping in a way that is **render-equivalent** without a
+          version bump; any change to the stored envelope shape requires one.
+- [ ] Changing a normalizer never mutates already-stored events. Replay re-processes the raw
+          body only when explicitly requested, and produces a **new** event rather than
+          overwriting the original.
+- [ ] A delivery created years ago renders from its stored envelope and its captured
+          `providerApiVersion`, not from today's parser.
+
+**Design** — This is the reason F41 puts everything the renderer needs *inside* the envelope.
+If a renderer ever re-reads the raw provider payload, then any parser change retroactively
+changes history, and a delivery log stops being evidence.
+
+**Errors** — an envelope whose `adapter_version` predates the current minimum supported
+version is rendered as best-effort and flagged in the UI, never dropped.
+
+**Security** — raw bodies are retained under the F51 policy; re-processing them requires the
+same tenant authorization as reading any event.
+
+**Tests**
+- `every_event_records_its_adapter_version`
+- `historical_delivery_renders_without_re_normalizing`
+- `replay_creates_a_new_event_and_preserves_the_original`
+- `renderer_depends_only_on_the_stored_envelope`
+
+**Deps** — F41, F48, F51.
