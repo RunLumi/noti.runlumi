@@ -11,7 +11,7 @@
 export const PURGE_ROWS_PER_TICK = 500;
 
 /** Tenant tables without a foreign key to organization, purged explicitly. */
-const TENANT_TABLES = ['notification_outbox', 'deliveries', 'integrations'] as const;
+export const TENANT_TABLES = ['notification_outbox', 'deliveries', 'integrations'] as const;
 
 export interface PurgeReport {
   readonly organizationId: string | null;

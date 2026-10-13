@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Bindings } from '../../src/env';
-import { PURGE_ROWS_PER_TICK, purgeDueWorkspace } from '../../src/pipeline/purge';
+import { PURGE_ROWS_PER_TICK, purgeDueWorkspace, TENANT_TABLES } from '../../src/pipeline/purge';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
 /** Workspace export and two-phase deletion (F30), over the real migrations. */
@@ -211,6 +211,36 @@ describe('workspace deletion', () => {
 
   it('still protects the last admin outside a purge', () => {
     expect(() => db.raw.exec("DELETE FROM member WHERE user_id='alice'")).toThrow(/requires an admin/);
+  });
+});
+
+describe('purge coverage', () => {
+  it('covers every table that holds workspace data, now and in future migrations', () => {
+    // A table with organization_id must either cascade from organization or be purged
+    // explicitly; workspace_deletions is the ledger and is meant to survive.
+    const tables = (
+      db.raw
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+        .all() as {
+        name: string;
+      }[]
+    ).map((t) => t.name);
+    const uncovered = tables.filter((table) => {
+      const columns = db.raw.prepare(`PRAGMA table_info("${table}")`).all() as { name: string }[];
+      if (!columns.some((c) => c.name === 'organization_id')) return false;
+      const fks = db.raw.prepare(`PRAGMA foreign_key_list("${table}")`).all() as {
+        table: string;
+        from: string;
+        on_delete: string;
+      }[];
+      const cascades = fks.some(
+        (f) => f.table === 'organization' && f.from === 'organization_id' && f.on_delete === 'CASCADE',
+      );
+      return (
+        !cascades && !(TENANT_TABLES as readonly string[]).includes(table) && table !== 'workspace_deletions'
+      );
+    });
+    expect(uncovered).toEqual([]);
   });
 });
 
