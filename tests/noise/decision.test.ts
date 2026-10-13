@@ -131,6 +131,9 @@ describe('isCritical', () => {
     [undefined, 'security.advisory', true],
     ['info', 'security_alert', true],
     ['info', 'insecurity.note', false],
+    // The sender chooses an event type, so no type string may bypass holds (ADR 0018).
+    ['info', 'test', false],
+    ['info', 'noti.test', false],
   ])('status %s, type %s -> %s', (status, type, expected) => expect(isCritical(status, type)).toBe(expected));
 });
 

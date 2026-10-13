@@ -17,6 +17,11 @@
  * `sent_at`: the end-to-end figure is `last_attempt_at` (the attempt that reached the
  * terminal state) minus `created_at`, so it carries up to one second of resolution error.
  *
+ * User-requested test notifications (`is_test = 1`, ADR 0018) are excluded from every ratio,
+ * count, latency, error breakdown and backlog age here: they measure a person's click, not the
+ * service, and stall detection ignores them too. The server's in-flight guard bounds how many can
+ * exist per integration.
+ *
  * Every ratio is a cohort by creation time: rows CREATED inside the window, counted by their
  * CURRENT state (a row created before the window that finishes inside it is not counted).
  * Every statement is scoped by `organization_id` (F24).
@@ -190,13 +195,13 @@ function latencySql(valueSql: string): string {
     `(SELECT v FROM s ORDER BY v LIMIT 1 OFFSET (SELECT MAX(0, (COUNT(*) * ${q} + 99) / 100 - 1) FROM s))`;
   return `WITH s AS (
     SELECT ${valueSql} AS v FROM deliveries
-    WHERE organization_id=?1 AND created_at>=?2 AND state IN ('sent','accepted')
+    WHERE organization_id=?1 AND created_at>=?2 AND is_test=0 AND state IN ('sent','accepted')
       AND ${valueSql} IS NOT NULL AND ${valueSql} >= 0)
   SELECT (SELECT COUNT(*) FROM s) AS samples,
          ${pct(50)} AS p50,
          ${pct(95)} AS p95,
          (SELECT COUNT(*) FROM deliveries
-            WHERE organization_id=?1 AND created_at>=?2 AND state IN ('sent','accepted')) AS terminal`;
+            WHERE organization_id=?1 AND created_at>=?2 AND is_test=0 AND state IN ('sent','accepted')) AS terminal`;
 }
 
 async function latency(db: Db, valueSql: string, org: string, since: string): Promise<LatencySummary> {
@@ -222,7 +227,7 @@ async function destinationBreakdown(db: Db, org: string, since: string): Promise
     .prepare(
       `SELECT COALESCE(i.destination,'unknown') AS destination, d.state AS state, COUNT(*) AS n
        FROM deliveries d LEFT JOIN integrations i ON i.id=d.integration_id AND i.organization_id=d.organization_id
-       WHERE d.organization_id=?1 AND d.created_at>=?2
+       WHERE d.organization_id=?1 AND d.created_at>=?2 AND d.is_test=0
        GROUP BY COALESCE(i.destination,'unknown'), d.state`,
     )
     .bind(org, since)
@@ -253,7 +258,7 @@ async function backlog(db: Db, org: string, nowMs: number): Promise<Observabilit
          MIN(CASE WHEN state='pending' THEN ${CREATED_MS} END) AS pending_at,
          MIN(CASE WHEN state='claimed' THEN claimed_at END) AS claimed_at,
          MIN(CASE WHEN state='retrying' AND next_attempt_at<=?2 THEN next_attempt_at END) AS retry_at
-       FROM deliveries WHERE organization_id=?1 AND state IN ('pending','claimed','retrying')`,
+       FROM deliveries WHERE organization_id=?1 AND is_test=0 AND state IN ('pending','claimed','retrying')`,
     )
     .bind(org, nowMs)
     .first<{ pending_at: number | null; claimed_at: number | null; retry_at: number | null }>();
@@ -261,7 +266,8 @@ async function backlog(db: Db, org: string, nowMs: number): Promise<Observabilit
     .prepare(
       `SELECT MIN(CAST(strftime('%s', created_at) AS INTEGER) * 1000) AS at
        FROM notification_outbox
-       WHERE organization_id=?1 AND state='pending' AND (not_before IS NULL OR not_before<=?2)`,
+       WHERE organization_id=?1 AND state='pending' AND (not_before IS NULL OR not_before<=?2)
+         AND NOT EXISTS (SELECT 1 FROM deliveries t WHERE t.id=notification_outbox.id AND t.is_test=1)`,
     )
     .bind(org, nowMs)
     .first<{ at: number | null }>();
@@ -286,7 +292,7 @@ export async function computeSummary(
   const [states, retry, codes, endToEnd, queueDelay, byDestination, pending, dropped] = await Promise.all([
     db
       .prepare(
-        'SELECT state, COUNT(*) AS n FROM deliveries WHERE organization_id=?1 AND created_at>=?2 GROUP BY state',
+        'SELECT state, COUNT(*) AS n FROM deliveries WHERE organization_id=?1 AND created_at>=?2 AND is_test=0 GROUP BY state',
       )
       .bind(organizationId, since)
       .all<StateRow>(),
@@ -294,14 +300,14 @@ export async function computeSummary(
       .prepare(
         `SELECT SUM(CASE WHEN attempts>=1 THEN 1 ELSE 0 END) AS attempted,
                 SUM(CASE WHEN attempts>1 THEN 1 ELSE 0 END) AS retried
-         FROM deliveries WHERE organization_id=?1 AND created_at>=?2`,
+         FROM deliveries WHERE organization_id=?1 AND created_at>=?2 AND is_test=0`,
       )
       .bind(organizationId, since)
       .first<{ attempted: number | null; retried: number | null }>(),
     db
       .prepare(
         `SELECT COALESCE(last_error_code,'unknown') AS code, COUNT(*) AS n FROM deliveries
-         WHERE organization_id=?1 AND created_at>=?2 AND state IN ('dead_lettered','failed')
+         WHERE organization_id=?1 AND created_at>=?2 AND is_test=0 AND state IN ('dead_lettered','failed')
          GROUP BY COALESCE(last_error_code,'unknown') ORDER BY n DESC, code LIMIT ?3`,
       )
       .bind(organizationId, since, TOP_ERROR_CODES)

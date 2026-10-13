@@ -46,6 +46,8 @@ export interface DeliveryItem {
   readonly updatedAt: string;
   readonly nextAttemptAt: string | null;
   readonly replayOf: string | null;
+  /** A user-requested test notification (ADR 0018), not a real event. */
+  readonly isTest: boolean;
   readonly latestReplayState: DeliveryState | null;
   readonly canReplay: boolean;
 }
@@ -155,6 +157,7 @@ export function parseDelivery(value: unknown): DeliveryItem {
     updatedAt: value.updatedAt,
     nextAttemptAt: value.nextAttemptAt,
     replayOf: value.replayOf,
+    isTest: value.isTest === true,
     latestReplayState: value.latestReplayState,
     canReplay: value.canReplay,
   };

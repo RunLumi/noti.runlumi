@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { createColumnHelper, flexRender, getCoreRowModel, useReactTable } from '@tanstack/react-table';
 import { IconChevronRight, IconRepeat } from '@tabler/icons-react';
-import { Button } from '../components/ui';
+import { Badge, Button } from '../components/ui';
 import { t } from '../i18n';
 import type { DeliveryItem } from './api';
 import { STATE_LABEL, destinationName } from './copy';
@@ -48,6 +48,12 @@ export function DeliveryTable({ rows, onOpen }: DeliveryTableProps) {
             <>
               <span className="cell-main">
                 {d.integrationExists ? d.integration.name : t('deliveries.integrationDeleted')}
+                {d.isTest && (
+                  <>
+                    {' '}
+                    <Badge>{t('delivery.testBadge')}</Badge>
+                  </>
+                )}
               </span>
               {d.integration.repo && <span className="cell-sub">{d.integration.repo}</span>}
             </>

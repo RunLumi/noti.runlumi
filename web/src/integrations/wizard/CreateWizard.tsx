@@ -10,6 +10,7 @@ import { IssuedSecret } from '../IssuedSecret';
 import { useCreateIntegration, useOrgId } from '../hooks';
 import { activeInstallations } from '../github/coverage';
 import { useGithubConnection } from '../github/hooks';
+import type { Integration } from '../../lib/api';
 import { fromServer } from '../validation';
 import {
   EMPTY_DRAFT,
@@ -26,6 +27,7 @@ import {
 } from './draft';
 import { GithubGate } from './GithubGate';
 import { Stepper } from './Stepper';
+import { TestStep } from './TestStep';
 import {
   DestinationStep,
   EventsStep,
@@ -63,7 +65,9 @@ export function CreateWizard() {
   const [formNotice, setFormNotice] = useState<string[]>([]);
   const leaving = useRef(false);
   // A custom webhook's signing secret, shown once after the save; see `IssuedSecret`.
-  const [issued, setIssued] = useState<{ id: string; name: string; secret: string } | null>(null);
+  const [issued, setIssued] = useState<{ integration: Integration; secret: string } | null>(null);
+  // Set once the integration is saved: the optional "Test it" step is shown instead of leaving.
+  const [saved, setSaved] = useState<Integration | null>(null);
 
   useBlocker({
     shouldBlockFn: () => !leaving.current && isDirty(draft) && !window.confirm(t('wizard.leaveConfirm')),
@@ -103,10 +107,10 @@ export function CreateWizard() {
       leaving.current = true;
       if (signingSecret) {
         // Stay on this page until the person has copied it: it cannot be shown again.
-        setIssued({ id: created.id, name: created.name, secret: signingSecret });
+        setIssued({ integration: created, secret: signingSecret });
         return;
       }
-      await navigate({ to: '/integrations/$id', params: { id: created.id }, search: { created: true } });
+      setSaved(created);
     } catch (error) {
       const server = fromServer(fieldErrorsOf(error));
       if (Object.keys(server.fields).length > 0) {
@@ -129,21 +133,31 @@ export function CreateWizard() {
     goTo(step + 1);
   };
 
+  const toIntegration = (id: string) =>
+    void navigate({ to: '/integrations/$id', params: { id }, search: { created: true } });
+
   if (issued) {
     return (
       <div className="wizard">
         <IssuedSecret
-          name={issued.name}
+          name={issued.integration.name}
           secret={issued.secret}
           kind="created"
           doneLabel="integration.secret.continue"
-          onDone={() =>
-            void navigate({ to: '/integrations/$id', params: { id: issued.id }, search: { created: true } })
-          }
+          onDone={() => {
+            setSaved(issued.integration);
+            setIssued(null);
+          }}
         />
       </div>
     );
   }
+  // Every step plus the optional test; the six before it are done once the integration exists.
+  const allSteps = [...steps, 'wizard.step.test' as const];
+  if (saved && orgId)
+    return (
+      <TestStep orgId={orgId} integration={saved} steps={allSteps} onDone={() => toIntegration(saved.id)} />
+    );
 
   const editFromReview = (field: WizardField) => goTo(stepOf(field));
   const Body = STEP_BODIES[step];
@@ -163,12 +177,12 @@ export function CreateWizard() {
         description={t('wizard.description')}
       />
       <div className="wizard">
-        <Stepper steps={steps} current={step} />
+        <Stepper steps={allSteps} current={step} />
         <form ref={formRef} className="wizard-sheet" onSubmit={onSubmit} noValidate>
           <h2 className="wizard-step-title" tabIndex={-1}>
             {t('wizard.stepOf', {
               current: step + 1,
-              total: steps.length,
+              total: allSteps.length,
               title: t(steps[step] ?? STEPS[0]),
             })}
           </h2>

@@ -449,3 +449,15 @@ describe('registry', () => {
     }
   });
 });
+
+describe('the event type `test` is not special (ADR 0018)', () => {
+  it('gets exactly the decision any other unknown type gets: no string-keyed bypass', () => {
+    const config: FilterConfig = {
+      branch: { allow: ['release/*'], deny: ['main'] },
+      actor: { allow: ['nobody'], deny: [], bots: 'any' },
+    };
+    const f = facts({ branch: 'main', actorLogin: 'octocat' });
+    expect(evaluateFilters(config, 'test', f)).toEqual(evaluateFilters(config, 'zzz.unknown', f));
+    expect(evaluateFilters(config, 'noti.test', f)).toEqual(evaluateFilters(config, 'zzz.unknown', f));
+  });
+});

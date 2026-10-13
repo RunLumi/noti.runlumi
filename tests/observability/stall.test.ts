@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sqliteTimestamp } from '../../src/delivery/claim';
 import {
   CLAIM_STALL_MS,
+  countStalls,
   decideStall,
   detectStalls,
   OUTBOX_STALL_MS,
@@ -66,6 +67,29 @@ describe('decideStall (pure)', () => {
     const rec = decideStall(NONE, firing, NOW + 1);
     expect(rec).toEqual({ action: 'recover', next: QUIET });
     expect(decideStall(NONE, rec.next, NOW + 2).action).toBe('none');
+  });
+});
+
+describe('test deliveries are ignored by stall counters (ADR 0018)', () => {
+  it('a stuck test (claimed, retrying, pending outbox) is not a stall', async () => {
+    db.raw
+      .prepare(
+        `INSERT INTO deliveries(id,integration_id,organization_id,state,claimed_at,next_attempt_at,created_at,is_test)
+         VALUES('t1','i','org-a','claimed',?,NULL,?,1),('t2','i','org-a','retrying',NULL,?,?,1)`,
+      )
+      .run(
+        NOW - 86_400_000,
+        sqliteTimestamp(NOW - 86_400_000),
+        NOW - 86_400_000,
+        sqliteTimestamp(NOW - 86_400_000),
+      );
+    outbox('t1', 'pending', 86_400_000);
+    expect(await countStalls(db.d1, NOW)).toEqual(NONE);
+    // A real one with the same shape is still counted.
+    delivery('real', 'claimed', NOW - 86_400_000, null);
+    outbox('real', 'pending', 86_400_000);
+    expect((await countStalls(db.d1, NOW)).claimedStale).toBe(1);
+    expect((await countStalls(db.d1, NOW)).outboxPending).toBe(1);
   });
 });
 

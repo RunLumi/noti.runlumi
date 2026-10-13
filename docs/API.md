@@ -175,6 +175,26 @@ The audit log refuses `UPDATE`. It is append-only at the application level, not
 tamper-evident: organization deletion cascades to it, and a future retention job will
 delete rows.
 
+### Send a test notification
+
+`POST /api/integrations/:id/test` sends a clearly labelled test message through the **real**
+delivery path ([ADR 0018](adr/0018-test-send.md)): an ordinary delivery and outbox row, the same
+dispatcher, consumer, URL policy and adapters as any event. Capability `integration.update`;
+requires our `Origin` and `application/json`.
+
+| Result | When |
+| --- | --- |
+| `202 {deliveryId}` | Queued. Nothing else is returned: no URL, credential or message body. Poll `GET /api/deliveries/:id`; the row has `isTest: true`. |
+| `404` | No such integration in this workspace (identical for another workspace's id; consumes no rate-limit budget). |
+| `409 {reason}` | `deletion_pending`, `disabled` (paused), `quarantined` (credentials need replacing), `test_in_flight` (an earlier test for this integration is still pending, claimed or retrying and was created in the last 15 minutes), or `unavailable` (it changed while the request ran). |
+| `429` + `Retry-After` | More than 5 tests per integration, 20 per user, 30 per workspace, or 10 per destination host (across all workspaces) in a minute (`reason: "rate_limited"`). |
+
+A test is never held or filtered because the route does not use those paths, not because of its event type: `test` and `noti.*` are reserved and refused (`400`) in a generic-webhook event's `type`. It is excluded from
+the observability SLIs, stall detection, the Overview's 24 hour counts and the "real event" setup step, and it is
+audited as `integration.test` (ids only). A replay of a test stays a test. The delivery state is
+the destination's real answer: `sent` (confirmed), `accepted` (accepted without confirmation, as
+with Teams), `retrying` or `dead_lettered` with the usual error code. For a custom webhook the error is one of two buckets only (`destination_unavailable`, `destination_unauthorized`), never the HTTP status class.
+
 ## Routing filters
 
 Per-integration filters narrow which of the subscribed events are sent
@@ -525,11 +545,40 @@ responses carry `guarantee: "at_least_once"` and the dashboard says so.
 | `GET /api/deliveries/:id` | `delivery.read` | `{delivery, timeline, attemptDetail: "summary", replays, guarantee}`. The timeline is what the single ledger row records, not a per-attempt history. |
 | `POST /api/deliveries/:id/replay` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. `202 {replay: {deliveryId, replayOf, created: true}}`; `200` with `created: false` while an earlier replay of the same delivery is queued or succeeded (idempotent). `409` if the delivery is not dead-lettered, already delivered, its original message is gone, its integration is deleted, paused or quarantined (`reason: "integration_unavailable"`), or workspace deletion is pending. `429` when rate limited. Audited as `delivery.replay`; the audit row commits in the same batch as the replay and exists only if a new replay row was created. |
 
+Each delivery carries `isTest` (a test notification, ADR 0018); tests stay in the log, labelled, but are left out of `/summary`.
+
 A replay never edits the original row (not even `updated_at`): it writes a new delivery with
 `replayOf` set, so the log shows both. Each delivery carries `integrationStatus`
 (`available`, `missing`, `disabled`, `quarantined`); `canReplay` is true only for
 `available`. Reads are limited to 300 per minute per user and mutations to 30, both `429`
 with `Retry-After`.
+
+## Setup progress
+
+`GET /api/setup/progress` (`delivery.read`) is derived from real rows on every request; nothing is
+stored and the browser holds no step state ([ADR 0018](adr/0018-test-send.md)).
+
+```ts
+type SetupProgress = {
+  organizationId: string;
+  steps: {
+    id: 'source_connected' | 'integration_created' | 'destination_verified' | 'first_event_received';
+    done: boolean;              // true only for status 'done'
+    status: 'done' | 'accepted' | 'todo';  // 'accepted': the destination accepted a message and never confirmed it
+    since: string | null;       // ISO instant of the earliest evidence; null when not done
+    nextAction: 'connect_source' | 'create_integration' | 'send_test' | 'trigger_real_event' | 'none';
+  }[];
+  complete: boolean;
+  next: string | null;          // the first step not done
+  verifiedWindowDays: 30;
+};
+```
+
+`source_connected`: an active GitHub installation or any **enabled** generic, GitLab or Stripe source.
+`integration_created`: any integration. `destination_verified`: a `sent` delivery (`done`) or, failing
+that, an `accepted` one (`accepted`) within 30 days, test or real, to an integration that still exists, is
+enabled and not quarantined. `complete` means no step is `todo`. `first_event_received`: any non-test delivery, in any state. Reads
+are limited to 120 per minute per user (`429` with `Retry-After`).
 
 ## Workspace export and deletion (admin)
 

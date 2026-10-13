@@ -130,6 +130,7 @@ export interface DeliveryRowRecord {
   last_attempt_at: number | null;
   next_attempt_at: number | null;
   dead_lettered_at: number | null;
+  is_test: number | null;
   integration_name: string | null;
   integration_repo: string | null;
   integration_destination: string | null;
@@ -182,6 +183,8 @@ export interface DeliveryView {
   readonly updatedAt: string;
   readonly nextAttemptAt: string | null;
   readonly replayOf: string | null;
+  /** A user-requested test notification (ADR 0018), not a real event. */
+  readonly isTest: boolean;
   /** State of the most recent replay of this row, if one was requested. */
   readonly latestReplayState: DeliveryState | null;
   readonly canReplay: boolean;
@@ -216,6 +219,27 @@ function errorView(code: string | null): DeliveryErrorView | null {
   };
 }
 
+/**
+ * The result of a TEST to a customer-chosen endpoint is shown as three buckets only
+ * (reachable, unreachable, refused by the endpoint), never the HTTP status class: with a
+ * tenant-chosen host, the class is an oracle for probing what answers where (ADR 0014, 0018).
+ * Unreachable maps to `destination_unavailable`; every answer that is not a success maps to
+ * `destination_unauthorized` ("refused the request").
+ */
+const UNREACHABLE: ReadonlySet<ErrorCode> = new Set([
+  'destination_unavailable',
+  'destination_timeout',
+  'destination_url_rejected',
+  'internal_error',
+]);
+
+function coarseTestError(code: string | null): DeliveryErrorView | null {
+  if (!code) return null;
+  return errorView(
+    UNREACHABLE.has(toErrorCode(code)) ? 'destination_unavailable' : 'destination_unauthorized',
+  );
+}
+
 const HELD_REASONS: ReadonlySet<string> = new Set(['quiet_hours', 'digest', 'grouped']);
 
 export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): DeliveryView {
@@ -235,11 +259,17 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
     integrationStatus: status,
     state,
     attempts: row.attempts,
-    error: state === 'dead_lettered' || state === 'retrying' ? errorView(row.last_error_code) : null,
+    error:
+      state === 'dead_lettered' || state === 'retrying'
+        ? row.is_test === 1 && row.integration_destination === 'generic_webhook'
+          ? coarseTestError(row.last_error_code)
+          : errorView(row.last_error_code)
+        : null,
     createdAt: sqlTimeToIso(row.created_at),
     updatedAt: sqlTimeToIso(row.updated_at) ?? row.updated_at,
     nextAttemptAt: state === 'retrying' ? epochToIso(row.next_attempt_at) : null,
     replayOf: row.replay_of,
+    isTest: row.is_test === 1,
     latestReplayState: latest,
     // A replay that is still in flight or already succeeded makes another one pointless;
     // the server enforces the same rule, this only decides whether to offer the button.

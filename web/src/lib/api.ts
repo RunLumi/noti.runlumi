@@ -25,6 +25,8 @@ export class ApiError extends Error {
     public fields: readonly FieldError[] = [],
     /** Seconds from a 429 `Retry-After` header, if the server sent one. */
     public retryAfter: number | null = null,
+    /** The server's machine-readable `reason` (for example `test_in_flight`), if it sent one. */
+    public reason: string | null = null,
   ) {
     super(message);
   }
@@ -76,6 +78,7 @@ async function request(path: string, init: RequestInit = {}): Promise<unknown> {
       res.status,
       fieldErrorsOf(body),
       res.status === 429 ? retryAfterOf(res) : null,
+      isRecord(body) && typeof body.reason === 'string' ? body.reason : null,
     );
   }
   return body;
