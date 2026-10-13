@@ -1,0 +1,140 @@
+/**
+ * Copy for the audit log (ADR 0019). A separate catalogue merged into `en`, like the filters
+ * and noise copy. One message per audit action id (`audit.action.<id>`), per metadata key
+ * (`audit.detail.<key>`) and per subject type, so a new action cannot ship without a plain-language
+ * label: `web/src/audit/audit.test.ts` checks every id in `src/audit/audit.ts` and every
+ * allow-listed key in `src/api/audit-view.ts`.
+ *
+ * Rules as everywhere: say what happened in plain words, name the thing, never claim more than the
+ * log records (it holds who and what, not message contents, and it is not tamper-proof).
+ */
+export const auditEn = {
+  'audit.eyebrow': 'SECURITY',
+  'audit.title': 'Audit log',
+  'audit.description':
+    'Who changed what in this workspace, and which requests were refused. Only admins can see this page.',
+  'audit.retention':
+    'Events are kept for {days} days and then deleted. The log records changes made in Noti, not message contents. It is an application log, not a tamper-proof record.',
+
+  'audit.filters.label': 'Filter audit events',
+  'audit.filter.action': 'What happened',
+  'audit.filter.action.all': 'Everything',
+  'audit.filter.outcome': 'Result',
+  'audit.filter.outcome.all': 'Any result',
+  'audit.filter.from': 'From',
+  'audit.filter.to': 'To',
+  'audit.filter.clear': 'Clear filters',
+  'audit.filter.dateHint': 'Dates are in UTC and include the whole day.',
+
+  'audit.loading': 'Loading audit events…',
+  'audit.count': { one: '{count} event shown.', other: '{count} events shown.' },
+  'audit.count.more': 'Older events are available.',
+  'audit.count.end': 'That is every event that matches.',
+  'audit.loadMore': 'Load older events',
+  'audit.loadingMore': 'Loading…',
+  'audit.retry': 'Try again',
+  'audit.tableLabel': 'Audit events, newest first',
+
+  'audit.col.when': 'When',
+  'audit.col.who': 'Who',
+  'audit.col.what': 'What happened',
+  'audit.col.subject': 'About',
+  'audit.col.result': 'Result',
+  'audit.col.details': 'Details',
+
+  'audit.empty.none.title': 'No events yet',
+  'audit.empty.none.body':
+    'Changes to integrations, sources and access appear here as they happen, and so do refused requests.',
+  'audit.empty.filtered.title': 'No events match these filters',
+  'audit.empty.filtered.body': 'Widen the dates or choose “Everything” to see more.',
+
+  'audit.error.title': 'We couldn’t load the audit log.',
+  'audit.error.body': 'Nothing has been changed. Try again in a moment.',
+  'audit.error.stale': 'We couldn’t refresh the log. The events below may be out of date.',
+
+  'audit.forbidden.title': 'Only admins can read the audit log',
+  'audit.forbidden.body': 'Ask an admin of this workspace if you need to know who changed something.',
+
+  'audit.export': 'Download loaded events (CSV)',
+  'audit.export.hint':
+    'Saves the events shown now, with the filters applied. Load older events first to include them.',
+  'audit.csv.header.time': 'Time (UTC)',
+  'audit.csv.header.action': 'Action',
+  'audit.csv.header.result': 'Result',
+  'audit.csv.header.who': 'Who',
+  'audit.csv.header.subjectType': 'About (type)',
+  'audit.csv.header.subjectId': 'About (id)',
+  'audit.csv.header.details': 'Details',
+
+  'audit.actor.system': 'Noti (automatic)',
+  'audit.actor.other': 'Not a current member',
+  'audit.outcome.success': 'Done',
+  'audit.outcome.denied': 'Refused',
+  'audit.noDetails': 'No further details recorded.',
+  'audit.value.true': 'Yes',
+  'audit.value.false': 'No',
+  'audit.list.more': 'and more',
+
+  'audit.action.integration.create': 'Integration created',
+  'audit.action.integration.update': 'Integration changed',
+  'audit.action.integration.delete': 'Integration deleted',
+  'audit.action.integration.credentials.rotate': 'Integration credentials replaced',
+  'audit.action.integration.auto_pause': 'Integration paused automatically',
+  'audit.action.integration.test': 'Test notification sent',
+  'audit.action.source.create': 'Source created',
+  'audit.action.source.update': 'Source changed',
+  'audit.action.source.delete': 'Source deleted',
+  'audit.action.source.secret.rotate': 'Source signing secret replaced',
+  'audit.action.delivery.replay': 'Failed delivery sent again',
+  'audit.action.access.denied': 'Request refused',
+  'audit.action.github.installation.bind': 'GitHub connected',
+  'audit.action.github.installation.bind_refused': 'GitHub connection refused',
+  'audit.action.github.installation.lifecycle': 'GitHub installation changed',
+  'audit.action.github.repository.out_of_scope': 'Update from a repository outside the connection ignored',
+  'audit.action.workspace.export': 'Workspace data exported',
+  'audit.action.workspace.deletion.request': 'Workspace deletion requested',
+  'audit.action.workspace.deletion.cancel': 'Workspace deletion cancelled',
+  'audit.action.workspace.purged': 'Workspace data deleted',
+  'audit.action.unknown': 'Other event',
+
+  'audit.subject.integration': 'Integration',
+  'audit.subject.source': 'Source',
+  'audit.subject.delivery': 'Delivery',
+  'audit.subject.organization': 'Workspace',
+  'audit.subject.capability': 'Permission',
+  'audit.subject.github_installation': 'GitHub installation',
+  'audit.subject.repository': 'Repository',
+
+  'audit.detail.repo': 'Repository',
+  'audit.detail.sourceId': 'Source',
+  'audit.detail.destination': 'Destination',
+  'audit.detail.destinationHost': 'Destination host',
+  'audit.detail.eventTypes': 'Updates',
+  'audit.detail.signed': 'Signed',
+  'audit.detail.filters': 'Filters',
+  'audit.detail.noise': 'Noise controls',
+  'audit.detail.fields': 'Changed',
+  'audit.detail.enabled': 'Turned on',
+  'audit.detail.clearedQuarantine': 'Cleared a credentials problem',
+  'audit.detail.providerStatus': 'Provider status',
+  'audit.detail.reason': 'Reason',
+  'audit.detail.providerCode': 'Provider code',
+  'audit.detail.kind': 'Kind',
+  'audit.detail.authMode': 'Verification',
+  'audit.detail.livemode': 'Live mode',
+  'audit.detail.integrationsDeleted': 'Integrations removed with it',
+  'audit.detail.downgrade': 'Verification weakened',
+  'audit.detail.deliveryId': 'Delivery',
+  'audit.detail.replayDeliveryId': 'New delivery',
+  'audit.detail.capability': 'Permission needed',
+  'audit.detail.role': 'Role',
+  'audit.detail.account': 'Account',
+  'audit.detail.selection': 'Repositories',
+  'audit.detail.repositories': 'Repositories covered',
+  'audit.detail.action': 'Change',
+  'audit.detail.added': 'Repositories added',
+  'audit.detail.removed': 'Repositories removed',
+  'audit.detail.purgeAfter': 'Data deleted after',
+  'audit.detail.disabledIntegrations': 'Integrations paused',
+  'audit.detail.restoredIntegrations': 'Integrations turned back on',
+} as const;

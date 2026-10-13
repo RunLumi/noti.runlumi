@@ -405,7 +405,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F28 — Audit events
 
-**Priority** P1 · **Status** 🟡 table, append-only trigger, integration + denial events (PR #9); member/session/installation events pending
+**Priority** P1 · **Status** 🟡 table, append-only trigger, integration + denial events (PR #9); admin read API `GET /api/audit` and dashboard page, actor name only, no IP or user agent, allow-listed metadata (slice 6e, ADR 0019); member/session events not written, no actor email by decision, no correlation id
 
 **Acceptance**
 - [ ] `audit_events(id, organization_id, actor_id, action, subject_type, subject_id,

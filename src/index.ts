@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { createAuth } from './auth/better-auth';
 import { api as githubApi, browser as githubBrowser } from './api/github';
+import audit from './api/audit';
 import deliveries from './api/deliveries';
 import integrations from './api/integrations';
 import routing from './api/routing';
@@ -47,6 +48,7 @@ app.route('/api/integrations', integrations);
 app.route('/api/sources', sources);
 app.route('/api/deliveries', deliveries);
 app.route('/api/observability', observability);
+app.route('/api/audit', audit);
 app.route('/api/integrations', routing);
 app.route('/api/integrations', testSend);
 app.route('/api/setup', setupProgress);

@@ -12,6 +12,12 @@ export const appEn = {
   'shell.loading': 'Loading your workspace…',
   'shell.workspaceFallback': 'Setup workspace',
   'shell.workspaceKind': 'Organization',
+  'switcher.heading': 'Your workspaces',
+  'switcher.trigger': 'Workspace: {name}, {role}. Switch workspace',
+  'switcher.create': 'Create workspace',
+  'switcher.createAnother': 'Create another workspace',
+  'switcher.changed': 'Switched to {name}. Your role here: {role}.',
+  'switcher.error': 'Couldn’t switch workspace. You are still in {name}.',
   'shell.navLabel': 'Main navigation',
   'shell.breadcrumbRoot': 'Workspace',
   'shell.preview': 'Preview',
@@ -19,6 +25,7 @@ export const appEn = {
   'nav.integrations': 'Integrations',
   'nav.activity': 'Activity',
   'nav.team': 'Team',
+  'nav.audit': 'Audit log',
   'nav.settings': 'Settings',
   'role.admin': 'Admin',
   'role.member': 'Member',
@@ -31,6 +38,7 @@ export const appEn = {
   'route.title.integration': 'Integration settings',
   'route.title.activity': 'Activity',
   'route.title.team': 'Team',
+  'route.title.audit': 'Audit log',
   'route.title.settings': 'Settings',
   'route.title.onboarding': 'Create your workspace',
   'route.title.invite': 'Team invitation',
@@ -141,6 +149,10 @@ export const appEn = {
 
   // --- Onboarding and invitations ----------------------------------------------------------------
   'onboarding.title': 'Create your workspace',
+  'onboarding.titleAdditional': 'Create another workspace',
+  'onboarding.bodyAdditional':
+    'A new workspace has its own integrations, sources, team and audit log. Nothing is shared with your other workspaces. You can switch between them from the sidebar.',
+  'onboarding.cancel': 'Back to your workspace',
   'onboarding.body':
     'Each person belongs to one organization at a time. You can invite more people after setup.',
   'onboarding.field': 'Organization name',

@@ -18,11 +18,27 @@ export const ADMIN: Me = {
     org_id: ORG_ID,
     org_name: 'Acme Studio',
     role: 'admin',
+    activeOrgId: ORG_ID,
+    organizations: [{ orgId: ORG_ID, role: 'admin', name: 'Acme Studio' }],
   },
 };
 
 export const MEMBER: Me = { user: { ...ADMIN.user, id: 'user_2', role: 'member' } };
-export const NO_WORKSPACE: Me = { user: { ...ADMIN.user, org_id: null, org_name: null, role: null } };
+export const NO_WORKSPACE: Me = {
+  user: { ...ADMIN.user, org_id: null, org_name: null, role: null, activeOrgId: null, organizations: [] },
+};
+
+/** A second workspace for the same person, where they are only a member (switcher tests). */
+export const OTHER_ORG_ID = 'org_test_2';
+export const MULTI: Me = {
+  user: {
+    ...ADMIN.user,
+    organizations: [
+      { orgId: ORG_ID, role: 'admin', name: 'Acme Studio' },
+      { orgId: OTHER_ORG_ID, role: 'member', name: 'Bao Retail' },
+    ],
+  },
+};
 
 const integration = (over: Partial<Integration> & Pick<Integration, 'id' | 'name'>): Integration => ({
   repo: 'acme/website',
@@ -291,3 +307,55 @@ export const MEMBERS = [
 ] as const;
 
 export const PASSKEYS = [{ id: 'pk_1', name: 'Work laptop', createdAt: '2026-09-10T00:00:00.000Z' }];
+
+/** What `GET /api/audit` returns for an admin: names only, allow-listed details, no addresses. */
+export const AUDIT_EVENTS = [
+  {
+    id: 'au_1',
+    createdAt: '2026-10-13T09:30:00Z',
+    action: 'integration.create',
+    subjectType: 'integration',
+    subjectId: 'int_1',
+    outcome: 'success',
+    actor: { kind: 'member', name: 'Linh Nguyen' },
+    summary: [
+      { key: 'repo', value: 'acme/website' },
+      { key: 'destination', value: 'slack' },
+      { key: 'signed', value: false },
+      { key: 'eventTypes', value: ['workflow_run.failure', 'workflow_run.timed_out'] },
+    ],
+  },
+  {
+    id: 'au_2',
+    createdAt: '2026-10-13T08:10:00Z',
+    action: 'access.denied',
+    subjectType: 'capability',
+    subjectId: 'delivery.replay',
+    outcome: 'denied',
+    actor: { kind: 'member', name: 'Minh Tran' },
+    summary: [{ key: 'role', value: 'member' }],
+  },
+  {
+    id: 'au_3',
+    createdAt: '2026-10-12T22:00:00Z',
+    action: 'integration.auto_pause',
+    subjectType: 'integration',
+    subjectId: 'int_3',
+    outcome: 'success',
+    actor: { kind: 'system' },
+    summary: [
+      { key: 'destination', value: 'discord' },
+      { key: 'providerStatus', value: 404 },
+    ],
+  },
+  {
+    id: 'au_4',
+    createdAt: '2026-10-12T21:00:00Z',
+    action: 'access.denied',
+    subjectType: 'organization',
+    subjectId: 'org_other',
+    outcome: 'denied',
+    actor: { kind: 'other' },
+    summary: [{ key: 'reason', value: 'not_a_member' }],
+  },
+] as const;

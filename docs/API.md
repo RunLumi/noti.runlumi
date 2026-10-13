@@ -44,10 +44,29 @@ type Me = {
   user: {
     id: string; name: string; email: string; emailVerified: boolean;
     org_id: string | null; org_name: string | null; role: string | null;
-    organizations: { orgId: string; role: string; name: string }[]; // only the caller's own
+    activeOrgId: string | null;                  // the workspace this response describes (= org_id)
+    organizations: { orgId: string; role: string; name: string }[]; // only the caller's own, oldest membership first
   };
 };
 ```
+
+### Switching workspace: `POST /api/workspace/active`
+
+Body `{"organizationId": "<id>"}` (JSON). Makes that workspace the **session's** active one, which
+every workspace route uses when no `?org=` is given.
+
+| Case | Response |
+| --- | --- |
+| Member of that workspace | `200 {"activeOrgId", "orgName", "role"}`; `session.active_organization_id` is updated |
+| Not a member, or no such organization | `404 {"error":"Not found"}`: the same status and body for both, so the endpoint reveals nothing about which ids exist |
+| No session, or email not verified | `401` |
+| Cross-site or missing `Origin` | `403` (central CSRF middleware, as for every `/api/*` mutation) |
+| Not JSON | `415` |
+| `organizationId` missing, not a string or longer than 64 | `422` with `fields` |
+| More than 30 switches a minute per user | `429` with `Retry-After` |
+
+Membership is read from the database for the caller; the body is never trusted. Only the caller's own
+session row is written. It is not audited (it changes no workspace data). `Cache-Control: no-store`.
 
 Only `/me` has the no-workspace exception. Every other workspace-scoped route (`/team`,
 `/integrations`, and the rest) still returns `403 {"error":"Create or join an organization
@@ -590,6 +609,43 @@ are limited to 120 per minute per user (`429` with `Retry-After`).
 | `DELETE /api/workspace/deletion` | `workspace.delete` | Cancels and restores the integrations that were enabled. Returns `409` once the purge has started. |
 
 While a deletion is pending, integration and source mutations and `POST /api/github/install` return `409`.
+
+## Audit log (admin)
+
+| Method and path | Capability | Result |
+| --- | --- | --- |
+| `GET /api/audit` | `audit.read` | `200` JSON, workspace-scoped, newest first, `Cache-Control: no-store`. A member gets `403 {"error":"Missing capability: audit.read"}` (audited). Limited to 120 requests a minute per user (`429` with `Retry-After`). |
+
+Query: `limit` (1 to 100, default 25), `cursor` (the opaque `nextCursor` of the previous page, keyed on
+`(created_at, id)`), `action` (one of the recorded action ids, `src/audit/actions.ts`), `outcome`
+(`success` or `denied`), `from` and `to` (`YYYY-MM-DD`, the whole UTC day, or an ISO instant). Anything
+invalid is `422 {"error":"Validation failed","fields":[...]}`.
+
+```ts
+type AuditPage = {
+  organizationId: string;
+  events: {
+    id: string;
+    createdAt: string;                 // ISO 8601 UTC
+    action: string;                    // e.g. 'integration.update', 'access.denied'
+    subjectType: string;               // integration | source | delivery | organization | capability | github_installation | repository
+    subjectId: string | null;          // an id, capability name or repository name, at most 120 characters
+    outcome: 'success' | 'denied';
+    actor:
+      | { kind: 'member'; name: string }   // a CURRENT member of this workspace, name only
+      | { kind: 'system' }                 // no actor (automatic)
+      | { kind: 'other' };                 // left the workspace, or an outsider whose probe was recorded here
+    summary: { key: string; value: string | number | boolean | string[] }[];  // allow-listed, bounded
+  }[];
+  nextCursor: string | null;
+  retentionDays: number;               // AUDIT_RETENTION_DAYS in force
+};
+```
+
+What is **not** returned, deliberately: the actor's email or id, `ip`, `user_agent`, and any
+`metadata_json` key that is not in the per-action allow-list (`SUMMARY_FIELDS` in
+`src/api/audit-view.ts`). Strings are cut to 120 characters, lists to 10 items, and control and bidi
+characters are removed. See ADR 0019.
 
 ## Observability
 

@@ -38,14 +38,14 @@ const STATES: readonly DeliveryState[] = [
 ];
 
 /** D1's `CURRENT_TIMESTAMP` format, which is what `updated_at` holds. */
-function toSqlTime(date: Date): string {
+export function toSqlTime(date: Date): string {
   return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
 /** `2026-10-13` means the whole UTC day; a full ISO instant is taken as written. */
-function parseBound(raw: string, edge: 'start' | 'end'): string | null {
+export function parseBound(raw: string, edge: 'start' | 'end'): string | null {
   const date = new Date(DATE_ONLY.test(raw) ? `${raw}T${edge === 'start' ? '00:00:00' : '23:59:59'}Z` : raw);
   return Number.isNaN(date.getTime()) ? null : toSqlTime(date);
 }
@@ -57,7 +57,7 @@ export function encodeCursor(updatedAt: string, id: string): string {
     .replace(/=+$/, '');
 }
 
-function decodeCursor(raw: string): { updatedAt: string; id: string } | null {
+export function decodeCursor(raw: string): { updatedAt: string; id: string } | null {
   try {
     const padded = raw.replace(/-/g, '+').replace(/_/g, '/');
     const parsed: unknown = JSON.parse(atob(padded));

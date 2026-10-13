@@ -70,7 +70,7 @@ billing-on-messages-sent, which lives outside both of this session's ranges and 
 
 ## F205 — Information architecture and navigation
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 6e: a workspace switcher in the shell for people in several workspaces, an admin-only Audit log entry; the rest of the information architecture is not started)
 
 **Story** As a person who does not work with developer tools, I want to find the one thing I
 came for, so that I never have to guess where something is.
@@ -1871,7 +1871,7 @@ building a feature ("it's fine, it's a preview").
 
 ## F222 — Audit trail and change history
 
-**Priority** P0 · **Status** not started · **Referenced by `05:F68` as the write trigger for
+**Priority** P0 · **Status** partial (slice 6e, ADR 0019: admin-only `/audit` read side over `GET /api/audit` with filters by action, result and date in the URL, plain-language English and Vietnamese labels, allow-listed details, retention stated, no export-before-delete flow. **Not done:** filters by actor/target/correlation id, a stated total, target links, a field diff, member/session/installation-initiated actors, an email beside the name (excluded by decision), "audit write failure fails the action") · **Referenced by `05:F68` as the write trigger for
 installation lifecycle events**
 
 **Story** As an administrator, I want to see who changed what in my workspace, so that I can

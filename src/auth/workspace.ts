@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { recordDenial, requestOrigin } from '../audit/audit';
+import { hit } from '../security/rate-limit';
 import { createAuth, type AuthBindings } from './better-auth';
 import { can, type Capability } from './permissions';
 
@@ -170,6 +171,7 @@ workspace.get('/me', async (c) => {
             org_id: null,
             org_name: null,
             role: null,
+            activeOrgId: null,
             organizations: [],
           },
         });
@@ -187,7 +189,8 @@ workspace.get('/me', async (c) => {
     })
     .from(schema.member)
     .innerJoin(schema.organization, eq(schema.organization.id, schema.member.organizationId))
-    .where(eq(schema.member.userId, resolved.userId));
+    .where(eq(schema.member.userId, resolved.userId))
+    .orderBy(schema.member.createdAt, schema.member.organizationId);
 
   return c.json({
     user: {
@@ -198,11 +201,72 @@ workspace.get('/me', async (c) => {
       org_id: resolved.orgId,
       org_name: resolved.orgName,
       role: resolved.role,
+      // The workspace this response describes: the session's active one, as settled above.
+      activeOrgId: resolved.orgId,
       // Every workspace the caller belongs to, so a client can offer a switcher.
       // Scoped to this user by definition; the caller cannot see anyone else's.
       organizations,
     },
   });
+});
+
+/** Switching is a write to the caller's own session only; a generous ceiling for a person clicking. */
+const SWITCHES_PER_MINUTE = 30;
+
+/**
+ * `POST /api/workspace/active` `{ organizationId }`: make a workspace the session's active one.
+ *
+ * Membership is checked here, from the database, for exactly this user: the id in the body is
+ * never trusted. A workspace the caller is not in and one that does not exist answer
+ * identically (404, same body), so the endpoint cannot be used to learn which ids exist. Only
+ * `session.active_organization_id` of the caller's own session changes. CSRF (Origin) is
+ * enforced for every `/api/*` mutation by `requireSameOrigin` (and repeated below).
+ */
+workspace.post('/active', async (c) => {
+  // Repeats the central Origin check (`requireSameOrigin`) so this file stands on its own.
+  const origin = c.req.header('origin');
+  if (!origin || origin !== new URL(c.env.APP_ORIGIN).origin) return c.json({ error: 'Forbidden' }, 403);
+  const s = await current(c);
+  if (!s) return c.json({ error: 'Unauthorized' }, 401);
+  if (!(c.req.header('content-type') ?? '').toLowerCase().startsWith('application/json'))
+    return c.json({ error: 'Expected application/json' }, 415);
+  const body: unknown = await c.req.json().catch(() => null);
+  const requested =
+    typeof body === 'object' && body !== null && 'organizationId' in body ? body.organizationId : null;
+  if (typeof requested !== 'string' || requested.length === 0 || requested.length > 64)
+    return c.json(
+      { error: 'Validation failed', fields: [{ field: 'organizationId', message: 'Required.' }] },
+      422,
+    );
+
+  const limit = await hit(c.env.DB, `workspace-active:${s.user.id}`, SWITCHES_PER_MINUTE, 60_000);
+  if (limit.limited)
+    return c.json({ error: 'Too many requests; try again shortly' }, 429, {
+      'retry-after': String(limit.retryAfterSeconds),
+    });
+
+  const db = drizzle(c.env.DB, { schema });
+  const found = await db
+    .select({
+      orgId: schema.member.organizationId,
+      role: schema.member.role,
+      orgName: schema.organization.name,
+    })
+    .from(schema.member)
+    .innerJoin(schema.organization, eq(schema.organization.id, schema.member.organizationId))
+    .where(and(eq(schema.member.userId, s.user.id), eq(schema.member.organizationId, requested)))
+    .limit(1);
+  const membership = found[0];
+  if (!membership) return c.json({ error: 'Not found' }, 404);
+
+  // Scoped to the caller's own session row, so another user's session can never be touched.
+  if (typeof s.session.id === 'string')
+    await db
+      .update(schema.session)
+      .set({ activeOrganizationId: membership.orgId })
+      .where(and(eq(schema.session.id, s.session.id), eq(schema.session.userId, s.user.id)));
+  c.header('Cache-Control', 'no-store');
+  return c.json({ activeOrgId: membership.orgId, orgName: membership.orgName, role: membership.role });
 });
 
 workspace.get('/team', async (c) => {
