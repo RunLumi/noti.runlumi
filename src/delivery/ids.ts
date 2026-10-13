@@ -106,6 +106,26 @@ export async function replayDeliveryId(originalDeliveryId: string, replaySequenc
   );
 }
 
+/**
+ * A test notification (ADR 0018) is a new delivery on every click: the id binds the tenant,
+ * the integration and a per-request nonce, so two clicks never collapse into one row and a
+ * test id can never equal a real delivery id (separate domain tag).
+ */
+export async function testDeliveryId(
+  organizationId: string,
+  integrationId: string,
+  nonce: string,
+): Promise<Digest> {
+  return sha256(
+    encodeComponents([
+      ['domain', 'noti.test-delivery.v1'],
+      ['organizationId', organizationId],
+      ['integrationId', integrationId],
+      ['nonce', nonce],
+    ]),
+  );
+}
+
 /** Lark's documented `uuid` maximum (F188). */
 export const LARK_UUID_MAX_LENGTH = 50;
 

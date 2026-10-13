@@ -4,6 +4,8 @@ import { api as githubApi, browser as githubBrowser } from './api/github';
 import deliveries from './api/deliveries';
 import integrations from './api/integrations';
 import routing from './api/routing';
+import setupProgress from './api/setup-progress';
+import testSend from './api/test-send';
 import sources from './api/sources';
 import workspaceLifecycle from './api/workspace-lifecycle';
 import workspace from './auth/workspace';
@@ -46,6 +48,8 @@ app.route('/api/sources', sources);
 app.route('/api/deliveries', deliveries);
 app.route('/api/observability', observability);
 app.route('/api/integrations', routing);
+app.route('/api/integrations', testSend);
+app.route('/api/setup', setupProgress);
 app.route('/api/github', githubApi);
 app.route('/github', githubBrowser);
 

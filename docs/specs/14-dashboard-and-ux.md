@@ -292,7 +292,7 @@ the type it accepts omits it (F97). Redaction at render time is a fallback, not 
 
 ## F207 — Setup progress model
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 6d, ADR 0018: `GET /api/setup/progress` derives four steps from real rows (source connected, integration created, destination verified in the last 30 days, first real event) with `since` and a closed next-action key; the Overview card shows them and disappears when done. **Not done:** the seven-step `StepId` set, the two machines (`workspace_setup`, `integration_setup`), `status` of `current`/`blocked`, `blocking_reason`, `why_this_step`, server-supplied titles and hrefs, repository and event selection as steps, and the endpoint path `/api/workspace/setup-state`)
 
 **Story** As someone who got interrupted, I want to be told exactly what to do next, so that I
 can finish what I started without remembering what I did.
@@ -1180,7 +1180,7 @@ through an error tracker or an analytics event — `docs/SECURITY.md` requires t
 
 ## F215 — Test-delivery screen
 
-**Priority** P0 · **Status** not started · **UI for F98**
+**Priority** P0 · **Status** partial (slice 6d, ADR 0018: a "Send a test notification" section on integration settings and a per-row button, a result panel that polls the real delivery and explains sent, accepted (Teams), failed with fix and docs links, retrying, timed out and rate limited, announced through a live region. **Not done:** a dedicated screen, rendered payload preview, HTTP status and latency, onboarding before an event type is chosen as a separate step) · **UI for F98**
 
 **Story** As someone who has never used this product, I want to prove it works before I trust
 it, so that I know the setup was worth finishing.
@@ -1286,7 +1286,7 @@ unredacted payload at all.
 
 ## F216 — Setup wizard shell and step navigation
 
-**Priority** P0 · **Status** not started · **Referenced by `07:F98`, `00-current-state.md:N3`**
+**Priority** P0 · **Status** partial (slice 6d: the create wizard gained an optional seventh step, "Test it", after the integration is saved; it can be skipped. The steps are not driven by the server-side setup model, and nothing resumes an interrupted wizard) · **Referenced by `07:F98`, `00-current-state.md:N3`**
 
 **Story** As a new user, I want one guided path from nothing to a notification that works, so
 that I never have to work out the order myself.

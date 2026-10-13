@@ -3,6 +3,7 @@ import { TeamManagement } from './team';
 import { PasskeysPanel } from './passkeys';
 import { IntegrationsStat } from './integrations/IntegrationsStat';
 import { DeliveryStats } from './deliveries/DeliveryStats';
+import { SetupProgressCard } from './setup/SetupProgressCard';
 import { DeliveryLogPage } from './deliveries/DeliveryLogPage';
 import { WorkspaceDataPanel } from './workspace/WorkspaceDataPanel';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
@@ -181,6 +182,7 @@ export function Overview() {
           </Link>
         }
       />
+      <SetupProgressCard />
       <div className="stats">
         <IntegrationsStat />
         <DeliveryStats />

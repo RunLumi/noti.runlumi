@@ -28,7 +28,9 @@ import {
   ORG_ID,
   PASSKEYS,
   ROUTING_LOG,
+  SETUP_PROGRESS,
   SOURCES,
+  TEST_DELIVERY_ID,
 } from './fixtures';
 import type { Me } from '../../lib/api';
 
@@ -100,6 +102,12 @@ export interface ApiState {
   members: unknown[];
   passkeys: unknown[];
   deletion: unknown;
+  /** `GET /api/setup/progress`; `'error'` makes it fail. */
+  setup: unknown;
+  /** Answer to `POST /api/integrations/:id/test`: accepted, or a failing status. */
+  testSend: 'ok' | 409 | 429 | 500;
+  /** The delivery a test creates, as `GET /api/deliveries/:id` reports it. */
+  testDelivery: Record<string, unknown>;
 }
 
 export const defaultApi = (): ApiState => ({
@@ -112,13 +120,19 @@ export const defaultApi = (): ApiState => ({
   members: [...MEMBERS],
   passkeys: [...PASSKEYS],
   deletion: { scheduled: false },
+  setup: SETUP_PROGRESS,
+  testSend: 'ok',
+  testDelivery: { state: 'sent' },
 });
 
 /** A made-up value in the real `whsec_` shape; built at runtime so no literal looks like a credential. */
 const fixtureSecret = () => ['whsec', btoa('fixture-not-a-real-value')].join('_');
 
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 
 /** Requests a test made that no handler answered; asserted empty by the route-coverage test. */
 export const unhandled: string[] = [];
@@ -184,6 +198,21 @@ export function installFetch(state: ApiState): void {
             ? json({ error: 'boom' }, 500)
             : json({ deliveries: state.deliveries, nextCursor: null }),
         );
+      if (path === `/api/deliveries/${TEST_DELIVERY_ID}`)
+        return Promise.resolve(
+          json({
+            delivery: {
+              ...(DELIVERIES[0] as object),
+              id: TEST_DELIVERY_ID,
+              isTest: true,
+              ...state.testDelivery,
+            },
+            timeline: [],
+            replays: [],
+          }),
+        );
+      if (path === '/api/setup/progress')
+        return Promise.resolve(state.setup === 'error' ? json({ error: 'boom' }, 500) : json(state.setup));
       const detail = /^\/api\/deliveries\/([^/]+)$/.exec(path);
       if (detail && Array.isArray(state.deliveries)) {
         const found = (state.deliveries as { id: string }[]).find((d) => d.id === detail[1]);
@@ -203,6 +232,18 @@ export function installFetch(state: ApiState): void {
       if (path === '/api/workspace/team') return Promise.resolve(json({ members: state.members }));
       if (path === '/api/workspace/deletion') return Promise.resolve(json(state.deletion));
       if (path.endsWith('/passkey/list-user-passkeys')) return Promise.resolve(json(state.passkeys));
+    }
+    if (method === 'POST' && /^\/api\/integrations\/[^/]+\/test$/.test(path)) {
+      if (state.testSend === 'ok') return Promise.resolve(json({ deliveryId: TEST_DELIVERY_ID }, 202));
+      return Promise.resolve(
+        json({ error: 'refused' }, state.testSend, state.testSend === 429 ? { 'retry-after': '42' } : {}),
+      );
+    }
+    if (method === 'POST' && path === '/api/integrations') {
+      const created = { ...INTEGRATIONS[0], id: 'int_new', name: 'New integration' };
+      // Later reads of the new id find it, as they would against the real API.
+      if (Array.isArray(state.integrations)) state.integrations = [created, ...state.integrations];
+      return Promise.resolve(json({ integration: created }, 201));
     }
     if (method === 'POST' && path === '/api/sources')
       return Promise.resolve(

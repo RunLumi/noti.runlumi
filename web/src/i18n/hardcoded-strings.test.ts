@@ -33,6 +33,8 @@ const TS_ALLOWLIST: Readonly<Record<string, string>> = {
   'lib/api.ts::Unexpected routing log entry': INTERNAL,
   'lib/api.ts::Unexpected installation shape': INTERNAL,
   'lib/api.ts::Unexpected install URL': INTERNAL,
+  'integrations/test/api.ts::Unexpected response': INTERNAL,
+  'setup/api.ts::Unexpected response': INTERNAL,
   'sources/api.ts::Unexpected source shape': INTERNAL,
   'sources/api.ts::Unexpected response': INTERNAL,
   'workspace/api.ts::Unexpected response': INTERNAL,

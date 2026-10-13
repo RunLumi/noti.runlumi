@@ -3,6 +3,7 @@ import { destinationsVi } from './messages.destinations.vi';
 import { filtersVi } from './messages.filters.vi';
 import { noiseVi } from './messages.noise.vi';
 import { providersVi } from './messages.providers.vi';
+import { setupVi } from './messages.setup.vi';
 import { sourcesVi } from './messages.sources.vi';
 
 /**
@@ -21,6 +22,7 @@ import { sourcesVi } from './messages.sources.vi';
 export const vi = {
   ...filtersVi,
   ...noiseVi,
+  ...setupVi,
   ...sourcesVi,
   ...providersVi,
   ...destinationsVi,

@@ -328,7 +328,7 @@ never retried blindly, because a wrong key will never become right.
 
 ## F98 — Destination health and verification
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 6d, ADR 0018: `POST /api/integrations/:id/test` sends a labelled test through the real outbox, queue, consumer, URL policy and adapters, with sent versus accepted preserved, the closed error taxonomy, rate limits and an audit row; excluded from the SLIs and the overview counts. **Not done:** `test: true` on a canonical envelope (a delivery column and event type `test` are used instead), a rendered payload preview, HTTP status, latency and provider response code in the result, a per-destination report of what the test could not verify beyond the Teams `accepted` explanation, scheduled health checks, billing exclusion (no billing exists))
 
 **Story** As a user setting up for the first time, I want to press "send a test" and know it
 worked, so that I trust the connection before real events depend on it.

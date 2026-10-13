@@ -207,6 +207,7 @@ const delivery = (over: Partial<DeliveryItem> & Pick<DeliveryItem, 'id' | 'state
   updatedAt: '2026-10-13T08:01:00Z',
   nextAttemptAt: null,
   replayOf: null,
+  isTest: false,
   latestReplayState: null,
   canReplay: false,
   ...over,
@@ -238,7 +239,25 @@ export const DELIVERIES: readonly DeliveryItem[] = [
     },
   }),
   delivery({ id: 'del_4', state: 'retrying', attempts: 2, nextAttemptAt: '2026-10-13T08:30:00Z' }),
+  delivery({ id: 'del_5', state: 'sent', isTest: true }),
 ];
+
+/** What `GET /api/setup/progress` returns for a workspace that has connected and created but not verified. */
+export const SETUP_PROGRESS = {
+  organizationId: ORG_ID,
+  steps: [
+    { id: 'source_connected', done: true, since: '2026-10-01T09:00:00Z', nextAction: 'none' },
+    { id: 'integration_created', done: true, since: '2026-10-01T09:30:00Z', nextAction: 'none' },
+    { id: 'destination_verified', done: false, since: null, nextAction: 'send_test' },
+    { id: 'first_event_received', done: false, since: null, nextAction: 'trigger_real_event' },
+  ],
+  complete: false,
+  next: 'destination_verified',
+  verifiedWindowDays: 30,
+} as const;
+
+/** The delivery a test send creates; its state is whatever a scenario needs. */
+export const TEST_DELIVERY_ID = 'del_test_1';
 
 export const MEMBERS = [
   {

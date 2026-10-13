@@ -108,8 +108,9 @@ function writeStatements(
     // delete or deletion request in between wins.
     db
       .prepare(
-        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,attempts,dedup_key,replay_of,created_at)
-         SELECT ?1,?2,?3,'pending',0,?4,?5,CURRENT_TIMESTAMP
+        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,attempts,dedup_key,replay_of,created_at,is_test)
+         SELECT ?1,?2,?3,'pending',0,?4,?5,CURRENT_TIMESTAMP,
+                COALESCE((SELECT is_test FROM deliveries WHERE id = ?5 AND organization_id = ?3), 0)
          WHERE EXISTS (SELECT 1 FROM integrations i
                        WHERE i.id = ?2 AND i.organization_id = ?3
                          AND i.enabled = 1 AND i.credentials_quarantined_at IS NULL)

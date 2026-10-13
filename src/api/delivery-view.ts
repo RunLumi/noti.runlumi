@@ -130,6 +130,7 @@ export interface DeliveryRowRecord {
   last_attempt_at: number | null;
   next_attempt_at: number | null;
   dead_lettered_at: number | null;
+  is_test: number | null;
   integration_name: string | null;
   integration_repo: string | null;
   integration_destination: string | null;
@@ -182,6 +183,8 @@ export interface DeliveryView {
   readonly updatedAt: string;
   readonly nextAttemptAt: string | null;
   readonly replayOf: string | null;
+  /** A user-requested test notification (ADR 0018), not a real event. */
+  readonly isTest: boolean;
   /** State of the most recent replay of this row, if one was requested. */
   readonly latestReplayState: DeliveryState | null;
   readonly canReplay: boolean;
@@ -240,6 +243,7 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
     updatedAt: sqlTimeToIso(row.updated_at) ?? row.updated_at,
     nextAttemptAt: state === 'retrying' ? epochToIso(row.next_attempt_at) : null,
     replayOf: row.replay_of,
+    isTest: row.is_test === 1,
     latestReplayState: latest,
     // A replay that is still in flight or already succeeded makes another one pointless;
     // the server enforces the same rule, this only decides whether to offer the button.

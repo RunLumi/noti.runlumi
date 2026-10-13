@@ -30,6 +30,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 6a | Dashboard: integrations list, guided create wizard, settings (edit, pause, rotate, delete), GitHub connection panel and repository picker | F206 (partial), F210 (partial), F211, F216 (partial), F217 (partial), F220 (partial), F221, F223, F224 (structure), F225 | — | 🟡 | #13 |
 | 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | #16 |
 | 6c | Dashboard: accessibility gate (axe-core on every route, wizard step and dialog), route-change title/announcement/focus, skip link, palette-contrast and stylesheet-preference tests, Vietnamese catalogue with a language switcher, hard-coded-string and catalogue-drift tests | F221 (part), F223 (part), F224 (part) | — | 🟡 | this PR |
+| 6d | Dashboard: "Send a test notification" through the real delivery path (API, settings section, list button, optional wizard step), derived setup-progress API and Overview card, `is_test` column (migration 0022) | F98 (part), F207 (part), F215 (part), F216 (part) | — | 🟡 | this PR |
 | 7 | Per-integration routing filters with provenance (backend, API, dashboard); the F121 rule engine is not started | F124, F125, F127, F128, F136–F140 (each in part) | — | 🟡 | #25 |
 | 8 | Noise control: quiet hours, burst grouping, hourly/daily digests, resolved notices, held-event store and release job, settings API and dashboard section. Not the preset library, preferences, silences or AI | F141–F146, F148, F152, F159, F165, F166 (each in part, see section) | — | 🟡 | this PR |
 | 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | #16 |
@@ -878,6 +879,53 @@ failures, overlapping runs, pauses and deletion.
 Vietnamese diacritics), a screen reader, a long digest against real Slack, Lark and Teams, real D1
 semantics for `UPDATE ... RETURNING` with a subselect, `Intl` zone data on the Workers runtime, load,
 and any real-provider end-to-end run. Vietnamese copy has had no native-speaker review.
+
+## Slice 6d — test send and setup progress (ADR 0018)
+
+What exists now:
+
+- `POST /api/integrations/:id/test` (`src/api/test-send.ts`): a real delivery marked `is_test`
+  (migration `0022`), event type `test`, created in one guarded batch with its outbox and audit
+  rows; 202 with the delivery id only; `integration.update`; CSRF; 5 per integration and 20 per user
+  per minute; refused (409) while deletion is pending, or for a paused or quarantined integration;
+  cross-tenant is a 404 that burns no budget.
+- Test events are never held by noise control (`isCritical`) and pass every routing filter; they are
+  excluded from the observability SLIs, `GET /api/deliveries/summary` and the "real event" setup
+  step. A replay of a test is still a test.
+- `GET /api/setup/progress`: four derived steps with `since` and a closed next-action key.
+- Dashboard: `TestSend` (settings section and list row), the optional "Test it" wizard step, the
+  "Finish setting up" Overview card, and a "Test" badge in the delivery log. English and Vietnamese.
+
+Tests: `tests/api/test-send.test.ts` (including end to end through the real consumer and adapters
+for Lark, Slack, Teams and Discord), `tests/api/setup-progress.test.ts`,
+`tests/migration-0022.test.ts`, additions to the filter and noise tests, and on the web side
+`poll.test.ts`, `setup.test.ts` and `test-send.a11y.test.tsx` plus the existing axe scenarios.
+
+**Not done:** scheduled re-tests and health banners; payload preview, HTTP status and latency in
+the result; F207's seven steps; testing a source endpoint; an Audit page view of `integration.test`;
+server-localised test text. No real provider accepted a test message: every provider response in
+the tests is a fixture.
+
+### Slice 6d: browser verification
+
+Run against `vite dev` (one process, local D1 and Queues) in the built-in browser, signed in with a
+local test account and a workspace created through the UI. The Browser pane was not displayed, so
+**no screenshot was taken**; everything below was read from the DOM and the network.
+
+**Seen:** the Overview card against the real `GET /api/setup/progress` (1 of 4, then 2 of 4 after an
+integration existed, with `since` times); a real "Send a test notification" click on a Slack
+integration: 202, the delivery row with `is_test = 1`, the `integration.test` audit row, the real
+queue consumer picking it up and the panel moving from "Waiting for Slack to answer" to "The first try
+did not work" with a "See it in Activity" link (the sandbox has no outbound network, so Slack was not
+reachable and each attempt timed out: that is a retry-path run, not a delivery); no horizontal
+overflow and no control under 44 px high at 320 px on the Overview, the list and the settings page;
+the Vietnamese settings section.
+
+**Not seen:** any screenshot or visual layout; a successful delivery or an `accepted` (Teams) result
+in a browser (no real webhook exists; the sent, accepted and failed states are covered by jsdom and
+the fake-D1 end-to-end tests only); the create wizard's "Test it" step in a real browser; the
+dead-lettered fix links against a real provider answer; keyboard order, focus ring and contrast on
+the new screens; any screen reader; Firefox and Safari.
 
 ## Slice S2 — ingress flood control wired (F29)
 

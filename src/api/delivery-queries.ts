@@ -7,7 +7,7 @@ import type { ListFilters } from './delivery-view';
 export const SELECT_VIEW = `
   d.id, d.integration_id, d.state, d.attempts, d.last_error_code, d.replay_of,
   d.created_at, d.updated_at, d.first_attempt_at, d.last_attempt_at, d.next_attempt_at,
-  d.dead_lettered_at,
+  d.dead_lettered_at, d.is_test,
   i.name AS integration_name, i.repo AS integration_repo,
   i.destination AS integration_destination, i.destination_host AS integration_destination_host,
   i.enabled AS integration_enabled, i.credentials_quarantined_at AS integration_quarantined_at,
@@ -59,11 +59,12 @@ export function buildListQuery(orgId: string, f: ListFilters): BuiltQuery {
 }
 
 /**
- * Binds: organization id, window start, window start (the second covers rows without
+ * Test notifications (ADR 0018) are not counted: the Overview shows what the service did for real
+ * events. They stay in the log, labelled. Binds: organization id, window start, window start (the second covers rows without
  * created_at). `INDEXED BY` because, without ANALYZE statistics, SQLite is free to pick the
  * single-column `deliveries_org_idx` and read every row of the workspace; this makes a missing
  * migration fail loudly instead of silently scanning.
  */
 export const SUMMARY_SQL = `SELECT state, COUNT(*) AS n FROM deliveries INDEXED BY deliveries_org_created
-  WHERE organization_id = ? AND (created_at >= ? OR (created_at IS NULL AND updated_at >= ?))
+  WHERE organization_id = ? AND is_test = 0 AND (created_at >= ? OR (created_at IS NULL AND updated_at >= ?))
   GROUP BY state`;

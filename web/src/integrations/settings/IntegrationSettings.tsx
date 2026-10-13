@@ -14,6 +14,7 @@ import { DeleteDialog } from './DeleteDialog';
 import { DetailsForm } from './DetailsForm';
 import { FiltersSection } from './FiltersSection';
 import { NoiseSection } from '../noise/NoiseSection';
+import { TestSend } from '../test/TestSend';
 import '../integrations.css';
 import { useLocale } from '../../i18n/LocaleProvider';
 
@@ -136,6 +137,9 @@ export function IntegrationSettings() {
                 ? t('settings.status.onBlocked')
                 : t('settings.status.on', { destination })}
           </p>
+        </Section>
+        <Section id="test" title={t('test.title')}>
+          <TestSend key={integration.id} orgId={orgId} integration={integration} />
         </Section>
         <Section id="details" title={t('settings.details.title')}>
           {integration.sourceId ? (

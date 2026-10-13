@@ -147,7 +147,7 @@ describe('create-integration wizard', () => {
     const user = userEvent.setup();
     await renderApp('/integrations/new');
     const stepper = await screen.findByRole('navigation', { name: 'Setup steps' });
-    expect(within(stepper).getAllByRole('listitem')).toHaveLength(6);
+    expect(within(stepper).getAllByRole('listitem')).toHaveLength(7);
     expect(stepper.querySelector('ol')).not.toBeNull();
 
     // 1 Repository
@@ -170,7 +170,7 @@ describe('create-integration wizard', () => {
     await expectClean('wizard step 4');
     await next(user);
     // 5 Filters (optional): editors for five filters plus the "Try it" checker
-    await screen.findByRole('heading', { level: 2, name: /Step 5 of 6/ });
+    await screen.findByRole('heading', { level: 2, name: /Step 5 of 7/ });
     await expectClean('wizard step 5 (filters)');
     await next(user);
     // 6 Review

@@ -133,7 +133,8 @@ Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
 | --- | --- |
 | `IntegrationsPage.tsx`, `IntegrationCard.tsx`, `EnabledSwitch.tsx` | List, card, optimistic pause/resume with rollback |
 | `github/` | Connection panel, `?github=` return messages, repository picker, coverage rules |
-| `wizard/` | Six-step create flow (filters are optional); `draft.ts` holds the pure step logic |
+| `wizard/` | Six-step create flow (filters are optional) plus the optional "Test it" step shown after saving (`TestStep.tsx`); `draft.ts` holds the pure step logic |
+| `test/` | "Send a test notification" ([ADR 0018](adr/0018-test-send.md)): `TestSend.tsx` (settings section, list row and wizard step), `useTestSend.ts`, `poll.ts` (bounded wait, pure and unit-tested), `api.ts`, `test-send.css` |
 | `filters/` | Routing filters ([ADR 0010](adr/0010-routing-filters.md)): `model.ts` (lines to API shape, error mapping, "Try it"), `FiltersEditor`, `FilterTester`, `RoutingLog` |
 | `noise/` | Quiet hours and summaries ([ADR 0016](adr/0016-noise-control.md)): `model.ts` (draft, validation with the server parser, the preview sentences from the server's `decideNoise`, time-zone list), `NoiseEditor`, `NoiseSection`, `hooks.ts` (waiting count), `noise.css` |
 | `settings/` | Per-integration screen: details form, filters, quiet hours and summaries, credential replacement, delete dialog |
@@ -214,6 +215,14 @@ the browser has it). Design decisions, so they are reviewable:
   the new fieldsets and read-outs, native time-picker behaviour on phones, Vietnamese
   diacritics) and a screen-reader pass.
 
+## Setup progress (`web/src/setup/`)
+
+Decisions: [ADR 0018](adr/0018-test-send.md). `SetupProgressCard` on the Overview lists the four
+derived steps from `GET /api/setup/progress`, with the next action as the only button, linking to
+existing routes. It disappears when every step is done and renders nothing (no alert) while loading
+or on error. The result of a test is announced through a polite `role="status"` region that exists
+before the click; focus stays on the button. Test rows in the delivery log carry a "Test" badge.
+
 ## Sources feature (`web/src/sources/`)
 
 Decisions and verification: [ADR 0012](adr/0012-generic-source.md). It reuses the integrations
@@ -278,7 +287,9 @@ state is scanned by axe-core in the tests and in a real browser; the shell annou
 changes and manages focus; the interface can be switched between English and Vietnamese. No
 screen reader has been run and no conformance level is claimed.
 
-**Not implemented:** test send, the setup-progress model, per-attempt history and bulk replay.
+Test send and setup progress (slice 6d, ADR 0018) are wired to the real API; see "Not verified" for what the browser pass did not cover.
+
+**Not implemented:** scheduled re-tests, a payload preview or provider status in the test result, per-attempt history and bulk replay.
 Passkeys register and authenticate but have not been acceptance-tested for counter
 regression.
 
@@ -319,6 +330,8 @@ Set the custom domain, origin policy, secure cookies, D1, Queue and outbound tra
 before public use. Rollback: see ADR 0017.
 
 ## Not yet verified
+
+- Slice 6d (test send, setup progress): no screenshot was taken and no real provider accepted a test; the success, accepted and failed panels, the wizard's "Test it" step, keyboard order and contrast have only jsdom and axe coverage. See `docs/PROGRESS.md`, "Slice 6d: browser verification".
 
 The integrations, delivery log and workspace screens were checked in a real browser at 320, 375
 and 1280 px (ADR 0007, 0009). Slice 6c re-ran axe-core in a real browser (colour contrast
