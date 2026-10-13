@@ -64,26 +64,35 @@ separable from those three adapters.
 
 ## Current implementation status
 
-Implemented and verified in the working tree as of the commit that introduced this index:
+The authoritative, per-slice record is [`../PROGRESS.md`](../PROGRESS.md). Each spec feature
+carries its own `Status` line, updated in the pull request that changes it. This table is the
+summary. "Shipped" means merged to `main` with passing CI. It does **not** mean
+production-ready: nothing has been exercised against a real GitHub App, Slack, Teams or Lark
+yet, and the release rule in `AGENTS.md` is unmet.
 
 | Area | State |
 | --- | --- |
-| Better Auth + Drizzle/D1 (users, sessions, orgs, members, invitations, passkeys) | ✅ |
-| Email verification and password reset via Cloudflare Email Sending | ✅ |
-| Auth rate limiting with database storage | ✅ |
-| React/Vite dashboard, responsive, on the Lumi design system | ✅ |
-| GitHub signature verification against the documented known-answer vector | ✅ |
-| Lark card rendering, signing and response validation | ✅ |
-| Toolchain: lockfile, format, lint (type-aware), typecheck, tests, build, CI | ✅ |
-| Worker bundle guard against the pure-JS scrypt fallback | ✅ |
+| Better Auth + Drizzle/D1 (users, sessions, orgs, members, invitations, passkeys), email verification and reset, auth rate limiting | ✅ |
+| Multi-workspace membership; tenant resolution from the verified GitHub installation (D2, D3) | ✅ |
+| Envelope encryption, AAD binding, KEK rotation, v0 migration (D5, D6) | ✅ ([ADR 0004](../adr/0004-envelope-encryption.md)); Secrets Store tier open |
+| Tenant-scoped integrations API, domain capabilities, audit log, closed event catalog (D9, D12, D16) | ✅ |
+| GitHub App install flow with verified binding, lifecycle events, repository scope | ✅ ([ADR 0008](../adr/0008-github-install-verification.md)); no real App registered |
+| Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery service (D4, D10, D11) | 🟡 ([ADR 0005](../adr/0005-delivery-reliability.md)); see PROGRESS for gaps |
+| Destination adapters (Slack, Teams, Lark) as pure modules | 🟡 ([ADR 0006](../adr/0006-destination-adapter-contract.md)); consumer wiring in progress |
+| Workspace export and two-phase deletion (N3) | ✅ |
+| Dashboard: auth, onboarding, team, integrations list/wizard/settings, GitHub connection | 🟡 ([ADR 0007](../adr/0007-integrations-ux.md)); delivery log pending |
+| End-to-end tests of the delivery path over the real migrations (D13) | ✅ |
+| Toolchain: lockfile, format, lint, typecheck, tests, build, CI, worker bundle guard | ✅ |
+| Routing rules and filters, grouping and digests, observability dashboards, additional sources, extended destinations, AI | ⬜ not started |
 
-**The one thing that must be true before any public launch:** F25 and F26 in
-[`02`](02-identity-tenancy.md). Better Auth scopes *its own* tables. It does not scope ours.
+**The release gate that opened this catalog** was F25 and F26: tenant isolation in *our*
+tables. Tenant resolution, the `organization_id` contract for new writes, and tenant-scoped
+reads and writes are in place and covered by cross-tenant tests. What remains before a
+public launch is in [`../RELEASE_GATES.md`](../RELEASE_GATES.md).
 
 > The organization plugin is an authorization and membership registry. **It is not a
 > data-isolation boundary.** Isolation is an `organization_id` predicate we write on every
-> query. Today `src/index.ts` routes on `event.repository.full_name` — a field chosen by the
-> sender — and no tenant-owned table carries an organization column.
+> query, and migration 0008 enforces it at the database for every new integration write.
 
 ## Cross-cutting invariants
 
