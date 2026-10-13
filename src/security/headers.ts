@@ -12,8 +12,8 @@
  */
 import type { MiddlewareHandler } from 'hono';
 
-/** Two years, preload-eligible. Only honoured by browsers over HTTPS. */
-const HSTS = 'max-age=63072000; includeSubDomains; preload';
+/** One year. No `preload`: eligibility is judged on the apex domain, which is a separate decision. */
+const HSTS = 'max-age=31536000; includeSubDomains';
 
 /** Features this product never uses. Passkeys (`publickey-credentials-*`) stay allowed. */
 const PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()';

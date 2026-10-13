@@ -641,3 +641,20 @@ Also fixed:
 - F231 abuse alerting, F233 audit rows for unknown-installation 403s and the staging
   isolation drill, F237 retention matrix, F242 runbooks and `security.txt`.
 - The dependency-review job is `continue-on-error` until it has run green once.
+
+**Review.** A security review found no HIGH issues and five MEDIUM ones, all fixed:
+
+- Rate-limit rows are now pruned from `scheduled()` and indexed on `window_start`
+  (migration 0014). The register entry that understated the risk is reworded (AR-16, AR-17).
+- HSTS no longer sends `preload`, because eligibility is judged on the apex domain, and the
+  max-age is one year.
+- The `dependency-review` job runs only when the repository variable `DEPENDENCY_REVIEW` is
+  `true`. Until the dependency graph is enabled it is skipped instead of showing as a failing
+  check.
+- Origin enforcement for every state-changing `/api/*` request is now central middleware
+  (`src/security/csrf.ts`), with its own tests, so a new route cannot forget it.
+- The CI guard now covers every workflow file and refuses any write or `id-token` permission.
+- The `ingressLimiter` call still has to be added to `route.ts`, wrapped so a D1 error fails
+  open and logs a redacted event.
+- The `tinypool` exception's stated fix was corrected. Upgrading to vitest 4 removes it.
+

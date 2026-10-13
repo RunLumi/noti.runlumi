@@ -19,7 +19,7 @@ export const EXCEPTIONS = [
     id: 'GHSA-5gmw-xhrv-c9v3',
     expires: '2027-01-11',
     reason:
-      'tinypool (test-runner worker pool) reached through vitest, which better-auth lists as an optional peer. Vitest is a devDependency and is not in the Worker bundle (verify:worker-bundle). Fix needs vitest 5 (breaking).',
+      'tinypool (test-runner worker pool) reached through vitest, which better-auth lists as an optional peer. Vitest is a devDependency and is not in the Worker bundle (verify:worker-bundle). Upgrading to vitest 4, which has no tinypool dependency, removes it.',
   },
   {
     id: 'GHSA-85c8-ppgw-ccpr',

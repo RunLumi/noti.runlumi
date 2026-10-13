@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -26,11 +26,27 @@ describe('session configuration (AR-1, F234)', () => {
 
 describe('CI workflow hygiene (F239)', () => {
   const code = stripComments(read('.github/workflows/ci.yml'), /^\s*#/);
+  // Every workflow, so a future one cannot skip the rules.
+  const workflows = readdirSync(join(root, '.github', 'workflows'))
+    .filter((f) => /\.ya?ml$/.test(f))
+    .map((f) => ({ f, text: stripComments(read(`.github/workflows/${f}`), /^\s*#/) }));
 
-  it('pins every action to a full commit SHA', () => {
-    const uses = [...code.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map((m) => m[1] ?? '');
-    expect(uses.length).toBeGreaterThan(0);
-    expect(uses.filter((u) => !/@[0-9a-f]{40}$/.test(u))).toEqual([]);
+  it('pins every action in every workflow to a full commit SHA', () => {
+    const offenders = workflows.flatMap(({ f, text }) =>
+      [...text.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)]
+        .map((m) => m[1] ?? '')
+        .filter((u) => !u.startsWith('./') && !/@[0-9a-f]{40}$/.test(u))
+        .map((u) => `${f}: ${u}`),
+    );
+    expect(workflows.length).toBeGreaterThan(0);
+    expect(offenders).toEqual([]);
+  });
+
+  it('grants no write or id-token permission in any workflow', () => {
+    const offenders = workflows.filter(({ text }) =>
+      /^\s+(contents|pull-requests|id-token|actions|packages|issues):\s*write\s*$/m.test(text),
+    );
+    expect(offenders.map((w) => w.f)).toEqual([]);
   });
 
   it('never uses pull_request_target and declares read-only permissions', () => {

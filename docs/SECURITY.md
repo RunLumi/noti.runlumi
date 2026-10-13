@@ -44,7 +44,7 @@ dependencies. Current exceptions (also in `scripts/audit-gate.mjs`, each with an
 
 | Advisory | Package | Why it does not affect the Worker | Expires |
 | --- | --- | --- | --- |
-| GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr | `tinypool` via `vitest` | Test runner only. `better-auth` lists vitest as an optional peer, so npm counts it as a production dependency. It is not in the Worker bundle. The fix needs vitest 5 (breaking) | 2027-01-11 |
+| GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr | `tinypool` via `vitest` | Test runner only. `better-auth` lists vitest as an optional peer, so npm counts it as a production dependency. It is not in the Worker bundle. Upgrading to vitest 4, which has no tinypool dependency, removes both | 2027-01-11 |
 
 ## Data deletion
 
