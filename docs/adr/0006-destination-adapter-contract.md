@@ -1,4 +1,4 @@
-# ADR 0004: Destination adapter contract, capability model and response taxonomy
+# ADR 0006: Destination adapter contract, capability model and response taxonomy
 
 Status: Accepted · Date: 2026-10-13 · Supersedes nothing
 
@@ -42,12 +42,12 @@ Slack was an inline `{ text }` string in the queue consumer, with every failure 
 7. **Lark DLP.** Lark masks emails and phone-like strings in titles and summaries before render
    (error 230028), and records `redactedFields`. Lark cards now set `config.summary.content`.
 8. **Compatibility.** `lark/webhook.ts` keeps `larkPayload`, `larkAccepted`, `larkCard` and
-   `larkSignature` for the current consumer in `src/index.ts`, which this slice deliberately
-   does not edit (slice 2 is rewriting it).
+   `larkSignature` for the current consumer in `src/pipeline/consumer.ts`, which this slice
+   deliberately does not edit (slice 4 owns it).
 
 ## Consequences
 
-- The consumer must switch to `prepareDelivery` / `sendRequest` / `classifyDeliveryResponse` (or
+- The consumer (`src/pipeline/consumer.ts`, owned by slice 4) must switch to `prepareDelivery` / `sendRequest` / `classifyDeliveryResponse` (or
   `deliver`) and persist `outcome`, `reason`, `retryAfterMs`, `format`, `degradedFrom`,
   `truncatedFields` and `redactedFields`. Until then Slack still uses the inline string.
 - Status is conveyed as text (`Failed: …`) as well as colour, for accessibility.
@@ -58,3 +58,21 @@ Slack was an inline `{ text }` string in the queue consumer, with every failure 
 - A Slack Web API, Lark app-bot or Teams bot mode ships (new capability entries, not edits).
 - Real-tenant tests settle Teams card version, private channels, trigger hosts and error codes.
 - Lark publishes a complete error-code table, or Lark/Teams markdown escape syntax is verified.
+
+## Unverified provider facts
+
+These are marked `UNVERIFIED` in code. None of them is claimed as fact.
+
+1. GovSlack's hook hostname (`slack-gov.com` family) is not recorded, so GovSlack is rejected.
+2. The reference's Slack OAuth `incoming_webhook.url` example omits `/services/`, but the
+   allowlist requires it. Confirm with a real OAuth install.
+3. Slack decoding `&amp;` inside `<url|label>` link URLs.
+4. Slack's header-block 150-character limit is not in the reference doc.
+5. Teams trigger URLs may be issued on hosts other than `*.logic.azure.com`.
+6. The maximum Adaptive Card version Teams supports is unpublished, so cards are pinned to 1.2.
+7. The Logic Apps status codes for a deleted or disabled flow and for an auth mismatch. The
+   generic HTTP mapping is applied.
+8. Whether Lark card markdown honours backslash or HTML-entity escapes. We neutralise to
+   fullwidth instead.
+9. The Lark `text` message body shape `{ content: { text } }`.
+10. The meaning of Lark code 19001. It is left unmapped.

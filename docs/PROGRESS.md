@@ -24,7 +24,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 3a | Tenant-scoped integrations API; domain capabilities; audit log; closed GitHub event catalog; write-time allowlist; DB-enforced tenant contract | F24, F26, F28, F61 (catalog), F72 (write-time) | D9, D12, D16, D2 (contract for new writes) | ✅ | #9 |
 | 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ✅ | #11 |
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F169–F190 | D4, D10, D11 | ⬜ | — |
-| 5 | Destination capability model; Slack and Teams adapters (pure modules; consumer wiring pending, see ADR 0004) | F91–F104 | D8 | 🟡 | — |
+| 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
 | 7 | Routing rules and filters | F119–F140 | — | ⬜ | — |
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
@@ -266,3 +266,49 @@ covered by tests:
   permission for an App user token. If it returns 403, the flow fails closed.
 - Reconciliation (F69), permission reads (F61), the unbind action, and the dashboard's
   "Connect GitHub" button. The button belongs to the UI slice.
+
+## Slice 5 — destination capability model and adapters (🟡)
+
+Adapters shipped as pure modules; consumer wiring is pending slice 4, which owns
+`src/pipeline/consumer.ts`. Until then the consumer still sends Slack as an inline string and
+uses the Lark compatibility exports.
+
+**What changed**
+
+- `src/connectors/destinations/` follows [ADR 0006](adr/0006-destination-adapter-contract.md):
+  - `adapter.ts`, `types.ts` and `capabilities.ts` hold the adapter contract and the
+    per-destination capability matrix. Teams Workflows is `accepted`, never `delivered`.
+  - `config.ts` and `url-policy.ts` do write-time validation behind a sealed config type, plus
+    the allowlist: https only, no userinfo, port, fragment or IP literal, and the documented
+    host and path prefix. Teams matches on host pattern only.
+  - `render.ts`, `markup.ts` and `redact.ts` hold the `card → markdown → plain` ladder with
+    byte budgets, truncation that respects graphemes and links, per-dialect escaping and Lark
+    DLP masking.
+  - `classify.ts` and `retry-after.ts` hold the closed `outcome`/`reason` taxonomy and the
+    RFC 9110 `Retry-After` parser.
+  - `send.ts` is the only I/O. It re-checks the URL, uses `redirect: 'error'`, applies a
+    timeout and reads a bounded body.
+  - `slack/`, `teams/` and `lark/` hold the renderer, classifier and adapter for each
+    destination. `lark/webhook.ts` keeps `larkPayload`/`larkAccepted` for the current consumer.
+- Public entry points are `prepareDelivery`, `sendRequest`, `classifyDeliveryResponse` and
+  `deliver`, all in `src/connectors/destinations/index.ts`.
+
+**Verified by**
+
+- `tests/destinations/*.test.ts`. These cover:
+  - allowlist accept and reject cases, including `hooks.slack.com.evil.com`, userinfo, http,
+    IP literals and wrong paths
+  - truncation edge cases (surrogate pairs, ZWJ, flags, Vietnamese combining marks, entities,
+    links)
+  - escaping and mention suppression
+  - every renderer rung and every classifier branch
+  - a conformance suite for render determinism and classification totality
+  - send-time re-validation with an injected `fetch`
+
+**Known gaps**
+
+- The adapters are not yet wired into the consumer. The delivery row does not yet store
+  `format`, `degradedFrom`, `truncatedFields`, `redactedFields` or `reason`.
+- Slack OAuth install (F103), test delivery (F98), the UI capability surface (F92/F93) and the
+  Lark app-bot mode (F101) are not started.
+- Several provider facts are `UNVERIFIED` and listed in ADR 0006. They need real-tenant checks.

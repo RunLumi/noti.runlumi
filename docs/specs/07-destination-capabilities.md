@@ -19,7 +19,7 @@ unsupported feature **visible to the user** instead of silently degraded.
 
 ## F91 — Destination adapter contract
 
-**Priority** P0 · **Status** not started · **Fixes** D8
+**Priority** P0 · **Status** partial — contract, adapters and conformance suite in `src/connectors/destinations/` (ADR 0006); `validateConfig` is synchronous; not yet called by the consumer · **Fixes** D8
 
 **Story** As a maintainer, I want one interface every destination implements, so that
 Slack stops being an inline string and starts being an adapter like Lark.
@@ -76,7 +76,7 @@ depth) because a row can be edited by migration or by an admin tool.
 
 ## F92 — Capability contract
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial — per-mode capability declarations with a golden-table test; no UI surface yet
 
 **Story** As a user, I want the UI to tell me what a destination can actually do, so that I
 choose it based on what I need rather than what a logo suggests.
@@ -140,7 +140,7 @@ if a documented provider limit changes without a spec update.
 
 ## F93 — Honest degradation ladder
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial — card → markdown → plain ladder reports the rung used and the rungs skipped; not yet stored on the delivery row; no save-time feature validation
 
 **Story** As a user, I want to know when a feature I enabled is not available on my
 destination, so that I am not surprised that my CI card did not update in place.
@@ -179,7 +179,7 @@ rejected at save time with an explanation.
 
 ## F94 — Rendering safety
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial — per-dialect escaping/neutralisation, mentions off, https + length-capped links, visible `…` truncation for Slack/Teams/Lark; `truncated_fields` not persisted
 
 **Story** As a customer, I want a malicious commit message or branch name to be displayed as
 text, so that a `PR titled "@here fix login"` does not ping my entire team.
@@ -219,7 +219,7 @@ content is untrusted user input, full stop.
 
 ## F95 — Body size budget per destination
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial — renderers respect `maxBodyBytes` (over-cap → `payload_too_large`); Slack top-level `text` always present; elision not yet logged
 
 **Story** As an operator, I want rendering to respect each destination's real limit, so that
 a chatty event never dead-letters on Teams at 28 KB.
@@ -261,7 +261,7 @@ the same repo would collapse. Never rely on multiple embeds.
 
 ## F96 — Credential validation at write time
 
-**Priority** P0 · **Status** not started · **Fixes** D9
+**Priority** P0 · **Status** partial — `validateDestinationConfig` + send-time re-check exist; the write path (slice 3) does not call them yet · **Fixes** D9
 
 **Story** As a security engineer, I want an invalid or malicious destination rejected when it
 is saved, so that a hostile URL is never persisted in the first place.
@@ -366,7 +366,7 @@ Lark/Slack webhook URL is a bearer secret that appears inside some card payloads
 
 ## F99 — Delivery result normalisation
 
-**Priority** P0 · **Status** not started · **Fixes** part of D11
+**Priority** P0 · **Status** partial — classifiers return `{outcome, reason, retryAfterMs?}` with RFC 9110 `Retry-After`; not yet persisted · **Fixes** part of D11
 
 **Story** As an operator, I want every provider's response normalised into one result shape,
 so that the dashboard and retry policy do not special-case Slack forever.
@@ -410,7 +410,7 @@ prove. `AGENTS.md` is explicit: *"No fabricated benchmarks... No silent loss."* 
 
 ## F100 — Provider acknowledgement semantics in the UI
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** partial — classifiers distinguish `accepted` (Teams) from `delivered`; UI not started
 
 **Story** As a customer, I want the delivery log to tell me the truth about whether my
 notification arrived, so that I can trust it enough to delete my own alerting.
@@ -445,7 +445,7 @@ notification arrived, so that I can trust it enough to delete my own alerting.
 
 ## F101 — Lark dual-mode credentials
 
-**Priority** P1 · **Status** partial
+**Priority** P1 · **Status** partial — custom-bot mode stores the domain and sets `config.summary.content`; app-bot mode not started
 
 **Story** As a Lark customer, I want a zero-setup webhook option and a powerful app option,
 so that I can start now and upgrade when I need message editing.
@@ -490,7 +490,7 @@ migration a single-mode design would force.
 
 ## F102 — Lark DLP and rate-limit handling
 
-**Priority** P1 · **Status** not started · **New, from research**
+**Priority** P1 · **Status** partial — DLP masking, `230028` permanent, throttling classified by code not status, unmapped codes flagged; per-mode rate limiters and hour offset not started · **New, from research**
 
 **Story** As a GitHub→Lark customer, I want my CI notifications to actually arrive, so that
 I can rely on them.
@@ -538,7 +538,7 @@ author emails are personal data.
 
 ## F103 — Slack dual-mode credentials
 
-**Priority** P0 · **Status** not started · **Fixes** D8
+**Priority** P0 · **Status** partial — incoming-webhook adapter (Block Kit + text fallback, classifier); OAuth install and Web API mode not started · **Fixes** D8
 
 **Story** As a Slack customer, I want a one-click "Add to Slack" button, so that I am not
 copying webhook URLs out of Slack settings.
@@ -591,7 +591,7 @@ proxy logs, browser history and support screenshots. The UI must warn about this
 
 ## F104 — Teams Workflows as the only MVP path
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial — Workflows adapter (Adaptive Cards only, host-pattern allowlist, `anyone` auth only, 28 KB budget); orphan-flow surfacing not started
 
 **Story** As a Microsoft 365 customer, I want a Teams destination that a non-technical
 administrator can set up, so that notifications actually reach my team.

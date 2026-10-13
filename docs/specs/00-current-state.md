@@ -153,7 +153,7 @@ Status as of PR #6 (2026-10-13):
 | D5 | Secrets copied into queue bodies | ✅ messages carry ids only; consumer re-reads the row by `id AND organization_id` (PR #7) |
 | D6 | No envelope encryption, AAD or key version | ✅ envelope + AAD + versioned KEK + rewrap + v0 migration (PR #7, ADR 0004) |
 | D7 | Plaintext session tokens | 🟡 moot for Better Auth's `session`; ⬜ `0004`'s dead `auth_tokens` still plaintext (N1) |
-| D8 | Slack has no adapter | ⬜ unchanged |
+| D8 | Slack has no adapter | 🟡 Slack/Teams/Lark adapters + capability model shipped as pure modules (ADR 0006); consumer wiring pending slice 4 |
 | D9 | Allowlist runs too late | ✅ enforced at write time by the integrations API and again before every send (PR #9) |
 | D10 | Delivery-id collisions | ⬜ unchanged |
 | D11 | No error classification | ⬜ unchanged |
