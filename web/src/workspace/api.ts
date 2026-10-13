@@ -40,6 +40,9 @@ export interface ExportResult {
   readonly truncated: boolean;
 }
 
+/** How long the blob URL stays valid after the click. */
+export const REVOKE_DELAY_MS = 10_000;
+
 /** A filename the server chose, reduced to characters that are safe in a download name. */
 export function safeFileName(header: string | null): string {
   const match = header ? /filename="([^"]+)"/.exec(header) : null;
@@ -81,7 +84,8 @@ export async function downloadExport(orgId: string): Promise<ExportResult> {
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(url);
+  // Revoking straight after click() can cancel the download in some browsers; give it time.
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
   return { file, truncated: truncatedIn(text) };
 }
 

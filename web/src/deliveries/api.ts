@@ -21,6 +21,12 @@ export interface DeliveryError {
   readonly userActionable: boolean;
 }
 
+export type IntegrationStatus = 'available' | 'missing' | 'disabled' | 'quarantined';
+
+export function isIntegrationStatus(value: unknown): value is IntegrationStatus {
+  return value === 'available' || value === 'missing' || value === 'disabled' || value === 'quarantined';
+}
+
 export interface DeliveryItem {
   readonly id: string;
   readonly integration: {
@@ -31,6 +37,8 @@ export interface DeliveryItem {
     readonly destinationHost: string | null;
   };
   readonly integrationExists: boolean;
+  /** Why a redelivery would not be delivered, or `available`. */
+  readonly integrationStatus: IntegrationStatus;
   readonly state: DeliveryState;
   readonly attempts: number;
   readonly error: DeliveryError | null;
@@ -116,6 +124,7 @@ export function parseDelivery(value: unknown): DeliveryItem {
     typeof value.integration.id !== 'string' ||
     typeof value.integration.name !== 'string' ||
     typeof value.integrationExists !== 'boolean' ||
+    !isIntegrationStatus(value.integrationStatus) ||
     !isDeliveryState(value.state) ||
     typeof value.attempts !== 'number' ||
     !nullableString(value.createdAt) ||
@@ -143,6 +152,7 @@ export function parseDelivery(value: unknown): DeliveryItem {
       destinationHost: typeof integration.destinationHost === 'string' ? integration.destinationHost : null,
     },
     integrationExists: value.integrationExists,
+    integrationStatus: value.integrationStatus,
     state: value.state,
     attempts: value.attempts,
     error: parseError(value.error ?? null),

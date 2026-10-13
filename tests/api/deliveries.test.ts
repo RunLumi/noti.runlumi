@@ -430,3 +430,162 @@ describe('POST /api/deliveries/:id/replay', () => {
     expect(last).toBe(429);
   });
 });
+
+describe('replay needs a usable integration (M1)', () => {
+  const replay = (id: string) => call('POST', `/api/deliveries/${id}/replay`, { as: 'alice' });
+  const replayRows = () =>
+    db.raw.prepare('SELECT COUNT(*) AS n FROM deliveries WHERE replay_of IS NOT NULL').get();
+  const adminRow = async () =>
+    (await json<ListBody>(await call('GET', '/api/deliveries', { as: 'alice' }))).deliveries[0];
+
+  const breakIt: [string, string, () => void][] = [
+    ['paused', 'disabled', () => db.raw.prepare("UPDATE integrations SET enabled=0 WHERE id='int-a'").run()],
+    [
+      'quarantined',
+      'quarantined',
+      () =>
+        db.raw
+          .prepare("UPDATE integrations SET credentials_quarantined_at=CURRENT_TIMESTAMP WHERE id='int-a'")
+          .run(),
+    ],
+    ['deleted', 'missing', () => db.raw.prepare("DELETE FROM integrations WHERE id='int-a'").run()],
+  ];
+
+  it.each(breakIt)(
+    'a %s integration: no replay, a clear 409, no offer in the log',
+    async (_n, status, act) => {
+      delivery({ id: 'd1' });
+      act();
+      const row = await adminRow();
+      expect((row as unknown as { integrationStatus: string }).integrationStatus).toBe(status);
+      expect(row?.canReplay).toBe(false);
+      const res = await replay('d1');
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ reason: 'integration_unavailable' });
+      expect(replayRows()).toEqual({ n: 0 });
+      expect(auditActions('org-a')).toEqual([]);
+      expect(db.raw.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get()).toEqual({ n: 1 });
+    },
+  );
+
+  it('offers replay when the integration is usable', async () => {
+    delivery({ id: 'd1' });
+    const row = await adminRow();
+    expect((row as unknown as { integrationStatus: string }).integrationStatus).toBe('available');
+    expect(row?.canReplay).toBe(true);
+    expect((await replay('d1')).status).toBe(202);
+  });
+});
+
+describe('the replay audit row is atomic with the replay (M2, L1, L2)', () => {
+  const replay = (id: string) => call('POST', `/api/deliveries/${id}/replay`, { as: 'alice' });
+  const count = (sql: string) => (db.raw.prepare(sql).get() as { n: number }).n;
+
+  it('has exactly one audit row per created replay, including under concurrency', async () => {
+    delivery({ id: 'd1' });
+    await Promise.all([replay('d1'), replay('d1'), replay('d1')]);
+    await replay('d1');
+    expect(count('SELECT COUNT(*) AS n FROM deliveries WHERE replay_of IS NOT NULL')).toBe(1);
+    expect(count("SELECT COUNT(*) AS n FROM audit_events WHERE action='delivery.replay'")).toBe(1);
+    const meta = db.raw
+      .prepare("SELECT metadata_json FROM audit_events WHERE action='delivery.replay'")
+      .get() as { metadata_json: string };
+    const created = db.raw.prepare('SELECT id FROM deliveries WHERE replay_of=?').get('d1') as { id: string };
+    expect(JSON.parse(meta.metadata_json)).toEqual({ replayDeliveryId: created.id });
+  });
+
+  it('writes neither the replay nor its outbox row when the audit write fails', async () => {
+    delivery({ id: 'd1' });
+    db.raw.exec(
+      `CREATE TRIGGER fail_replay_audit BEFORE INSERT ON audit_events WHEN NEW.action='delivery.replay'
+       BEGIN SELECT RAISE(ABORT,'audit down'); END`,
+    );
+    const res = await replay('d1');
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(count('SELECT COUNT(*) AS n FROM deliveries WHERE replay_of IS NOT NULL')).toBe(0);
+    expect(count('SELECT COUNT(*) AS n FROM notification_outbox')).toBe(1);
+    expect(db.raw.prepare('SELECT replay_count FROM deliveries WHERE id=?').get('d1')).toEqual({
+      replay_count: 0,
+    });
+  });
+
+  it('does not touch the original row’s updated_at, so cursors stay stable', async () => {
+    delivery({ id: 'd1', updatedAt: '2026-10-13 10:00:00' });
+    await replay('d1');
+    expect(db.raw.prepare('SELECT updated_at, replay_count FROM deliveries WHERE id=?').get('d1')).toEqual({
+      updated_at: '2026-10-13 10:00:00',
+      replay_count: 1,
+    });
+  });
+
+  it('refuses inside the write itself when a deletion was requested after the checks', async () => {
+    delivery({ id: 'd1' });
+    db.raw
+      .prepare(
+        `INSERT INTO workspace_deletions(organization_id,requested_by,requested_at,purge_after,disabled_integration_ids)
+         VALUES('org-a','alice',CURRENT_TIMESTAMP,?,'[]')`,
+      )
+      .run(Date.now() + 86_400_000);
+    const { redeliver } = await import('../../src/delivery/redeliver');
+    const result = await redeliver(db.d1, {
+      organizationId: 'org-a',
+      deliveryId: 'd1',
+      audit: { actorId: 'alice' },
+    });
+    expect(result).toEqual({ ok: false, error: 'deletion_pending' });
+    expect(count('SELECT COUNT(*) AS n FROM deliveries WHERE replay_of IS NOT NULL')).toBe(0);
+    expect(count('SELECT COUNT(*) AS n FROM audit_events')).toBe(0);
+    expect(count('SELECT COUNT(*) AS n FROM notification_outbox')).toBe(1);
+  });
+});
+
+describe('read rate limit (L3)', () => {
+  it('answers 429 with Retry-After past the per-user ceiling, and only for that user', async () => {
+    let last: Response | undefined;
+    for (let i = 0; i < 301; i++) last = await call('GET', '/api/deliveries/summary', { as: 'bob' });
+    expect(last?.status).toBe(429);
+    expect(Number(last?.headers.get('retry-after'))).toBeGreaterThanOrEqual(1);
+    expect((await call('GET', '/api/deliveries/summary', { as: 'alice' })).status).toBe(200);
+  });
+});
+
+describe('delivery log indexes (M3)', () => {
+  const plan = (sql: string, values: readonly (string | number)[]) =>
+    (db.raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...(values as never[])) as { detail: string }[])
+      .map((r) => r.detail)
+      .join('\n');
+
+  it('serves the list from the (organization, updated_at, id) index without a sort', async () => {
+    const { buildListQuery } = await import('../../src/api/delivery-queries');
+    const q = buildListQuery('org-a', {
+      state: null,
+      integrationId: null,
+      from: null,
+      to: null,
+      cursor: null,
+      limit: 25,
+    });
+    const text = plan(q.sql, q.values);
+    expect(text).toContain('deliveries_org_updated');
+    expect(text).not.toContain('USE TEMP B-TREE FOR ORDER BY');
+  });
+
+  it('serves the summary from the (organization, created_at) index', async () => {
+    const { SUMMARY_SQL } = await import('../../src/api/delivery-queries');
+    expect(plan(SUMMARY_SQL, ['org-a', '2026-10-13 00:00:00', '2026-10-13 00:00:00'])).toContain(
+      'deliveries_org_created',
+    );
+  });
+
+  it('still counts rows without created_at by updated_at', async () => {
+    delivery({ id: 'old', state: 'sent', updatedAt: '2000-01-01 00:00:00' });
+    delivery({
+      id: 'legacy',
+      state: 'sent',
+      updatedAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
+    });
+    db.raw.prepare("UPDATE deliveries SET created_at=NULL WHERE id IN ('old','legacy')").run();
+    const res = await call('GET', '/api/deliveries/summary', { as: 'alice' });
+    expect((await json<{ counts: { sent: number } }>(res)).counts.sent).toBe(1);
+  });
+});

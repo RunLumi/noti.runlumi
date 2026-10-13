@@ -566,7 +566,7 @@ redacted exactly as F98 does for the test preview.
 
 ## F182 — Manual replay
 
-**Priority** P0 · **Status** partial (slice 4: idempotent tenant-scoped service. Slice 6b: `POST /api/deliveries/:id/replay`, admin-only, CSRF-checked, rate-limited, refused while workspace deletion is pending, audited as `delivery.replay`; dashboard Redeliver button. Not built: bulk replay, replay after the outbox payload is purged)
+**Priority** P0 · **Status** partial (slice 4: idempotent tenant-scoped service. Slice 6b: `POST /api/deliveries/:id/replay`, admin-only, CSRF-checked, rate-limited, refused while workspace deletion is pending, audited as `delivery.replay`; dashboard Redeliver button. The replay is refused when its integration is deleted, paused or quarantined, and its audit row is atomic with it. Not built: bulk replay, replay after the outbox payload is purged)
 
 **Story** As a customer, I want to retry a failed notification myself, so that I do not have
 to wait for you to notice.

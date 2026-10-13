@@ -134,6 +134,8 @@ export interface DeliveryRowRecord {
   integration_repo: string | null;
   integration_destination: string | null;
   integration_destination_host: string | null;
+  integration_enabled: number | null;
+  integration_quarantined_at: string | null;
   latest_replay_state: string | null;
 }
 
@@ -143,6 +145,18 @@ export interface DeliveryErrorView {
   readonly messageKey: string | null;
   readonly retryable: boolean;
   readonly userActionable: boolean;
+}
+
+/**
+ * Whether a replay could actually be delivered: the consumer dead-letters a message whose
+ * integration is gone, paused or has unreadable credentials, so we do not offer one.
+ */
+export type IntegrationStatus = 'available' | 'missing' | 'disabled' | 'quarantined';
+
+export function integrationStatus(row: DeliveryRowRecord): IntegrationStatus {
+  if (row.integration_name === null && row.integration_repo === null) return 'missing';
+  if (row.integration_quarantined_at !== null) return 'quarantined';
+  return row.integration_enabled === 1 ? 'available' : 'disabled';
 }
 
 export interface DeliveryView {
@@ -156,6 +170,8 @@ export interface DeliveryView {
   };
   /** False once the integration was deleted: history stays, the integration does not. */
   readonly integrationExists: boolean;
+  /** Why a replay would not be delivered, or `available`. */
+  readonly integrationStatus: IntegrationStatus;
   readonly state: DeliveryState;
   readonly attempts: number;
   readonly error: DeliveryErrorView | null;
@@ -194,6 +210,7 @@ function errorView(code: string | null): DeliveryErrorView | null {
 export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): DeliveryView {
   const state = normalizeDeliveryState(row.state);
   const latest = row.latest_replay_state ? normalizeDeliveryState(row.latest_replay_state) : null;
+  const status = integrationStatus(row);
   return {
     id: row.id,
     integration: {
@@ -204,6 +221,7 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
       destinationHost: row.integration_destination_host,
     },
     integrationExists: row.integration_name !== null || row.integration_repo !== null,
+    integrationStatus: status,
     state,
     attempts: row.attempts,
     error: state === 'dead_lettered' || state === 'retrying' ? errorView(row.last_error_code) : null,
@@ -214,7 +232,11 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
     latestReplayState: latest,
     // A replay that is still in flight or already succeeded makes another one pointless;
     // the server enforces the same rule, this only decides whether to offer the button.
-    canReplay: mayReplay && state === 'dead_lettered' && (latest === null || latest === 'dead_lettered'),
+    canReplay:
+      mayReplay &&
+      state === 'dead_lettered' &&
+      status === 'available' &&
+      (latest === null || latest === 'dead_lettered'),
   };
 }
 

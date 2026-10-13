@@ -1,11 +1,12 @@
 import { Hono, type Context } from 'hono';
-import { recordAudit, requestOrigin } from '../audit/audit';
+import { requestOrigin } from '../audit/audit';
 import { authorize, isFailure, type Resolved } from '../auth/workspace';
 import { can, type Capability } from '../auth/permissions';
 import { redeliver } from '../delivery/redeliver';
 import { normalizeDeliveryState, type DeliveryState } from '../delivery/state';
 import type { Bindings } from '../env';
-import { log } from '../platform/log';
+import { hit } from '../security/rate-limit';
+import { FROM_VIEW, SELECT_VIEW, SUMMARY_SQL, buildListQuery } from './delivery-queries';
 import {
   deriveTimeline,
   encodeCursor,
@@ -30,19 +31,6 @@ type Ctx = Context<{ Bindings: Bindings }>;
 
 const SUMMARY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
-const SELECT_VIEW = `
-  d.id, d.integration_id, d.state, d.attempts, d.last_error_code, d.replay_of,
-  d.created_at, d.updated_at, d.first_attempt_at, d.last_attempt_at, d.next_attempt_at,
-  d.dead_lettered_at,
-  i.name AS integration_name, i.repo AS integration_repo,
-  i.destination AS integration_destination, i.destination_host AS integration_destination_host,
-  (SELECT r.state FROM deliveries r
-     WHERE r.replay_of = d.id AND r.organization_id = d.organization_id
-     ORDER BY r.rowid DESC LIMIT 1) AS latest_replay_state`;
-
-const FROM_VIEW = `FROM deliveries d
-  LEFT JOIN integrations i ON i.id = d.integration_id AND i.organization_id = d.organization_id`;
-
 async function gate(c: Ctx, capability: Capability): Promise<Resolved | Response> {
   const resolved = await authorize(c, capability);
   return isFailure(resolved) ? c.json({ error: resolved.error }, resolved.status) : resolved;
@@ -57,18 +45,19 @@ function mutationRejected(c: Ctx): Response | null {
   return null;
 }
 
-async function rateLimited(c: Ctx, userId: string): Promise<Response | null> {
-  const windowStart = Math.floor(Date.now() / 60_000) * 60_000;
-  const row = await c.env.DB.prepare(
-    `INSERT INTO api_rate_limits(key,window_start,count) VALUES(?,?,1)
-     ON CONFLICT(key,window_start) DO UPDATE SET count=count+1
-     RETURNING count`,
-  )
-    .bind(`deliveries:${userId}`, windowStart)
-    .first<{ count: number }>();
-  if ((row?.count ?? 0) <= MUTATIONS_PER_MINUTE) return null;
-  const retryAfter = Math.ceil((windowStart + 60_000 - Date.now()) / 1000);
-  return c.json({ error: 'Too many changes; try again shortly' }, 429, { 'retry-after': String(retryAfter) });
+const WINDOW_MS = 60_000;
+/** Reads are cheap but unbounded callers are not; the ceiling is far above what a person clicks. */
+const READS_PER_MINUTE = 300;
+
+async function rateLimited(c: Ctx, userId: string, scope: 'read' | 'write'): Promise<Response | null> {
+  const result =
+    scope === 'write'
+      ? await hit(c.env.DB, `deliveries:${userId}`, MUTATIONS_PER_MINUTE, WINDOW_MS)
+      : await hit(c.env.DB, `deliveries:read:${userId}`, READS_PER_MINUTE, WINDOW_MS);
+  if (!result.limited) return null;
+  return c.json({ error: 'Too many requests; try again shortly' }, 429, {
+    'retry-after': String(result.retryAfterSeconds),
+  });
 }
 
 const deliveries = new Hono<{ Bindings: Bindings }>();
@@ -76,39 +65,15 @@ const deliveries = new Hono<{ Bindings: Bindings }>();
 deliveries.get('/', async (c) => {
   const who = await gate(c, 'delivery.read');
   if (who instanceof Response) return who;
+  const limitedRead = await rateLimited(c, who.userId, 'read');
+  if (limitedRead) return limitedRead;
   const parsed = parseListFilters((name) => c.req.query(name));
   if (!parsed.ok) return c.json({ error: 'Validation failed', fields: parsed.fields }, 422);
   const f = parsed.value;
 
-  const where = ['d.organization_id = ?'];
-  const values: (string | number)[] = [who.orgId];
-  if (f.state === 'dead_lettered') where.push("d.state IN ('dead_lettered','failed')");
-  else if (f.state) {
-    where.push('d.state = ?');
-    values.push(f.state);
-  }
-  if (f.integrationId) {
-    where.push('d.integration_id = ?');
-    values.push(f.integrationId);
-  }
-  if (f.from) {
-    where.push('d.updated_at >= ?');
-    values.push(f.from);
-  }
-  if (f.to) {
-    where.push('d.updated_at <= ?');
-    values.push(f.to);
-  }
-  if (f.cursor) {
-    where.push('(d.updated_at < ? OR (d.updated_at = ? AND d.id < ?))');
-    values.push(f.cursor.updatedAt, f.cursor.updatedAt, f.cursor.id);
-  }
-
-  const rows = await c.env.DB.prepare(
-    `SELECT ${SELECT_VIEW} ${FROM_VIEW} WHERE ${where.join(' AND ')}
-     ORDER BY d.updated_at DESC, d.id DESC LIMIT ?`,
-  )
-    .bind(...values, f.limit + 1)
+  const query = buildListQuery(who.orgId, f);
+  const rows = await c.env.DB.prepare(query.sql)
+    .bind(...query.values)
     .all<DeliveryRowRecord>();
 
   const page = rows.results.slice(0, f.limit);
@@ -127,13 +92,11 @@ deliveries.get('/', async (c) => {
 deliveries.get('/summary', async (c) => {
   const who = await gate(c, 'delivery.read');
   if (who instanceof Response) return who;
+  const limitedRead = await rateLimited(c, who.userId, 'read');
+  if (limitedRead) return limitedRead;
   const since = new Date(Date.now() - SUMMARY_WINDOW_MS).toISOString().slice(0, 19).replace('T', ' ');
-  const rows = await c.env.DB.prepare(
-    `SELECT state, COUNT(*) AS n FROM deliveries
-     WHERE organization_id = ? AND COALESCE(created_at, updated_at) >= ?
-     GROUP BY state`,
-  )
-    .bind(who.orgId, since)
+  const rows = await c.env.DB.prepare(SUMMARY_SQL)
+    .bind(who.orgId, since, since)
     .all<{ state: string; n: number }>();
   const counts: Record<DeliveryState, number> = {
     pending: 0,
@@ -151,6 +114,8 @@ deliveries.get('/summary', async (c) => {
 deliveries.get('/:id', async (c) => {
   const who = await gate(c, 'delivery.read');
   if (who instanceof Response) return who;
+  const limitedRead = await rateLimited(c, who.userId, 'read');
+  if (limitedRead) return limitedRead;
   const id = c.req.param('id');
   const row = await c.env.DB.prepare(
     `SELECT ${SELECT_VIEW} ${FROM_VIEW} WHERE d.id = ? AND d.organization_id = ?`,
@@ -183,6 +148,15 @@ const REFUSALS = {
   already_delivered: { status: 409, error: 'This delivery already reached its destination.' },
   not_replayable: { status: 409, error: 'Only a failed delivery can be redelivered.' },
   payload_unavailable: { status: 409, error: 'The original message is no longer available to redeliver.' },
+  integration_unavailable: {
+    status: 409,
+    error:
+      'The integration for this delivery is deleted, paused or needs its credentials fixed. Fix it first, then redeliver.',
+  },
+  deletion_pending: {
+    status: 409,
+    error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.',
+  },
 } as const;
 
 deliveries.post('/:id/replay', async (c) => {
@@ -195,7 +169,7 @@ deliveries.post('/:id/replay', async (c) => {
       { error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.' },
       409,
     );
-  const limited = await rateLimited(c, who.userId);
+  const limited = await rateLimited(c, who.userId, 'write');
   if (limited) return limited;
 
   const id = c.req.param('id');
@@ -210,28 +184,15 @@ deliveries.post('/:id/replay', async (c) => {
   if (latest && normalizeDeliveryState(latest.state) !== 'dead_lettered')
     return c.json({ replay: { deliveryId: latest.id, replayOf: id, created: false } }, 200);
 
-  const result = await redeliver(c.env.DB, { organizationId: who.orgId, deliveryId: id });
+  const result = await redeliver(c.env.DB, {
+    organizationId: who.orgId,
+    deliveryId: id,
+    // The audit row commits in the same batch as the replay, and only if the replay was made.
+    audit: { actorId: who.userId, ...requestOrigin(c.req.raw.headers) },
+  });
   if (!result.ok) {
     const refusal = REFUSALS[result.error];
     return c.json({ error: refusal.error, reason: result.error }, refusal.status);
-  }
-  if (result.created) {
-    try {
-      await recordAudit(c.env.DB, {
-        organizationId: who.orgId,
-        actorId: who.userId,
-        action: 'delivery.replay',
-        subjectType: 'delivery',
-        subjectId: id,
-        outcome: 'success',
-        ...requestOrigin(c.req.raw.headers),
-        metadata: { replayDeliveryId: result.deliveryId },
-      });
-    } catch {
-      // The replay is already durable and cannot be undone; say so loudly instead of
-      // pretending it did not happen. The log carries ids only.
-      log('error', 'delivery_replay_audit_failed', { organization_id: who.orgId, delivery_id: id });
-    }
   }
   return c.json(
     { replay: { deliveryId: result.deliveryId, replayOf: result.replayOf, created: result.created } },

@@ -486,6 +486,12 @@ export const en = {
   'redeliver.adminOnly': 'Only workspace admins can redeliver. Ask an admin if this notification matters.',
   'redeliver.inFlight': 'A redelivery is already {state}. Check the redeliveries below.',
   'redeliver.succeeded': 'This was redelivered and the redelivery went through.',
+  'redeliver.integration.missing':
+    'The integration this was sent through has been deleted, so it cannot be redelivered.',
+  'redeliver.integration.disabled':
+    'This integration is paused. Turn it back on in its settings first, then come back to redeliver.',
+  'redeliver.integration.quarantined':
+    'Noti stopped using this integration’s saved webhook URL. Paste the URL again in its settings first, then come back to redeliver.',
   'redeliver.notOffered': 'Only failed deliveries can be redelivered. This one is not failed.',
   'redeliver.deletionPending':
     'This workspace is scheduled for deletion, so nothing can be redelivered. Cancel the deletion in Settings first.',

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ERROR_CODES, ERROR_TAXONOMY } from '../../../src/platform/errors';
 import { ApiError } from '../lib/api';
 import { en } from '../i18n/messages.en';
@@ -7,7 +7,7 @@ import { DELIVERY_STATES, parseDelivery, type DeliveryError } from './api';
 import { STATE_LABEL, STATE_MEANING, describeDeliveryError, failureCopy } from './copy';
 import { hasFilters, toFilters, validateActivitySearch } from './search';
 import { absoluteTime, relativeTime } from './Time';
-import { parseDeletion, safeFileName } from '../workspace/api';
+import { REVOKE_DELAY_MS, downloadExport, parseDeletion, safeFileName } from '../workspace/api';
 
 const row = (over: Record<string, unknown> = {}) => ({
   id: 'd1',
@@ -19,6 +19,7 @@ const row = (over: Record<string, unknown> = {}) => ({
     destinationHost: 'hooks.slack.com',
   },
   integrationExists: true,
+  integrationStatus: 'available',
   state: 'dead_lettered',
   attempts: 3,
   error: {
@@ -109,6 +110,8 @@ describe('parseDelivery', () => {
     expect(() => parseDelivery(row({ state: 'exploded' }))).toThrow(ApiError);
     expect(() => parseDelivery(row({ attempts: '3' }))).toThrow(ApiError);
     expect(() => parseDelivery(null)).toThrow(ApiError);
+    expect(() => parseDelivery(row({ integrationStatus: 'gone' }))).toThrow(ApiError);
+    expect(() => parseDelivery(row({ integrationStatus: undefined }))).toThrow(ApiError);
     expect(() => parseDelivery(row({ error: { code: 1 } }))).toThrow(ApiError);
   });
 });
@@ -196,5 +199,51 @@ describe('workspace data helpers', () => {
     expect(en['workspace.danger.point3']).toMatch(/7 days/);
     expect(en['workspace.danger.backup']).toMatch(/30 days/);
     expect(en['workspace.danger.backup']).toMatch(/Time Travel/);
+  });
+});
+
+describe('redelivery that could not be delivered', () => {
+  it('has a message for every integration state that blocks it', () => {
+    for (const status of ['missing', 'disabled', 'quarantined'] as const) {
+      const key = `redeliver.integration.${status}`;
+      expect(Object.keys(en)).toContain(key);
+    }
+    expect(parseDelivery(row({ integrationStatus: 'disabled', canReplay: false })).integrationStatus).toBe(
+      'disabled',
+    );
+  });
+});
+
+describe('export download', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('revokes the blob URL only after a delay, not straight after the click', async () => {
+    vi.useFakeTimers();
+    const revoke = vi.fn();
+    const link = { click: vi.fn(), remove: vi.fn(), href: '', download: '' };
+    vi.stubGlobal('document', { createElement: () => link, body: { append: vi.fn() } });
+    vi.stubGlobal(
+      'URL',
+      Object.assign(function URLStub() {}, { createObjectURL: () => 'blob:x', revokeObjectURL: revoke }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response('{}', { headers: { 'content-disposition': 'attachment; filename="x.json"' } }),
+        ),
+      ),
+    );
+    await downloadExport('org-a');
+    expect(link.click).toHaveBeenCalled();
+    expect(revoke).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(REVOKE_DELAY_MS - 1);
+    expect(revoke).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(revoke).toHaveBeenCalledWith('blob:x');
+    expect(REVOKE_DELAY_MS).toBeGreaterThanOrEqual(1000);
   });
 });

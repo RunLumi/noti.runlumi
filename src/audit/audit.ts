@@ -56,11 +56,19 @@ export function auditStatement(
   db: D1Database,
   entry: AuditEntry,
   ifIntegrationExists?: { id: string; organizationId: string },
+  options: { readonly onlyIfPreviousStatementChangedRows?: boolean } = {},
 ): D1PreparedStatement {
-  const guard = ifIntegrationExists
-    ? ' WHERE EXISTS (SELECT 1 FROM integrations WHERE id=? AND organization_id=?)'
-    : '';
-  const guardValues = ifIntegrationExists ? [ifIntegrationExists.id, ifIntegrationExists.organizationId] : [];
+  // `changes()` is the row count of the statement just before this one in the batch: put the
+  // audit row right after the INSERT it describes and it exists only if that insert did.
+  const guard = options.onlyIfPreviousStatementChangedRows
+    ? ' WHERE changes() > 0'
+    : ifIntegrationExists
+      ? ' WHERE EXISTS (SELECT 1 FROM integrations WHERE id=? AND organization_id=?)'
+      : '';
+  const guardValues =
+    ifIntegrationExists && !options.onlyIfPreviousStatementChangedRows
+      ? [ifIntegrationExists.id, ifIntegrationExists.organizationId]
+      : [];
   return db
     .prepare(
       `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json)

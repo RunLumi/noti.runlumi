@@ -43,6 +43,8 @@ export function RedeliverPanel({ orgId, delivery, onShowNew }: RedeliverPanelPro
     if (latest === 'sent' || latest === 'accepted') status = t('redeliver.succeeded');
     else if (latest !== null && IN_FLIGHT.has(latest))
       status = t('redeliver.inFlight', { state: t(STATE_LABEL[latest]).toLowerCase() });
+    else if (delivery.integrationStatus !== 'available')
+      status = t(`redeliver.integration.${delivery.integrationStatus}`);
     else status = t('redeliver.adminOnly');
   }
 

@@ -26,10 +26,25 @@ not create one.
    refused while workspace deletion is pending. While an earlier replay of the same delivery
    is queued or has succeeded, a second request returns it (`created: false`) rather than
    sending twice. Only dead-lettered deliveries are replayable; the service already refuses
-   delivered ones. The audit row is written after the durable replay; if that write fails the
-   error is logged with ids only and the request still succeeds, because the replay cannot be
-   undone and pretending otherwise would be worse. This is not atomic with the replay; a
-   follow-up could move both into one batch.
+   delivered ones.
+
+   *Replay needs a usable integration.* The consumer dead-letters a message whose integration
+   is deleted, paused or quarantined, so a replay would return 202 and then fail. The service
+   now refuses with `409 integration_unavailable` ("fix the integration first, then
+   redeliver"), the delivery view carries `integrationStatus` (`available`, `missing`,
+   `disabled`, `quarantined`) and `canReplay` requires `available`; the dialog explains which
+   it is instead of offering a button that cannot work.
+
+   *The audit row is atomic with the replay.* The `delivery.replay` insert is a statement in
+   the same `db.batch` as the replay, placed straight after the delivery insert and guarded by
+   `changes() > 0`, so it exists exactly when a new replay row was created. A failed audit
+   write rolls the replay back (a 5xx, nothing queued) rather than leaving an unaudited
+   replay. The same insert carries the integration-usable and no-pending-deletion guards, so
+   a pause, quarantine, delete or deletion request between the read and the write wins. The
+   source row's `updated_at` is left alone so a reader's cursor does not shift.
+
+   *Rate limits.* Writes keep 30 per minute per user; reads get 300 per minute per user
+   (`429` with `Retry-After`), using the shared limiter in `src/security/rate-limit.ts`.
 
 3. **The UI says "at least once", always.** The log page and the detail dialog state that a
    notification may occasionally arrive more than once. A redelivery is described as a *new
@@ -71,6 +86,17 @@ not create one.
    appear on the step. Test send for Teams (F215, which must ask the person to confirm the
    message appeared) is not built, so the wizard does not offer it.
 
+## Indexes
+
+Migration `0013_delivery_log_indexes.sql` adds `deliveries(organization_id, updated_at DESC,
+id DESC)` for the list and `deliveries(organization_id, created_at)` for the 24-hour summary,
+whose predicate is now `created_at >= ? OR (created_at IS NULL AND updated_at >= ?)` instead
+of `COALESCE(...)`, which no index can serve. Tests assert with `EXPLAIN QUERY PLAN` that the
+list uses its index with no sort step and the summary uses its index. The summary query names
+its index (`INDEXED BY`), because without ANALYZE statistics SQLite may pick the broader
+`deliveries_org_idx`; the consequence is that migration 0013 must be applied before the
+Worker that uses it is deployed. Rollback is `DROP INDEX` for each (no data changes).
+
 ## Not built
 
 Test send (F215), the setup-progress model (F207), per-attempt history (F184), free-text and
@@ -109,6 +135,10 @@ Checked in the in-app browser (Chromium) at 1280 px and 320 px:
   integration created through the real API; it appears in the list and in the log as
   Microsoft Teams.
 - Overview: delivery figures come from `/summary`.
+
+The review follow-up (integration-unavailable refusal, atomic audit, indexes, read rate
+limit, export blob URL revoked after a delay) was verified with the API and web tests over
+the fake D1, including `EXPLAIN QUERY PLAN`; it was not re-run in the browser.
 
 **Not verified.** The file download itself was not triggered (the export endpoint was called
 with `fetch`). The member (non-admin) view of Settings and the Redeliver control was not

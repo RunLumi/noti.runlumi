@@ -145,10 +145,13 @@ responses carry `guarantee: "at_least_once"` and the dashboard says so.
 | `GET /api/deliveries` | `delivery.read` | `{deliveries, nextCursor, guarantee}`. Query: `state`, `integrationId`, `from`, `to` (ISO dates), `limit` (1–100, default 25), `cursor` (opaque, ordered by `(updated_at, id)` descending). Filter `state=dead_lettered` also matches legacy `failed` rows. `422` on a bad filter. |
 | `GET /api/deliveries/summary` | `delivery.read` | `{windowHours: 24, counts}` by state for deliveries created in the last 24 hours. |
 | `GET /api/deliveries/:id` | `delivery.read` | `{delivery, timeline, attemptDetail: "summary", replays, guarantee}`. The timeline is what the single ledger row records, not a per-attempt history. |
-| `POST /api/deliveries/:id/replay` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. `202 {replay: {deliveryId, replayOf, created: true}}`; `200` with `created: false` while an earlier replay of the same delivery is queued or succeeded (idempotent). `409` if the delivery is not dead-lettered, already delivered, its original message is gone, or workspace deletion is pending. `429` when rate limited. Audited as `delivery.replay`. |
+| `POST /api/deliveries/:id/replay` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. `202 {replay: {deliveryId, replayOf, created: true}}`; `200` with `created: false` while an earlier replay of the same delivery is queued or succeeded (idempotent). `409` if the delivery is not dead-lettered, already delivered, its original message is gone, its integration is deleted, paused or quarantined (`reason: "integration_unavailable"`), or workspace deletion is pending. `429` when rate limited. Audited as `delivery.replay`; the audit row commits in the same batch as the replay and exists only if a new replay row was created. |
 
-A replay never edits the original row: it writes a new delivery with `replayOf` set, so the
-log shows both.
+A replay never edits the original row (not even `updated_at`): it writes a new delivery with
+`replayOf` set, so the log shows both. Each delivery carries `integrationStatus`
+(`available`, `missing`, `disabled`, `quarantined`); `canReplay` is true only for
+`available`. Reads are limited to 300 per minute per user and mutations to 30, both `429`
+with `Retry-After`.
 
 ## Workspace export and deletion (admin)
 
