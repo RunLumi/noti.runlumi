@@ -7,7 +7,8 @@ workspace. The order of resolution is:
 2. Otherwise, the session's active organization.
 3. Otherwise, the caller's only membership.
 
-If none of these yields a workspace, the request is refused. A workspace the caller does not
+If none of these yields a workspace, the request is refused, except `GET /api/workspace/me`
+(see below). A workspace the caller does not
 belong to returns **404**, never 403, and the attempt is written to `audit_events`.
 
 Mutations (`POST`, `PATCH`, `DELETE`) also require:
@@ -24,6 +25,33 @@ Mutations (`POST`, `PATCH`, `DELETE`) also require:
 A probe against a workspace the caller does not belong to is audited once per minute per
 actor and target. A `?org=` value longer than 64 characters is never stored verbatim. A
 failed denial write never changes the response.
+
+## Current user
+
+`GET /api/workspace/me` tells the dashboard who is signed in and which workspace it is in.
+It answers for every membership state:
+
+| Caller | Response |
+| --- | --- |
+| No session, or email not verified | `401 {"error":"Unauthorized"}` |
+| Verified, **no memberships** | `200` with `org_id`, `org_name`, `role` all `null` and `organizations: []`. This is the normal start of onboarding, so the dashboard routes to `/onboarding` instead of `/signin`. |
+| One membership | `200` with that workspace |
+| Several memberships | `200` with the `?org=` workspace, else the session's active one, else the **earliest membership**, which is then saved as the session's active workspace. It never guesses across tenants. |
+| `?org=` for a workspace the caller is not in | `404`, audited as above |
+
+```ts
+type Me = {
+  user: {
+    id: string; name: string; email: string; emailVerified: boolean;
+    org_id: string | null; org_name: string | null; role: string | null;
+    organizations: { orgId: string; role: string; name: string }[]; // only the caller's own
+  };
+};
+```
+
+Only `/me` has the no-workspace exception. Every other workspace-scoped route (`/team`,
+`/integrations`, and the rest) still returns `403 {"error":"Create or join an organization
+first"}` for a caller with no memberships.
 
 Capabilities, as defined in `src/auth/permissions.ts`:
 
