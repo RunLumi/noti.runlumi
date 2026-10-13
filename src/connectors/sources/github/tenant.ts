@@ -63,3 +63,30 @@ export async function resolveTenant(
   if (row.status !== 'active') return { kind: 'not-active' };
   return { kind: 'ok', organizationId: row.organization_id };
 }
+
+/**
+ * Repository scope (F67). For a `selected` installation, the repository must be in the
+ * synced set; `installation_repositories` events keep that set current. For `all`, GitHub
+ * only sends events for repositories the installation covers, and the payload is signed.
+ */
+export async function repositoryInScope(
+  db: D1Database,
+  appId: string,
+  installationId: string,
+  repositoryId: unknown,
+): Promise<boolean> {
+  const row = await db
+    .prepare('SELECT id,repository_selection FROM github_installations WHERE installation_id=? AND app_id=?')
+    .bind(installationId, appId)
+    .first<{ id: string; repository_selection: string }>();
+  if (!row) return false;
+  if (row.repository_selection === 'all') return true;
+  if (typeof repositoryId !== 'number' || !Number.isSafeInteger(repositoryId)) return false;
+  const hit = await db
+    .prepare(
+      'SELECT 1 AS x FROM github_installation_repositories WHERE installation_row_id=? AND repository_id=?',
+    )
+    .bind(row.id, String(repositoryId))
+    .first();
+  return hit !== null;
+}

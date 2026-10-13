@@ -30,7 +30,7 @@ manual. Do not write it; do not rely on it either.
 
 ## F55 — GitHub App registration
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 registration documented in docs/GITHUB_APP.md; amended by ADR 0008 (OAuth verify leg); no App registered yet
 
 **Story** As a user, I want to connect Noti to GitHub with one click, so that I am not
 pasting webhook URLs and secrets into a form.
@@ -66,7 +66,7 @@ dashboard client, never included in an error.
 
 ## F56 — Install flow and tenant binding
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ✅ verified binding via user token + PKCE, single-use states (PR #11, ADR 0008)
 
 **Story** As a user, I want to install Noti and land back in my own workspace, so that I do
 not have to re-find my account afterwards.
@@ -111,7 +111,7 @@ It requires an explicit, audited, owner-only action.
 
 ## F57 — Installation registry and lifecycle
 
-**Priority** P0 · **Status** not started · **This is the tenant key**
+**Priority** P0 · **Status** ✅ registry, lifecycle status, no-rebind trigger (PR #11) · **This is the tenant key**
 
 **Story** As an operator, I want every inbound event to resolve to exactly one workspace via
 its verified installation, so that no event can be routed using attacker-supplied data.
@@ -538,7 +538,7 @@ destination URLs.
 
 ## F67 — Repository selection enforcement
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ✅ enforced at ingress and integration write (PR #11)
 
 **Story** As a customer, I expect Noti to respect "Only select repositories", so that a
 restricted installation cannot route events from repositories the customer excluded.
@@ -575,7 +575,7 @@ repos out of the wrong workspace.
 
 ## F68 — Lifecycle events as security events
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ✅ lifecycle events applied immediately and audited (PR #11)
 
 **Story** As a security reviewer, I want App authorization changes treated as security
 incidents, so that a revoked customer loses access immediately and visibly.

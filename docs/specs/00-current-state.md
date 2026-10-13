@@ -88,13 +88,13 @@ passkey plan and `AUTH_EMAIL` setup — all superseded. It also carried an out-o
 that Cloudflare Email Sending cannot send to arbitrary recipients; that restriction was
 lifted once a sending domain is onboarded. Rewritten against the working tree on 2026-10-13.
 
-### N6 — No bridge from a GitHub installation to an organization 🟡 inbound half resolved
+### N6 — No bridge from a GitHub installation to an organization ✅ resolved (PR #6, PR #11)
 `migrations/0006` adds `github_installations` (unique per `(installation_id, app_id)`, cascades
 with the organization). `/webhooks/github` now resolves the tenant **only** from the verified
 payload's `installation.id`, scoped to our `GITHUB_APP_ID`, and rejects every other outcome
 with `403` — unknown installation, foreign App, missing block, suspended or uninstalled.
-Still open: the install/setup flow that *writes* that row (F56/F57), so today the registry is
-populated only by hand and ingress fails closed.
+PR #11 adds the install flow that writes that row. The claimed installation id is verified
+with the installer's own token (ADR 0008), and lifecycle events keep the row current.
 
 ### N7 — Ambiguous membership selection would have leaked a tenant ✅ resolved
 Found while implementing N2 — the most valuable thing in this change.
@@ -163,7 +163,7 @@ Status as of PR #6 (2026-10-13):
 | D15 | Magic 1 MiB webhook cap | ⬜ unchanged |
 | D16 | Unbounded event-type string space | ✅ closed 18-type catalog; ingress ignores anything else (PR #9) |
 
-New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N6 is half resolved; N3 remains open.
+New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N6 is resolved; N3 remains open.
 
 Each item below is reproducible from the code. Severity is our judgement.
 

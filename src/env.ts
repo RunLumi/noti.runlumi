@@ -18,6 +18,12 @@ export type Bindings = AuthBindings & {
   DELIVERY_QUEUE: Queue<DeliveryMessage>;
   GITHUB_WEBHOOK_SECRET: string;
   GITHUB_APP_ID: string;
+  /** Public App slug (github.com/apps/<slug>). Not a secret. */
+  GITHUB_APP_SLUG: string;
+  /** OAuth client id of the App, used for the install-verification leg. Not a secret. */
+  GITHUB_CLIENT_ID: string;
+  /** OAuth client secret of the App. Secret. */
+  GITHUB_CLIENT_SECRET: string;
   /** Legacy v0 key. Read-only until the migration job reports zero v0 rows (F37). */
   ENCRYPTION_KEY: string;
   /** Key-encryption keys by version, 64 hex characters each (F34, F37). */

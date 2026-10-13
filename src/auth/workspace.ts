@@ -239,7 +239,7 @@ export async function authorize(c: WorkspaceContext, capability: Capability): Pr
 
 // `selectMembership`, `Selection` and `Membership` are already exported at their
 // declarations. Re-exporting them here would conflict.
-export { resolveWorkspace, isFailure };
+export { resolveWorkspace, isFailure, current as currentSession };
 export type { Resolved, Failure };
 
 export default workspace;

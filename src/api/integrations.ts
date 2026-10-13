@@ -7,6 +7,7 @@ import type { Bindings } from '../env';
 import { sealCredentials, blob, type DestinationCredentials } from '../pipeline/credentials';
 import type { DestinationKind } from '../pipeline/allowlist';
 import { parseCreateIntegration, parseUpdateIntegration, type FieldError } from './integration-input';
+import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
 
 /**
  * Tenant-scoped integrations API (F26). Every query carries `organization_id = <resolved
@@ -206,7 +207,9 @@ integrations.post('/', async (c) => {
   const parsed = parseCreateIntegration(read.body);
   if (!parsed.ok) return invalid(c, parsed.errors);
 
-  const input = parsed.value;
+  const repo = await canonicalRepository(c.env.DB, who.orgId, parsed.value.repo);
+  if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
+  const input = { ...parsed.value, repo };
   const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM integrations WHERE organization_id=?')
     .bind(who.orgId)
     .first<{ n: number }>();
@@ -273,7 +276,12 @@ integrations.patch('/:id', async (c) => {
   if (!read.ok) return read.response;
   const parsed = parseUpdateIntegration(read.body, existing.destination);
   if (!parsed.ok) return invalid(c, parsed.errors);
-  const input = parsed.value;
+  let input = parsed.value;
+  if (input.repo !== undefined) {
+    const repo = await canonicalRepository(c.env.DB, who.orgId, input.repo);
+    if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
+    input = { ...input, repo };
+  }
 
   type SqlValue = string | number | ArrayBuffer | null;
   const assignments: [column: string, value: SqlValue][] = [];

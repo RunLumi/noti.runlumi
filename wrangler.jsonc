@@ -44,5 +44,9 @@
     // Which KEK version (secret KEK_V<n>) wraps new connection keys. Not a secret.
     // Flip only after the new KEK secret is deployed; see docs/IMPLEMENTATION.md.
     "KMS_ACTIVE_VERSION": "1",
+    // Public GitHub App identifiers (see docs/GITHUB_APP.md). The client SECRET is a
+    // Worker secret, never a var. Until these are real, /api/github/install returns 503.
+    "GITHUB_APP_SLUG": "REPLACE_WITH_GITHUB_APP_SLUG",
+    "GITHUB_CLIENT_ID": "REPLACE_WITH_GITHUB_CLIENT_ID",
   },
 }

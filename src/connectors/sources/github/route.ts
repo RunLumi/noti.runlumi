@@ -4,7 +4,9 @@ import { asRecord, str } from '../../../lib/json';
 import { dispatchOutbox } from '../../../pipeline/outbox';
 import { isGithubEventType } from './catalog';
 import { classifyGithubEvent, verifyGithubSignature } from './events';
-import { resolveTenant } from './tenant';
+import { recordAudit } from '../../../audit/audit';
+import { handleLifecycle, LIFECYCLE_EVENTS } from './lifecycle';
+import { repositoryInScope, resolveTenant } from './tenant';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -57,7 +59,25 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   const event = asRecord(parsed);
   if (!event) return c.text('Invalid event', 400);
 
-  const repo = str(asRecord(event.repository)?.full_name);
+  const kind = c.req.header('x-github-event') || '';
+  // GitHub pings the App webhook when it is configured. It carries no installation and
+  // routes nothing; acknowledging it is what makes "Redeliver" in GitHub's UI go green.
+  if (kind === 'ping') return c.json({ accepted: true, ping: true }, 202);
+  // Lifecycle events change installation state and never route a notification (F68).
+  if (LIFECYCLE_EVENTS.has(kind)) {
+    try {
+      const outcome = await handleLifecycle(c.env.DB, c.env.GITHUB_APP_ID, kind, event);
+      return c.json({ accepted: true, lifecycle: outcome.kind }, 202);
+    } catch {
+      // A 5xx makes the failure visible in GitHub's delivery log, where it can be
+      // redelivered; a revocation must never be silently dropped. No payload is logged.
+      console.error(JSON.stringify({ event: 'github_lifecycle_failed', kind }));
+      return c.text('Lifecycle update failed', 500);
+    }
+  }
+
+  const repository = asRecord(event.repository);
+  const repo = str(repository?.full_name);
   const deliveryId = c.req.header('x-github-delivery');
   if (!repo || !deliveryId) return c.text('Invalid event', 400);
 
@@ -76,7 +96,21 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
       return c.text('Installation not active', 403);
   }
   const organizationId = tenant.organizationId;
-  const eventType = classifyGithubEvent(c.req.header('x-github-event') || '', event);
+
+  // Repository scope (F67): a restricted installation never routes an excluded repository.
+  const installationId = String(asRecord(event.installation)?.id);
+  if (!(await repositoryInScope(c.env.DB, c.env.GITHUB_APP_ID, installationId, repository?.id))) {
+    await recordAudit(c.env.DB, {
+      organizationId,
+      actorId: null,
+      action: 'github.repository.out_of_scope',
+      subjectType: 'repository',
+      subjectId: repo.slice(0, 200),
+      outcome: 'denied',
+    });
+    return c.text('Repository not in scope', 403);
+  }
+  const eventType = classifyGithubEvent(kind, event);
   // Outside the closed catalog nothing can be subscribed, so nothing is looked up (D16).
   if (!isGithubEventType(eventType)) return c.json({ accepted: true, persisted: 0 }, 202);
 
