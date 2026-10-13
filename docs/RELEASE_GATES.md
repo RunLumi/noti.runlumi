@@ -20,7 +20,7 @@ needs a named owner, a written rationale and an entry in the register in
 | Real-provider end-to-end | A staging run through the actual GitHub App and a real Lark, Slack and Teams destination: create, test, deliver, inspect, retry, with run links | not done | Never run. The local GitHub App settings were placeholders (PROGRESS, slice 6a) |
 | Tenant isolation | The F233 drill (org A attempts to read, update and delete org B's integration, destination, delivery, dead letter and audit rows by id) plus static query checks, and a Time Travel restore re-drill | partly | Tenant resolution comes only from the verified installation and every query is scoped (slices 1, 3a, tests under `tests/`). The staging drill and a static every-query-filters-by-org check are not done |
 | Secret handling | No secret or webhook URL in logs, dead letters, previews or exports; KEK custody and rotation rehearsed | partly | Redaction layer, log tests, export test, static console guard (`tests/security/`). KEK rotation has a runbook (`IMPLEMENTATION.md`) but has not been rehearsed; no review has been done |
-| Rollback rehearsal | Deploy, migrate, roll back, executed | not done | Migrations are additive and the v0 credential columns are kept for rollback (ADR 0004), but a rehearsal has not been performed |
+| Rollback rehearsal | Deploy, migrate, roll back, executed | not done | Migrations are additive and the v0 credential columns are kept for rollback (ADR 0004); per-migration reversibility is tabulated in `RUNBOOK.md` (some steps are not reversible). A rehearsal has not been performed |
 
 ## 2. Carried over from the PR #1 list
 
@@ -53,7 +53,8 @@ needs a named owner, a written rationale and an entry in the register in
 | Static guards (console, origin checks, config secrets, XSS sinks) | done | `tests/security/static-guards.test.ts` |
 | `npm audit signatures`, install-script review, OIDC deploy | not done | F239 |
 | Abuse alerting, audit coverage of unknown-installation 403s | not done | F231, F233 |
-| Incident runbooks, `security.txt` | not done | F242 |
+| Incident runbooks, `security.txt` | partly | Availability and delivery-loss runbook exists (`RUNBOOK.md`, never rehearsed, several Cloudflare behaviours UNVERIFIED). Security incident response and `security.txt` are not done (F242) |
+| Delivery SLIs, stall detection, retention (spec 13) | partly | `GET /api/observability/summary`, cron stall log line and bounded retention are tested against the Node SQLite fake only (ADR 0011). No paging, no `job_runs`, no ingress counter; nothing is measured against a real deployment, so no SLI may be published externally |
 
 ## 4. Known limitations
 

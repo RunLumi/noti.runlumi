@@ -3,6 +3,7 @@
  * `redact()` (F12) before it is emitted, so a field that happens to carry a URL or token
  * cannot reach the log.
  */
+import { correlationFields } from './correlation';
 import { redact } from './redact';
 
 export type LogLevel = 'info' | 'warn' | 'error';
@@ -10,7 +11,9 @@ export type LogLevel = 'info' | 'warn' | 'error';
 export type LogFields = Readonly<Record<string, unknown>>;
 
 export function logLine(level: LogLevel, msg: string, fields: LogFields = {}): string {
-  return JSON.stringify(redact({ ts: new Date().toISOString(), level, msg, ...fields }));
+  return JSON.stringify(
+    redact({ ts: new Date().toISOString(), level, msg, ...correlationFields(), ...fields }),
+  );
 }
 
 export function log(level: LogLevel, msg: string, fields: LogFields = {}): void {

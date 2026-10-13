@@ -31,7 +31,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | this PR |
 | 7 | Routing rules and filters | F119–F140 | — | ⬜ | — |
 | 8 | Grouping, digests and noise control | F141–F168 | — | ⬜ | — |
-| 9 | Observability and runbook | F191–F204 | — | ⬜ | — |
+| 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | this PR |
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
 | W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (helper only), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | this PR |
@@ -657,4 +657,45 @@ Also fixed:
 - The `ingressLimiter` call still has to be added to `route.ts`, wrapped so a D1 error fails
   open and logs a redacted event.
 - The `tinypool` exception's stated fix was corrected. Upgrading to vitest 4 removes it.
+
+## Slice 9 — observability core (this PR)
+
+**What changed**
+
+- `src/platform/correlation.ts` and one `app.use` in `src/index.ts`: our own v4 correlation id
+  per request, echoed as `x-request-id`, attached (with a sane caller `x-request-id` as
+  `external_request_id`, and `cf-ray`) to every log line inside the request through
+  `AsyncLocalStorage`. A caller-supplied id is never adopted (spec 13 F193).
+- `src/observability/slis.ts` and `GET /api/observability/summary` (`delivery.read`,
+  `?window=` 1h to 30d): counts by state, success ratio, retry rate, dead letters by error
+  code, exact p50/p95 end-to-end and queue-delay latency, backlog ages, a per-destination
+  breakdown (Teams as `accepted`), and an explicit `notMeasurable` list. Empty windows are
+  `null`, never 0 or 1.
+- `src/observability/stall.ts`: cron stall detection with transition-based logging; state in
+  the new `ops_state` table (migration 0016).
+- `src/observability/cron.ts`: isolated cron jobs with a heartbeat; one failing job no longer skips stall detection or retention.
+- `src/pipeline/retention.ts`: hourly-throttled, index-seeking, bounded age-based purge of terminal deliveries, orphan outbox
+  rows and audit events; `DELIVERY_RETENTION_DAYS` (90) and `AUDIT_RETENTION_DAYS` (365).
+- `docs/RUNBOOK.md`, ADR 0011, API and release-gate rows.
+
+**Verified by**
+
+- Unit and integration tests over the real migrations in `tests/platform/correlation.test.ts`,
+  `tests/observability/`, `tests/pipeline/retention.test.ts` and `tests/api/observability.test.ts`
+  (SLI arithmetic, tenant isolation, window bounds, stall transitions, retention safety rules,
+  header echo), and `npm run format && npm run check`.
+- Not verified: anything against a real D1 database, Cloudflare Queues, Workers Logs or a
+  deployed cron. The SQL is exercised only through the Node SQLite fake.
+
+**Not done / follow-ups**
+
+- Correlation id on the queue message, `deliveries`/outbox rows and consumer log lines
+  (needs `src/pipeline/consumer.ts` and the GitHub route); `X-Noti-Correlation-Id`; lookup by
+  id.
+- Acceptance, routing and duplicate rates, ack and attempt latency, persisted unmapped-error
+  flag (no events table or attempt table); Analytics Engine; `job_runs`; `alert_state` and
+  paging; evidence bundle; the SLI publication gate; any dashboard view of the summary.
+- The runbook has not been rehearsed. Several Cloudflare behaviours in it are marked
+  UNVERIFIED.
+- Retention has not run against real data volumes; the per-tick bound is 2,500 rows per table, and real-D1 `meta.changes` semantics for the drain loops are unverified.
 

@@ -163,3 +163,35 @@ with `Retry-After`.
 | `DELETE /api/workspace/deletion` | `workspace.delete` | Cancels and restores the integrations that were enabled. Returns `409` once the purge has started. |
 
 While a deletion is pending, integration mutations and `POST /api/github/install` return `409`.
+
+## Observability
+
+| Method and path | Capability | Result |
+| --- | --- | --- |
+| `GET /api/observability/summary?window=24h` | `delivery.read` | `200` JSON, workspace-scoped, `Cache-Control: no-store`. `window` is `<n>h` or `<n>d` from `1h` to `30d` (default `24h`); anything else is `400`. Limited to 30 requests a minute per user (`429` with `Retry-After`). |
+
+The body is exact, computed from the delivery ledger on request. Ratios are a **cohort by creation time**: rows created inside the window, counted by their current state. `oldestOutboxPendingAgeMs` covers due outbox rows only (a retry parked for later does not count). Shape (abridged):
+
+```ts
+type Ratio = { value: number | null; numerator: number; denominator: number }; // null = no data
+type Summary = {
+  provenance: 'exact';
+  generatedAtMs: number;
+  window: { sinceMs: number; untilMs: number };
+  deliveries: { total: number; byState: Record<DeliveryState, number> };
+  successRatio: Ratio & { definition: string };   // (sent+accepted) / (sent+accepted+dead_lettered)
+  retryRate: Ratio & { definition: string };
+  deadLetter: { count: number; byErrorCode: { code: string; count: number }[] };
+  latency: { endToEnd: Latency; queueDelay: Latency };   // exact nearest-rank p50/p95, no averages
+  backlog: { oldestPendingAgeMs; oldestClaimedAgeMs; oldestRetryOverdueMs; oldestOutboxPendingAgeMs }; // current, not windowed
+  byDestination: { destination: string; outcomeKind: 'delivered' | 'accepted'; total; sent; accepted; deadLettered; successRatio: Ratio }[];
+  notMeasurable: { sli: string; reason: string }[];       // SLIs the ledger cannot support yet
+};
+type Latency = { samples: number; excluded: number; p50Ms: number | null; p95Ms: number | null; resolutionMs: 1000 };
+```
+
+Teams Workflows reaches `accepted`, never `sent`: the provider cannot confirm delivery, so it
+is reported as `outcomeKind: "accepted"`. Latency is `last_attempt_at` minus `created_at`;
+`created_at` has one-second resolution. Every response from the Worker carries an
+`x-request-id` header (our own id; a caller-supplied one is only logged beside it).
+
