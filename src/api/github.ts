@@ -33,7 +33,9 @@ function mayConnect(db: D1Database) {
       .prepare('SELECT role FROM member WHERE organization_id=? AND user_id=?')
       .bind(organizationId, userId)
       .first<{ role: string }>();
-    return row !== null && can(row.role, 'integration.create');
+    return (
+      row !== null && can(row.role, 'integration.create') && !(await isDeletionPending(db, organizationId))
+    );
   };
 }
 

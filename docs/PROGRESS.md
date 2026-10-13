@@ -459,8 +459,33 @@ See [ADR 0005](adr/0005-delivery-reliability.md) §12.
 - the last admin still protected outside a purge;
 - an export with no credential material, scoped to the caller's workspace.
 
+**Review.** A security review found no CRITICAL or HIGH issues. The two races and two
+MEDIUM gaps are fixed with regression tests:
+
+- A cancel racing the purge start. The purge now claims the row with one guarded `UPDATE`
+  and deletes nothing if it loses.
+- A double-click overwriting the restore snapshot. Scheduling is one atomic upsert that also
+  takes the snapshot, and it matches nothing while a request is pending.
+- An unbounded cascade. Audit events, auth states and synced repositories are drained in
+  bounded ticks before the organization is deleted.
+- A cancel batch that could exceed 100 statements. It is now one `json_each` update.
+
+Also fixed:
+
+- The deletion-pending guard now covers integration delete and the GitHub callback.
+- The purge writes a `workspace.purged` audit row with no organization, so the trail survives.
+- The export orders its rows, exports the most recent ones, and reports `truncated` per table
+  (2,000-row cap).
+
 **Known gaps**
 
+- In-flight deliveries for a workspace pending deletion fail permanently
+  (`integration_unavailable`); cancelling does not requeue them.
+- Existing stored Slack URLs that do not match the strict `/services/T…/B…/<token>` shape are
+  rejected at send time as permanent failures. A one-off re-check job that quarantines them
+  visibly is not built.
+- The GitHub installation stays installed on GitHub's side after a purge; admins should
+  uninstall it there.
 - D1 Time Travel keeps restorable history for up to 30 days, so erasure from backups is not
   faster than that. `SECURITY.md` says so.
 - The dashboard has no deletion or export screen yet.

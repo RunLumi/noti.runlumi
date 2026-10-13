@@ -17,7 +17,8 @@ export type AuditAction =
   | 'github.repository.out_of_scope'
   | 'workspace.export'
   | 'workspace.deletion.request'
-  | 'workspace.deletion.cancel';
+  | 'workspace.deletion.cancel'
+  | 'workspace.purged';
 
 export type AuditMetadata = Readonly<Record<string, string | number | boolean | null | readonly string[]>>;
 

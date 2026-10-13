@@ -369,6 +369,11 @@ integrations.delete('/:id', async (c) => {
   if (!origin || origin !== new URL(c.env.APP_ORIGIN).origin) return c.json({ error: 'Forbidden' }, 403);
   const gated = await gate(c, 'integration.delete');
   if (gated instanceof Response) return gated;
+  if (await isDeletionPending(c.env.DB, gated.orgId))
+    return c.json(
+      { error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.' },
+      409,
+    );
   const limited = await rateLimited(c, gated.userId);
   if (limited) return limited;
   const who = gated;

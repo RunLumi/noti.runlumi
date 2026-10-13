@@ -15,7 +15,7 @@ import { asRecord } from '../lib/json';
  */
 export const RETENTION_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const EXPORT_ROW_LIMIT = 5000;
+const EXPORT_ROW_LIMIT = 2000;
 
 type Ctx = Context<{ Bindings: Bindings }>;
 
@@ -90,21 +90,26 @@ lifecycle.post('/deletion', async (c) => {
       { error: 'Type the workspace name exactly to confirm.', fields: [{ field: 'confirm' }] },
       422,
     );
-  if (await pendingDeletion(c.env.DB, who.orgId))
-    return c.json({ error: 'Deletion is already scheduled.' }, 409);
 
-  const enabled = await c.env.DB.prepare('SELECT id FROM integrations WHERE organization_id=? AND enabled=1')
-    .bind(who.orgId)
-    .all<{ id: string }>();
-  const ids = enabled.results.map((r) => r.id);
+  // One atomic upsert takes the snapshot of enabled integrations and schedules the purge.
+  // It inserts, or revives a previously cancelled request, and matches nothing while a
+  // request is pending — so a double-click cannot overwrite the snapshot with [].
   const purgeAfter = Date.now() + RETENTION_DAYS * DAY_MS;
+  const scheduled = await c.env.DB.prepare(
+    `INSERT INTO workspace_deletions(organization_id,requested_by,requested_at,purge_after,disabled_integration_ids)
+     VALUES(?,?,CURRENT_TIMESTAMP,?,(SELECT json_group_array(id) FROM integrations WHERE organization_id=? AND enabled=1))
+     ON CONFLICT(organization_id) DO UPDATE SET
+       requested_by=excluded.requested_by, requested_at=excluded.requested_at, purge_after=excluded.purge_after,
+       disabled_integration_ids=excluded.disabled_integration_ids, cancelled_at=NULL, purge_started_at=NULL
+     WHERE workspace_deletions.cancelled_at IS NOT NULL AND workspace_deletions.purged_at IS NULL`,
+  )
+    .bind(who.orgId, who.userId, purgeAfter, who.orgId)
+    .run();
+  if (scheduled.meta.changes !== 1) return c.json({ error: 'Deletion is already scheduled.' }, 409);
 
+  const pending = await pendingDeletion(c.env.DB, who.orgId);
+  const disabled = pending ? restorableIds(pending.disabled_integration_ids).length : 0;
   await c.env.DB.batch([
-    // INSERT OR REPLACE: a previously cancelled request is superseded by the new one.
-    c.env.DB.prepare(
-      `INSERT OR REPLACE INTO workspace_deletions(organization_id,requested_by,purge_after,disabled_integration_ids)
-       VALUES(?,?,?,?)`,
-    ).bind(who.orgId, who.userId, purgeAfter, JSON.stringify(ids)),
     c.env.DB.prepare(
       'UPDATE integrations SET enabled=0,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND enabled=1',
     ).bind(who.orgId),
@@ -116,7 +121,7 @@ lifecycle.post('/deletion', async (c) => {
       subjectId: who.orgId,
       outcome: 'success',
       ...requestOrigin(c.req.raw.headers),
-      metadata: { purgeAfter: new Date(purgeAfter).toISOString(), disabledIntegrations: ids.length },
+      metadata: { purgeAfter: new Date(purgeAfter).toISOString(), disabledIntegrations: disabled },
     }),
   ]);
   return c.json(view(await pendingDeletion(c.env.DB, who.orgId)), 202);
@@ -136,22 +141,29 @@ lifecycle.delete('/deletion', async (c) => {
   if (rejected) return rejected;
   const who = await gate(c, 'workspace.delete');
   if (who instanceof Response) return who;
-  const pending = await pendingDeletion(c.env.DB, who.orgId);
-  if (!pending) return c.json({ error: 'No deletion is scheduled.' }, 404);
-  if (pending.purge_started_at)
-    return c.json({ error: 'The purge has already started and cannot be cancelled.' }, 409);
 
-  const ids = restorableIds(pending.disabled_integration_ids);
-  await c.env.DB.batch([
+  // The cancel is one guarded UPDATE that also returns the snapshot. If the purge claimed
+  // the row first, nothing comes back and nothing is restored.
+  const cancelled = await c.env.DB.prepare(
+    `UPDATE workspace_deletions SET cancelled_at=CURRENT_TIMESTAMP
+     WHERE organization_id=? AND cancelled_at IS NULL AND purged_at IS NULL AND purge_started_at IS NULL
+     RETURNING disabled_integration_ids`,
+  )
+    .bind(who.orgId)
+    .first<{ disabled_integration_ids: string }>();
+  if (!cancelled) {
+    return (await pendingDeletion(c.env.DB, who.orgId))
+      ? c.json({ error: 'The purge has already started and cannot be cancelled.' }, 409)
+      : c.json({ error: 'No deletion is scheduled.' }, 404);
+  }
+
+  const ids = restorableIds(cancelled.disabled_integration_ids);
+  const results = await c.env.DB.batch([
+    // One statement regardless of count; only ids from the snapshot, only in this workspace.
     c.env.DB.prepare(
-      'UPDATE workspace_deletions SET cancelled_at=CURRENT_TIMESTAMP WHERE organization_id=? AND purge_started_at IS NULL',
-    ).bind(who.orgId),
-    // Restore only what the request turned off, and only inside this workspace.
-    ...ids.map((id) =>
-      c.env.DB.prepare(
-        'UPDATE integrations SET enabled=1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?',
-      ).bind(id, who.orgId),
-    ),
+      `UPDATE integrations SET enabled=1,updated_at=CURRENT_TIMESTAMP
+       WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))`,
+    ).bind(who.orgId, JSON.stringify(ids)),
     auditStatement(c.env.DB, {
       organizationId: who.orgId,
       actorId: who.userId,
@@ -163,7 +175,7 @@ lifecycle.delete('/deletion', async (c) => {
       metadata: { restoredIntegrations: ids.length },
     }),
   ]);
-  return c.json({ scheduled: false });
+  return c.json({ scheduled: false, restoredIntegrations: results[0]?.meta.changes ?? 0 });
 });
 
 /**
@@ -195,15 +207,16 @@ lifecycle.get('/export', async (c) => {
       .bind(who.orgId),
     db
       .prepare(
-        `SELECT id,integration_id,state,attempts,updated_at FROM deliveries WHERE organization_id=? LIMIT ?`,
+        `SELECT id,integration_id,state,attempts,updated_at FROM deliveries WHERE organization_id=?
+         ORDER BY updated_at DESC LIMIT ?`,
       )
-      .bind(who.orgId, EXPORT_ROW_LIMIT),
+      .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
     db
       .prepare(
         `SELECT action,subject_type,subject_id,outcome,metadata_json,created_at FROM audit_events
          WHERE organization_id=? ORDER BY created_at DESC LIMIT ?`,
       )
-      .bind(who.orgId, EXPORT_ROW_LIMIT),
+      .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
   ]);
 
   await recordAudit(db, {
@@ -225,8 +238,13 @@ lifecycle.get('/export', async (c) => {
     members: members?.results ?? [],
     integrations: integrations?.results ?? [],
     githubInstallations: installations?.results ?? [],
-    deliveries: deliveries?.results ?? [],
-    auditEvents: audit?.results ?? [],
+    deliveries: (deliveries?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
+    auditEvents: (audit?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
+    // The most recent rows are exported; `true` means older rows exist and were left out.
+    truncated: {
+      deliveries: (deliveries?.results.length ?? 0) > EXPORT_ROW_LIMIT,
+      auditEvents: (audit?.results.length ?? 0) > EXPORT_ROW_LIMIT,
+    },
   };
   return c.json(body, 200, {
     'content-disposition': `attachment; filename="lumi-noti-export-${who.orgId}.json"`,

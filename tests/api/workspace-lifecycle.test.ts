@@ -209,6 +209,54 @@ describe('workspace deletion', () => {
     expect((await call('DELETE', '/api/workspace/deletion', 'alice')).status).toBe(409);
   });
 
+  it('a cancel that lands before the purge claims the row means nothing is deleted', async () => {
+    const id = await createIntegration('alice');
+    await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' });
+    await call('DELETE', '/api/workspace/deletion', 'alice');
+    const report = await purgeDueWorkspace(db.d1, Date.now() + 8 * 24 * 60 * 60 * 1000);
+    expect(report.organizationId).toBeNull();
+    expect(enabledIds('org-a')).toEqual([id]);
+  });
+
+  it('a second request while one is pending cannot overwrite the restore snapshot', async () => {
+    const id = await createIntegration('alice');
+    await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' });
+    expect((await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' })).status).toBe(409);
+    await call('DELETE', '/api/workspace/deletion', 'alice');
+    expect(enabledIds('org-a')).toEqual([id]);
+  });
+
+  it('can be requested again after a cancel', async () => {
+    await createIntegration('alice');
+    await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' });
+    await call('DELETE', '/api/workspace/deletion', 'alice');
+    expect((await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' })).status).toBe(202);
+    expect(enabledIds('org-a')).toEqual([]);
+  });
+
+  it('blocks deleting an integration while the workspace deletion is pending', async () => {
+    const id = await createIntegration('alice');
+    await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' });
+    expect((await call('DELETE', `/api/integrations/${id}`, 'alice')).status).toBe(409);
+  });
+
+  it('drains a large audit log in bounded ticks and records the purge with no organization', async () => {
+    const insert = db.raw.prepare(
+      "INSERT INTO audit_events(id,organization_id,action,subject_type,outcome) VALUES(?,'org-a','access.denied','organization','denied')",
+    );
+    for (let i = 0; i < PURGE_ROWS_PER_TICK + 50; i++) insert.run(`a${i}`);
+    await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' });
+    const later = Date.now() + 8 * 24 * 60 * 60 * 1000;
+    expect((await purgeDueWorkspace(db.d1, later)).completed).toBe(false);
+    expect((await purgeDueWorkspace(db.d1, later)).completed).toBe(true);
+    expect(count("SELECT COUNT(*) AS n FROM audit_events WHERE organization_id='org-a'")).toBe(0);
+    expect(
+      count(
+        "SELECT COUNT(*) AS n FROM audit_events WHERE action='workspace.purged' AND organization_id IS NULL AND subject_id='org-a'",
+      ),
+    ).toBe(1);
+  });
+
   it('still protects the last admin outside a purge', () => {
     expect(() => db.raw.exec("DELETE FROM member WHERE user_id='alice'")).toThrow(/requires an admin/);
   });
@@ -256,6 +304,21 @@ describe('workspace export', () => {
     expect(body).toMatchObject({ format: 'lumi-noti-export/v1', credentialsIncluded: false });
     expect(body.integrations).toHaveLength(1);
     expect(body.members).toHaveLength(2);
+  });
+
+  it('flags truncated tables and exports the most recent rows', async () => {
+    const insert = db.raw.prepare(
+      "INSERT INTO deliveries(id,integration_id,organization_id,state,updated_at) VALUES(?,'x','org-a','sent',?)",
+    );
+    for (let i = 0; i < 2001; i++) insert.run(`d${i}`, `2026-01-01 00:${String(i % 60).padStart(2, '0')}:00`);
+    const body = await (
+      await call('GET', '/api/workspace/export', 'alice')
+    ).json<{
+      deliveries: unknown[];
+      truncated: { deliveries: boolean; auditEvents: boolean };
+    }>();
+    expect(body.deliveries).toHaveLength(2000);
+    expect(body.truncated).toEqual({ deliveries: true, auditEvents: false });
   });
 
   it('exports only the caller’s workspace', async () => {
