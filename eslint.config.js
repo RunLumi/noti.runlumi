@@ -1,0 +1,106 @@
+// ESLint flat config. Type-aware linting is deliberate: the highest-value defects in this
+// codebase (unchecked index access, unvalidated `any` from webhook bodies, non-null
+// assertions on parsed JSON, floating promises in the queue consumer) are all invisible to
+// non-type-aware rules.
+//
+// See docs/specs/01-platform-runtime.md F01 and F14.
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import prettier from 'eslint-config-prettier';
+import globals from 'globals';
+
+export default tseslint.config(
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '.wrangler/**',
+      'coverage/**',
+      'playwright-report/**',
+      // This file is config, not product code; it cannot provide type information.
+      'eslint.config.js',
+    ],
+  },
+
+  js.configs.recommended,
+  tseslint.configs.recommendedTypeChecked,
+  prettier,
+
+  // Build/tooling configs live outside both tsconfig projects, so they cannot supply type
+  // information. `disableTypeChecked` is the supported way to exempt them without
+  // enumerating individual type-aware rules.
+  {
+    files: ['**/*.config.ts', 'scripts/**/*.ts'],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+
+  // Worker source: the runtime is not a browser, but Web APIs are available.
+  {
+    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    languageOptions: {
+      globals: { ...globals.worker },
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      // A webhook body is untrusted input. `JSON.parse` returning `any` and letting it
+      // flow into a query is exactly the defect class this repo has already shipped —
+      // see D3 in docs/specs/00-current-state.md, where routing keys on a body field.
+      // These rules live in the TS plugin namespace as of typescript-eslint v8.
+      '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-member-access': 'error',
+      '@typescript-eslint/no-unsafe-call': 'error',
+      '@typescript-eslint/no-unsafe-return': 'error',
+      '@typescript-eslint/no-unsafe-argument': 'error',
+
+      // Explicit `unknown` + narrowing is the only sanctioned way to handle provider
+      // payloads. Use `catch (e: unknown)`, not `any`.
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' },
+      ],
+
+      // Prefer explicit guards over non-null assertions on parsed input.
+      '@typescript-eslint/no-non-null-assertion': 'error',
+
+      // Floating promises in a queue consumer are silent data loss.
+      '@typescript-eslint/no-floating-promises': 'error',
+
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+    },
+  },
+
+  // Web/frontend source: browser globals.
+  {
+    files: ['web/src/**/*.ts', 'web/src/**/*.tsx'],
+    languageOptions: {
+      globals: { ...globals.browser },
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      // The dashboard talks to APIs that are not implemented yet, so some payload shapes are
+      // still `any`. Warn (not error) so the debt stays visible without blocking delivery.
+      '@typescript-eslint/no-unsafe-assignment': 'warn',
+      '@typescript-eslint/no-unsafe-member-access': 'warn',
+      '@typescript-eslint/no-unsafe-call': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      '@typescript-eslint/no-floating-promises': 'error',
+    },
+  },
+
+  // Tests assert on untrusted provider shapes by nature; `any` is legitimate there.
+  {
+    files: ['tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+    },
+  },
+);

@@ -11,6 +11,14 @@ Build a globally competitive, simple, trustworthy, standalone notification route
 - Not a Zapier clone: no arbitrary code execution, bidirectional sync, or unrestricted workflow graphs in V1.
 - AI is optional and later: explain/filter/summarize noisy events with human-visible provenance, explicit opt-in, budget controls and deterministic fallback. Never silently fabricate event facts.
 
+## Design and brand contract
+- Read `DESIGN.md` before changing any UI. It is the authoritative visual system: exact Lumi colors, warm Paper White canvas, opaque evidence sheets, Civic Navy headings, self-hosted Geist, Tabler Outline icons, spacing and geometry.
+- Use the original logo assets in `brand/`. Import SVGs into the Vite app so builds fingerprint and bundle them; do not redraw, recolor, stretch or substitute a generic icon for the Lumi mark. Use a light-compatible variant on paper/white and the white variant only on navy.
+- Adapt the landing-oriented design document to this notification product. Its company/product narrative and email CTA are not requirements for the authenticated app; preserve Noti's actual workflows and honest prototype/planned labels.
+- Keep glass in navigation controls only, with opaque, reduced-transparency and forced-color fallbacks. Reading surfaces stay opaque. Prefer no glass when it adds no useful hierarchy.
+- Validate desktop and 320px mobile reflow, keyboard focus, contrast, reduced motion and Vietnamese diacritics. Keep body text at least 16px, metadata at least 12px and controls at least 44px tall.
+- UI changes must document their design decisions and verification in `docs/adr/` and `docs/FRONTEND.md`. Never invent live metrics or provider acceptance evidence to make a screen look complete.
+
 ## Before coding
 1. Inspect existing code, tests, docs, CI, Cloudflare platform limits and provider API docs; don't overwrite working code without reason.
 2. Pick the smallest vertical slice that produces real user value; document assumptions and acceptance criteria.

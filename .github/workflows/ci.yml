@@ -15,7 +15,9 @@ jobs:
         with:
           node-version: '22'
       - run: python3 scripts/test_auth_schema.py
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - run: npm run format:check
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm run typecheck:web
       - run: npm run build:web
