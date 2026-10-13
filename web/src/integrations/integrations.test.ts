@@ -71,7 +71,13 @@ describe('client validation mirrors the server', () => {
       ...overrides,
     });
 
-  const urls: [string, 'slack' | 'lark'][] = [
+  const urls: [string, 'slack' | 'lark' | 'teams'][] = [
+    ['https://prod-12.westus.logic.azure.com/workflows/abc/triggers/manual/paths/invoke?sig=x', 'teams'],
+    ['https://logic.azure.com/workflows/abc', 'teams'],
+    ['https://evil.test/logic.azure.com', 'teams'],
+    ['https://logic.azure.com.evil.test/x', 'teams'],
+    ['http://prod-12.westus.logic.azure.com/x', 'teams'],
+    [SLACK, 'teams'],
     [SLACK, 'slack'],
     [LARK, 'lark'],
     ['https://open.feishu.cn/open-apis/bot/v2/hook/abc', 'lark'],
@@ -225,8 +231,12 @@ describe('response parsing', () => {
   });
 
   it('rejects a row with an unknown destination or credential state', () => {
-    expect(() => parseIntegration({ ...row, destination: 'teams' })).toThrow(ApiError);
+    expect(() => parseIntegration({ ...row, destination: 'discord' })).toThrow(ApiError);
     expect(() => parseIntegration({ ...row, credentials: 'unknown' })).toThrow(ApiError);
+  });
+
+  it('accepts a Teams row', () => {
+    expect(parseIntegration({ ...row, destination: 'teams' }).destination).toBe('teams');
   });
 
   it('has no field that could carry a webhook URL', () => {

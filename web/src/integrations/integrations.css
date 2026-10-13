@@ -722,6 +722,9 @@
 }
 
 .guide {
+  min-width: 0;
+  /* Provider hostnames such as make.powerautomate.com are one unbreakable word at 320px. */
+  overflow-wrap: anywhere;
   padding: var(--space-5);
   border: var(--border-hairline);
   border-radius: var(--radius-control);
@@ -739,6 +742,24 @@
   margin: 0 0 var(--space-3);
   padding-left: var(--space-6);
   list-style: decimal;
+}
+
+.guide-caveat {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-signal-amber);
+  border-radius: var(--radius-control);
+  background: var(--color-amber-soft);
+  color: var(--color-ink);
+  font-size: 14px;
+}
+
+.guide-caveat svg {
+  flex: none;
+  margin-top: 2px;
 }
 
 .guide-note {

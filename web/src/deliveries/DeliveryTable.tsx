@@ -96,7 +96,14 @@ export function DeliveryTable({ rows, onOpen }: DeliveryTableProps) {
     ],
     [onOpen],
   );
-  const table = useReactTable({ data: rows as DeliveryItem[], columns, getCoreRowModel: getCoreRowModel() });
+  const table = useReactTable({
+    data: rows as DeliveryItem[],
+    columns,
+    // Key rows by delivery id so a row that moves (a new redelivery lands on top) keeps its DOM
+    // node and with it the focus the detail dialog returns to.
+    getRowId: (row) => row.id,
+    getCoreRowModel: getCoreRowModel(),
+  });
 
   return (
     <div className="table-wrap card delivery-table-wrap">

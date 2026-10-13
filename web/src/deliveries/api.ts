@@ -27,7 +27,7 @@ export interface DeliveryItem {
     readonly id: string;
     readonly name: string;
     readonly repo: string | null;
-    readonly destination: 'lark' | 'slack' | null;
+    readonly destination: 'lark' | 'slack' | 'teams' | null;
     readonly destinationHost: string | null;
   };
   readonly integrationExists: boolean;
@@ -128,7 +128,9 @@ export function parseDelivery(value: unknown): DeliveryItem {
     throw bad('delivery');
   const integration = value.integration;
   const destination =
-    integration.destination === 'lark' || integration.destination === 'slack'
+    integration.destination === 'lark' ||
+    integration.destination === 'slack' ||
+    integration.destination === 'teams'
       ? integration.destination
       : null;
   return {

@@ -27,7 +27,8 @@ export interface AuditEntry {
   readonly organizationId: string | null;
   readonly actorId: string | null;
   readonly action: AuditAction;
-  readonly subjectType: 'integration' | 'delivery' | 'organization' | 'capability' | 'github_installation' | 'repository';
+  readonly subjectType:
+    'integration' | 'delivery' | 'organization' | 'capability' | 'github_installation' | 'repository';
   readonly subjectId: string | null;
   readonly outcome: 'success' | 'denied';
   readonly ip?: string | null;

@@ -174,7 +174,9 @@ export function Overview() {
             <span>02</span>
             <div>
               <b>Choose a destination</b>
-              <p>Paste a Lark or Slack webhook URL in the integration setup. It is stored encrypted.</p>
+              <p>
+                Paste a Lark, Slack or Teams webhook URL in the integration setup. It is stored encrypted.
+              </p>
             </div>
           </div>
           <div className="step">

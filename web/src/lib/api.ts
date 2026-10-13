@@ -83,7 +83,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 // --- Integrations (docs/API.md) -------------------------------------------------------------
 
-export type DestinationKind = 'lark' | 'slack';
+export type DestinationKind = 'lark' | 'slack' | 'teams';
 export type CredentialsState = 'ok' | 'legacy' | 'quarantined';
 
 /** The server never returns a webhook URL or a signing secret; only the host. */
@@ -138,7 +138,7 @@ export function parseIntegration(value: unknown): Integration {
     typeof value.name !== 'string' ||
     typeof value.repo !== 'string' ||
     !Array.isArray(value.eventTypes) ||
-    (value.destination !== 'lark' && value.destination !== 'slack') ||
+    (value.destination !== 'lark' && value.destination !== 'slack' && value.destination !== 'teams') ||
     !nullableString(value.destinationHost) ||
     typeof value.enabled !== 'boolean' ||
     (value.credentials !== 'ok' && value.credentials !== 'legacy' && value.credentials !== 'quarantined') ||

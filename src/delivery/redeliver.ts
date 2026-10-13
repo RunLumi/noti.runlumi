@@ -10,8 +10,8 @@
  * requests for the same replay produce one row; the loser gets `created: false`.
  *
  * Tenant-scoped: every read and write is `WHERE organization_id = ?`. Authorization (the
- * `delivery.replay` capability, F24) and the audit record are the calling route's job and
- * are NOT implemented yet — there is no route.
+ * `delivery.replay` capability, F24) and the audit record are the calling route's job —
+ * `POST /api/deliveries/:id/replay` in `src/api/deliveries.ts`.
  */
 import { replayDeliveryId } from './ids';
 import { normalizeDeliveryState, planReplay } from './state';

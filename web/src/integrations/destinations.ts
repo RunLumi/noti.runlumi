@@ -2,9 +2,9 @@ import type { DestinationKind } from '../lib/api';
 import type { MessageId } from '../i18n';
 
 /**
- * What the dashboard says about each destination it can actually connect today. Only Lark
- * and Slack are listed because only they pass the server's write-time allowlist (F206: a
- * destination we cannot connect is absent, not greyed out).
+ * What the dashboard says about each destination it can actually connect today. Only the
+ * kinds that pass the server's write-time allowlist are listed (F206: a destination we
+ * cannot connect is absent, not greyed out).
  */
 export interface DestinationInfo {
   readonly kind: DestinationKind;
@@ -18,6 +18,8 @@ export interface DestinationInfo {
   /** Official provider documentation, the fallback when a provider screen changes (F212). */
   readonly docsUrl: string;
   readonly supportsSigningSecret: boolean;
+  /** Extra provider-specific caveats shown under the steps (Teams: trigger access, orphaned flows, accepted ≠ delivered). */
+  readonly notes?: readonly MessageId[];
 }
 
 export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = {
@@ -56,6 +58,26 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsUrl: 'https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks',
     supportsSigningSecret: false,
   },
+  teams: {
+    kind: 'teams',
+    name: 'destination.teams',
+    where: 'destination.teams.where',
+    what: 'destination.teams.what',
+    urlHint: 'destination.teams.urlHint',
+    wrongHost: 'validation.webhookUrl.wrongHost.teams',
+    steps: [
+      'destination.teams.step1',
+      'destination.teams.step2',
+      'destination.teams.step3',
+      'destination.teams.step4',
+      'destination.teams.step5',
+    ],
+    docsLabel: 'destination.teams.docs',
+    docsUrl:
+      'https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498',
+    supportsSigningSecret: false,
+    notes: ['destination.teams.noteOwner', 'destination.teams.noteAccepted'],
+  },
 };
 
-export const DESTINATION_ORDER: readonly DestinationKind[] = ['lark', 'slack'];
+export const DESTINATION_ORDER: readonly DestinationKind[] = ['lark', 'slack', 'teams'];

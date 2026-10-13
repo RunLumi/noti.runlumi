@@ -533,7 +533,7 @@ how a notification product becomes untrustworthy.
 
 ## F181 — Dead-letter inspection
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** partial (slice 6b: tenant-scoped list/detail API with state, attempts, taxonomy code and user-facing copy, plus a dashboard Activity page. The persisted ledger holds one row per delivery, so there is no per-attempt history, no `Retry-After` display and no payload preview; those need F184's attempts table)
 
 **Story** As a support engineer, I want to see why a notification failed, so that I can tell a
 customer something better than "it didn't work".
@@ -566,7 +566,7 @@ redacted exactly as F98 does for the test preview.
 
 ## F182 — Manual replay
 
-**Priority** P0 · **Status** partial (slice 4: idempotent tenant-scoped service; no route, `delivery.replay` capability check or audit yet)
+**Priority** P0 · **Status** partial (slice 4: idempotent tenant-scoped service. Slice 6b: `POST /api/deliveries/:id/replay`, admin-only, CSRF-checked, rate-limited, refused while workspace deletion is pending, audited as `delivery.replay`; dashboard Redeliver button. Not built: bulk replay, replay after the outbox payload is purged)
 
 **Story** As a customer, I want to retry a failed notification myself, so that I do not have
 to wait for you to notice.

@@ -57,6 +57,19 @@ that produced `00-current-state.md` D3.
 `/` (overview) `/integrations` `/integrations/new` `/integrations/:id` `/activity` `/team`
 `/settings` `/onboarding` `/invite`
 
+## Delivery log and workspace data (`web/src/deliveries/`, `web/src/workspace/`)
+
+Decisions and verification: [ADR 0009](adr/0009-delivery-log-ux.md).
+
+| Path | Role |
+| --- | --- |
+| `deliveries/DeliveryLogPage.tsx` | `/activity`: filters, table, load more, empty/error/loading states |
+| `deliveries/DeliveryTable.tsx` | TanStack Table; rows stack into labelled cards at narrow widths |
+| `deliveries/DeliveryDetail.tsx`, `RedeliverPanel.tsx` | Detail dialog, plain-language cause, admin-only confirmed redelivery |
+| `deliveries/DeliveryStats.tsx` | Overview figures from `GET /api/deliveries/summary` (last 24 hours, counted not estimated) |
+| `deliveries/search.ts`, `api.ts`, `copy.ts` | URL-backed filters, strict response parsing, state and error copy |
+| `workspace/` | Settings: credential-free export download and two-phase workspace deletion |
+
 ## Integrations feature (`web/src/integrations/`)
 
 Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
@@ -88,9 +101,12 @@ Integrations (list, create, edit, pause, credential replacement, delete) and the
 connection panel are wired to the real API and were exercised against a local Worker; see
 ADR 0007 for what that does and does not prove.
 
-**Not implemented:** delivery history, replay, test send, and the API behind the `/activity`
-table — those screens show explicit placeholders. Passkeys register and
-authenticate but have not been acceptance-tested for counter regression.
+The delivery log (`/activity`), manual redelivery, workspace export and two-phase deletion are
+wired to the real API (ADR 0009). Microsoft Teams can be chosen in the create wizard.
+
+**Not implemented:** test send, the setup-progress model, per-attempt history and bulk replay.
+Passkeys register and authenticate but have not been acceptance-tested for counter
+regression.
 
 Nothing on any screen claims a connector is production-ready, and no metric is invented to
 make a screen look complete. `docs/PRODUCT.md`'s "median setup under 5 minutes" and

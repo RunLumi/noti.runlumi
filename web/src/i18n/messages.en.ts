@@ -12,7 +12,7 @@ export const en = {
   'integrations.eyebrow': 'CONNECTIONS',
   'integrations.title': 'Integrations',
   'integrations.description':
-    'Each integration sends chosen GitHub updates from one repository to one Lark or Slack chat.',
+    'Each integration sends chosen GitHub updates from one repository to one Lark, Slack or Microsoft Teams chat.',
   'integrations.new': 'New integration',
   'integrations.loading': 'Loading integrations…',
   'integrations.count': { one: '{count} integration', other: '{count} integrations' },
@@ -70,6 +70,24 @@ export const en = {
   'destination.slack.urlHint': 'Starts with https://hooks.slack.com/services/.',
   'destination.lark.docs': 'Lark’s guide to custom bots',
   'destination.slack.docs': 'Slack’s guide to incoming webhooks',
+  'destination.teams': 'Microsoft Teams',
+  'destination.teams.where': 'Posts to the Teams channel you choose.',
+  'destination.teams.what':
+    'Uses a Power Automate “Workflows” flow whose trigger is a web request. It runs under your account.',
+  'destination.teams.urlHint':
+    'A https://…logic.azure.com/… address, shown on the flow’s first step after you save it.',
+  'destination.teams.docs': 'Microsoft’s guide to webhooks with Workflows',
+  'destination.teams.step1':
+    'In Teams, open the channel’s “…” menu, choose Workflows, and pick “Post to a channel when a webhook request is received”. You can also start from Power Automate.',
+  'destination.teams.step2': 'Name the flow, check the team and channel, then choose Next and Create flow.',
+  'destination.teams.step3':
+    'Open the flow’s first step (“When a Teams webhook request is received”). Under Who can trigger the flow, choose Anyone. Noti cannot sign in as a Microsoft user.',
+  'destination.teams.step4': 'Save, then copy the HTTP POST URL from that step.',
+  'destination.teams.step5': 'Paste it below. Noti accepts only addresses on logic.azure.com.',
+  'destination.teams.noteOwner':
+    'The flow belongs to the person who created it, not to the team. If they leave the company, notifications stop. Ask them to add a co-owner.',
+  'destination.teams.noteAccepted':
+    'Teams only says “accepted” when we send a message. It cannot confirm the flow posted it, so Noti shows these as Accepted, never Delivered. If your admin has not approved Workflows, messages are accepted and then lost.',
   'destination.guideTitle': 'Where to find the webhook URL',
   'destination.guideNote':
     'These steps follow the provider’s own documentation. If a screen looks different, use their guide.',
@@ -147,7 +165,7 @@ export const en = {
   'field.hideLabel': 'Hide {field}',
 
   // --- Client-side validation (mirrors src/api/integration-input.ts) -------
-  'validation.destination': 'Choose Lark or Slack.',
+  'validation.destination': 'Choose Lark, Slack or Microsoft Teams.',
   'validation.name': 'Use 1–80 characters, without line breaks.',
   'validation.repo': 'Use the form owner/repository, for example acme/website.',
   'validation.events': 'Choose at least one update.',
@@ -157,6 +175,8 @@ export const en = {
     'That isn’t a Lark webhook address. It should start with https://open.larksuite.com/open-apis/bot/v2/hook/ (or open.feishu.cn).',
   'validation.webhookUrl.wrongHost.slack':
     'That isn’t a Slack webhook address. It should start with https://hooks.slack.com/services/.',
+  'validation.webhookUrl.wrongHost.teams':
+    'That isn’t a Workflows web-request address. It should start with https:// and end its host with logic.azure.com.',
   'validation.signingSecret': 'Paste the secret exactly as Lark shows it, without spaces.',
 
   // --- Event categories ---------------------------------------------------
@@ -365,7 +385,7 @@ export const en = {
   'deliveries.filter.to': 'To',
   'deliveries.filter.clear': 'Clear filters',
   'deliveries.filter.dateHint': 'Dates are in UTC and include the whole day.',
-  'deliveries.count': { one: '{count} delivery shown', other: '{count} deliveries shown' },
+  'deliveries.count': { one: '{count} delivery shown.', other: '{count} deliveries shown.' },
   'deliveries.count.more': 'More are available.',
   'deliveries.count.end': 'That is every delivery that matches.',
   'deliveries.loadMore': 'Load more',

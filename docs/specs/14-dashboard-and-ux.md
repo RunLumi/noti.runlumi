@@ -951,7 +951,7 @@ records what was removed. No customer tenant is ever used for capture.
 
 ## F213 — Delivery log
 
-**Priority** P0 · **Status** not started · **Referenced by `07:F100`, `07:F149`, `11:F164`,
+**Priority** P0 · **Status** partial (slice 6b: Activity page over `GET /api/deliveries` with outcome, integration and date filters, cursor "load more", detail dialog and honest at-least-once copy. Not built: free-text search, event-type filter, saved filters, per-attempt rows, export of the log; see ADR 0009) · **Referenced by `07:F100`, `07:F149`, `11:F164`,
 `11:F185`**
 
 **Story** As a customer, I want to see every notification we tried to send and what happened to
@@ -1463,7 +1463,7 @@ audited (F222).
 
 ## F218 — Dead-letter queue and replay UI
 
-**Priority** P0 · **Status** not started · **UI for F181/F182**
+**Priority** P0 · **Status** partial (slice 6b: failed deliveries open a detail dialog with a plain-language cause and an admin-only, confirmed Redeliver; no bulk replay, no health-check banner, no dedicated DLQ page) · **UI for F181/F182**
 
 **Story** As a customer whose notifications stopped, I want to see what failed and retry it
 myself, so that I do not have to wait for you to notice.
