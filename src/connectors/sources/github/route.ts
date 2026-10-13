@@ -14,6 +14,7 @@ import { extractGithubFacts } from './facts';
 import type { RoutingFacts } from '../../../routing/filters';
 import { createRouteDecider } from '../../../routing/ingress';
 import { decisionStatement, type RoutingDecisionRow } from '../../../routing/provenance';
+import { ingressLimiter } from '../../../security/rate-limit';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -146,6 +147,21 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
       return c.text('Installation not active', 403);
   }
   const organizationId = tenant.organizationId;
+
+  // Flood control (F29), after signature verification and tenant resolution so an
+  // unauthenticated caller cannot spend an installation's budget. Lifecycle events and
+  // pings returned earlier and are never limited. A limiter fault fails OPEN: losing a
+  // notification to a bookkeeping error is worse than briefly skipping a flood guard.
+  try {
+    const decision = await ingressLimiter(c.env, Number(asRecord(event.installation)?.id));
+    if (decision.limited) {
+      return c.text('Too many events; retry later', 429, {
+        'retry-after': String(decision.retryAfterSeconds),
+      });
+    }
+  } catch {
+    log('warn', 'rate_limit_error', { scope: 'ingress' });
+  }
 
   // Repository scope (F67): a restricted installation never routes an excluded repository.
   const installationId = String(asRecord(event.installation)?.id);

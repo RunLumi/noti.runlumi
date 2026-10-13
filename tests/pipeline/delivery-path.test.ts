@@ -222,6 +222,47 @@ describe('ingress tenant isolation', () => {
     for (const row of outbox) expect(row.payload_json).not.toMatch(/ciphertext|larksuite/);
   });
 
+  it('answers 429 with Retry-After once an installation exceeds the ingress limit (F29)', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    const windowStart = Math.floor(Date.now() / 60_000) * 60_000;
+    db.raw
+      .prepare('INSERT INTO api_rate_limits(key,window_start,count) VALUES(?,?,?)')
+      .run('ingress:github:100', windowStart, 600);
+    const res = await postWebhook(issueEvent(100), 'flood-1');
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  it('never rate-limits lifecycle events, so a revocation is not delayed', async () => {
+    installation('org-a', '100');
+    const windowStart = Math.floor(Date.now() / 60_000) * 60_000;
+    db.raw
+      .prepare('INSERT INTO api_rate_limits(key,window_start,count) VALUES(?,?,?)')
+      .run('ingress:github:100', windowStart, 10_000);
+    const res = await postWebhook(
+      { action: 'suspend', installation: { id: 100, app_id: Number(APP_ID) } },
+      'lifecycle-1',
+      'installation',
+    );
+    expect(res.status).toBe(202);
+    expect(
+      db.raw.prepare("SELECT status FROM github_installations WHERE installation_id='100'").get(),
+    ).toEqual({
+      status: 'suspended',
+    });
+  });
+
+  it('fails open when the limiter itself errors, rather than dropping the notification', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    db.raw.exec('DROP TABLE api_rate_limits');
+    const res = await postWebhook(issueEvent(100), 'failopen-1');
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+  });
+
   it('ignores event types outside the catalog without touching integrations (D16)', async () => {
     installation('org-a', '100');
     await integration('int-a', 'org-a', LARK_A);
