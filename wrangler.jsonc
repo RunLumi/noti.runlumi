@@ -1,0 +1,28 @@
+{
+  "name": "lumi-noti",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "queues": {
+    "producers": [
+      {
+        "binding": "DELIVERY_QUEUE",
+        "queue": "noti-deliveries"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "noti-deliveries",
+        "max_batch_size": 10,
+        "max_retries": 5,
+        "dead_letter_queue": "noti-dead-letters"
+      }
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lumi-noti",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ]
+}
