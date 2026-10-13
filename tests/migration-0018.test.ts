@@ -151,6 +151,32 @@ describe('migration 0018', () => {
     expect(raw.prepare('SELECT * FROM integrations ORDER BY id').all()).toEqual(beforeRows);
   });
 
+  it('leaves every integrations trigger and index in place after the whole chain (0019 recreates some)', () => {
+    const { raw } = createFakeD1();
+    const names = (type: string) =>
+      (
+        raw
+          .prepare('SELECT name FROM sqlite_master WHERE type=? AND (tbl_name=? OR name=?) ORDER BY name')
+          .all(type, 'integrations', 'sources_delete_integrations') as { name: string }[]
+      ).map((r) => r.name);
+    expect(names('trigger')).toEqual([
+      'integrations_org_immutable',
+      'integrations_org_required_insert',
+      'integrations_source_immutable',
+      'integrations_source_same_org',
+      'sources_delete_integrations',
+    ]);
+    expect(names('index')).toEqual(
+      expect.arrayContaining([
+        'integrations_kek_version',
+        'integrations_org_created',
+        'integrations_org_idx',
+        'integrations_repo',
+        'integrations_source',
+      ]),
+    );
+  });
+
   it('keeps the rest of the database intact', () => {
     const { raw } = createFakeD1({ before: '0018' });
     seed(raw);
