@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import type { Bindings, DeliveryMessage } from '../../../env';
 import { asRecord, str } from '../../../lib/json';
 import { dispatchOutbox } from '../../../pipeline/outbox';
+import { isGithubEventType } from './catalog';
 import { classifyGithubEvent, verifyGithubSignature } from './events';
 import { resolveTenant } from './tenant';
 
@@ -76,6 +77,8 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   }
   const organizationId = tenant.organizationId;
   const eventType = classifyGithubEvent(c.req.header('x-github-event') || '', event);
+  // Outside the closed catalog nothing can be subscribed, so nothing is looked up (D16).
+  if (!isGithubEventType(eventType)) return c.json({ accepted: true, persisted: 0 }, 202);
 
   // `repo` only narrows within the tenant. It is not authorization.
   const rows = await c.env.DB.prepare(

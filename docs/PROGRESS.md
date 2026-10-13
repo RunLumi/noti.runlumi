@@ -21,7 +21,8 @@ Each slice is one PR. A PR is merged only once CI passes.
 | --- | --- | --- | --- | --- | --- |
 | 1 | Inbound tenant resolution from verified GitHub installation; multi-workspace membership | F15, F25 (expand), F59 | D2 (expand), D3, N6 (inbound) | ✅ | #6 |
 | 2 | Worker modularisation, envelope encryption with AAD and key version, queue messages carry ids not secrets, delivery-path integration tests | F33, F35–F37 (F34 tier 2) | D5, D6, D13 | ✅ | #7 |
-| 3 | Tenant-scoped integrations API with write-time validation; GitHub App install flow; `organization_id` NOT NULL contract | F26–F29, F56–F58, F72 | D2 (contract), D9, D12, D16, N6 | ⬜ | — |
+| 3a | Tenant-scoped integrations API; domain capabilities; audit log; closed GitHub event catalog; write-time allowlist; DB-enforced tenant contract | F24, F26, F28, F61 (catalog), F72 (write-time) | D9, D12, D16, D2 (contract for new writes) | ✅ | #9 |
+| 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ⬜ | — |
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F169–F190 | D4, D10, D11 | ⬜ | — |
 | 5 | Destination capability model; Slack and Teams adapters | F91–F104 | D8 | ⬜ | — |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
@@ -120,3 +121,57 @@ AI features (F243–F262) stay out of scope until the delivery ledger is trustwo
 - The KEK is a Worker secret, which is F34 tier 2. The Secrets Store binding (tier 1),
   environment-mismatch detection, audited key destruction and crypto-shredding (F40) are
   still open.
+
+## Slice 3a — integrations API, capabilities and audit (PR #9)
+
+**What changed**
+
+- `src/auth/permissions.ts` adds domain capabilities (`integration.*`, `delivery.read|replay`,
+  `audit.read`) to the same Better Auth access-control definition. `can(role, capability)` is
+  the pure check.
+- `authorize(c, capability)` in `src/auth/workspace.ts` is the single gate. It audits every
+  denial itself. A not-a-member probe is recorded against the target workspace when that
+  workspace exists.
+- `src/api/integrations.ts` adds `GET`, `POST`, `PATCH` and `DELETE` on `/api/integrations`.
+  Every query is scoped to the resolved workspace. Credentials are sealed on write
+  (ADR 0004), and responses show only the destination host. Mutations require our `Origin`
+  and a JSON body (CSRF). The contract is in [`API.md`](API.md).
+- `src/api/integration-input.ts` validates everything before anything is sealed: the
+  destination allowlist (D9), the closed event catalog (D12, D16), the repository format, the
+  Lark-only signing secret, and immutable fields. Error messages never echo input.
+- `src/connectors/sources/github/catalog.ts` is the closed set of 18 subscribable GitHub
+  events. Ingress returns early for anything outside it.
+- `migrations/0008`:
+  - Integration metadata columns.
+  - Triggers that refuse an integration without `organization_id` and refuse moving one to
+    another workspace. This is the contract step for every new write.
+  - An append-only `audit_events` table.
+- `src/audit/audit.ts` writes audit rows as batch statements, so the audit row commits with
+  the change it describes.
+
+**Verified by**
+
+- `tests/auth/permissions.test.ts`: role × capability table, plus unknown roles.
+- `tests/api/integration-input.test.ts`: allowlist bypass attempts (look-alike host, http,
+  userinfo, port, IP literal, wrong path), catalog bounds, repository format, no echo of
+  input, rules for immutable fields.
+- `tests/api/integrations.test.ts`: runs over the real migrations, with only the Better Auth
+  session lookup stubbed. It covers:
+  - sealed create that never returns the URL;
+  - cross-tenant 404 on every verb;
+  - an audited not-a-member probe;
+  - CSRF origin and content-type refusal;
+  - 401 without a session;
+  - credential rotation with fresh DEK and quarantine cleared;
+  - audit rows for each change;
+  - DB triggers;
+  - an append-only audit log;
+  - an API-created integration delivering end to end through the consumer.
+
+**Known gaps**
+
+- `repo` is checked for format, not against the installation's repositories. That arrives
+  with F67 in slice 3b.
+- There is no audit-log read API yet. The `audit.read` capability exists.
+- Legacy rows without `organization_id` still need a backfill before the triggers can be
+  replaced by `NOT NULL` + `FOREIGN KEY`.

@@ -154,14 +154,14 @@ Status as of PR #6 (2026-10-13):
 | D6 | No envelope encryption, AAD or key version | ✅ envelope + AAD + versioned KEK + rewrap + v0 migration (PR #7, ADR 0004) |
 | D7 | Plaintext session tokens | 🟡 moot for Better Auth's `session`; ⬜ `0004`'s dead `auth_tokens` still plaintext (N1) |
 | D8 | Slack has no adapter | ⬜ unchanged |
-| D9 | Allowlist runs too late | ⬜ unchanged |
+| D9 | Allowlist runs too late | ✅ enforced at write time by the integrations API and again before every send (PR #9) |
 | D10 | Delivery-id collisions | ⬜ unchanged |
 | D11 | No error classification | ⬜ unchanged |
-| D12 | `event_types` unvalidated JSON | ⬜ unchanged |
+| D12 | `event_types` unvalidated JSON | ✅ validated against the closed catalog on every write (PR #9) |
 | D13 | No integration test of the delivery path | ✅ `tests/pipeline/delivery-path.test.ts` runs ingress → outbox → queue → consumer over the real migrations (PR #7) |
 | D14 | CI does not enforce the documented workflow | 🟡 `npm ci`, format, lint, typecheck, build, tests and bundle guard enforced; coverage threshold not yet |
 | D15 | Magic 1 MiB webhook cap | ⬜ unchanged |
-| D16 | Unbounded event-type string space | ⬜ unchanged |
+| D16 | Unbounded event-type string space | ✅ closed 18-type catalog; ingress ignores anything else (PR #9) |
 
 New: **N1–N7** above. N2, N4, N5 and N7 are resolved; N1 is marked; N6 is half resolved; N3 remains open.
 

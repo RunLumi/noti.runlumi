@@ -275,7 +275,7 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F24 — Authorization model
 
-**Priority** P0 · **Status** 🟡 implemented for auth, absent for domain
+**Priority** P0 · **Status** ✅ domain capabilities + `authorize()` gate with audited denials (PR #9)
 
 **What exists** — `src/auth/permissions.ts` defines `admin` and `member` via
 `createAccessControl(defaultStatements)`:
@@ -314,7 +314,7 @@ missing argument, not a missing `if`.
 
 ## F25 — Domain tenancy bridge
 
-**Priority** P0 · **Status** ❌ **not started — this is the P0 for V1**
+**Priority** P0 · **Status** 🟡 expand (0006) + contract-by-trigger for new writes (0008); legacy backfill and NOT NULL/FK pending
 
 **Story** As a security reviewer, I want every tenant-owned record to carry an organization
 id, so that isolation is representable in the schema and not merely intended in application
@@ -356,7 +356,7 @@ authorization layer to enforce.
 
 ## F26 — Tenant-scoped authorization
 
-**Priority** P0 · **Status** 🟡 pattern exists for auth, absent for domain
+**Priority** P0 · **Status** 🟡 integrations API fully scoped with cross-tenant 404 (PR #9); static query-predicate test pending
 
 **Story** As a security reviewer, I want every data access to require an explicit
 organization scope, so that a missing filter is a type error rather than a breach.
@@ -405,7 +405,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F28 — Audit events
 
-**Priority** P1 · **Status** ❌ not started
+**Priority** P1 · **Status** 🟡 table, append-only trigger, integration + denial events (PR #9); member/session/installation events pending
 
 **Acceptance**
 - [ ] `audit_events(id, organization_id, actor_id, action, subject_type, subject_id,
