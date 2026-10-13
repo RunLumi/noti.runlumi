@@ -40,11 +40,11 @@ lifecycle events, because delaying a revocation is worse than absorbing a cheap 
 ## Dependency audit exceptions
 
 CI runs `npm run audit:gate`, which fails on high or critical advisories in production
-dependencies. Current exceptions (also in `scripts/audit-gate.mjs`, each with an expiry):
-
-| Advisory | Package | Why it does not affect the Worker | Expires |
-| --- | --- | --- | --- |
-| GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr | `tinypool` via `vitest` | Test runner only. `better-auth` lists vitest as an optional peer, so npm counts it as a production dependency. It is not in the Worker bundle. Upgrading to vitest 4, which has no tinypool dependency, removes both | 2027-01-11 |
+dependencies. The exception list in `scripts/audit-gate.mjs` is currently **empty**. The two
+`tinypool` advisories (GHSA-5gmw-xhrv-c9v3, GHSA-85c8-ppgw-ccpr) that were excepted until the
+test runner moved to vitest 4 (no `tinypool` dependency) are gone. A new exception is a PR with
+a reason and an expiry of at most 90 days, listed here with the advisory, package, why it does
+not affect the Worker, and the expiry.
 
 ## Data deletion
 

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { fromBase64, generateSigningSecret } from '../../src/connectors/sources/generic/encoding';
 import { verifyStandardWebhook } from '../../src/connectors/sources/generic/signature';
 import type { Bindings, DeliveryMessage } from '../../src/env';
@@ -18,7 +18,7 @@ const GENERIC_URL = 'https://hooks.example.com/noti/inbound?channel=ci';
 
 let db: FakeD1;
 let env: Bindings;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: Mock<typeof fetch>;
 let claimTokens = 0;
 
 const deps = (): ConsumerDeps => ({
@@ -137,7 +137,7 @@ beforeEach(() => {
     APP_ORIGIN: 'https://noti.test',
     GENERIC_WEBHOOK_ENABLED: 'true',
   } as Bindings;
-  fetchMock = vi.fn();
+  fetchMock = vi.fn<typeof fetch>();
   vi.stubGlobal('fetch', fetchMock);
 });
 

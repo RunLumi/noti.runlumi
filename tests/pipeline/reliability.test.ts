@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import worker from '../../src/index';
 import {
   MARK_DISPATCHED_SQL,
@@ -35,7 +35,7 @@ const HMAC_FIXTURE = ['reliability', 'hmac', 'fixture'].join('-');
 let db: FakeD1;
 let sent: DeliveryMessage[];
 let env: Bindings;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: Mock<typeof fetch>;
 let clock: number;
 let tokens: number;
 

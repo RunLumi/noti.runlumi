@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # typescript-eslint 8.x supports `typescript >=4.8.4 <6.1.0` (checked 2026-10-14), so
+      # TypeScript 6.1+ and 7 are unsupported by our linter. Revisit on 2026-12-14, or when a
+      # typescript-eslint release widens the peer range. See docs/PROGRESS.md "Toolchain majors".
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
     groups:
       # One PR for routine bumps; a major version still arrives on its own.
       npm-minor-and-patch:

@@ -664,9 +664,8 @@ Also fixed:
   permissions, `npm run audit:gate`, a dependency-review job, Dependabot (npm and Actions,
   weekly, grouped). Root `SECURITY.md`.
 - `scripts/audit-gate.mjs`: the `npm audit --omit=dev --audit-level=high` policy with a short
-  dated exception list. Today it excepts two tinypool advisories that reach the production
-  tree only because `better-auth` lists vitest as an optional peer (documented in
-  `docs/SECURITY.md`).
+  dated exception list (empty since the toolchain majors below; the two tinypool advisories it once
+  excepted went away with vitest 4+).
 - `docs/THREAT_MODEL.md` (STRIDE per entry point, risk register AR-1 to AR-16) and a
   restructured `docs/RELEASE_GATES.md`.
 - `tests/security/`: headers and CSP parsing, limiter, audit gate, static guards (no
@@ -1012,3 +1011,42 @@ recorded refusal, not a gap.
 **UNVERIFIED**: see the list in ADR 0014 (Discord per-route limit, legacy and canary hosts, token
 shapes, embed-title markdown, the Worker-side DoH answer, egress reachability).
 
+
+
+## Toolchain majors (2026-10-14)
+
+One coordinated upgrade replaces four separate Dependabot PRs (#19 plugin-react, #20 typescript,
+#21 coverage-v8, #22 vite). Evidence read on 2026-10-14 from `npm view <pkg>@<ver> peerDependencies
+engines time` and the official migration guides (vite.dev/guide/migration, vitest.dev/guide/migration).
+Versions chosen are at least two weeks old, exact-pinned where the repo pins.
+
+| Package | From | To | Decision | Evidence |
+| --- | --- | --- | --- | --- |
+| vite | ^7.1.0 | ^8.3.1 (locked 8.3.1, 2026-09-24) | Upgraded | Node `^20.19 \|\| >=22.12`; `@tailwindcss/vite` 4.3.3 peers `vite ^5.2 \|\| ^6 \|\| ^7 \|\| ^8`. No config change needed: the app uses no `rollupOptions`/`esbuild` options. Bundle 247 kB gzip JS, 12 kB gzip CSS |
+| @vitejs/plugin-react | ^5.0.0 | ^6.1.1 (2026-08-28) | Upgraded | Peers `vite ^8.0.0` (its optional babel/oxc peers are unused) |
+| vitest | 3.2.7 | 5.0.2 (2026-09-25) | Upgraded | Peers `vite ^6.4 \|\| ^7 \|\| ^8`, Node `^22.12 \|\| ^24 \|\| >=26`; `better-auth` 1.7.7 optional peer accepts `^5.0.0`. No `tinypool` dependency (3.2.7 had it). 4.1.11 also passed the whole check, so 4.x is the fallback |
+| @vitest/coverage-v8 | 3.2.7 | 5.0.2 | Upgraded | Must equal the vitest version (peer `vitest: 5.0.2`) |
+| typescript | ^5.9.2 | not upgraded | **Deferred** | `typescript-eslint` 8.71.2 (latest) peers `typescript >=4.8.4 <6.1.0`, so 6.1+ and 7.0.2 are outside the supported range. Dependabot major ignore added, revisit 2026-12-14 |
+| @tailwindcss/vite, drizzle-kit, typescript-eslint | | unchanged | n/a | Already compatible with vite 8 or untouched |
+
+Consequences and fixes:
+
+- The two audit exceptions in `scripts/audit-gate.mjs` and `docs/SECURITY.md` are removed; the list
+  is empty and `npm run audit:gate` passes with none. The exception mechanism and its tests stay.
+- `package.json` `engines.node` is now `>=22.12`, which vite 8 and vitest 5 already require.
+- `tsconfig.json` lists `"node"` in `types`. Before, `@types/node` entered the program only through a
+  triple-slash reference in vite 7 / vitest 3; the same Node typings are available as before.
+- `tests/pipeline/{destinations,reliability,extended-destinations}.test.ts`, `tests/api/extended-destinations.test.ts`: `fetchMock` typed `Mock<typeof fetch>`
+  (vitest 4+ types made the untyped `vi.fn` trip `no-misused-promises`).
+- Lockfile: regenerated only for the toolchain subtree (npm 10.9.2 cannot resolve vitest 4+ with
+  vite 8: `Cannot read properties of null (reading 'edgesOut')` in arborist; the lock was resolved with
+  npm 11.19.1, and `npm ci` was then verified with the repo's npm 10).
+
+**Verified by**: `npm ci` from scratch, `npm run format && npm run check` (2225 tests, typecheck,
+web typecheck, build, worker bundle), `npm run test:coverage`, `npm run audit:gate`, and the built
+SPA served by `npm run preview:web`: `/` redirects to `/signin`, which renders with its fonts and
+assets and no script errors. The only console errors are two 502s from `/api/workspace/me`
+because no Worker was running behind the preview proxy.
+**Not verified**: the dashboard behind sign-in against a running Worker, and the Vite 8 dev server
+(`npm run dev:web`) beyond starting the production build; CSS output is minified by Lightning CSS
+now, so a visual diff of the authenticated screens was not run.
