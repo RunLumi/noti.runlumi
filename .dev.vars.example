@@ -1,0 +1,3 @@
+# Local development only. Never commit real secrets.
+ENCRYPTION_KEY_BASE64=replace-with-random-32-byte-base64-key
+GITHUB_WEBHOOK_SECRET=replace-me
