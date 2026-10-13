@@ -14,6 +14,8 @@ export interface Source {
   readonly createdAt: string;
   readonly lastReceivedAt: string | null;
   readonly secretRotatedAt: string | null;
+  /** Events refused because their webhook-id was already used with a different body. */
+  readonly reusedIdRejections: number;
   readonly integrationCount: number;
 }
 
@@ -41,6 +43,7 @@ export function parseSource(value: unknown): Source {
     typeof value.createdAt !== 'string' ||
     !nullableString(value.lastReceivedAt) ||
     !nullableString(value.secretRotatedAt) ||
+    typeof value.reusedIdRejections !== 'number' ||
     typeof value.integrationCount !== 'number'
   )
     throw new ApiError('Unexpected source shape', 500);
@@ -53,6 +56,7 @@ export function parseSource(value: unknown): Source {
     createdAt: value.createdAt,
     lastReceivedAt: value.lastReceivedAt,
     secretRotatedAt: value.secretRotatedAt,
+    reusedIdRejections: value.reusedIdRejections,
     integrationCount: value.integrationCount,
   };
 }
@@ -93,8 +97,10 @@ export const sourcesApi = {
     parseSourceWithSecret(
       await api<unknown>(withOrg(`${item(id)}/rotate`, orgId), { method: 'POST', body: '{}' }),
     ),
-  remove: async (orgId: string, id: string): Promise<void> => {
-    await api<unknown>(withOrg(item(id), orgId), { method: 'DELETE' });
+  /** `cascade` must be true when chats are connected: they are deleted with the source. */
+  remove: async (orgId: string, id: string, cascade: boolean): Promise<void> => {
+    const path = withOrg(item(id), orgId);
+    await api<unknown>(cascade ? `${path}&cascade=true` : path, { method: 'DELETE' });
   },
 };
 

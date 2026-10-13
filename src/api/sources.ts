@@ -7,9 +7,11 @@ import {
   generateSigningSecret,
   sealSourceSecret,
 } from '../connectors/sources/generic/secret';
+import { toBytes } from '../crypto/envelope';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import type { Bindings } from '../env';
 import { asRecord } from '../lib/json';
+import { blob } from '../pipeline/credentials';
 import { hit } from '../security/rate-limit';
 import { isDeletionPending } from './workspace-lifecycle';
 
@@ -41,11 +43,13 @@ interface SourceRow {
   updated_at: string;
   last_received_at: string | null;
   secret_rotated_at: string | null;
+  reused_id_rejections: number;
+  last_reuse_rejected_at: string | null;
   integration_count: number;
 }
 
 const SELECT = `s.id,s.name,s.kind,s.endpoint_id,s.enabled,s.created_at,s.updated_at,s.last_received_at,
-  s.secret_rotated_at,
+  s.secret_rotated_at,s.reused_id_rejections,s.last_reuse_rejected_at,
   (SELECT COUNT(*) FROM integrations i WHERE i.source_id=s.id AND i.organization_id=s.organization_id) AS integration_count`;
 
 export interface SourceView {
@@ -60,6 +64,9 @@ export interface SourceView {
   readonly updatedAt: string;
   readonly lastReceivedAt: string | null;
   readonly secretRotatedAt: string | null;
+  /** Events refused because their webhook-id was already used with a different body. */
+  readonly reusedIdRejections: number;
+  readonly lastReuseRejectedAt: string | null;
   readonly integrationCount: number;
 }
 
@@ -79,6 +86,8 @@ function toView(row: SourceRow, appOrigin: string): SourceView {
     updatedAt: row.updated_at,
     lastReceivedAt: row.last_received_at,
     secretRotatedAt: row.secret_rotated_at,
+    reusedIdRejections: row.reused_id_rejections,
+    lastReuseRejectedAt: row.last_reuse_rejected_at,
     integrationCount: row.integration_count,
   };
 }
@@ -204,12 +213,6 @@ sources.post('/', async (c) => {
   const body = asRecord(read.body);
   const name = parseName(body?.name);
   if (!body || !name) return invalidName(c);
-  const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM sources WHERE organization_id=?')
-    .bind(who.orgId)
-    .first<{ n: number }>();
-  if ((count?.n ?? 0) >= MAX_SOURCES_PER_WORKSPACE)
-    return c.json({ error: `A workspace can have at most ${MAX_SOURCES_PER_WORKSPACE} sources.` }, 409);
-
   const id = crypto.randomUUID();
   const endpointId = generateEndpointId();
   const secret = generateSigningSecret();
@@ -218,11 +221,13 @@ sources.post('/', async (c) => {
     secret,
     keyringFromEnv(c.env),
   );
-  await c.env.DB.batch([
+  // The quota is part of the INSERT, so two concurrent creates cannot both pass a stale count.
+  const results = await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO sources(id,organization_id,kind,name,endpoint_id,secret_envelope,key_salt,dek_wrapped,
          kek_version,enabled,created_by)
-       VALUES(?,?,'generic',?,?,?,?,?,?,1,?)`,
+       SELECT ?,?,'generic',?,?,?,?,?,?,1,?
+       WHERE (SELECT COUNT(*) FROM sources WHERE organization_id=?) < ?`,
     ).bind(
       id,
       who.orgId,
@@ -233,9 +238,13 @@ sources.post('/', async (c) => {
       sealed.dekWrapped,
       sealed.kekVersion,
       who.userId,
+      who.orgId,
+      MAX_SOURCES_PER_WORKSPACE,
     ),
     audit(c, who, 'source.create', id, { kind: 'generic' }),
   ]);
+  if (results[0]?.meta.changes !== 1)
+    return c.json({ error: `A workspace can have at most ${MAX_SOURCES_PER_WORKSPACE} sources.` }, 409);
   const row = await load(c, who.orgId, id);
   if (!row) return c.json({ error: 'Not found' }, 404);
   return c.json({ source: toView(row, c.env.APP_ORIGIN), secret }, 201, NO_STORE);
@@ -307,10 +316,17 @@ sources.patch('/:id', async (c) => {
  * no overlap window (ADR 0012): the sender must be updated first or immediately after.
  */
 sources.post('/:id/rotate', async (c) => {
-  const who = await mutationGate(c, 'source.update');
+  const who = await mutationGate(c, 'source.rotate');
   if (who instanceof Response) return who;
   const id = c.req.param('id');
   if (!(await load(c, who.orgId, id))) return c.json({ error: 'Not found' }, 404);
+  // The wrapped key we saw. The UPDATE below applies only if it is still current, so a
+  // concurrent rotation or the KEK rewrap job makes this a 409 instead of a lost update.
+  const seen = await c.env.DB.prepare('SELECT dek_wrapped FROM sources WHERE id=? AND organization_id=?')
+    .bind(id, who.orgId)
+    .first<{ dek_wrapped: unknown }>();
+  const seenWrap = seen ? blob(toBytes(seen.dek_wrapped)) : null;
+  if (!seenWrap) return c.json({ error: 'Not found' }, 404);
   const secret = generateSigningSecret();
   const sealed = await sealSourceSecret(
     { organizationId: who.orgId, sourceId: id },
@@ -321,11 +337,23 @@ sources.post('/:id/rotate', async (c) => {
     c.env.DB.prepare(
       `UPDATE sources SET secret_envelope=?,key_salt=?,dek_wrapped=?,kek_version=?,
          secret_rotated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-       WHERE id=? AND organization_id=?`,
-    ).bind(sealed.secretEnvelope, sealed.keySalt, sealed.dekWrapped, sealed.kekVersion, id, who.orgId),
+       WHERE id=? AND organization_id=? AND dek_wrapped=?`,
+    ).bind(
+      sealed.secretEnvelope,
+      sealed.keySalt,
+      sealed.dekWrapped,
+      sealed.kekVersion,
+      id,
+      who.orgId,
+      seenWrap,
+    ),
     audit(c, who, 'source.secret.rotate', id, {}),
   ]);
-  if (results[0]?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
+  if (results[0]?.meta.changes !== 1) {
+    return (await load(c, who.orgId, id))
+      ? c.json({ error: 'The source changed while rotating. Nothing was changed; try again.' }, 409)
+      : c.json({ error: 'Not found' }, 404);
+  }
   const row = await load(c, who.orgId, id);
   return row
     ? c.json({ source: toView(row, c.env.APP_ORIGIN), secret }, 200, NO_STORE)
@@ -333,7 +361,8 @@ sources.post('/:id/rotate', async (c) => {
 });
 
 /**
- * Deleting a source deletes the integrations bound to it (they have nothing left to route)
+ * Deleting a source deletes the integrations bound to it (they have nothing left to route),
+ * only with `?cascade=true`,
  * and, with the row, its wrapped DEK: the sealed secret becomes unrecoverable.
  */
 sources.delete('/:id', async (c) => {
@@ -342,6 +371,16 @@ sources.delete('/:id', async (c) => {
   const id = c.req.param('id');
   const existing = await load(c, who.orgId, id);
   if (!existing) return c.json({ error: 'Not found' }, 404);
+  // Deleting also deletes the bound integrations and their saved webhook URLs, so it must be
+  // asked for explicitly; otherwise nothing is touched and the count is reported.
+  if (existing.integration_count > 0 && c.req.query('cascade') !== 'true')
+    return c.json(
+      {
+        error: `This source has ${existing.integration_count} connected chat(s). Delete them with it by passing cascade=true.`,
+        integrations: existing.integration_count,
+      },
+      409,
+    );
   const results = await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM integrations WHERE source_id=? AND organization_id=?').bind(id, who.orgId),
     c.env.DB.prepare('DELETE FROM sources WHERE id=? AND organization_id=?').bind(id, who.orgId),

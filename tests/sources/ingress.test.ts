@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_BODY_BYTES } from '../../src/connectors/sources/generic/route';
+import { createHash } from 'node:crypto';
+import { DECOY_MAX_BODY_BYTES, MAX_BODY_BYTES } from '../../src/connectors/sources/generic/route';
 import { SOURCE_INGRESS_LIMIT_PER_MINUTE } from '../../src/security/rate-limit';
 import type { DeliveryMessage } from '../../src/env';
 import { consumeDeliveries, type ConsumerDeps } from '../../src/pipeline/consumer';
@@ -423,11 +424,11 @@ describe('idempotency', () => {
     expect(count('SELECT COUNT(*) AS n FROM notification_outbox')).toBe(1);
   });
 
-  it('first writer wins when a webhook-id is reused with a different body', async () => {
+  it('keeps the first event when a webhook-id is reused with a different body (the reuse is refused)', async () => {
     const src = await createSource();
     await route('alice', src.id);
     await post(src, EVENT, { id: 'evt_2' });
-    await post(src, { ...EVENT, title: 'Different' }, { id: 'evt_2' });
+    expect((await post(src, { ...EVENT, title: 'Different' }, { id: 'evt_2' })).status).toBe(409);
     const out = h.db.raw.prepare('SELECT payload_json FROM notification_outbox').all() as {
       payload_json: string;
     }[];
@@ -515,5 +516,153 @@ describe('credential faults', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect((await post(b, EVENT)).status).toBe(500);
     err.mockRestore();
+  });
+});
+
+describe('bounded body reads (M1)', () => {
+  function chunked(chunks: number, size = 64 * 1024) {
+    const chunk = new Uint8Array(size).fill(0x61);
+    const state = { pulled: 0 };
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (state.pulled >= chunks) return controller.close();
+        state.pulled++;
+        controller.enqueue(chunk);
+      },
+    });
+    return { stream, state };
+  }
+  const send = (
+    src: { endpointId: string },
+    body: ReadableStream<Uint8Array>,
+    headers: Record<string, string> = {},
+  ) =>
+    worker.fetch(
+      new Request(`https://noti.test/webhooks/generic/${src.endpointId}`, {
+        method: 'POST',
+        body,
+        duplex: 'half',
+        headers: { 'content-type': 'application/json', ...headers },
+      } as RequestInit),
+      h.env,
+      { waitUntil: h.waitUntil } as unknown as ExecutionContext,
+    );
+
+  it('cuts a chunked body (no Content-Length) off at the cap without reading the rest', async () => {
+    const src = await createSource();
+    const { stream, state } = chunked(64); // 4 MiB offered, 256 KiB cap
+    const res = await send(src, stream);
+    expect(res.status).toBe(413);
+    expect(state.pulled).toBeLessThan(10);
+  });
+
+  it('is not fooled by a lying small Content-Length', async () => {
+    const src = await createSource();
+    const { stream, state } = chunked(64);
+    const res = await send(src, stream, { 'content-length': '12' });
+    expect(res.status).toBe(413);
+    expect(state.pulled).toBeLessThan(10);
+  });
+
+  it('treats a non-numeric Content-Length as unknown and still enforces the cap', async () => {
+    const src = await createSource();
+    const { stream } = chunked(8);
+    expect((await send(src, stream, { 'content-length': 'abc' })).status).toBe(413);
+  });
+});
+
+describe('edge cost of unauthenticated requests (M2)', () => {
+  it('skips the decoy HMAC for a large body on a dead endpoint, and keeps it for a small one', async () => {
+    const spy = vi.spyOn(crypto.subtle, 'verify');
+    const dead = { endpointId: 'Z'.repeat(24), secret: 'whsec_AAAA' };
+    spy.mockClear();
+    await post(dead, null, { rawBody: 'x'.repeat(DECOY_MAX_BODY_BYTES + 1) });
+    expect(spy).not.toHaveBeenCalled();
+    await post(dead, null, { rawBody: 'x'.repeat(DECOY_MAX_BODY_BYTES) });
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+});
+
+describe('webhook-id reuse (M3)', () => {
+  it('refuses a reused id with a different body: 409, counted, redacted warning, nothing queued', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    expect((await post(src, EVENT, { id: 'evt_dup' })).status).toBe(202);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const res = await post(src, { ...EVENT, title: 'A different event' }, { id: 'evt_dup' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'webhook_id_reused' });
+    expect(deliveries()).toBe(1);
+    const row = h.db.raw.prepare('SELECT reused_id_rejections,last_reuse_rejected_at FROM sources').get() as {
+      reused_id_rejections: number;
+      last_reuse_rejected_at: string | null;
+    };
+    expect(row.reused_id_rejections).toBe(1);
+    expect(row.last_reuse_rejected_at).not.toBeNull();
+    const logged = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('generic_webhook_id_reused');
+    expect(logged).not.toContain('evt_dup');
+    expect(logged).not.toContain('A different event');
+    warn.mockRestore();
+    // The counter is visible through the API, and the same body is still an idempotent 202.
+    const view = await call('GET', `/api/sources/${src.id}`, { as: 'alice' });
+    expect((await view.json<{ source: { reusedIdRejections: number } }>()).source.reusedIdRejections).toBe(1);
+    const same = await post(src, EVENT, { id: 'evt_dup' });
+    expect(same.status).toBe(202);
+    expect(await same.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
+  });
+
+  it('only reports a reuse to an authenticated sender (bad signature stays 401, no counter)', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    await post(src, EVENT, { id: 'evt_x' });
+    const res = await post(
+      src,
+      { ...EVENT, title: 'other' },
+      { id: 'evt_x', headers: { 'webhook-signature': 'v1,AAAA' }, sign: false },
+    );
+    expect(res.status).toBe(401);
+    expect(h.db.raw.prepare('SELECT reused_id_rejections AS n FROM sources').get()).toEqual({ n: 0 });
+  });
+
+  it('stores the SHA-256 of the raw body with the delivery', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    const body = JSON.stringify(EVENT);
+    await post(src, EVENT, { rawBody: body });
+    const expected = createHash('sha256').update(body).digest('hex');
+    expect(h.db.raw.prepare('SELECT body_hash FROM deliveries').get()).toEqual({ body_hash: expected });
+  });
+});
+
+describe('replay after retention (L5)', () => {
+  it('does not send an already-delivered event again when its id is replayed after the outbox row was purged', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    expect((await post(src, EVENT, { id: 'evt_once' })).status).toBe(202);
+    const rows = h.db.raw.prepare('SELECT payload_json FROM notification_outbox').all() as {
+      payload_json: string;
+    }[];
+    const msg = {
+      body: JSON.parse(rows[0]?.payload_json ?? '{}') as DeliveryMessage,
+      attempts: 1,
+      ack: vi.fn(),
+      retry: vi.fn(),
+    };
+    h.fetchMock.mockClear();
+    await consumeDeliveries(
+      { messages: [msg], retryAll: () => undefined } as unknown as MessageBatch<unknown>,
+      h.env,
+      { random: () => 0.5, now: () => Date.now(), newClaimToken: () => crypto.randomUUID() },
+    );
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
+    // Retention removes dispatched outbox rows after 7 days; the delivery row lives on.
+    h.db.raw.prepare('DELETE FROM notification_outbox').run();
+    const replay = await post(src, EVENT, { id: 'evt_once' });
+    expect(await replay.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
+    expect(h.db.raw.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get()).toEqual({ n: 0 });
+    expect(h.waitUntil).toHaveBeenCalledTimes(1); // only the first request dispatched
+    expect(h.fetchMock).toHaveBeenCalledTimes(1);
   });
 });

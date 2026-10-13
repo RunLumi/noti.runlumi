@@ -813,3 +813,22 @@ fault fails open and logs a redacted `rate_limit_error`. Covered by three tests 
   1 MiB cap of F78 (this source caps at 256 KiB).
 - No source health beyond `last_received_at`; no per-source rate-limit tuning.
 - GitLab, Stripe, Linear, Sentry and Cloudflare sources (F81–F90).
+
+**Security review of this slice (fixed in the same PR)**
+
+- M1: `src/lib/body.ts` `readBodyCapped` counts streamed bytes and stops at the cap; used by the
+  generic route (256 KiB) and the GitHub route (1 MiB). Tested with chunked and lying
+  `Content-Length` requests.
+- M2: the decoy HMAC is skipped above 16 KiB; `docs/RUNBOOK.md` documents the edge rate rule
+  and `docs/THREAT_MODEL.md` has section 4.1b plus AR-18. **The edge rule is not configured or
+  rehearsed.**
+- M3: `deliveries.body_hash`; a reused `webhook-id` with a different body is `409
+  webhook_id_reused`, counted per source and shown on the Sources page (AR-19).
+- M4: `source.rotate` and `source.delete` are admin-only; deleting a source with chats needs
+  `?cascade=true` (otherwise 409 with the count); the UI hides the buttons from members and the
+  dialog states the count.
+- L2: rotate is guarded on the wrapped key it read (409 on a concurrent change). L3: the
+  25-source quota is inside the `INSERT`. L4: `integrations.source_id` is immutable once set and
+  an `AFTER DELETE` trigger on `sources` leaves no orphan integrations. L5: the outbox insert
+  is conditional on the delivery insert (`changes() > 0`); the GitHub route had the same
+  defect (a redelivery after outbox retention sent again) and is fixed with a test.

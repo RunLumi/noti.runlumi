@@ -164,9 +164,22 @@ describe('read, authorization and CSRF', () => {
     expect(row).toEqual({ enabled: 1 });
   });
 
-  it('lets members and admins manage sources (same grant as integrations)', async () => {
-    expect((await create('bob')).status).toBe(201);
-    expect((await create('alice')).status).toBe(201);
+  it('lets members create, list, rename and pause; rotate and delete are admin-only', async () => {
+    const created = await create('bob');
+    expect(created.status).toBe(201);
+    const { source } = await created.json<Created>();
+    const path = `/api/sources/${source.id}`;
+    expect((await call('GET', '/api/sources', { as: 'bob' })).status).toBe(200);
+    expect((await call('PATCH', path, { as: 'bob', body: { enabled: false } })).status).toBe(200);
+    const rotate = await call('POST', `${path}/rotate`, { as: 'bob' });
+    expect(rotate.status).toBe(403);
+    expect(await rotate.text()).toContain('source.rotate');
+    expect((await call('DELETE', `${path}?cascade=true`, { as: 'bob' })).status).toBe(403);
+    expect(count('SELECT COUNT(*) AS n FROM sources')).toBe(1);
+    // The refusal is audited, and nothing changed.
+    expect(audits('org-a')).toContain('access.denied');
+    expect((await call('POST', `${path}/rotate`, { as: 'alice' })).status).toBe(200);
+    expect((await call('DELETE', path, { as: 'alice' })).status).toBe(204);
   });
 
   it('rejects cross-site and non-JSON mutations', async () => {
@@ -291,7 +304,13 @@ describe('delete', () => {
                 VALUES('gh','acme/web','[]','slack','x','org-a')`,
       )
       .run();
-    const res = await call('DELETE', `/api/sources/${c.source.id}`, { as: 'alice' });
+    // Without an explicit cascade nothing is touched and the count is reported.
+    const refused = await call('DELETE', `/api/sources/${c.source.id}`, { as: 'alice' });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ integrations: 1 });
+    expect(count('SELECT COUNT(*) AS n FROM sources')).toBe(1);
+    expect(count('SELECT COUNT(*) AS n FROM integrations')).toBe(2);
+    const res = await call('DELETE', `/api/sources/${c.source.id}?cascade=true`, { as: 'alice' });
     expect(res.status).toBe(204);
     expect(count('SELECT COUNT(*) AS n FROM sources')).toBe(0);
     expect(count('SELECT COUNT(*) AS n FROM integrations')).toBe(1);
@@ -417,5 +436,115 @@ describe('KEK rotation', () => {
     // The old KEK can now be retired and the same secret still verifies.
     h.env = { ...h.env, KEK_V1: '' };
     expect((await ingest(c)).status).toBe(202);
+  });
+});
+
+/** Run `before` once, right before the next D1 batch: a deterministic "concurrent writer". */
+function interceptBatch(before: () => void | Promise<void>): void {
+  const real = h.db.d1;
+  let fired = false;
+  h.env = {
+    ...h.env,
+    DB: new Proxy(real, {
+      get(target, prop) {
+        if (prop !== 'batch') return Reflect.get(target, prop, target) as unknown;
+        return async (statements: D1PreparedStatement[]) => {
+          if (!fired) {
+            fired = true;
+            await before();
+          }
+          return target.batch(statements);
+        };
+      },
+    }),
+  };
+}
+
+describe('concurrency guards (L2, L3)', () => {
+  it('rotate applies only if the wrapped key is the one it read: a concurrent rewrap makes it a 409', async () => {
+    const c = await createOk();
+    const envBefore = h.env;
+    interceptBatch(async () => {
+      // The KEK rewrap job runs between the read and the write.
+      const next = { ...envBefore, KEK_V2: '22'.repeat(32), KMS_ACTIVE_VERSION: '2' };
+      expect(await rewrapStaleSourceKeys(h.db.d1, keyringFromEnv(next))).toBe(1);
+    });
+    const res = await call('POST', `/api/sources/${c.source.id}/rotate`, { as: 'alice' });
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).not.toContain('whsec_');
+    expect(audits('org-a')).toEqual(['source.create']);
+    // Nothing was rotated: the old secret still verifies (under the rewrapped key).
+    h.env = { ...envBefore, KEK_V2: '22'.repeat(32), KMS_ACTIVE_VERSION: '2' };
+    expect((await ingest(c)).status).toBe(202);
+  });
+
+  it('the quota is enforced inside the INSERT: a concurrent create that fills it makes this one 409 with no audit', async () => {
+    for (let i = 0; i < MAX_SOURCES_PER_WORKSPACE - 1; i++) seedSource(`q${i}`, i);
+    interceptBatch(() => seedSource('racer', 99));
+    const res = await create();
+    expect(res.status).toBe(409);
+    expect(count('SELECT COUNT(*) AS n FROM sources WHERE organization_id=?', 'org-a')).toBe(
+      MAX_SOURCES_PER_WORKSPACE,
+    );
+    expect(audits('org-a')).toEqual([]);
+  });
+});
+
+function seedSource(id: string, n: number): void {
+  h.db.raw
+    .prepare(
+      `INSERT INTO sources(id,organization_id,kind,name,endpoint_id,secret_envelope,key_salt,dek_wrapped,kek_version)
+       VALUES(?,?,'generic','s',?,x'00',x'00',x'00',1)`,
+    )
+    .run(id, 'org-a', String(n).padStart(24, 'f'));
+}
+
+describe('database invariants (L4)', () => {
+  async function bound(as = 'alice') {
+    const c = await createOk(as);
+    const res = await call('POST', '/api/integrations', {
+      as,
+      body: { name: 'n', sourceId: c.source.id, destination: 'slack', webhookUrl: SLACK },
+    });
+    return { c, integrationId: (await res.json<{ integration: { id: string } }>()).integration.id };
+  }
+
+  it('an integration can never be moved to another source or detached from its source', async () => {
+    const { integrationId } = await bound();
+    const other = await createOk('alice', 'Other');
+    const set = (v: string | null) => () =>
+      h.db.raw.prepare('UPDATE integrations SET source_id=? WHERE id=?').run(v, integrationId);
+    expect(set(other.source.id)).toThrow(/cannot change/);
+    expect(set(null)).toThrow(/cannot change/);
+    // Leaving it unchanged is fine.
+    h.db.raw.prepare('UPDATE integrations SET name=name WHERE id=?').run(integrationId);
+  });
+
+  it('an unbound integration can only be attached to a source of its own organization', async () => {
+    const theirs = await createOk('mallory');
+    h.db.raw
+      .prepare(
+        `INSERT INTO integrations(id,repo,event_types,destination,webhook_ciphertext,organization_id)
+         VALUES('gh','acme/web','[]','slack','x','org-a')`,
+      )
+      .run();
+    expect(() =>
+      h.db.raw.prepare("UPDATE integrations SET source_id=? WHERE id='gh'").run(theirs.source.id),
+    ).toThrow(/same organization/);
+    const mine = await createOk('alice');
+    h.db.raw.prepare("UPDATE integrations SET source_id=? WHERE id='gh'").run(mine.source.id);
+  });
+
+  it('no orphan integrations: removing a source by any path removes its integrations', async () => {
+    const a = await bound();
+    await bound('mallory');
+    h.db.raw.prepare('DELETE FROM sources WHERE id=?').run(a.c.source.id);
+    expect(count('SELECT COUNT(*) AS n FROM integrations WHERE source_id IS NOT NULL')).toBe(1);
+    expect(count('SELECT COUNT(*) AS n FROM integrations WHERE organization_id=?', 'org-a')).toBe(0);
+    // An organization cascade (workspace purge) leaves nothing behind either.
+    h.db.raw.prepare("DELETE FROM integrations WHERE organization_id='org-b'").run();
+    const again = await bound('mallory');
+    h.db.raw.prepare("DELETE FROM sources WHERE organization_id='org-b'").run();
+    expect(count('SELECT COUNT(*) AS n FROM integrations WHERE id=?', again.integrationId)).toBe(0);
   });
 });

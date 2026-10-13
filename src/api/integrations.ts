@@ -349,7 +349,12 @@ integrations.patch('/:id', async (c) => {
   )
     return invalid(c, [
       {
-        field: parsed.value.repo !== undefined ? 'repo' : 'eventTypes',
+        field:
+          parsed.value.repo !== undefined
+            ? 'repo'
+            : parsed.value.eventTypes !== undefined
+              ? 'eventTypes'
+              : 'filters',
         message: 'This integration receives every event from its source; this cannot be changed.',
       },
     ]);

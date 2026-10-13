@@ -18,6 +18,10 @@
 --   no GitHub `owner/name` can equal, because it contains ':'), so the GitHub ingress query
 --   `WHERE repo=?` can never select them. GitHub routing is otherwise untouched.
 --
+-- `deliveries.body_hash`: SHA-256 (hex) of the raw request body of a generic event, stored with
+-- the dedup row so a webhook-id reused with a DIFFERENT body is refused (409) instead of being
+-- silently swallowed as a duplicate. NULL for every other delivery.
+--
 -- ROLLBACK: the previous Worker ignores both the table and the column. To remove them:
 --   DROP TABLE sources; (and, SQLite >= 3.35) ALTER TABLE integrations DROP COLUMN source_id;
 -- Integrations with a non-NULL source_id must be deleted first; the old Worker would
@@ -39,7 +43,11 @@ CREATE TABLE sources (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_received_at TEXT,
-  secret_rotated_at TEXT
+  secret_rotated_at TEXT,
+  -- Events refused because their webhook-id was already accepted with a different body.
+  -- A visible counter, so a sender that reuses ids hears about it (review M3).
+  reused_id_rejections INTEGER NOT NULL DEFAULT 0,
+  last_reuse_rejected_at TEXT
 );
 
 CREATE INDEX sources_org_created ON sources(organization_id, created_at);
@@ -70,4 +78,29 @@ WHEN NEW.source_id IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM sources WHERE id = NEW.source_id AND organization_id = NEW.organization_id)
 BEGIN
   SELECT RAISE(ABORT, 'integrations.source_id must reference a source in the same organization');
+END;
+
+ALTER TABLE deliveries ADD COLUMN body_hash TEXT;
+
+-- source_id is set once, at creation, and never reassigned or cleared: moving an integration
+-- between sources would redirect events across the source boundary. (An UPDATE that leaves it
+-- unchanged is allowed.) Setting it from NULL must also satisfy the same-organization rule.
+CREATE TRIGGER integrations_source_immutable
+BEFORE UPDATE OF source_id ON integrations
+WHEN NEW.source_id IS NOT OLD.source_id
+BEGIN
+  SELECT RAISE(ABORT, 'integrations.source_id cannot change')
+  WHERE OLD.source_id IS NOT NULL;
+  SELECT RAISE(ABORT, 'integrations.source_id must reference a source in the same organization')
+  WHERE NEW.source_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM sources WHERE id = NEW.source_id AND organization_id = NEW.organization_id);
+END;
+
+-- No orphans: an integration bound to a source cannot outlive it, whichever path deletes the
+-- source (the API, an organization cascade, a manual cleanup). The API additionally requires
+-- an explicit `cascade` for a source that still has integrations.
+CREATE TRIGGER sources_delete_integrations
+AFTER DELETE ON sources
+BEGIN
+  DELETE FROM integrations WHERE source_id = OLD.id AND organization_id = OLD.organization_id;
 END;

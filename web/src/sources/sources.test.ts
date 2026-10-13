@@ -2,13 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseCreateIntegration } from '../../../src/api/integration-input';
 import { verifyStandardWebhook } from '../../../src/connectors/sources/generic/signature';
 import { generateSigningSecret } from '../../../src/connectors/sources/generic/encoding';
-import { t } from '../i18n';
+import { t, tp } from '../i18n';
 import { ApiError, parseIntegration } from '../lib/api';
-import { isoOf, parseSource, parseSourceWithSecret } from './api';
+import { isoOf, parseSource, parseSourceWithSecret, sourcesApi } from './api';
 import { defaultChatName, toConnectBody, validateConnect, type ConnectDraft } from './connect';
 import { SAMPLE_BODY, SECRET_ENV, bashSnippet, nodeSnippet } from './snippets';
 
@@ -26,6 +26,7 @@ const row = {
   updatedAt: '2026-10-13 12:00:00',
   lastReceivedAt: null,
   secretRotatedAt: null,
+  reusedIdRejections: 0,
   integrationCount: 0,
 };
 
@@ -217,5 +218,39 @@ describe('copy', () => {
     expect(t('sources.secret.warning')).toMatch(/only time/);
     expect(t('sources.rotate.body')).toMatch(/stops working immediately/);
     expect(t('sources.delete.bodyNoChats')).toMatch(/cannot be undone/);
+  });
+});
+
+describe('review hardening in the UI', () => {
+  it('reads the reused-id counter and rejects a response without it', () => {
+    expect(parseSource({ ...row, reusedIdRejections: 3 }).reusedIdRejections).toBe(3);
+    const { reusedIdRejections: _omit, ...without } = row;
+    void _omit;
+    expect(() => parseSource(without)).toThrow(ApiError);
+  });
+
+  it('states the reuse rule in plain words, with a plural count', () => {
+    expect(tp('sources.card.reused', 1)).toBe('1 event was rejected because its id was reused.');
+    expect(tp('sources.card.reused', 4)).toBe('4 events were rejected because their id was reused.');
+    expect(t('sources.card.reusedHelp')).toMatch(/409/);
+    expect(t('sources.guide.sign')).toMatch(/unique per event/);
+  });
+
+  it('only sends cascade=true when chats are connected', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string) => {
+      calls.push(url);
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
+    await sourcesApi.remove('org-a', 's1', false);
+    await sourcesApi.remove('org-a', 's1', true);
+    vi.unstubAllGlobals();
+    expect(calls).toEqual(['/api/sources/s1?org=org-a', '/api/sources/s1?org=org-a&cascade=true']);
+  });
+
+  it('hides rotate and delete from non-admins and tells them why', () => {
+    const card = readFileSync(join(new URL('.', import.meta.url).pathname, 'SourceCard.tsx'), 'utf8');
+    expect(card).toMatch(/isAdmin \?/);
+    expect(t('sources.adminOnly')).toMatch(/admins/);
   });
 });

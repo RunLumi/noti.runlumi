@@ -1,8 +1,10 @@
 import { useRef, useState, type FormEvent } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { IconPlus, IconRefresh, IconPlugConnected } from '@tabler/icons-react';
 import { Field, focusFirstInvalid } from '../components/form';
 import { PageHeader } from '../components/PageHeader';
 import { Button, Input, Notice } from '../components/ui';
+import { authApi } from '../lib/api';
 import { t, tp } from '../i18n';
 import { describeError, fieldErrorsOf } from '../integrations/errors';
 import { useOrgId } from '../integrations/hooks';
@@ -99,6 +101,8 @@ function ListSkeleton() {
 export function SourcesPage() {
   const orgId = useOrgId();
   const list = useSources(orgId);
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
+  const isAdmin = me.data?.user.role === 'admin';
   // The secret lives only here, in memory. Dismissing it, or leaving the page, discards it.
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const sources = list.data ?? [];
@@ -152,6 +156,7 @@ export function SourcesPage() {
                 key={source.id}
                 orgId={orgId ?? ''}
                 source={source}
+                isAdmin={isAdmin}
                 onRotated={(result) => setReveal({ kind: 'rotated', result })}
               />
             ))}

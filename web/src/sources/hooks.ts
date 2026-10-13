@@ -52,7 +52,8 @@ export function useToggleSource(orgId: string) {
 export function useDeleteSource(orgId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => sourcesApi.remove(orgId, id),
+    // The dialog states how many chats go with the source; confirming it is the cascade.
+    mutationFn: (source: Source) => sourcesApi.remove(orgId, source.id, source.integrationCount > 0),
     onSuccess: () =>
       Promise.all([
         qc.invalidateQueries({ queryKey: sourceKeys.all(orgId) }),

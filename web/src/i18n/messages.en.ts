@@ -604,6 +604,13 @@ export const en = {
   'sources.card.chatsCount': { one: '{count} chat', other: '{count} chats' },
   'sources.card.chatsNone': 'No chat yet — events are accepted but sent nowhere.',
   'sources.card.rotated': 'Secret changed',
+  'sources.card.reused': {
+    one: '{count} event was rejected because its id was reused.',
+    other: '{count} events were rejected because their id was reused.',
+  },
+  'sources.card.reusedHelp':
+    'Each event needs its own webhook-id. A request that reuses an id with different content is refused with HTTP 409 so it is never silently dropped. Give every event a new id; only retry the same event with the same id and the same body.',
+  'sources.adminOnly': 'Only workspace admins can rotate the secret or delete a source.',
   'sources.card.created': 'Created',
   'sources.toggle.label': 'Receive events',
   'sources.toggle.labelFor': 'Receive events for {name}',
@@ -621,7 +628,7 @@ export const en = {
     'Required: type (such as deploy.failed) and title. Optional: summary, url (https only, shown as a link, never opened by Noti), severity (info, warning, error or critical), actor, and up to 10 simple fields. Maximum body size is 256 KiB.',
   'sources.guide.signTitle': 'How events are signed',
   'sources.guide.sign':
-    'Send three headers: webhook-id (unique per event), webhook-timestamp (seconds; must be within 5 minutes) and webhook-signature (v1, then a comma, then the base64 HMAC-SHA256 of “id.timestamp.body”, keyed with the decoded secret). Repeating a webhook-id is safe: Noti accepts that event once.',
+    'Send three headers: webhook-id (unique per event), webhook-timestamp (seconds; must be within 5 minutes) and webhook-signature (v1, then a comma, then the base64 HMAC-SHA256 of “id.timestamp.body”, keyed with the decoded secret). Ids must be unique per event: repeating a webhook-id with the same body is safe (Noti accepts that event once), but reusing it for different content is refused with HTTP 409.',
   'sources.guide.bash': 'Shell (curl and openssl)',
   'sources.guide.node': 'Node.js',
   'sources.guide.copy': 'Copy example',

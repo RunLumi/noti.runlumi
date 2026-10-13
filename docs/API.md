@@ -30,7 +30,8 @@ Capabilities, as defined in `src/auth/permissions.ts`:
 | Capability | admin | member |
 | --- | --- | --- |
 | `integration.read/create/update/delete` | ✅ | ✅ |
-| `source.read/create/update/delete` | ✅ | ✅ |
+| `source.read/create/update` | ✅ | ✅ |
+| `source.rotate`, `source.delete` | ✅ | ❌ |
 | `delivery.read` | ✅ | ✅ |
 | `delivery.replay`, `audit.read` | ✅ | ❌ |
 
@@ -189,7 +190,7 @@ credentials on it, but a `repo` or `eventTypes` change is `422`.
 ## Sources (generic signed webhook source)
 
 Capabilities `source.*`; the same mutation rules as above (Origin, JSON, 20 mutations per user
-per minute, 25 sources per workspace). Every query is scoped to the workspace; another
+per minute, 25 sources per workspace, enforced atomically in the INSERT). Every query is scoped to the workspace; another
 workspace's source is `404`.
 
 ```ts
@@ -203,6 +204,8 @@ type Source = {
   createdAt: string; updatedAt: string;
   lastReceivedAt: string | null;      // last accepted, verified event
   secretRotatedAt: string | null;
+  reusedIdRejections: number;         // events refused with 409 webhook_id_reused
+  lastReuseRejectedAt: string | null;
   integrationCount: number;           // chats bound to it
 };
 ```
@@ -213,8 +216,8 @@ type Source = {
 | `GET /api/sources/:id` | | `200 {source}` |
 | `POST /api/sources` | `{name}` (1–80 characters, no control characters) | `201 {source, secret}`, `Cache-Control: no-store` |
 | `PATCH /api/sources/:id` | `{name?, enabled?}` | `200 {source}`; any other field is `422` |
-| `POST /api/sources/:id/rotate` | none | `200 {source, secret}`, `Cache-Control: no-store`; the previous secret is invalid at once |
-| `DELETE /api/sources/:id` | none | `204`; also deletes the integrations bound to the source |
+| `POST /api/sources/:id/rotate` | none | **Admin only** (`source.rotate`). `200 {source, secret}`, `Cache-Control: no-store`; the previous secret is invalid at once. `409` if the source changed while rotating (nothing changed; retry). |
+| `DELETE /api/sources/:id[?cascade=true]` | none | **Admin only** (`source.delete`). `204`. A source with connected chats returns `409 {error, integrations: n}` unless `cascade=true`, which also deletes those integrations and their saved webhook URLs. |
 
 `secret` (`whsec_` + base64 of 32 random bytes) is returned **only** by create and rotate and is
 never readable again; it is also absent from the workspace export, which lists sources without
@@ -227,7 +230,7 @@ No session. Authentication is the [Standard Webhooks](https://github.com/standar
 
 | Header | Meaning |
 | --- | --- |
-| `webhook-id` | Unique per event; letters, digits, `_`, `:`, `-`, at most 128 characters (no `.`). Repeating it is safe: the event is accepted once. |
+| `webhook-id` | **Must be unique per event**; letters, digits, `_`, `:`, `-`, at most 128 characters (no `.`). Retrying the same event with the same id and body is safe: it is accepted once. Reusing an id for different content is refused with `409`. |
 | `webhook-timestamp` | Unix **seconds**; must be within 5 minutes of the server clock. |
 | `webhook-signature` | Space-separated `v1,<base64 HMAC-SHA256>` entries (at most 10); the HMAC is over `<webhook-id>.<webhook-timestamp>.<raw body>`, keyed with the **base64-decoded** secret after `whsec_`. Other versions are ignored. |
 
@@ -256,9 +259,10 @@ both render as failure) and `summary` plus `fields` within a 280-character budge
 | --- | --- |
 | `202 {accepted: true, persisted: n}` | Durably accepted for `n` integrations (`0` if the source has none). `duplicate: true` marks a repeat of an already-accepted `webhook-id`. |
 | `400 {error, fields: [{field, message}]}` | Authentic but invalid JSON or event; names fields, never echoes values. |
+| `409 {error: "webhook_id_reused"}` | This `webhook-id` was already accepted with a different body. Nothing was queued; the source's `reusedIdRejections` counter increments. Give every event its own id. |
 | `401 Unauthorized` | Missing or malformed headers, wrong signature, or timestamp outside the window (all identical). |
 | `404 Not found` | Unknown, malformed or paused endpoint (all identical). |
-| `413` / `415` | Body over 256 KiB / not `application/json`. |
+| `413` / `415` | Body over 256 KiB (counted as it streams in, so chunked and lying `Content-Length` requests are cut off at the cap) / not `application/json`. |
 | `429` | More than 600 verified events per minute for this source; honour `Retry-After`. |
 | `500` | The stored secret could not be opened; retry later. |
 

@@ -96,7 +96,7 @@ export function DeleteSourceDialog({ orgId, source }: DialogProps) {
     e.preventDefault();
     if (!matches || remove.isPending) return;
     try {
-      await remove.mutateAsync(source.id);
+      await remove.mutateAsync(source);
     } catch {
       // Rendered from `remove.error`; the dialog stays open.
     }

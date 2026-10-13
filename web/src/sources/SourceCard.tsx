@@ -15,6 +15,8 @@ interface SourceCardProps {
   readonly orgId: string;
   readonly source: Source;
   readonly onRotated: (result: SourceWithSecret) => void;
+  /** Rotating and deleting are admin-only (the server enforces it; the buttons are hidden). */
+  readonly isAdmin: boolean;
 }
 
 function ReceivingSwitch({ orgId, source }: { readonly orgId: string; readonly source: Source }) {
@@ -59,7 +61,7 @@ function ReceivingSwitch({ orgId, source }: { readonly orgId: string; readonly s
 }
 
 /** One source as an opaque work sheet: where to send events, what happened last, what to do. */
-export function SourceCard({ orgId, source, onRotated }: SourceCardProps) {
+export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProps) {
   const headingId = 'source-' + source.id;
   return (
     <article
@@ -122,12 +124,24 @@ export function SourceCard({ orgId, source, onRotated }: SourceCardProps) {
           </div>
         )}
       </dl>
+      {source.reusedIdRejections > 0 && (
+        <Notice kind="warning">
+          <p className="notice-title">{tp('sources.card.reused', source.reusedIdRejections)}</p>
+          <p>{t('sources.card.reusedHelp')}</p>
+        </Notice>
+      )}
       <Guidance endpointUrl={source.endpointUrl} />
       <ConnectChat orgId={orgId} source={source} />
       <footer className="integration-card-foot source-actions">
         <ReceivingSwitch orgId={orgId} source={source} />
-        <RotateDialog orgId={orgId} source={source} onRotated={onRotated} />
-        <DeleteSourceDialog orgId={orgId} source={source} />
+        {isAdmin ? (
+          <>
+            <RotateDialog orgId={orgId} source={source} onRotated={onRotated} />
+            <DeleteSourceDialog orgId={orgId} source={source} />
+          </>
+        ) : (
+          <p className="field-hint">{t('sources.adminOnly')}</p>
+        )}
       </footer>
     </article>
   );

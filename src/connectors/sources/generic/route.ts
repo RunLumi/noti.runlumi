@@ -2,8 +2,9 @@ import type { Context } from 'hono';
 import { CryptoError } from '../../../crypto/envelope';
 import { keyringFromEnv } from '../../../crypto/keyring-env';
 import { newLeaseToken } from '../../../delivery/claim';
-import { dedupKey, deliveryId as deriveDeliveryId } from '../../../delivery/ids';
+import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../../../env';
+import { readBodyCapped } from '../../../lib/body';
 import { log } from '../../../platform/log';
 import { dispatchOutbox } from '../../../pipeline/outbox';
 import { sourceIngressLimiter } from '../../../security/rate-limit';
@@ -39,13 +40,17 @@ function isJson(contentType: string | undefined): boolean {
 
 // A fixed throwaway key so the unknown/disabled path performs the same HMAC work over the
 // same bytes as a real verification (best-effort timing parity; see ADR 0012).
+/** Bodies larger than this skip the decoy HMAC. */
+export const DECOY_MAX_BODY_BYTES = 16 * 1024;
 const DECOY_KEY = new Uint8Array(new ArrayBuffer(32)).fill(0x5a);
 
 export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promise<Response> {
   if (!isJson(c.req.header('content-type'))) return c.text('Expected application/json', 415);
-  if (Number(c.req.header('content-length') || 0) > MAX_BODY_BYTES) return c.text('Too large', 413);
-  const raw = new Uint8Array(await c.req.arrayBuffer());
-  if (raw.length > MAX_BODY_BYTES) return c.text('Too large', 413);
+  // Counts bytes as they arrive, so a chunked or lying request is cut off at the cap instead
+  // of being buffered first (review M1).
+  const read = await readBodyCapped(c.req.raw, MAX_BODY_BYTES);
+  if (!read.ok) return c.text('Too large', 413);
+  const raw = read.bytes;
 
   const headers = {
     id: c.req.header('webhook-id') ?? null,
@@ -64,7 +69,11 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
         .first<SourceRow>()
     : null;
   if (!source || source.enabled !== 1) {
-    await verifyStandardWebhook(DECOY_KEY, headers, raw, Math.floor(nowMs / 1000));
+    // Timing parity is best effort and only worth its CPU for ordinary bodies: above the
+    // threshold the decoy is skipped so an unauthenticated 256 KiB body costs one D1 read
+    // and no HMAC (review M2, ADR 0012).
+    if (raw.length <= DECOY_MAX_BODY_BYTES)
+      await verifyStandardWebhook(DECOY_KEY, headers, raw, Math.floor(nowMs / 1000));
     return notFound(c);
   }
 
@@ -115,17 +124,46 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
   });
   const display = toDisplayFields(parsed.event);
 
+  // A webhook-id must be unique per event. If this id was already accepted with a DIFFERENT
+  // body, the event would be silently dropped as a "duplicate": refuse it loudly instead
+  // (review M3). Same id and same body stays an idempotent 202.
+  const bodyHash = toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)));
+  const earlier = await c.env.DB.prepare(
+    'SELECT body_hash FROM deliveries WHERE dedup_key=? AND organization_id=? LIMIT 1',
+  )
+    .bind(dedup.hex, organizationId)
+    .first<{ body_hash: string | null }>();
+  if (earlier && earlier.body_hash !== null && earlier.body_hash !== bodyHash) {
+    try {
+      await c.env.DB.prepare(
+        `UPDATE sources SET reused_id_rejections=reused_id_rejections+1,last_reuse_rejected_at=CURRENT_TIMESTAMP
+         WHERE id=? AND organization_id=?`,
+      )
+        .bind(source.id, organizationId)
+        .run();
+    } catch {
+      // Display-only counter; the rejection stands either way.
+    }
+    // Counts and ids of ours only: never the webhook-id (sender controlled) or the body.
+    log('warn', 'generic_webhook_id_reused', { source_id: source.id });
+    return c.json({ error: 'webhook_id_reused', message: 'webhook-id must be unique per event.' }, 409);
+  }
+
   let queued = 0;
   for (const row of rows.results) {
     const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
     const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...display };
     const results = await c.env.DB.batch([
       c.env.DB.prepare(
-        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)
-         VALUES(?,?,?,'pending',?,CURRENT_TIMESTAMP)`,
-      ).bind(id, row.id, organizationId, dedup.hex),
+        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,body_hash,created_at)
+         VALUES(?,?,?,'pending',?,?,CURRENT_TIMESTAMP)`,
+      ).bind(id, row.id, organizationId, dedup.hex, bodyHash),
+      // Only if the delivery row above was NEW (`changes()` is the previous statement's row
+      // count). Otherwise a repeat after the outbox row was purged (retention drops dispatched
+      // outbox rows after 7 days while the delivery lives on) would send the event again.
       c.env.DB.prepare(
-        'INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json) VALUES(?,?,?)',
+        `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
+         SELECT ?,?,? WHERE changes() > 0`,
       ).bind(id, organizationId, JSON.stringify(message)),
     ]);
     if (results[1]?.meta.changes) queued++;

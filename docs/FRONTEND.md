@@ -121,7 +121,7 @@ sheet, switch, field, destination-choice and dialog styles and the `validation.t
 
 Rules this feature adds: the signing secret lives only in component state and is gone on
 dismissal or navigation (no storage, URL, cache or console; a test greps for this); it is never
-placed in a copyable example; status is always text, not colour alone. Integrations bound to a
+placed in a copyable example; status is always text, not colour alone. Rotate and delete are shown to workspace admins only (the server enforces it); a card shows "N events were rejected because their id was reused" when a sender reuses webhook-ids. Integrations bound to a
 source show "Events from your own system" instead of a repository, and their settings page
 explains that updates cannot be chosen. `web/src/sources/sources.test.ts` runs the shell and
 Node examples and checks their output with the Worker's verifier. **Not verified:** a browser
