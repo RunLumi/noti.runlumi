@@ -7,6 +7,7 @@ import { githubWebhook } from './connectors/sources/github/route';
 import { keyringFromEnv, keyringProblem } from './crypto/keyring-env';
 import type { Bindings } from './env';
 import { consumeDeliveries } from './pipeline/consumer';
+import { DEAD_LETTER_QUEUE, consumeDeadLetters } from './pipeline/dead-letter';
 import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
 import { dispatchOutbox } from './pipeline/outbox';
 import { log } from './platform/log';
@@ -55,6 +56,8 @@ export default {
     await maintainCredentials(env);
   },
 
-  // Wrapped so the runtime's third argument (ExecutionContext) is never taken for deps.
-  queue: (batch: MessageBatch<unknown>, env: Bindings) => consumeDeliveries(batch, env),
+  // One Worker consumes both queues. Wrapped so the runtime's third argument
+  // (ExecutionContext) is never taken for test deps.
+  queue: (batch: MessageBatch<unknown>, env: Bindings) =>
+    batch.queue === DEAD_LETTER_QUEUE ? consumeDeadLetters(batch, env) : consumeDeliveries(batch, env),
 };

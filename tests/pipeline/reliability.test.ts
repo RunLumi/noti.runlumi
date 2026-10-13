@@ -6,6 +6,7 @@ import { dedupKey, deliveryId } from '../../src/delivery/ids';
 import { redeliver } from '../../src/delivery/redeliver';
 import type { Bindings, DeliveryMessage } from '../../src/env';
 import { QUEUE_MAX_RETRIES, consumeDeliveries, type ConsumerDeps } from '../../src/pipeline/consumer';
+import { DEAD_LETTER_QUEUE, QUEUE_EXHAUSTED, consumeDeadLetters } from '../../src/pipeline/dead-letter';
 import { dispatchOutbox, type DispatchDeps } from '../../src/pipeline/outbox';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 import { legacySeal } from '../support/legacy';
@@ -492,10 +493,104 @@ describe('manual redelivery (F182)', () => {
   });
 });
 
+describe('dead-letter queue consumer (F180)', () => {
+  async function deadLetter(body: unknown, queue = DEAD_LETTER_QUEUE): Promise<FakeMessage> {
+    const msg = message(body);
+    const batch = { queue, messages: [msg], retryAll: () => undefined } as unknown as MessageBatch<unknown>;
+    await worker.queue(batch, env);
+    return msg;
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  it('moves a never-attempted delivery to a terminal dead_lettered state', async () => {
+    const m = enqueue('d1');
+    const msg = await deadLetter(m);
+    expect(msg.acked).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(row('d1')).toMatchObject({
+      state: 'dead_lettered',
+      last_error: QUEUE_EXHAUSTED,
+      last_error_code: 'internal_error',
+    });
+    expect(row('d1')?.dead_lettered_at).toEqual(expect.any(Number));
+  });
+
+  it('keeps the error code of a retrying delivery', async () => {
+    const m = enqueue('d1', 'int-a', 'org-a', 'retrying');
+    db.raw
+      .prepare(
+        "UPDATE deliveries SET last_error='provider_http_503',last_error_code='destination_unavailable' WHERE id='d1'",
+      )
+      .run();
+    await deadLetter(m);
+    expect(row('d1')).toMatchObject({
+      state: 'dead_lettered',
+      last_error: 'provider_http_503',
+      last_error_code: 'destination_unavailable',
+    });
+  });
+
+  it('leaves terminal rows and live claims alone, and takes over a stale claim', async () => {
+    const sentMsg = enqueue('d1', 'int-a', 'org-a', 'sent');
+    await deadLetter(sentMsg);
+    expect(row('d1')?.state).toBe('sent');
+
+    const live = enqueue('d2');
+    db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=? WHERE id='d2'").run(Date.now());
+    await deadLetter(live);
+    expect(row('d2')?.state).toBe('claimed');
+
+    const stale = enqueue('d3');
+    db.raw.prepare("UPDATE deliveries SET state='claimed',claimed_at=? WHERE id='d3'").run(1);
+    await deadLetter(stale);
+    expect(row('d3')?.state).toBe('dead_lettered');
+  });
+
+  it('is tenant-scoped: a message naming another workspace changes nothing', async () => {
+    const m = enqueue('d1');
+    expect((await deadLetter({ ...m, organizationId: 'org-b' })).acked).toBe(true);
+    expect(row('d1')?.state).toBe('pending');
+  });
+
+  it('acknowledges an unparseable message', async () => {
+    expect((await deadLetter({ nonsense: true })).acked).toBe(true);
+  });
+
+  it('retries the DLQ message when the ledger write fails', async () => {
+    const msg = message(enqueue('d1'));
+    const broken = {
+      ...env,
+      DB: { prepare: () => ({ bind: () => ({ run: () => Promise.reject(new Error('down')) }) }) },
+    };
+    const batch = { queue: DEAD_LETTER_QUEUE, messages: [msg] } as unknown as MessageBatch<unknown>;
+    await consumeDeadLetters(batch, broken as unknown as Bindings);
+    expect(msg.retried).toEqual({});
+    expect(msg.acked).toBe(false);
+  });
+});
+
 describe('configuration', () => {
-  it('QUEUE_MAX_RETRIES mirrors max_retries in wrangler.jsonc', () => {
-    const config = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8');
-    expect(config).toMatch(new RegExp(`"max_retries":\\s*${QUEUE_MAX_RETRIES}\\b`));
+  const config = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8');
+
+  it('QUEUE_MAX_RETRIES mirrors max_retries on the delivery consumer in wrangler.jsonc', () => {
+    expect(config).toMatch(
+      new RegExp(`"queue": "noti-deliveries",[\\s\\S]*?"max_retries":\\s*${QUEUE_MAX_RETRIES}\\b`),
+    );
+  });
+
+  it('delivery_queue_batch_size_is_small (F176)', () => {
+    const size = /"queue": "noti-deliveries",[\s\S]*?"max_batch_size":\s*(\d+)/.exec(config)?.[1];
+    expect(Number(size)).toBeGreaterThanOrEqual(1);
+    expect(Number(size)).toBeLessThanOrEqual(5);
+  });
+
+  it('the dead-letter queue has a consumer (F180)', () => {
+    expect(config).toContain(`"dead_letter_queue": "${DEAD_LETTER_QUEUE}"`);
+    expect(config).toMatch(new RegExp(`"consumers"[\\s\\S]*"queue": "${DEAD_LETTER_QUEUE}"`));
   });
 });
 

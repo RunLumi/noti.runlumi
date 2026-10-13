@@ -28,6 +28,7 @@ const LEGAL: Record<string, DeliveryState> = {
   'claimed:retry_scheduled': 'retrying',
   'claimed:dead_letter': 'dead_lettered',
   'retrying:dead_letter': 'dead_lettered',
+  'pending:dead_letter': 'dead_lettered',
   'pending:suppress': 'suppressed',
   'claimed:suppress': 'suppressed',
   'retrying:suppress': 'suppressed',

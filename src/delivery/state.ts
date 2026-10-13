@@ -64,9 +64,10 @@ const ALLOWED_FROM: { readonly [E in DeliveryEvent['type']]: ReadonlySet<Deliver
   delivered: new Set(['claimed']),
   accepted: new Set(['claimed']),
   retry_scheduled: new Set(['claimed']),
-  // From `retrying` too: the queue's DLQ consumer may receive a message whose ledger row is
-  // still waiting, and a retrying row must still reach a terminal state (F180).
-  dead_letter: new Set(['claimed', 'retrying']),
+  // From `pending` and `retrying` too: the DLQ consumer receives messages whose ledger row
+  // never got an outcome (e.g. a batch retried on a key fault until the queue gave up), and
+  // such a row must still reach a terminal state (F180).
+  dead_letter: new Set(['pending', 'claimed', 'retrying']),
   suppress: new Set(['pending', 'claimed', 'retrying']),
 };
 

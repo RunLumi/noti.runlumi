@@ -76,12 +76,21 @@ state sets.
       scrubs before truncating, and never throws. A known limit: only the first word of a
       multi-word secret in free text is redacted.
 
+11. **A minimal DLQ consumer.** Messages in a dead-letter queue with no consumer are deleted
+    after four days, and nothing would have marked the ledger. `src/pipeline/dead-letter.ts`
+    consumes `noti-dead-letters` in the same Worker (`batch.queue` selects it). It moves a
+    non-terminal row (`pending`, `retrying`, or a `claimed` row whose claim is stale) to
+    `dead_lettered`, keeping any earlier error code, or `internal_error` with
+    `queue_retries_exhausted`. It never calls a provider and never re-enqueues. For this,
+    the state machine also allows `pending → dead_lettered`. `max_batch_size` for
+    `noti-deliveries` is now 5, the top of the F176 range.
+
 Crypto handling is unchanged from ADR 0004. Row defects are dead-lettered without a provider
 call. Key or config faults are `internal_error`, which is retryable.
 
 ## Not done (honest list)
 
-- No `noti-dead-letters` consumer and no DLQ health check (F180). No `delivery_attempts`
+- No DLQ health check that asserts the consumer is attached (F180). No `delivery_attempts`
   table (F184). No `event_dedup` table or TTL purge (F170/F171).
 - No replay API route, `delivery.replay` capability or audit record (F182). No dead-letter
   view (F181).
@@ -89,7 +98,7 @@ call. Key or config faults are `internal_error`, which is retryable.
   limiting (F187). Lark custom bots have no `uuid`; the helper exists for app mode (F188).
 - `outbox_stalled` and reconciler-failure alerts are not built (F173/F174). Unmapped provider
   errors are logged, not counted as a metric.
-- The delivery queue's `max_batch_size` is still 10, not the 1–5 F176 asks for.
-  `wrangler.jsonc` was not changed in this slice.
+- DLQ retention is 24 h on Workers Free and 14 days on Paid. This has not been checked
+  against the account plan.
 - No real-provider end-to-end validation. Every result here comes from the `node:sqlite` D1
   fake and mocked `fetch`.

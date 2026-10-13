@@ -354,6 +354,9 @@ Decisions and their rationale are in [ADR 0005](adr/0005-delivery-reliability.md
   - keeps the tenant re-check on every read and write, the crypto split (row defect → dead
     letter, key fault → retry) and duplicate suppression for terminal rows.
 - Outbound calls have a 10 s `AbortSignal.timeout`.
+- `src/pipeline/dead-letter.ts` consumes `noti-dead-letters` and moves stranded ledger rows
+  to `dead_lettered` (F180). `wrangler.jsonc` sets the delivery queue `max_batch_size` to 5
+  (F176) and declares the DLQ consumer.
 
 **Verified by**
 
@@ -378,7 +381,9 @@ Decisions and their rationale are in [ADR 0005](adr/0005-delivery-reliability.md
     legacy-stored event;
   - replay: one row under concurrent requests, refused for a sent delivery, refused across
     tenants, refused without a stored message;
-  - `QUEUE_MAX_RETRIES` matches `wrangler.jsonc`.
+  - the DLQ consumer: never-attempted, retrying, terminal, live-claim, stale-claim and
+    cross-tenant cases, plus a ledger failure retried;
+  - `QUEUE_MAX_RETRIES`, the batch size and the DLQ consumer match `wrangler.jsonc`.
 - `tests/pipeline/delivery-path.test.ts`: the slice 2 cases still pass. Permanent crypto
   failures now end in `dead_lettered`.
 - `tests/migrations.test.ts`: 0009 keeps every row, maps legacy states, recreates the
@@ -388,13 +393,12 @@ Decisions and their rationale are in [ADR 0005](adr/0005-delivery-reliability.md
 
 **Known gaps**
 
-- No consumer reads `noti-dead-letters`. There is no `delivery_attempts` table, no
-  `event_dedup` table and no TTL purge.
+- No health check asserts the DLQ consumer is attached. There is no `delivery_attempts`
+  table, no `event_dedup` table and no TTL purge.
 - No replay route, capability check or audit record.
 - No circuit breaker, client-side dedup window or per-destination rate limiting.
 - No `outbox_stalled` or reconciler-failure alert, and no metric for unmapped provider
   errors.
-- The delivery queue `max_batch_size` is still 10.
 - Per-provider classification for Slack API, Teams and Discord waits for slice 5.
 - The 12 h queue delay maximum is UNVERIFIED against Cloudflare's docs.
 - No real-provider validation.

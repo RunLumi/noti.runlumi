@@ -331,7 +331,7 @@ collision is a leak and is tested.
 
 ## F176 — Per-message acknowledgement
 
-**Priority** P0 · **Status** partial (per-message ack/retry; delivery `max_batch_size` is still 10, not 1–5) · **Fixes** part of D8
+**Priority** P0 · **Status** implemented (slice 4: per-message ack/retry; delivery `max_batch_size` 5) · **Fixes** part of D8
 
 **Story** As a customer, I want one bad message not to re-send nine good ones, so that a
 single poison event does not multiply into spam.
@@ -494,7 +494,7 @@ punitive action against a shared IP.
 
 ## F180 — Dead-letter queue
 
-**Priority** P0 · **Status** partial (slice 4: terminal `dead_lettered` state with taxonomy code; no DLQ consumer, no attempt-log table) · **Fixes** part of D11
+**Priority** P0 · **Status** partial (slice 4: terminal `dead_lettered` state with taxonomy code; DLQ consumer marks stranded rows; no consumer-attached health check, no attempt-log table) · **Fixes** part of D11
 
 **Story** As an operator, I want exhausted deliveries to land somewhere I can see, so that
 they are never silently dropped.
