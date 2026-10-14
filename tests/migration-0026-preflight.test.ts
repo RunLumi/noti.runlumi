@@ -81,3 +81,85 @@ describe('migration 0026 preflight', () => {
     expect(rowsOf(wrangler)).toEqual([{ check: 'total:deliveries', n: 3 }]);
   });
 });
+
+describe('migration 0026 preflight prediction equals the migration (M3)', () => {
+  const perTable = (rows: Check[]) =>
+    Object.fromEntries(rows.filter((r) => r.check.startsWith('orphan:')).map((r) => [r.check.slice(7), r.n]));
+  const actual = (raw: ReturnType<typeof createFakeD1>['raw']) =>
+    Object.fromEntries(
+      (
+        raw.prepare('SELECT source_table AS t, COUNT(*) AS n FROM legacy_orphaned_rows GROUP BY 1').all() as {
+          t: string;
+          n: number;
+        }[]
+      ).map((r) => [r.t, r.n]),
+    );
+  const withZeros = (o: Record<string, number>) => ({
+    integrations: 0,
+    deliveries: 0,
+    notification_outbox: 0,
+    held_events: 0,
+    routing_decisions: 0,
+    noise_open_failures: 0,
+    ...o,
+  });
+
+  it('counts rows derived to a dangling or case-mismatched organization as quarantined', () => {
+    const { raw } = createFakeD1({ before: '0026' });
+    seedLegacy(raw);
+    // Rows whose integration has a dangling / case-mismatched organization: the migration derives the
+    // bad id, copies nothing valid, and quarantines them.
+    raw.exec(`
+      INSERT INTO deliveries(id,integration_id,state,organization_id,created_at) VALUES
+        ('d-to-ghost','i-dangling','sent',NULL,'2026-01-06'), ('d-to-case','i-case','sent','','2026-01-06');
+      INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES
+        ('o-to-ghost','{"integrationId":"i-dangling"}','pending',NULL), ('d-to-case','{}','pending',NULL);
+    `);
+    const predicted = perTable(raw.prepare(SQL).all() as unknown as Check[]);
+    applyMigration(raw, '0026_tenant_contract.sql');
+    expect(withZeros(predicted)).toEqual(withZeros(actual(raw)));
+  });
+
+  it('matches on pseudo-random legacy data', () => {
+    let seed = 12345;
+    const rnd = (n: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    const orgs: (string | null)[] = [null, '', 'org-a', 'org-b', 'ghost', 'ORG-A'];
+    for (let round = 0; round < 25; round++) {
+      const { raw } = createFakeD1({ before: '0026' });
+      seedLegacy(raw);
+      raw.exec('DELETE FROM notification_outbox; DELETE FROM deliveries; DELETE FROM integrations');
+      for (let i = 0; i < 8; i++) {
+        raw
+          .prepare(
+            'INSERT INTO integrations(id,repo,event_types,destination,webhook_ciphertext,organization_id,source_id) VALUES(?,?,?,?,?,?,?)',
+          )
+          .run(
+            `i${i}`,
+            'r',
+            '[]',
+            'slack',
+            'x',
+            orgs[rnd(orgs.length)] ?? null,
+            rnd(3) === 0 ? 'src-a' : null,
+          );
+        raw
+          .prepare('INSERT INTO deliveries(id,integration_id,state,organization_id) VALUES(?,?,?,?)')
+          .run(`d${i}`, `i${rnd(10)}`, 'sent', orgs[rnd(orgs.length)] ?? null);
+        raw
+          .prepare('INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES(?,?,?,?)')
+          .run(
+            `d${rnd(10)}x${i}`,
+            rnd(2) ? `{"integrationId":"i${rnd(10)}"}` : 'nope',
+            'pending',
+            orgs[rnd(orgs.length)] ?? null,
+          );
+      }
+      const predicted = perTable(raw.prepare(SQL).all() as unknown as Check[]);
+      applyMigration(raw, '0026_tenant_contract.sql');
+      expect(withZeros(predicted), `round ${round}`).toEqual(withZeros(actual(raw)));
+    }
+  });
+});

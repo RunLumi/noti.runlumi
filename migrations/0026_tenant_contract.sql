@@ -11,28 +11,48 @@
 --   held_events, routing_decisions, noise_open_failures  organization_id TEXT NOT NULL (no FK)
 --      become   organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE
 --
+-- THIS FILE NEVER DESTROYS AN ORIGINAL. It contains no DROP, DELETE or TRUNCATE of any of the six
+-- tables or of `<table>_old` (tests/migration-0026.test.ts scans for that). Each original is
+-- RENAMED aside to `<table>_old` and STAYS there, with every row it held, until an operator
+-- finalizes with scripts/migration-0026-finalize.mjs after reconciling `_old` against the live table
+-- row for row (docs/RUNBOOK.md). The first version of this file dropped `<table>_old` behind a
+-- foreign-key guard; that guard was defeatable (a runner that carries on after an error re-ran the
+-- file over a leftover `_old`; foreign keys off; `PRAGMA defer_foreign_keys`), so the DROP was
+-- removed instead of defended.
+--
 -- WHAT D1 DOES WITH A FILE THAT FAILS PART WAY IS NOT DOCUMENTED (the Cloudflare migrations,
 -- best-practices and limits pages say nothing about per-file transactions or abort-on-error;
--- UNVERIFIED, see docs/adr/0021). sqlite3's own default is to carry on after an error. So this
--- file is written to be safe in BOTH worlds:
+-- UNVERIFIED, see docs/adr/0021). sqlite3's own default is to carry on after an error. So the file
+-- is written to be safe in BOTH worlds:
 --
---   * Nothing destructive follows from a statement that "should have" stopped the file. A table
---     is never dropped by name while its replacement is unproven: the original is RENAMED aside
---     (`<table>_old`), the verified copy takes its name, and only then is `<table>_old` dropped,
---     and that DROP is guarded by a foreign key (below) that is released only by a statement
---     whose WHERE clause recounts the original against the copy at that moment. A mismatch, a
---     row written after the copy, or a failed earlier step leaves the guard in place and the
---     DROP itself fails with "FOREIGN KEY constraint failed". The original data is then still
---     in `<table>_old`.
---   * Re-running is safe: the scratch objects are dropped IF EXISTS first, the quarantine is
---     idempotent, and every copy is rebuilt from the live table.
---   * It still must run in a write freeze (MAINTENANCE_MODE, docs/RUNBOOK.md): a row written
---     between the copy and the swap would be missing from the new table. The guard turns that
---     into a refused DROP rather than a silent loss, but the Worker would be running on an
---     incomplete table until an operator restored the originals.
+--   * Tripwires first (section 0). Each is an INSERT into a CHECK-constrained table, so a runner
+--     that aborts on error stops there with a named constraint in the message:
+--       foreign_keys_must_be_on                       PRAGMA foreign_keys is not 1
+--       legacy_alter_table_must_be_off                PRAGMA legacy_alter_table is not 0
+--       old_tables_from_an_earlier_run_...            a `<table>_old` already exists
+--       all_six_tenant_tables_must_exist              a live table is missing (half-applied state)
+--   * A runner that CARRIES ON must not run the dependents of a tripped wire. Two gates do that:
+--       _gate_0026_ok        created by `CREATE TABLE ... AS SELECT CASE WHEN <every tripwire passes>
+--                            THEN 1 ELSE abs(-9223372036854775808) END`: the ELSE branch raises
+--                            "integer overflow" at run time, so the table EXISTS only if nothing
+--                            tripped. Every backfill, quarantine and copy statement has
+--                            `AND EXISTS (SELECT 1 FROM _gate_0026_ok)`: with no such table it fails
+--                            to compile and touches nothing.
+--       _gate_0026_verified  the same trick over the count verification (section 4).
+--     Every ALTER TABLE ... RENAME is blocked until both exist: the view `_gate_0026_poison` selects
+--     from them, and SQLite refuses a RENAME while any view in the schema references a missing table
+--     ("error in view _gate_0026_poison: no such table"). (PRAGMA legacy_alter_table=ON skips that
+--     check; it is a tripwire.) A tripped file therefore renames nothing and copies nothing.
+--   * Re-running is safe. Scratch objects are dropped IF EXISTS first; the quarantine is
+--     idempotent; every copy is rebuilt from the live table. Over a leftover `<table>_old` the
+--     tripwire fires and nothing else runs: restore or finalize first (docs/RUNBOOK.md).
+--   * It still must run in a write freeze (docs/RUNBOOK.md): a row written between the copy and the
+--     swap would be missing from the new table. The swap-time recount (`_swap_verify`) and the
+--     finalize step both detect that; the row itself is safe in `<table>_old`.
 --
 -- Steps, in order:
---   0. Hygiene for a re-run; quarantine table.
+--   0. Hygiene for a re-run, tripwires, gates, quarantine table, snapshot of every index and trigger
+--      about to be dropped (so recovery can recreate them verbatim).
 --   1. BACKFILL only where the tenant is DERIVABLE from our own rows, never guessed:
 --        integrations          <- its source (sources.organization_id), when it has a source_id
 --        deliveries            <- the integration they were routed to
@@ -46,42 +66,54 @@
 --      (all of them are organization-scoped). It is recorded in `legacy_orphaned_rows` with
 --      NON-SECRET metadata only (no ciphertext, no key material, no event payload; every
 --      free-text field cut to 200 characters so the record cannot be refused for being long).
---      The row itself leaves the live table; its credentials and payload are then recoverable
---      only through D1 Time Travel, never from the quarantine.
+--      The row itself leaves the live table, but it is NOT deleted: it stays, credentials and
+--      payload included, in `<table>_old` until finalize (a temporary table, docs/DATA_RETENTION.md),
+--      and afterwards only through D1 Time Travel.
 --   3. BUILD the replacement tables with the constraint and copy every surviving row in rowid
 --      order (rowid is used as recency by src/api/deliveries.ts).
 --   4. VERIFY: a failing INSERT into a CHECK-constrained table (`row_counts_must_match`) aborts
---      the file where D1 aborts on error, before anything is renamed.
---   5. SWAP per table: guard row, rename original aside, rename the copy into place, drop the
---      old table's indexes and triggers (they follow the renamed table and would collide),
---      create them again on the new table, release the guard ONLY if the recount balances,
---      drop `<table>_old`, drop the guard.
+--      the file where D1 aborts on error, and `_gate_0026_verified` keeps every rename blocked
+--      where it does not.
+--   5. SWAP per table: rename the original aside (`<table>_old`), rename the copy into place, move
+--      the indexes and triggers (those on the original follow the rename and would collide, so they
+--      are dropped from `<table>_old`; they are in `_snapshot_0026`), create them on the new table.
+--   6. VERIFY THE SWAP and remove the scratch objects (never an `_old` table).
 --
 -- Every column, default, CHECK, index and trigger that 0001..0025 gave these tables is carried
 -- over in the same column order (tests/migration-0026.test.ts diffs sqlite_master before and
 -- after and fails on any difference other than the intended constraint). The insert triggers
 -- are kept: NOT NULL does not reject '' and the trigger messages are what callers see.
 -- sources_delete_integrations is a trigger on `sources` that names `integrations`; SQLite
--- rewrites such triggers when a table is renamed, so it is dropped first and recreated last
--- (see 0018).
+-- rewrites such triggers when a table is renamed, so it is dropped and recreated straight after
+-- the integrations rename (see 0018).
 --
--- Nothing references these tables by foreign key apart from the temporary guards, and the new
--- foreign keys point AT organization. With ON DELETE CASCADE, deleting an organization now
--- removes its rows even if the explicit bounded purge (src/pipeline/purge.ts) has not drained
--- them; the purge still drains them first, in bounded batches.
+-- Nothing references these tables by foreign key, and the new foreign keys point AT organization.
+-- With ON DELETE CASCADE, deleting an organization now removes its rows even if the explicit
+-- bounded purge (src/pipeline/purge.ts) has not drained them; the purge still drains them first,
+-- in bounded batches, and also clears any `_old` rows of that organization.
 --
 -- SIZE: each table is copied in one statement. D1 documents a 30 second limit per query and
 -- warns that one statement touching hundreds of thousands of rows exceeds it; apply only below
 -- the ceiling in docs/RUNBOOK.md (purge deliveries by retention first).
 --
--- ROLLBACK: not reversible by SQL. The pre-contract schema is a superset (it accepts NULL), so
--- the previous Worker keeps working against this one. Restoring the nullable columns is
--- another rebuild; removed orphan rows are not restored automatically. The real undo is the D1
--- Time Travel bookmark taken BEFORE applying (docs/RUNBOOK.md).
+-- ROLLBACK: restore with scripts/migration-0026-recover.mjs (renames each `<table>_old` back and
+-- recreates the indexes and triggers from `_snapshot_0026`), valid only until traffic has resumed
+-- on the new tables; after that, D1 Time Travel to the bookmark taken BEFORE applying
+-- (docs/RUNBOOK.md). Removed orphan rows are in `<table>_old` until finalize.
 -- =============================================================================
 
--- --- 0. hygiene for a re-run, and the quarantine table -----------------------
+-- --- 0. hygiene for a re-run, tripwires, gates --------------------------------
+-- Scratch only: copies, verification rows, tripwire tables, gates, and the guard tables of the first
+-- version of this file. NEVER a `<table>_old`, never `_snapshot_0026`.
+DROP VIEW IF EXISTS _gate_0026_poison;
+DROP TABLE IF EXISTS _gate_0026_ok;
+DROP TABLE IF EXISTS _gate_0026_verified;
+DROP TABLE IF EXISTS _fk_required;
+DROP TABLE IF EXISTS _alter_mode;
+DROP TABLE IF EXISTS _old_absent;
+DROP TABLE IF EXISTS _live_present;
 DROP TABLE IF EXISTS _contract_verify;
+DROP TABLE IF EXISTS _swap_verify;
 DROP TABLE IF EXISTS _guard_integrations;
 DROP TABLE IF EXISTS integrations_v4;
 DROP TABLE IF EXISTS _guard_deliveries;
@@ -95,6 +127,54 @@ DROP TABLE IF EXISTS routing_decisions_v4;
 DROP TABLE IF EXISTS _guard_noise_open_failures;
 DROP TABLE IF EXISTS noise_open_failures_v4;
 
+-- While either gate table is missing, every ALTER TABLE ... RENAME in this database fails.
+CREATE VIEW _gate_0026_poison AS SELECT 1 FROM _gate_0026_ok, _gate_0026_verified;
+
+-- Tripwire: foreign keys must be enforced (the new constraints and the cascade rely on it).
+CREATE TABLE _fk_required (
+  on_ INTEGER NOT NULL CONSTRAINT foreign_keys_must_be_on CHECK (on_ = 1)
+);
+INSERT INTO _fk_required SELECT foreign_keys FROM pragma_foreign_keys;
+DROP TABLE _fk_required;
+
+-- Tripwire: legacy ALTER TABLE behaviour skips the schema check the gate relies on.
+CREATE TABLE _alter_mode (
+  legacy INTEGER NOT NULL CONSTRAINT legacy_alter_table_must_be_off CHECK (legacy = 0)
+);
+INSERT INTO _alter_mode SELECT legacy_alter_table FROM pragma_legacy_alter_table;
+DROP TABLE _alter_mode;
+
+-- Tripwire: an `_old` table means an earlier run left the originals aside. Finalize or restore first.
+CREATE TABLE _old_absent (
+  n INTEGER NOT NULL CONSTRAINT old_tables_from_an_earlier_run_must_be_finalized_or_restored_first CHECK (n = 0)
+);
+INSERT INTO _old_absent
+SELECT COUNT(*) FROM sqlite_master
+WHERE type = 'table' AND name IN
+  ('integrations_old','deliveries_old','notification_outbox_old','held_events_old','routing_decisions_old','noise_open_failures_old');
+DROP TABLE _old_absent;
+
+-- Tripwire: all six live tables exist (a half-applied earlier run has renamed one away).
+CREATE TABLE _live_present (
+  n INTEGER NOT NULL CONSTRAINT all_six_tenant_tables_must_exist CHECK (n = 6)
+);
+INSERT INTO _live_present
+SELECT COUNT(*) FROM sqlite_master
+WHERE type = 'table' AND name IN
+  ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures');
+DROP TABLE _live_present;
+
+-- The gate: exists only if every tripwire above holds right now. abs(-9223372036854775808) raises
+-- "integer overflow", which fails the statement and creates nothing.
+CREATE TABLE _gate_0026_ok AS
+SELECT CASE WHEN (SELECT foreign_keys FROM pragma_foreign_keys) = 1
+             AND (SELECT legacy_alter_table FROM pragma_legacy_alter_table) = 0
+             AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
+                   ('integrations_old','deliveries_old','notification_outbox_old','held_events_old','routing_decisions_old','noise_open_failures_old')) = 0
+             AND (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
+                   ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures')) = 6
+            THEN 1 ELSE abs(-9223372036854775808) END AS ok;
+
 CREATE TABLE IF NOT EXISTS legacy_orphaned_rows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   source_table TEXT NOT NULL CHECK(source_table IN
@@ -106,12 +186,32 @@ CREATE TABLE IF NOT EXISTS legacy_orphaned_rows (
 );
 CREATE INDEX IF NOT EXISTS legacy_orphaned_rows_table ON legacy_orphaned_rows(source_table, quarantined_at);
 
+-- Every index and trigger this file is about to drop and recreate, verbatim, so recovery
+-- (scripts/migration-0026-recover.mjs) can put them back on a restored original. DDL only: no tenant data.
+-- Refreshed only while the gate is open, so a tripped re-run never overwrites the snapshot that a
+-- restore needs.
+CREATE TABLE IF NOT EXISTS _snapshot_0026 (
+  type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  tbl_name TEXT NOT NULL,
+  sql TEXT NOT NULL,
+  PRIMARY KEY (type, name)
+);
+DELETE FROM _snapshot_0026 WHERE EXISTS (SELECT 1 FROM _gate_0026_ok);
+INSERT INTO _snapshot_0026(type, name, tbl_name, sql)
+SELECT type, name, tbl_name, sql FROM sqlite_master
+WHERE type IN ('index','trigger') AND sql IS NOT NULL
+  AND (tbl_name IN ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures')
+       OR name = 'sources_delete_integrations')
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
+
 -- --- 1. backfill (derivable tenants only) ------------------------------------
 UPDATE integrations
 SET organization_id = (SELECT s.organization_id FROM sources s WHERE s.id = integrations.source_id)
 WHERE (organization_id IS NULL OR organization_id = '')
   AND source_id IS NOT NULL
-  AND EXISTS (SELECT 1 FROM sources s WHERE s.id = integrations.source_id);
+  AND EXISTS (SELECT 1 FROM sources s WHERE s.id = integrations.source_id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 UPDATE deliveries
 SET organization_id = (
@@ -120,7 +220,8 @@ SET organization_id = (
 WHERE (organization_id IS NULL OR organization_id = '')
   AND EXISTS (
     SELECT 1 FROM integrations i
-    WHERE i.id = deliveries.integration_id AND i.organization_id IS NOT NULL AND i.organization_id <> '');
+    WHERE i.id = deliveries.integration_id AND i.organization_id IS NOT NULL AND i.organization_id <> '')
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 UPDATE notification_outbox
 SET organization_id = COALESCE(
@@ -130,7 +231,8 @@ SET organization_id = COALESCE(
    WHERE i.id = CASE WHEN json_valid(notification_outbox.payload_json)
                      THEN json_extract(notification_outbox.payload_json, '$.integrationId') END
      AND i.organization_id IS NOT NULL AND i.organization_id <> ''))
-WHERE (organization_id IS NULL OR organization_id = '');
+WHERE (organization_id IS NULL OR organization_id = '')
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 
 -- --- 2. quarantine what is left (metadata only; idempotent) ------------------
@@ -142,7 +244,8 @@ SELECT 'integrations', id,
 FROM integrations
 WHERE (organization_id IS NULL OR organization_id = ''
    OR NOT EXISTS (SELECT 1 FROM organization o WHERE o.id = integrations.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'integrations' AND q.row_id = integrations.id);
+  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'integrations' AND q.row_id = integrations.id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 INSERT INTO legacy_orphaned_rows(source_table, row_id, reason, detail_json)
 SELECT 'deliveries', id,
@@ -152,7 +255,8 @@ SELECT 'deliveries', id,
 FROM deliveries
 WHERE (organization_id IS NULL OR organization_id = ''
    OR NOT EXISTS (SELECT 1 FROM organization o WHERE o.id = deliveries.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'deliveries' AND q.row_id = deliveries.id);
+  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'deliveries' AND q.row_id = deliveries.id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 INSERT INTO legacy_orphaned_rows(source_table, row_id, reason, detail_json)
 SELECT 'notification_outbox', id,
@@ -161,7 +265,8 @@ SELECT 'notification_outbox', id,
 FROM notification_outbox
 WHERE (organization_id IS NULL OR organization_id = ''
    OR NOT EXISTS (SELECT 1 FROM organization o WHERE o.id = notification_outbox.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'notification_outbox' AND q.row_id = notification_outbox.id);
+  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'notification_outbox' AND q.row_id = notification_outbox.id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 INSERT INTO legacy_orphaned_rows(source_table, row_id, reason, detail_json)
 SELECT 'held_events', id,
@@ -169,7 +274,8 @@ SELECT 'held_events', id,
   json_object('integration_id', substr(integration_id, 1, 200), 'state', substr(state, 1, 200), 'held_at', held_at, 'event_type', substr(event_type, 1, 200))
 FROM held_events
 WHERE (organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization o WHERE o.id = held_events.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'held_events' AND q.row_id = held_events.id);
+  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'held_events' AND q.row_id = held_events.id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 INSERT INTO legacy_orphaned_rows(source_table, row_id, reason, detail_json)
 SELECT 'routing_decisions', id,
@@ -178,7 +284,8 @@ SELECT 'routing_decisions', id,
               'decided_at', decided_at)
 FROM routing_decisions
 WHERE (organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization o WHERE o.id = routing_decisions.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'routing_decisions' AND q.row_id = routing_decisions.id);
+  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'routing_decisions' AND q.row_id = routing_decisions.id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 INSERT INTO legacy_orphaned_rows(source_table, row_id, reason, detail_json)
 SELECT 'noise_open_failures', CAST(id AS TEXT),
@@ -186,7 +293,8 @@ SELECT 'noise_open_failures', CAST(id AS TEXT),
   json_object('integration_id', substr(integration_id, 1, 200), 'opened_at', opened_at)
 FROM noise_open_failures
 WHERE (organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization o WHERE o.id = noise_open_failures.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'noise_open_failures' AND q.row_id = CAST(noise_open_failures.id AS TEXT));
+  AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'noise_open_failures' AND q.row_id = CAST(noise_open_failures.id AS TEXT))
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 -- --- 3. rebuild with the constraint -------------------------------------------
 CREATE TABLE integrations_v4 (
@@ -231,6 +339,7 @@ SELECT
 FROM integrations
 WHERE organization_id IS NOT NULL AND organization_id <> ''
   AND EXISTS (SELECT 1 FROM organization o WHERE o.id = integrations.organization_id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok)
 ORDER BY rowid;
 
 CREATE TABLE deliveries_v4 (
@@ -275,6 +384,7 @@ SELECT
 FROM deliveries
 WHERE organization_id IS NOT NULL AND organization_id <> ''
   AND EXISTS (SELECT 1 FROM organization o WHERE o.id = deliveries.organization_id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok)
 ORDER BY rowid;
 
 CREATE TABLE notification_outbox_v4 (
@@ -300,6 +410,7 @@ SELECT
 FROM notification_outbox
 WHERE organization_id IS NOT NULL AND organization_id <> ''
   AND EXISTS (SELECT 1 FROM organization o WHERE o.id = notification_outbox.organization_id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok)
 ORDER BY rowid;
 
 CREATE TABLE held_events_v4 (
@@ -340,6 +451,7 @@ SELECT
   repo,actor,status,summary,resolved
 FROM held_events
 WHERE organization_id <> '' AND EXISTS (SELECT 1 FROM organization o WHERE o.id = held_events.organization_id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok)
 ORDER BY rowid;
 
 CREATE TABLE routing_decisions_v4 (
@@ -361,6 +473,7 @@ SELECT
   id,organization_id,integration_id,event_type,outcome,filter_id,reason,unknown_fact,decided_at
 FROM routing_decisions
 WHERE organization_id <> '' AND EXISTS (SELECT 1 FROM organization o WHERE o.id = routing_decisions.organization_id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok)
 ORDER BY rowid;
 
 CREATE TABLE noise_open_failures_v4 (
@@ -375,7 +488,8 @@ CREATE TABLE noise_open_failures_v4 (
 INSERT INTO noise_open_failures_v4(id,organization_id,integration_id,key_hash,opened_at)
 SELECT id,organization_id,integration_id,key_hash,opened_at
 FROM noise_open_failures
-WHERE organization_id <> '' AND EXISTS (SELECT 1 FROM organization o WHERE o.id = noise_open_failures.organization_id);
+WHERE organization_id <> '' AND EXISTS (SELECT 1 FROM organization o WHERE o.id = noise_open_failures.organization_id)
+  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 -- --- 4. verify the copy against the live original (loud: aborts where D1 aborts) ---
 CREATE TABLE _contract_verify (
@@ -407,16 +521,27 @@ UNION ALL SELECT 'noise_open_failures',
   (SELECT COUNT(*) FROM noise_open_failures) = (SELECT COUNT(*) FROM noise_open_failures_v4) + (SELECT COUNT(*) FROM noise_open_failures o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
   AND NOT EXISTS (SELECT 1 FROM noise_open_failures o WHERE (o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
     AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'noise_open_failures' AND q.row_id = CAST(o.id AS TEXT)));
+
+-- Second gate. Exists only if all six rows above were inserted, i.e. every balance held. If the INSERT
+-- above failed (so _contract_verify is empty) the CASE raises and the table is not created.
+CREATE TABLE _gate_0026_verified AS
+SELECT CASE WHEN (SELECT COUNT(*) FROM _contract_verify WHERE balanced = 1) = 6
+            THEN 1 ELSE abs(-9223372036854775808) END AS ok;
 DROP TABLE _contract_verify;
 
--- --- 5. swap, table by table. The old table is dropped only behind its guard -------
-DROP TRIGGER IF EXISTS sources_delete_integrations;
+-- --- 5. swap, table by table. Originals are renamed aside and KEPT as `<table>_old` --------
+-- Every ALTER TABLE ... RENAME below fails unless _gate_0026_ok and _gate_0026_verified exist.
 
 -- integrations
-CREATE TABLE _guard_integrations (ref REFERENCES integrations(id));
-INSERT INTO _guard_integrations(ref) SELECT id FROM integrations ORDER BY rowid LIMIT 1;
 ALTER TABLE integrations RENAME TO integrations_old;
 ALTER TABLE integrations_v4 RENAME TO integrations;
+-- The rename rewrote this trigger to name integrations_old; recreate it on the new table at once.
+DROP TRIGGER IF EXISTS sources_delete_integrations;
+CREATE TRIGGER sources_delete_integrations
+AFTER DELETE ON sources
+BEGIN
+  DELETE FROM integrations WHERE source_id = OLD.id AND organization_id = OLD.organization_id;
+END;
 DROP INDEX IF EXISTS integrations_repo;
 DROP INDEX IF EXISTS integrations_org_idx;
 DROP INDEX IF EXISTS integrations_kek_version;
@@ -465,17 +590,7 @@ BEGIN
     AND NOT EXISTS (SELECT 1 FROM sources WHERE id = NEW.source_id AND organization_id = NEW.organization_id);
 END;
 
--- Release the guard only if the ORIGINAL, recounted now, balances against the copy.
-DELETE FROM _guard_integrations
-WHERE (SELECT COUNT(*) FROM integrations_old) = (SELECT COUNT(*) FROM integrations) + (SELECT COUNT(*) FROM integrations_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM integrations_old o WHERE (o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'integrations' AND q.row_id = o.id));
-DROP TABLE integrations_old;
-DROP TABLE _guard_integrations;
-
 -- deliveries
-CREATE TABLE _guard_deliveries (ref REFERENCES deliveries(id));
-INSERT INTO _guard_deliveries(ref) SELECT id FROM deliveries ORDER BY rowid LIMIT 1;
 ALTER TABLE deliveries RENAME TO deliveries_old;
 ALTER TABLE deliveries_v4 RENAME TO deliveries;
 DROP INDEX IF EXISTS deliveries_org_idx;
@@ -492,17 +607,8 @@ CREATE INDEX deliveries_replay_of ON deliveries(replay_of);
 CREATE INDEX deliveries_org_created ON deliveries(organization_id, created_at);
 CREATE INDEX deliveries_state_created ON deliveries(state, created_at);
 CREATE INDEX deliveries_org_updated ON deliveries(organization_id, updated_at DESC, id DESC);
--- Release the guard only if the ORIGINAL, recounted now, balances against the copy.
-DELETE FROM _guard_deliveries
-WHERE (SELECT COUNT(*) FROM deliveries_old) = (SELECT COUNT(*) FROM deliveries) + (SELECT COUNT(*) FROM deliveries_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM deliveries_old o WHERE (o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'deliveries' AND q.row_id = o.id));
-DROP TABLE deliveries_old;
-DROP TABLE _guard_deliveries;
 
 -- notification_outbox
-CREATE TABLE _guard_notification_outbox (ref REFERENCES notification_outbox(id));
-INSERT INTO _guard_notification_outbox(ref) SELECT id FROM notification_outbox ORDER BY rowid LIMIT 1;
 ALTER TABLE notification_outbox RENAME TO notification_outbox_old;
 ALTER TABLE notification_outbox_v4 RENAME TO notification_outbox;
 DROP INDEX IF EXISTS notification_outbox_pending;
@@ -513,17 +619,8 @@ CREATE INDEX notification_outbox_pending ON notification_outbox(state,created_at
 CREATE INDEX notification_outbox_org_idx ON notification_outbox(organization_id);
 CREATE INDEX notification_outbox_lease ON notification_outbox(state,lease_expires_at);
 CREATE INDEX notification_outbox_org_due ON notification_outbox(organization_id,state,not_before);
--- Release the guard only if the ORIGINAL, recounted now, balances against the copy.
-DELETE FROM _guard_notification_outbox
-WHERE (SELECT COUNT(*) FROM notification_outbox_old) = (SELECT COUNT(*) FROM notification_outbox) + (SELECT COUNT(*) FROM notification_outbox_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM notification_outbox_old o WHERE (o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'notification_outbox' AND q.row_id = o.id));
-DROP TABLE notification_outbox_old;
-DROP TABLE _guard_notification_outbox;
 
 -- held_events
-CREATE TABLE _guard_held_events (ref REFERENCES held_events(id));
-INSERT INTO _guard_held_events(ref) SELECT id FROM held_events ORDER BY rowid LIMIT 1;
 ALTER TABLE held_events RENAME TO held_events_old;
 ALTER TABLE held_events_v4 RENAME TO held_events;
 DROP INDEX IF EXISTS held_events_due;
@@ -536,17 +633,8 @@ CREATE INDEX held_events_state_due ON held_events(state, release_at);
 CREATE INDEX held_events_failed ON held_events(state, released_at) WHERE state = 'failed';
 CREATE INDEX held_events_released_in ON held_events(organization_id, released_in) WHERE released_in IS NOT NULL;
 CREATE INDEX held_events_released_at ON held_events(released_at) WHERE released_at IS NOT NULL;
--- Release the guard only if the ORIGINAL, recounted now, balances against the copy.
-DELETE FROM _guard_held_events
-WHERE (SELECT COUNT(*) FROM held_events_old) = (SELECT COUNT(*) FROM held_events) + (SELECT COUNT(*) FROM held_events_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM held_events_old o WHERE (o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'held_events' AND q.row_id = o.id));
-DROP TABLE held_events_old;
-DROP TABLE _guard_held_events;
 
 -- routing_decisions
-CREATE TABLE _guard_routing_decisions (ref REFERENCES routing_decisions(id));
-INSERT INTO _guard_routing_decisions(ref) SELECT id FROM routing_decisions ORDER BY rowid LIMIT 1;
 ALTER TABLE routing_decisions RENAME TO routing_decisions_old;
 ALTER TABLE routing_decisions_v4 RENAME TO routing_decisions;
 DROP INDEX IF EXISTS routing_decisions_integration;
@@ -554,32 +642,44 @@ DROP INDEX IF EXISTS routing_decisions_decided;
 CREATE INDEX routing_decisions_integration
   ON routing_decisions(organization_id, integration_id, decided_at DESC, id DESC);
 CREATE INDEX routing_decisions_decided ON routing_decisions(decided_at);
--- Release the guard only if the ORIGINAL, recounted now, balances against the copy.
-DELETE FROM _guard_routing_decisions
-WHERE (SELECT COUNT(*) FROM routing_decisions_old) = (SELECT COUNT(*) FROM routing_decisions) + (SELECT COUNT(*) FROM routing_decisions_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM routing_decisions_old o WHERE (o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'routing_decisions' AND q.row_id = o.id));
-DROP TABLE routing_decisions_old;
-DROP TABLE _guard_routing_decisions;
 
 -- noise_open_failures
-CREATE TABLE _guard_noise_open_failures (ref REFERENCES noise_open_failures(id));
-INSERT INTO _guard_noise_open_failures(ref) SELECT id FROM noise_open_failures ORDER BY rowid LIMIT 1;
 ALTER TABLE noise_open_failures RENAME TO noise_open_failures_old;
 ALTER TABLE noise_open_failures_v4 RENAME TO noise_open_failures;
 DROP INDEX IF EXISTS noise_open_failures_opened;
 CREATE INDEX noise_open_failures_opened ON noise_open_failures(opened_at);
--- Release the guard only if the ORIGINAL, recounted now, balances against the copy.
-DELETE FROM _guard_noise_open_failures
-WHERE (SELECT COUNT(*) FROM noise_open_failures_old) = (SELECT COUNT(*) FROM noise_open_failures) + (SELECT COUNT(*) FROM noise_open_failures_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-  AND NOT EXISTS (SELECT 1 FROM noise_open_failures_old o WHERE (o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'noise_open_failures' AND q.row_id = CAST(o.id AS TEXT)));
-DROP TABLE noise_open_failures_old;
-DROP TABLE _guard_noise_open_failures;
 
--- recreate the trigger on `sources` that deletes bound integrations (see 0018)
-CREATE TRIGGER sources_delete_integrations
-AFTER DELETE ON sources
-BEGIN
-  DELETE FROM integrations WHERE source_id = OLD.id AND organization_id = OLD.organization_id;
-END;
+-- --- 6. verify the swap against the kept originals, then remove the scratch objects ----------
+-- A row written to an original after the copy (a writer outside the freeze) shows up here as a count
+-- that does not balance. Nothing is dropped either way: the row is in `<table>_old`.
+CREATE TABLE _swap_verify (
+  tbl TEXT NOT NULL,
+  balanced INTEGER NOT NULL CONSTRAINT swap_counts_must_match CHECK(balanced = 1)
+);
+INSERT INTO _swap_verify(tbl, balanced)
+SELECT 'tables', (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
+    ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures',
+     'integrations_old','deliveries_old','notification_outbox_old','held_events_old','routing_decisions_old','noise_open_failures_old')) = 12
+UNION ALL SELECT 'integrations',
+  (SELECT COUNT(*) FROM integrations_old) = (SELECT COUNT(*) FROM integrations) + (SELECT COUNT(*) FROM integrations_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
+UNION ALL SELECT 'deliveries',
+  (SELECT COUNT(*) FROM deliveries_old) = (SELECT COUNT(*) FROM deliveries) + (SELECT COUNT(*) FROM deliveries_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
+UNION ALL SELECT 'notification_outbox',
+  (SELECT COUNT(*) FROM notification_outbox_old) = (SELECT COUNT(*) FROM notification_outbox) + (SELECT COUNT(*) FROM notification_outbox_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
+UNION ALL SELECT 'held_events',
+  (SELECT COUNT(*) FROM held_events_old) = (SELECT COUNT(*) FROM held_events) + (SELECT COUNT(*) FROM held_events_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
+UNION ALL SELECT 'routing_decisions',
+  (SELECT COUNT(*) FROM routing_decisions_old) = (SELECT COUNT(*) FROM routing_decisions) + (SELECT COUNT(*) FROM routing_decisions_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
+UNION ALL SELECT 'noise_open_failures',
+  (SELECT COUNT(*) FROM noise_open_failures_old) = (SELECT COUNT(*) FROM noise_open_failures) + (SELECT COUNT(*) FROM noise_open_failures_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id));
+DROP TABLE _swap_verify;
+DROP VIEW IF EXISTS _gate_0026_poison;
+DROP TABLE IF EXISTS _gate_0026_ok;
+DROP TABLE IF EXISTS _gate_0026_verified;
+-- Copies that were never swapped in (only when a tripwire or the verification stopped the swap).
+DROP TABLE IF EXISTS integrations_v4;
+DROP TABLE IF EXISTS deliveries_v4;
+DROP TABLE IF EXISTS notification_outbox_v4;
+DROP TABLE IF EXISTS held_events_v4;
+DROP TABLE IF EXISTS routing_decisions_v4;
+DROP TABLE IF EXISTS noise_open_failures_v4;

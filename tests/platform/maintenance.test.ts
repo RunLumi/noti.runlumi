@@ -86,4 +86,40 @@ describe('maintenance mode', () => {
     expect(retryAll).toHaveBeenCalledWith({ delaySeconds: 300 });
     expect(touched()).toBe(0);
   });
+
+  it('never gates the dead-letter consumer: its message is not handed back (max_retries 1 would drop it)', async () => {
+    const { env } = envWith('true');
+    const retryAll = vi.fn();
+    await worker.queue(
+      { queue: 'noti-dead-letters', messages: [], retryAll } as unknown as MessageBatch<unknown>,
+      env,
+    );
+    expect(retryAll).not.toHaveBeenCalled();
+  });
+});
+
+describe('/health/ready warns while migration 0026 originals are kept', () => {
+  const ready = async (env: Bindings) =>
+    await (
+      await worker.fetch(new Request('https://noti.test/health/ready'), env, ctx)
+    ).json<{
+      warnings?: string[];
+    }>();
+
+  it('warns (never fails on it) while a `<table>_old` exists, and not once they are gone', async () => {
+    const { env } = envWith(undefined);
+    expect((await ready(env)).warnings).toEqual(['migration_0026_old_tables_present']);
+    const clean = envWith(undefined);
+    const raw = clean.env.DB as unknown as { prepare: (s: string) => { run: () => Promise<unknown> } };
+    for (const t of [
+      'integrations',
+      'deliveries',
+      'notification_outbox',
+      'held_events',
+      'routing_decisions',
+      'noise_open_failures',
+    ])
+      await raw.prepare(`DROP TABLE ${t}_old`).run();
+    expect((await ready(clean.env)).warnings).toBeUndefined();
+  });
 });

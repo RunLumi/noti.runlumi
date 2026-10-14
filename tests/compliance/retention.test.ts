@@ -14,6 +14,7 @@ import { renderRetentionDoc } from '../../src/compliance/render-retention';
 import {
   DRAINED_BEFORE_ORGANIZATION_DELETE,
   DRAINED_VIA_INSTALLATION,
+  LEGACY_OLD_TABLES,
   TENANT_TABLES,
 } from '../../src/pipeline/purge';
 import { AUDIT_RETENTION, DELIVERY_RETENTION } from '../../src/pipeline/retention';
@@ -162,6 +163,9 @@ describe('every claimed removal mechanism exists', () => {
         case 'via_installation':
           expect(DRAINED_VIA_INSTALLATION as readonly string[], row.id).toContain(row.table);
           break;
+        case 'legacy_old':
+          expect(LEGACY_OLD_TABLES as readonly string[], row.id).toContain(row.table);
+          break;
         case 'organization_delete':
           expect(row.table).toBe('organization');
           expect(read('src/pipeline/purge.ts')).toContain('DELETE FROM organization WHERE id=?');
@@ -204,6 +208,7 @@ describe('workspace purge covers every tenant table', () => {
     const purged = new Set<string>([
       ...TENANT_TABLES,
       ...DRAINED_BEFORE_ORGANIZATION_DELETE,
+      ...LEGACY_OLD_TABLES,
       ...tables.filter((t) =>
         foreignKeys(t).some((fk) => fk.table === 'organization' && fk.on_delete === 'CASCADE'),
       ),
@@ -216,6 +221,17 @@ describe('workspace purge covers every tenant table', () => {
     for (const ledger of LEDGER_TABLES_OUTLIVING_PURGE) {
       expect(RETENTION_MATRIX.find((r) => r.table === ledger)?.retention.kind).toBe('indefinite');
     }
+  });
+});
+
+describe('temporary tables', () => {
+  it('every `<table>_old` has a temporary retention with a stated drop-by, and the doc says so', () => {
+    const rows = RETENTION_MATRIX.filter((r) => r.retention.kind === 'temporary');
+    expect(rows.map((r) => r.table).sort()).toEqual([...LEGACY_OLD_TABLES, '_snapshot_0026'].sort());
+    for (const r of rows) {
+      expect(r.retention.kind === 'temporary' && r.retention.dropBy).toMatch(/migration-0026-finalize/);
+    }
+    expect(renderRetentionDoc()).toContain('TEMPORARY.');
   });
 });
 

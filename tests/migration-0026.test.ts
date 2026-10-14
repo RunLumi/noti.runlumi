@@ -1,7 +1,4 @@
-import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { applyMigration, createFakeD1, migrationFiles, seedOrganization } from './support/d1';
 import { seedLegacy } from './support/legacy-0026';
@@ -309,147 +306,18 @@ describe('migration 0026: backfill, quarantine and verification', () => {
     expect(raw.prepare("SELECT * FROM deliveries WHERE id='d-set'").all()).toEqual(keptRows);
   });
 
-  describe('when the file fails part way', () => {
-    const migrationSql = (): string =>
-      readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations', FILE), 'utf8');
-    const VERIFY = '-- --- 4. verify';
-    const SWAP = '-- --- 5. swap';
-    const lost = `DELETE FROM deliveries_v4 WHERE id = 'd-set';\n`;
-    const late = `INSERT INTO deliveries(id,integration_id,state,organization_id,created_at) VALUES('d-late','i-ok','sent','org-a','2026-02-01');\n`;
-    const original = (raw: DatabaseSync) => ({
-      nullable: must(columns(raw, 'deliveries').find((c) => c.name === 'organization_id')).notnull === 0,
-      // organization_id is excluded: the backfill (step 1) legitimately fills it before any failure.
-      rows: withoutOrg(raw.prepare('SELECT * FROM deliveries ORDER BY rowid').all()),
-    });
-    const withoutOrg = (rows: Record<string, unknown>[]): unknown[] =>
-      rows.map(({ organization_id: _o, ...rest }) => rest);
-    const leftovers = (raw: DatabaseSync): string[] =>
-      (
-        raw
-          .prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE '%\\_v4' ESCAPE '\\' OR name LIKE '%\\_old' ESCAPE '\\' OR name LIKE '\\_guard%' ESCAPE '\\' OR name LIKE '\\_contract%' ESCAPE '\\') ORDER BY name",
-          )
-          .all() as { name: string }[]
-      ).map((r) => r.name);
-
-    it('aborts inside a transaction and leaves the old schema untouched', () => {
-      const { raw } = createFakeD1({ before: '0026' });
-      seedLegacy(raw);
-      const before = original(raw);
-      const sql = migrationSql();
-      expect(sql).toContain(VERIFY);
-      raw.exec('BEGIN');
-      expect(() => raw.exec(sql.replace(VERIFY, `${lost}${VERIFY}`))).toThrow(/row_counts_must_match/);
-      raw.exec('ROLLBACK');
-      expect(original(raw)).toEqual(before);
-      expect(
-        raw
-          .prepare("SELECT name FROM sqlite_master WHERE name IN ('legacy_orphaned_rows','deliveries_v4')")
-          .all(),
-      ).toEqual([]);
-    });
-
-    it('with no wrapper transaction: stops before anything is renamed, then a plain re-run completes cleanly', () => {
-      const { raw } = createFakeD1({ before: '0026' });
-      seedLegacy(raw);
-      const before = original(raw);
-      const sql = migrationSql();
-      // node:sqlite stops at the first error, like a runner that aborts the file.
-      expect(() => raw.exec(sql.replace(VERIFY, `${lost}${VERIFY}`))).toThrow(/row_counts_must_match/);
-      // Originals intact and still the live tables; only scratch objects are left behind.
-      expect(original(raw)).toEqual(before);
-      expect(leftovers(raw)).toContain('deliveries_v4');
-      // Re-running the unmodified file cleans the scratch tables and finishes.
-      raw.exec(sql);
-      expect(leftovers(raw)).toEqual([]);
-      expect(must(columns(raw, 'deliveries').find((c) => c.name === 'organization_id')).notnull).toBe(1);
-      expect(count(raw, 'deliveries')).toBe(before.rows.length - 3);
-      expect(raw.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-    });
-
-    it('a row written between the copy and the swap is never lost: the guard refuses the DROP', () => {
-      const { raw } = createFakeD1({ before: '0026' });
-      seedLegacy(raw);
-      const sql = migrationSql();
-      expect(sql).toContain(SWAP);
-      // The verify has passed; a live writer then adds one row to the ORIGINAL table.
-      expect(() => raw.exec(sql.replace(SWAP, `${late}${SWAP}`))).toThrow(/FOREIGN KEY constraint failed/);
-      const rows = raw.prepare("SELECT id FROM deliveries_old WHERE id='d-late'").all();
-      expect(rows).toHaveLength(1);
-      expect(count(raw, 'deliveries_old')).toBe(8);
-    });
-
-    /** A runner that, like the sqlite3 shell, carries on after an error. */
-    function runCarryingOn(raw: DatabaseSync, sql: string): string[] {
-      const errors: string[] = [];
-      const text = sql.replace(/--[^\n]*/g, '');
-      const statements: string[] = [];
-      let current = '';
-      let inTrigger = false;
-      for (const line of text.split('\n')) {
-        current += `${line}\n`;
-        if (/^\s*CREATE TRIGGER\b/i.test(line)) inTrigger = true;
-        if (inTrigger ? /^\s*END;\s*$/i.test(line) : /;\s*$/.test(line)) {
-          statements.push(current.trim());
-          current = '';
-          inTrigger = false;
-        }
-      }
-      for (const statement of statements.filter((x) => x.length > 0)) {
-        try {
-          raw.exec(statement);
-        } catch (e) {
-          errors.push(e instanceof Error ? e.message : String(e));
-        }
-      }
-      return errors;
-    }
-
-    it('a runner that carries on after a failed verify still cannot destroy the original', () => {
-      const { raw } = createFakeD1({ before: '0026' });
-      seedLegacy(raw);
-      const before = original(raw);
-      const errors = runCarryingOn(raw, migrationSql().replace(VERIFY, `${lost}${VERIFY}`));
-      expect(errors.some((e) => /row_counts_must_match/.test(e))).toBe(true);
-      expect(errors.some((e) => /FOREIGN KEY constraint failed/.test(e))).toBe(true);
-      // Every original row survives, byte for byte, in the table the DROP was refused for.
-      expect(
-        withoutOrg(
-          raw.prepare('SELECT * FROM deliveries_old ORDER BY rowid').all() as Record<string, unknown>[],
-        ),
-      ).toEqual(before.rows);
-      // Tables whose copy was sound completed normally.
-      expect(must(columns(raw, 'held_events').find((c) => c.name === 'organization_id')).notnull).toBe(1);
-      expect(leftovers(raw)).toEqual(['deliveries_old']);
-    });
-
-    it('a runner that carries on after a late writer also keeps every row', () => {
-      const { raw } = createFakeD1({ before: '0026' });
-      seedLegacy(raw);
-      const errors = runCarryingOn(raw, migrationSql().replace(SWAP, `${late}${SWAP}`));
-      expect(errors.some((e) => /FOREIGN KEY constraint failed/.test(e))).toBe(true);
-      expect(raw.prepare("SELECT id FROM deliveries_old WHERE id='d-late'").all()).toHaveLength(1);
-    });
-
-    it('is safe to apply twice', () => {
-      const { raw } = createFakeD1({ before: '0026' });
-      seedLegacy(raw);
-      applyMigration(raw, FILE);
-      const once = Object.fromEntries(
-        TABLES.map((t) => [t, raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]),
-      );
-      const quarantine = raw
-        .prepare('SELECT source_table,row_id,reason FROM legacy_orphaned_rows ORDER BY id')
-        .all();
-      applyMigration(raw, FILE);
-      expect(
-        Object.fromEntries(TABLES.map((t) => [t, raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
-      ).toEqual(once);
-      expect(
-        raw.prepare('SELECT source_table,row_id,reason FROM legacy_orphaned_rows ORDER BY id').all(),
-      ).toEqual(quarantine);
-      expect(leftovers(raw)).toEqual([]);
-    });
+  it('refuses a second application over the kept originals instead of rebuilding (the failure matrix is in migration-0026-matrix.test.ts)', () => {
+    const { raw } = createFakeD1({ before: '0026' });
+    seedLegacy(raw);
+    applyMigration(raw, FILE);
+    const once = Object.fromEntries(
+      TABLES.map((t) => [t, raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()]),
+    );
+    expect(() => applyMigration(raw, FILE)).toThrow(/old_tables_from_an_earlier_run/);
+    expect(
+      Object.fromEntries(TABLES.map((t) => [t, raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all()])),
+    ).toEqual(once);
+    for (const t of TABLES) expect(count(raw, `${t}_old`), t).toBeGreaterThan(0);
   });
 
   it('copies in rowid order, so the recency the API reads from rowid survives', () => {

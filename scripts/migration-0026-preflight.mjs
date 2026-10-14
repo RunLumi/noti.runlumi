@@ -42,6 +42,14 @@ export function evaluate(rows, options = {}) {
   const review = [];
   if (rows.length === 0)
     blockers.push('no preflight rows were read: the file is empty or not wrangler --json output');
+  for (const r of byPrefix('blocker:')) {
+    if (r.n > 0)
+      blockers.push(
+        r.check === 'blocker:foreign_keys_off'
+          ? 'PRAGMA foreign_keys is not 1 on this connection; migration 0026 trips on it'
+          : `${r.n} <table>_old table(s) already exist: finalize (scripts/migration-0026-finalize.mjs) or restore (scripts/migration-0026-recover.mjs) first`,
+      );
+  }
   for (const r of byPrefix('total:')) {
     if (r.n > ROW_CEILING)
       blockers.push(

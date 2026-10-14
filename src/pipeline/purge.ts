@@ -30,6 +30,30 @@ export const TENANT_TABLES = [
   'destination_health',
 ] as const;
 
+/**
+ * TEMPORARY tables migration 0026 leaves behind: the six rebuilt originals, renamed aside as `<table>_old`
+ * and kept until an operator runs scripts/migration-0026-finalize.mjs (docs/RUNBOOK.md). They hold tenant
+ * rows, including orphans with credentials, and have no foreign key, so the purge clears a workspace's rows
+ * from them when they exist and tolerates their absence. Rows with no organization are not reachable here;
+ * finalize removes them.
+ */
+export const LEGACY_OLD_TABLES = [
+  'integrations_old',
+  'deliveries_old',
+  'notification_outbox_old',
+  'held_events_old',
+  'routing_decisions_old',
+  'noise_open_failures_old',
+] as const;
+
+/** Names of the `_old` tables that exist right now (none once finalized, and on a fresh database before 0026). */
+export async function existingLegacyTables(db: D1Database): Promise<string[]> {
+  const rows = await db
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%\\_old' ESCAPE '\\'")
+    .all<{ name: string }>();
+  return rows.results.map((r) => r.name).filter((n) => (LEGACY_OLD_TABLES as readonly string[]).includes(n));
+}
+
 /** Tables that cascade from organization but are drained in bounded rounds first (see boundedDeletes). */
 export const DRAINED_BEFORE_ORGANIZATION_DELETE = ['audit_events', 'github_auth_states'] as const;
 /** Child table of `github_installations`, drained through a join before the organization is deleted. */
@@ -47,8 +71,8 @@ export interface PurgeReport {
  * auth states, synced repositories) are drained here first, so the final organization
  * delete only cascades small, bounded sets (members, invitations, installations).
  */
-function boundedDeletes(db: D1Database, org: string): D1PreparedStatement[] {
-  const byOrg = [...TENANT_TABLES, ...DRAINED_BEFORE_ORGANIZATION_DELETE].map((table) =>
+function boundedDeletes(db: D1Database, org: string, legacy: readonly string[]): D1PreparedStatement[] {
+  const byOrg = [...TENANT_TABLES, ...legacy, ...DRAINED_BEFORE_ORGANIZATION_DELETE].map((table) =>
     db
       .prepare(
         `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE organization_id=? LIMIT ?)`,
@@ -89,7 +113,7 @@ export async function purgeDueWorkspace(db: D1Database, now: number): Promise<Pu
     .run();
   if (claimed.meta.changes !== 1) return { organizationId: null, deleted: 0, completed: false };
 
-  const results = await db.batch(boundedDeletes(db, org));
+  const results = await db.batch(boundedDeletes(db, org, await existingLegacyTables(db)));
   const deleted = results.reduce((sum, r) => sum + (r.meta.changes ?? 0), 0);
   if (results.some((r) => (r.meta.changes ?? 0) === PURGE_ROWS_PER_TICK)) {
     return { organizationId: org, deleted, completed: false };

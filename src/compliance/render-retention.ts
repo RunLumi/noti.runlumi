@@ -42,6 +42,8 @@ export function describeRetention(r: Retention): string {
       }`;
     case 'indefinite':
       return `No expiry. ${r.reason}`;
+    case 'temporary':
+      return `TEMPORARY. ${r.dropBy}`;
     case 'not_enforced':
       return `NOT ENFORCED. ${r.gap}`;
   }
