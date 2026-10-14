@@ -17,7 +17,8 @@ No formal security audit has been performed.
 
 The full model (assets, trust boundaries, STRIDE per entry point) and the accepted-risk
 register are in [`THREAT_MODEL.md`](THREAT_MODEL.md). Release status is in
-[`RELEASE_GATES.md`](RELEASE_GATES.md). Vulnerability reports: see the root `SECURITY.md`.
+[`RELEASE_GATES.md`](RELEASE_GATES.md). Where each authentication and authorization decision lives, and the
+route-by-guard table, is in [`AUTHORIZATION.md`](AUTHORIZATION.md). Vulnerability reports: see the root `SECURITY.md`.
 
 ## Response headers
 

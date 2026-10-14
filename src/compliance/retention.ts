@@ -746,6 +746,25 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     ...placeholders,
   },
   {
+    id: 'legacy_orphaned_rows',
+    table: 'legacy_orphaned_rows',
+    category: 'legacy_retired',
+    personalData: 'indirect',
+    dataHeld:
+      'Metadata of rows that had no derivable workspace when migration 0026 ran (repository, destination, state, timestamps, ids; each free-text field cut to 200 characters). No credentials, no event payloads.',
+    purpose:
+      'Lets an operator see what the tenant-contract migration removed from the live tables. Read by no code.',
+    retention: {
+      kind: 'not_enforced',
+      gap: 'Nothing drops it. The operator reviews it after applying migration 0026 and runs DROP TABLE legacy_orphaned_rows (docs/RUNBOOK.md).',
+    },
+    deletion: [{ kind: 'none', reason: 'No code path touches it; an operator drops the table by hand.' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Excluded on purpose: the rows belong to no workspace.',
+    ...placeholders,
+  },
+  {
     id: 'workspace_deletions',
     table: 'workspace_deletions',
     category: 'platform_state',

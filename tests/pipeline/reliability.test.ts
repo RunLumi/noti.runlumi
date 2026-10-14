@@ -255,10 +255,12 @@ describe('atomic outbox claim (F172, D4)', () => {
     expect(sent).toEqual([]);
   });
 
-  it('never routes a row that has no tenant', async () => {
-    db.raw
-      .prepare("INSERT INTO notification_outbox(id,payload_json) VALUES('orphan',?)")
-      .run(JSON.stringify({ id: 'orphan', integrationId: 'int-a', organizationId: 'org-a' }));
+  it('cannot hold a row that has no tenant: the schema refuses it (0026)', async () => {
+    expect(() =>
+      db.raw
+        .prepare("INSERT INTO notification_outbox(id,payload_json) VALUES('orphan',?)")
+        .run(JSON.stringify({ id: 'orphan', integrationId: 'int-a', organizationId: 'org-a' })),
+    ).toThrow(/NOT NULL constraint failed: notification_outbox.organization_id/);
     expect((await dispatchOutbox(env, dispatchDeps())).workspaces).toBe(0);
   });
 });

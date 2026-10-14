@@ -540,6 +540,7 @@ What the files themselves say:
 | 0021 noise control | Old Worker ignores the column and both tables, but it **stops releasing**: rows in `held`/`claimed` wait until a Worker that knows about them runs again (nothing is lost). Turn noise settings off and let `held_events` drain before rolling back if updates must not be delayed | `DROP TABLE held_events; DROP TABLE noise_open_failures;` is safe only once nothing is waiting; the column stays (dropping it needs a rebuild) |
 | 0024 credential lifecycle | Old Worker ignores the three columns. **Apply before** the new Worker (its queries name them). A rollback past the Worker leaves revoked integrations quarantined (still stopped) but a revoked **source** is only `enabled=0`, which the old Worker also honours; it would let someone re-enable it | Expand-only: the columns stay (dropping them needs `ALTER TABLE ... DROP COLUMN`, SQLite 3.35+) |
 | 0025 delivery ledger depth | Old Worker ignores the four new `deliveries` columns and the tables `event_dedup`, `delivery_attempts`, `destination_health`: it stops recording attempts and suppressed repeats and stops honouring the breaker and pacing, nothing else. Waiting deliveries (`last_error` `circuit_open` or `destination_paced`) are retried by their next scheduled time | Expand-only. `DROP TABLE` the three tables is safe; the columns stay (dropping them needs a rebuild) |
+| 0026 tenant contract | The previous Worker keeps working: the new schema is stricter than it needs and it never writes a NULL organization. Rows the migration could not attribute to a tenant were moved to `legacy_orphaned_rows` with metadata only; they left the live tables and are recoverable **only through Time Travel** (the quarantine keeps metadata, never credentials) | **Not reversible by SQL.** Restoring nullable columns is another rebuild, and quarantined rows are not put back. The only real undo is a D1 Time Travel restore to the bookmark taken before applying (procedure **UNVERIFIED**) |
 | 0016 observability | Old Worker ignores `ops_state` and the two indexes | `DROP TABLE ops_state; DROP INDEX deliveries_state_created; DROP INDEX audit_events_created;` |
 
 A rollback rehearsal has **not** been performed (docs/RELEASE_GATES.md). A restore from D1
@@ -583,6 +584,147 @@ act are the operator's (docs/DSAR.md).
 `Expires` 90 days ahead, so there is nothing to renew. Check on each release that the Contact URL still
 opens a private advisory form and that private vulnerability reporting is enabled for the repository (not
 verified from here).
+## Applying migration 0026 (tenant contract)
+
+`migrations/0026_tenant_contract.sql` rebuilds six tables to add `organization_id NOT NULL` plus a
+foreign key (ADR 0021). **It has never been applied to a real D1** (no staging environment). This is
+a blocking release item (`docs/RELEASE_GATES.md`): rehearse it on staging first.
+
+What Cloudflare documents, and what it does not (checked 2026-10-14):
+
+- Documented: a query may run 30 seconds, and that limit "also applies to the entire batch call"; a
+  statement may be 100 KB; a single statement that modifies "hundreds of thousands of rows" exceeds
+  execution limits and large work should be broken into chunks of about 1,000 rows
+  (<https://developers.cloudflare.com/d1/platform/limits/>). The migrations page mentions
+  `PRAGMA defer_foreign_keys = true` for changes that would violate foreign keys
+  (<https://developers.cloudflare.com/d1/reference/migrations/>).
+- **Not stated** (so **UNVERIFIED**): whether a migration file runs in a transaction, whether a failed
+  statement aborts the file or the runner carries on, and any per-file statement limit. The
+  best-practices page says nothing on these either. The migration is therefore written to be safe in
+  both worlds (below), and this procedure does not rely on atomicity.
+
+How the file protects the data without atomicity: a table is never dropped by name while its
+replacement is unproven. The original is renamed aside (`<table>_old`), the copy takes its name, and
+`DROP TABLE <table>_old` is guarded by a temporary foreign key that is released only by a statement
+whose WHERE clause recounts the original against the copy at that moment. If anything failed, or a
+row was written after the copy, the DROP errors with `FOREIGN KEY constraint failed` and the original
+rows are still in `<table>_old`. The foreign key relies on D1 enforcing foreign keys, which it does by
+default (**UNVERIFIED** on this account until rehearsed).
+
+### Procedure (maintenance window; every step is mandatory)
+
+1. **Preflight, read-only.** Reports everything the migration will quarantine, ids that differ only by
+   case, cross-tenant anomalies, and row counts:
+
+   ```
+   wrangler d1 execute lumi-noti --remote --json --file scripts/migration-0026-preflight.sql > preflight.json
+   node scripts/migration-0026-preflight.mjs preflight.json
+   ```
+
+   It exits 1 until every quarantined row is acknowledged by exact count
+   (`--ack-orphans <N>`): those rows' credentials and payloads leave the live tables and are
+   recoverable **only through Time Travel**. It also refuses any table above 100,000 rows (the
+   ceiling: one `INSERT ... SELECT` per table must finish inside 30 seconds). To get under it, purge
+   deliveries by retention first (`DELIVERY_RETENTION_DAYS`, `purgeExpiredRecords`), or run the
+   chunked backfill below. Decisions on the reviewed items: a delivery whose organization differs
+   from its integration's, an integration whose organization differs from its source's, and
+   deliveries of a quarantined integration are **kept** (each row is valid on its own, and deleting
+   history on a guess is worse); review each before applying.
+2. **Bookmark.** `wrangler d1 time-travel info lumi-noti`; write the bookmark down. It is the only
+   undo (procedure **UNVERIFIED**).
+3. **Freeze every writer.** Deploy with `MAINTENANCE_MODE=true` (`wrangler deploy --var
+   MAINTENANCE_MODE:true`). Every route except `/health` and `/health/ready` answers 503 with
+   `Retry-After: 300` (providers retry; none are told the event was accepted), cron jobs do nothing and
+   queue batches are retried after five minutes. Confirm: a webhook POST returns 503 and the cron log
+   shows `maintenance_mode_cron_skipped`. Also pause the cron trigger and the queue consumer in the
+   dashboard if you do not trust a single flag. Wait for in-flight requests to drain (one minute).
+4. **Final recount.** Re-run step 1 immediately before applying; the counts must be the same.
+5. **Apply.** `wrangler d1 migrations apply lumi-noti --remote`.
+6. **Verify before unfreezing** (all must hold):
+
+   ```sql
+   -- the contract is in place on all six tables (expect 6 rows with notnull=1)
+   SELECT 'integrations' t, "notnull" FROM pragma_table_info('integrations') WHERE name='organization_id'
+   UNION ALL SELECT 'deliveries', "notnull" FROM pragma_table_info('deliveries') WHERE name='organization_id'
+   UNION ALL SELECT 'notification_outbox', "notnull" FROM pragma_table_info('notification_outbox') WHERE name='organization_id'
+   UNION ALL SELECT 'held_events', "notnull" FROM pragma_table_info('held_events') WHERE name='organization_id'
+   UNION ALL SELECT 'routing_decisions', "notnull" FROM pragma_table_info('routing_decisions') WHERE name='organization_id'
+   UNION ALL SELECT 'noise_open_failures', "notnull" FROM pragma_table_info('noise_open_failures') WHERE name='organization_id';
+   -- no leftovers (expect 0 rows): a leftover means a step failed
+   SELECT name FROM sqlite_master WHERE type='table'
+     AND (name LIKE '%\_old' ESCAPE '\' OR name LIKE '%\_v4' ESCAPE '\' OR name LIKE '\_guard%' ESCAPE '\' OR name LIKE '\_contract%' ESCAPE '\');
+   -- no dangling foreign keys (expect 0 rows)
+   PRAGMA foreign_key_check;
+   -- what was removed from the live tables
+   SELECT source_table, reason, COUNT(*) FROM legacy_orphaned_rows GROUP BY 1,2;
+   -- row counts equal the preflight totals minus the quarantined rows, per table
+   ```
+
+   Then check the four indexes and five triggers of `integrations` exist
+   (`SELECT name FROM sqlite_master WHERE tbl_name='integrations'`) and send one test notification
+   (`POST /api/integrations/:id/test`) before unfreezing.
+7. **Unfreeze** (`MAINTENANCE_MODE=false`), watch `/health/ready`, the delivery log and the cron heartbeat.
+8. After review, `DROP TABLE legacy_orphaned_rows;` (no code reads it).
+
+### If it fails
+
+Stay in maintenance mode. Do not hand-edit tables to "make the numbers match".
+
+- **Failed before the swap** (the `row_counts_must_match` check, or a copy error): the original tables
+  are untouched and live. Drop the scratch tables the verify query lists (`<t>_v4`, `_guard_<t>`,
+  `_contract_verify`) and re-apply; the file drops them itself with `IF EXISTS` and the quarantine is
+  idempotent.
+- **A `<table>_old` exists** (a DROP was refused): the swap happened but the guard found the copy
+  unbalanced, or a row had been written meanwhile. **The original rows are in `<table>_old`; the new
+  `<table>` may be incomplete.** Restore the original with Time Travel to the step 2 bookmark and
+  re-apply from the freeze. (Renaming `<table>_old` back is possible but the migration has already
+  dropped its indexes and triggers, so Time Travel is the supported path.) Do not re-apply on top of a
+  leftover `_old`.
+- **Anything else, or you cannot tell:** Time Travel restore to the bookmark.
+
+### Chunked backfill (large `deliveries` only)
+
+The migration's own backfill and copy are single statements. If the preflight reports `deliveries`
+near the ceiling, fill the tenant by hand in bounded rounds until it reports 0 changes, so the
+migration's backfill matches nothing (the copy is still one statement, and the ceiling still applies):
+
+```sql
+UPDATE deliveries SET organization_id=(SELECT i.organization_id FROM integrations i
+  WHERE i.id=deliveries.integration_id AND i.organization_id IS NOT NULL AND i.organization_id<>'')
+WHERE rowid IN (SELECT rowid FROM deliveries WHERE organization_id IS NULL
+  AND EXISTS (SELECT 1 FROM integrations i WHERE i.id=deliveries.integration_id
+    AND i.organization_id IS NOT NULL AND i.organization_id<>'') LIMIT 1000);
+```
+
+## Tenant-isolation drill
+
+Two runners share one attack plan (`scripts/lib/drill-plan.mjs`, built from
+`src/auth/route-policy.ts`):
+
+- **Fake D1, every build:** `tests/drill/tenant-isolation.test.ts` (part of `npm test`). It proves the
+  application and the migrated schema. It does not exercise the deployed Worker, real D1 or real
+  Better Auth sessions.
+- **Staging, by hand: `scripts/tenant-isolation-drill.mjs`. UNVERIFIED: it has never been run.**
+
+To run it once a staging environment exists (F233 evidence item 2):
+
+1. Create two throwaway accounts you own, A and B, each with one workspace, one source, one
+   integration bound to it (a Slack destination you control for B) and one delivery.
+2. Sign in as A, copy the `Cookie` request header of any `/api` call. Write B's ids and unique
+   markers (names, endpoint id, destination tail) into a JSON file outside the repository:
+   `{ "orgId", "orgName", "integrationId", "sourceId", "deliveryId", "markers": [...] }`.
+3. `DRILL_BASE_URL=https://<staging> DRILL_COOKIE='...' DRILL_VICTIM_FILE=./victim.json
+   DRILL_ATTACKER_ROLE=admin node --experimental-strip-types scripts/tenant-isolation-drill.mjs`
+   (read-only attacks). Add `DRILL_ALLOW_DESTRUCTIVE=1` for the writes: if isolation is broken they
+   change B's staging data, which is why they are opt-in. Repeat as B against A, and once as a
+   plain member of A (`DRILL_ATTACKER_ROLE=member`).
+4. Success is exit code 0: every attempt a 404 (a 403 only where A's own role lacks the capability),
+   nothing of B's in any response. The script prints attempts and counts, never cookies, bodies or
+   identifiers. Then check B's audit log for the recorded probes (capped at 20 a minute per user,
+   ADR 0019) and that B's Slack channel received nothing.
+5. Re-run after a D1 Time Travel restore (F233 evidence item 4), then record the run in
+   `docs/RELEASE_GATES.md`. A failure is an incident: stop the route, preserve logs, follow the
+   steps in `docs/specs/15` F242.
 
 ## Incident record template
 

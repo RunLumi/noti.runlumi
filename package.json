@@ -26,6 +26,7 @@
     "audit:gate": "node scripts/audit-gate.mjs",
     "docs:spec-status": "node scripts/spec-status.mjs",
     "docs:retention": "node scripts/render-retention.mjs",
+    "docs:authorization": "UPDATE_AUTHORIZATION_DOC=1 vitest run tests/security/authorization-doc.test.ts",
     "schema:test": "python3 scripts/test_auth_schema.py"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { applyMigration, createFakeD1 } from './support/d1';
+import { applyMigration, createFakeD1, seedOrganization } from './support/d1';
 
 describe('migration 0015', () => {
   const names = (raw: DatabaseSync, type: 'index' | 'trigger', table = 'integrations'): string[] =>
@@ -44,6 +44,7 @@ describe('migration 0015', () => {
 
   it('only admits valid, bounded JSON in filters_json', () => {
     const { raw } = createFakeD1();
+    for (const org of ['org-a', 'org-b']) seedOrganization(raw, org);
     seed(raw);
     const set = (value: string | null) =>
       raw.prepare("UPDATE integrations SET filters_json=? WHERE id='a'").run(value);

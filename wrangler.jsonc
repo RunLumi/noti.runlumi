@@ -101,5 +101,7 @@
     // "false" the API refuses to create or re-enable one and the consumer refuses to send to a
     // stored one. Not a secret.
     "GENERIC_WEBHOOK_ENABLED": "false",
+    // "true" freezes every writer (HTTP 503, cron skipped, queue retried) for a migration window.
+    "MAINTENANCE_MODE": "false",
   },
 }

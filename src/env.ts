@@ -81,6 +81,12 @@ export type Bindings = AuthBindings & {
    * default; see ADR 0014 for the criteria that must be met first.
    */
   GENERIC_WEBHOOK_ENABLED?: string;
+  /**
+   * `"true"` puts the Worker in maintenance mode: every route except `/health` answers 503 with
+   * Retry-After, cron jobs do nothing and queue batches are retried later. Used as the mandatory
+   * write freeze while a table-rebuilding migration runs (docs/RUNBOOK.md, migration 0026).
+   */
+  MAINTENANCE_MODE?: string;
   /** Audit event retention in days (30..3650, default 365). */
   AUDIT_RETENTION_DAYS?: string;
 };

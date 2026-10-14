@@ -14,8 +14,8 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 35 | 156 | 50 | 4 | 17 | 262 |
-| P0 | 31 | 107 | 9 | 3 | 8 | 158 |
+| All features | 36 | 156 | 49 | 4 | 17 | 262 |
+| P0 | 32 | 107 | 8 | 3 | 8 | 158 |
 | P1 | 4 | 43 | 23 | 0 | 2 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
@@ -36,7 +36,7 @@
 | [12-delivery-reliability.md](12-delivery-reliability.md) | 7 | 15 | 0 | 0 | 0 | 22 |
 | [13-observability.md](13-observability.md) | 0 | 10 | 4 | 0 | 0 | 14 |
 | [14-dashboard-and-ux.md](14-dashboard-and-ux.md) | 0 | 18 | 3 | 1 | 0 | 22 |
-| [15-security-and-compliance.md](15-security-and-compliance.md) | 2 | 12 | 2 | 0 | 0 | 16 |
+| [15-security-and-compliance.md](15-security-and-compliance.md) | 3 | 12 | 1 | 0 | 0 | 16 |
 | [16-ai-and-roadmap.md](16-ai-and-roadmap.md) | 0 | 3 | 5 | 1 | 11 | 20 |
 
 ## Features
@@ -67,8 +67,8 @@
 | F22 | Rate limiting | [02](02-identity-tenancy.md) | P0 | 🟡 | Better Auth `rateLimit.storage: 'database'` with per-route rules and `cf-connecting-ip` configured (`src/auth/better-auth.ts`). Not built: any test of these rules; ingress limits live separately (F29) |
 | F23 | CSRF and origin policy | [02](02-identity-tenancy.md) | P0 | ✅ | `requireSameOrigin` middleware enforces exact `APP_ORIGIN` on all mutating `/api/*` routes (`src/security/csrf.ts`); `trustedOrigins` pinned; `tests/security/csrf.test.ts`, `tests/api/workspace-active.test.ts`. SameSite cookie … |
 | F24 | Authorization model | [02](02-identity-tenancy.md) | P0 | ✅ | domain capabilities in `src/auth/permissions.ts`, single `authorize()` gate with audited denials and capability named in 403 (`src/auth/workspace.ts`); role x capability table in `tests/auth/permissions.test.ts` (PR #9); no viewer … |
-| F25 | Domain tenancy bridge | [02](02-identity-tenancy.md) | P0 | 🟡 | expand + indexes (0006), contract-by-trigger blocking new NULL/changed org ids (0008), later tables created NOT NULL. Not built: legacy-row backfill, final NOT NULL + FK on `integrations`/`deliveries`/`notification_outbox`, static … |
-| F26 | Tenant-scoped authorization | [02](02-identity-tenancy.md) | P0 | 🟡 | `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9). Not built: static test that every query has an org predicate, … |
+| F25 | Domain tenancy bridge | [02](02-identity-tenancy.md) | P0 | 🟡 | contract done in schema: `organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE` on `integrations`, `deliveries`, `notification_outbox`, `held_events`, `routing_decisions`, `noise_open_failures` … |
+| F26 | Tenant-scoped authorization | [02](02-identity-tenancy.md) | P0 | 🟡 | `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9); static every-query test with a reviewed, no-dead-entry allowlist (39 … |
 | F27 | Connection and installation registry | [02](02-identity-tenancy.md) | P0 | ✅ | `github_installations` with unique installation id, tenant taken from the verified installation row, unknown installation refused (PR #6, PR #11, ADR 0008; `tests/github/install-flow.test.ts`). Audit of unknown-installation 403s … |
 | F28 | Audit events | [02](02-identity-tenancy.md) | P1 | 🟡 | `audit_events` append-only with integration, source, replay, denial, installation and workspace events (`src/audit/actions.ts`, PR #9), admin `GET /api/audit` plus page (ADR 0019). Not built: member/invite/role/session events, … |
 | F29 | Webhook ingress protection | [02](02-identity-tenancy.md) | P0 | 🟡 | per-installation GitHub limiter (`ingressLimiter`, `tests/security/rate-limit.test.ts`) and per-source flood limit with 429 + Retry-After for generic and provider sources (`tests/sources/ingress.test.ts`); D1 counters, fails open. … |
@@ -274,8 +274,8 @@
 | F229 | Allowed provider domains, and how that list is maintained | [15](15-security-and-compliance.md) | P0 | 🟡 | per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); not built: typed registry with `docsUrl` and … |
 | F230 | Send-time egress enforcement and what we cannot enforce | [15](15-security-and-compliance.md) | P0 | ✅ | URL policy re-run before every send with no network call on rejection (`src/connectors/destinations/send.ts`); IP literals, userinfo, port, fragment, path and length rejected (`tests/destinations/url-policy.test.ts`, … |
 | F231 | Rate limiting, quotas and abuse | [15](15-security-and-compliance.md) | P0 | 🟡 | D1 fixed-window limiter (`src/security/rate-limit.ts`) wired into GitHub ingress, generic and provider sources and the dashboard APIs with 429 plus Retry-After (`tests/security/rate-limit.test.ts`, … |
-| F232 | Authentication and authorization: what is decided elsewhere | [15](15-security-and-compliance.md) | P0 | ❌ | pointer table with release evidence and the static every-mutating-route-maps-to-a-capability check are not written; underlying controls exist: role-by-capability table test (`tests/auth/permissions.test.ts`), static Origin guard … |
-| F233 | Tenant isolation is the release gate | [15](15-security-and-compliance.md) | P0 | 🟡 | tenant comes only from the verified installation, queries are scoped, tenant columns and immutability triggers in migrations, cross-workspace 404 tests (`tests/tenant-resolution.test.ts`, `tests/api/integrations.test.ts`, … |
+| F232 | Authentication and authorization: what is decided elsewhere | [15](15-security-and-compliance.md) | P0 | ✅ | `docs/AUTHORIZATION.md` (pointer table, the four rules, generated roles-by-capability and route-by-guard tables); route registry `src/auth/route-policy.ts`; `tests/security/route-capability.test.ts` compares the routes the app … |
+| F233 | Tenant isolation is the release gate | [15](15-security-and-compliance.md) | P0 | 🟡 | tenant comes only from the verified installation, tenant columns NOT NULL with foreign keys (`migrations/0026_tenant_contract.sql`), static every-query-filters-by-org test (`tests/security/tenant-query-scope.test.ts`), … |
 | F234 | Accepted risk: Better Auth stores session tokens in a cleartext column | [15](15-security-and-compliance.md) | P0 | 🟡 | accepted as AR-1 in `docs/THREAT_MODEL.md`; in place: 30-day expiry with daily refresh and password-reset revocation (`src/auth/better-auth.ts`), `cookieCache` off asserted in `tests/security/config-guards.test.ts`, retired … |
 | F235 | Cloudflare Email Sending: platform constraints we did not choose | [15](15-security-and-compliance.md) | P1 | ❌ | the limits table is not recorded outside this spec and no email-failure handling is built; auth mail goes through a `send_email` binding with a server-controlled sender (`src/auth/email.ts`) with no suppression list, quota … |
 | F236 | Audit events: completeness, immutability, access | [15](15-security-and-compliance.md) | P1 | 🟡 | audit rows are written with the change in one batch, typed primitives-only size-capped metadata, admin-only `audit.read` reads, tenant-scoped (`src/audit/audit.ts`, `src/api/audit.ts`, `tests/api/audit.test.ts`); not built: static … |

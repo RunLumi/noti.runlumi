@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { applyMigration, createFakeD1 } from './support/d1';
+import { applyMigration, createFakeD1, seedOrganization } from './support/d1';
 
 describe('migration 0007', () => {
   it('removes legacy ciphertext from every outbox row and keeps the rows', () => {
@@ -42,9 +42,18 @@ describe('migration 0007', () => {
 
   it('accepts the new invalid outbox state and rejects unknown ones', () => {
     const { raw } = createFakeD1();
-    raw.prepare("INSERT INTO notification_outbox(id,payload_json,state) VALUES('a','{}','invalid')").run();
+    seedOrganization(raw, 'org');
+    raw
+      .prepare(
+        "INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES('a','{}','invalid','org')",
+      )
+      .run();
     expect(() =>
-      raw.prepare("INSERT INTO notification_outbox(id,payload_json,state) VALUES('b','{}','bogus')").run(),
+      raw
+        .prepare(
+          "INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES('b','{}','bogus','org')",
+        )
+        .run(),
     ).toThrow();
   });
 });
@@ -126,15 +135,29 @@ describe('migration 0009', () => {
         'notification_outbox_org_due',
       ]),
     );
-    raw.prepare("INSERT INTO notification_outbox(id,payload_json,state) VALUES('a','{}','claimed')").run();
-    raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('d','i','dead_lettered')").run();
+    seedOrganization(raw, 'org');
+    raw
+      .prepare(
+        "INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES('a','{}','claimed','org')",
+      )
+      .run();
+    raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,state,organization_id) VALUES('d','i','dead_lettered','org')",
+      )
+      .run();
     expect(() =>
-      raw.prepare("INSERT INTO deliveries(id,integration_id,state) VALUES('e','i','bogus')").run(),
+      raw
+        .prepare(
+          "INSERT INTO deliveries(id,integration_id,state,organization_id) VALUES('e','i','bogus','org')",
+        )
+        .run(),
     ).toThrow();
   });
 
   it('keeps legacy failed writable for one release, so a Worker rollback still works (M4)', () => {
     const { raw } = createFakeD1();
+    seedOrganization(raw, 'org');
     // Exactly the statement the slice 2 consumer runs for a permanent failure.
     raw
       .prepare(
@@ -367,6 +390,7 @@ describe('migration 0012', () => {
 
   it('the recreated triggers still enforce the tenant contract', () => {
     const { raw } = createFakeD1();
+    for (const org of ['org-a', 'org-b']) seedOrganization(raw, org);
     expect(() => insertRow(raw, 'x', 'slack', null)).toThrow(/organization_id is required/);
     expect(() => insertRow(raw, 'y', 'slack', '')).toThrow(/organization_id is required/);
     insertRow(raw, 'ok', 'slack', 'org-a');
@@ -377,6 +401,7 @@ describe('migration 0012', () => {
 
   it('accepts teams and still rejects unknown destinations', () => {
     const { raw } = createFakeD1();
+    seedOrganization(raw, 'org-a');
     for (const kind of ['lark', 'slack', 'teams']) insertRow(raw, kind, kind, 'org-a');
     expect(() => insertRow(raw, 'd', 'telegram', 'org-a')).toThrow();
   });
