@@ -64,6 +64,7 @@ const input = (o: Partial<Parameters<typeof decideAlert>[1]> = {}) => ({
   nowMs: 1_000_000,
   renotifyMs: 60 * MIN,
   confirmTicks: 1,
+  resolveTicks: 1,
   ...o,
 });
 
@@ -178,10 +179,13 @@ describe('the engine over D1', () => {
     expect(events[1]?.dedupeKey).toBe(events[0]?.dedupeKey);
     expect(events[1]?.firingForMs).toBe(60 * MIN);
 
-    // Resolve once.
-    const resolved = await run(QUIET, t0 + 61 * MIN);
-    expect(resolved.resolved).toBe(1);
+    // Resolve once, after three clear evaluations in a row (hysteresis).
+    await run(QUIET, t0 + 61 * MIN);
     await run(QUIET, t0 + 62 * MIN);
+    expect(events.map((e) => e.kind)).toEqual(['firing', 'renotify']);
+    const resolved = await run(QUIET, t0 + 63 * MIN);
+    expect(resolved.resolved).toBe(1);
+    await run(QUIET, t0 + 64 * MIN);
     expect(events.map((e) => e.kind)).toEqual(['firing', 'renotify', 'resolved']);
     expect((await loadAlertStates(db.d1)).get('outbox_stall')).toMatchObject({ state: 'resolved' });
 
@@ -218,7 +222,7 @@ describe('the engine over D1', () => {
     const failedLine = err.mock.calls.map((c) => String(c[0])).find((l) => l.includes('alert_sink_failed'));
     expect(failedLine).toBeDefined();
     expect(failedLine).not.toContain('hook.example');
-    // Retried NOTIFY_RETRY_MS after the failure, not at the one-hour cadence and not on the next tick.
+    // Re-sent AS A FIRING (not a renotify) NOTIFY_RETRY_MS after the failure, not at the one-hour cadence.
     await evaluateAlerts(env(), t0 + NOTIFY_RETRY_MS - MIN, {
       sinks: [recording],
       signals: hot('key_config_fault', 1),
@@ -228,7 +232,18 @@ describe('the engine over D1', () => {
       sinks: [recording],
       signals: hot('key_config_fault', 1),
     });
-    expect(events.map((e) => e.kind)).toEqual(['firing', 'renotify']);
+    expect(events.map((e) => e.kind)).toEqual(['firing', 'firing']);
+    expect(events[1]?.dedupeKey).toBe(events[0]?.dedupeKey);
+    // Delivered now: nothing more is re-sent.
+    await evaluateAlerts(env(), t0 + NOTIFY_RETRY_MS + MIN, {
+      sinks: [recording],
+      signals: hot('key_config_fault', 1),
+    });
+    expect(events).toHaveLength(2);
+    expect((await loadAlertStates(db.d1)).get('key_config_fault')).toMatchObject({
+      unsent: null,
+      notifyFailures: 0,
+    });
   });
 
   it('an alert_state write failure is logged and the other alerts are still evaluated', async () => {
@@ -307,19 +322,15 @@ describe('signals from D1 and the boot report', () => {
         "INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,started_at,finished_at,outcome) VALUES('a1','org-a','d','i',1,?,?,'dead_lettered'),('a2','org-a','d','i',2,?,?,'dead_lettered')",
       )
       .run(now - MIN, now - MIN, now - 60 * MIN, now - 60 * MIN);
-    for (const t of [0, 1, 2, 7, 20]) {
-      db.raw
-        .prepare(
-          "INSERT INTO job_runs(job,started_at,finished_at,outcome,healthy) VALUES('heartbeat',?,?,'ok',1)",
-        )
-        .run(now - t * MIN, now - t * MIN);
-    }
+    db.raw
+      .prepare("INSERT INTO ops_state(key,value,updated_at) VALUES('cron_gap',?,?)")
+      .run(JSON.stringify({ at: now - 2 * MIN, gapMs: 13 * MIN }), now);
     const s = await collectSignals(env(), now);
     expect(s.oldestPendingAgeMs).toBeGreaterThanOrEqual(7 * 60 * MIN);
     expect(s.deadLetterStuckRows).toBe(3); // old pending, old claim, overdue retry; not the future retry
     expect(s.breakersOpen).toBe(2);
     expect(s.deadLettersRecent).toBe(1); // only the attempt inside the window
-    expect(s.heartbeatMaxGapMs).toBe(13 * MIN); // 7 -> 20 minutes ago
+    expect(s.heartbeatMaxGapMs).toBe(13 * MIN); // the recorded gap, still inside its window
   });
 
   it('counts a boot-report fault as key_config_fault', async () => {
@@ -526,7 +537,7 @@ describe('the alert job inside the cron tick', () => {
       state: 'firing',
     });
     expect(err.mock.calls.some((c) => String(c[0]).includes('alert_firing'))).toBe(true);
-    expect(db.raw.prepare("SELECT outcome FROM job_runs WHERE job='alerts'").get()).toEqual({
+    expect(db.raw.prepare("SELECT last_outcome AS outcome FROM job_state WHERE job='alerts'").get()).toEqual({
       outcome: 'ok',
     });
   });
@@ -547,7 +558,9 @@ describe('the alert job inside the cron tick', () => {
       );
       expect(outcome).toBe(baseline);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(db.raw.prepare("SELECT outcome FROM job_runs WHERE job='alerts'").get()).toEqual({
+      expect(
+        db.raw.prepare("SELECT last_outcome AS outcome FROM job_state WHERE job='alerts'").get(),
+      ).toEqual({
         outcome: 'ok',
       });
       expect(db.raw.prepare("SELECT state FROM alert_state WHERE alert_id='outbox_stall'").get()).toEqual({
@@ -564,7 +577,7 @@ describe('the alert job inside the cron tick', () => {
     expect(db.raw.prepare("SELECT state FROM alert_state WHERE alert_id='key_config_fault'").get()).toEqual({
       state: 'firing',
     });
-    expect(db.raw.prepare('SELECT job FROM job_runs ORDER BY id').all()).toEqual([
+    expect(db.raw.prepare('SELECT job FROM job_state ORDER BY rowid').all()).toEqual([
       { job: 'heartbeat' },
       { job: 'stall_detection' },
       { job: 'alerts' },

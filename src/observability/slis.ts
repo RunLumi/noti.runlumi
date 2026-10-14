@@ -28,6 +28,7 @@
  */
 import { sqliteTimestamp } from '../delivery/claim';
 import { normalizeDeliveryState, type DeliveryState } from '../delivery/state';
+import { log } from '../platform/log';
 import { readJobHealth, type JobHealth } from './job-health';
 
 type Db = Pick<D1Database, 'prepare'>;
@@ -423,7 +424,10 @@ export async function computeSummary(
     byDestination,
     duplicates: await duplicates(db, organizationId, since, byState),
     destinationHealth: await destinationHealth(db, organizationId, nowMs - windowMs, nowMs),
-    jobs: await readJobHealth(db, nowMs).catch(() => null),
+    jobs: await readJobHealth(db, nowMs).catch((error: unknown) => {
+      log('warn', 'summary_jobs_unreadable', { error });
+      return null;
+    }),
     notMeasurable: NOT_MEASURABLE,
   };
 }

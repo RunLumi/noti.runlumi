@@ -45,8 +45,8 @@ export interface AlertEvent {
 
 export interface AlertSink {
   readonly name: string;
-  /** Rejects on failure; the engine contains it. */
-  notify(event: AlertEvent): Promise<void>;
+  /** Rejects on failure; the engine contains it. `timeoutMs` is what is left of this tick's sink budget. */
+  notify(event: AlertEvent, ctx?: { readonly timeoutMs?: number }): Promise<void>;
 }
 
 function figure(value: number | null, unit: AlertUnit): string {
@@ -102,9 +102,11 @@ export interface WebhookTarget {
 
 /** The first kind whose URL policy accepts the URL, or null. Never echoes the URL. */
 export function resolveWebhookTarget(raw: string | undefined, appOrigin?: string): WebhookTarget | null {
-  if (!raw) return null;
+  // A pasted secret often carries a trailing newline or space; the policy rejects those as malformed.
+  const url = raw?.trim();
+  if (!url) return null;
   for (const kind of ALERT_WEBHOOK_KINDS) {
-    if (checkDestinationUrl(kind, raw, { ownHosts: ownHostsOf(appOrigin) }).ok) return { kind, url: raw };
+    if (checkDestinationUrl(kind, url, { ownHosts: ownHostsOf(appOrigin) }).ok) return { kind, url };
   }
   return null;
 }
@@ -140,7 +142,7 @@ export const ALERT_WEBHOOK_TIMEOUT_MS = 10_000;
 export function webhookSink(target: WebhookTarget, options: { readonly fetch?: Fetcher } = {}): AlertSink {
   return {
     name: 'webhook',
-    async notify(e) {
+    async notify(e, ctx) {
       const result = await sendRequest(
         {
           kind: target.kind,
@@ -150,7 +152,13 @@ export function webhookSink(target: WebhookTarget, options: { readonly fetch?: F
           body: bodyFor(target.kind, formatAlertText(e)),
         },
         (res, at) => classifyDeliveryResponse(target.kind, res, at),
-        { timeoutMs: ALERT_WEBHOOK_TIMEOUT_MS, ...(options.fetch ? { fetch: options.fetch } : {}) },
+        {
+          timeoutMs: Math.max(
+            1,
+            Math.min(ALERT_WEBHOOK_TIMEOUT_MS, ctx?.timeoutMs ?? ALERT_WEBHOOK_TIMEOUT_MS),
+          ),
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+        },
       );
       if (result.outcome !== 'delivered' && result.outcome !== 'accepted') {
         // The reason is from our closed taxonomy, never provider text; the URL never appears.

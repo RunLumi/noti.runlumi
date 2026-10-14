@@ -750,7 +750,7 @@ characters are removed. See ADR 0019.
 | --- | --- | --- |
 | `GET /api/observability/summary?window=24h` | `delivery.read` | `200` JSON, workspace-scoped, `Cache-Control: no-store`. `window` is `<n>h` or `<n>d` from `1h` to `30d` (default `24h`); anything else is `400`. Limited to 30 requests a minute per user (`429` with `Retry-After`). |
 
-Each delivery view and the detail carry `correlationId` (string or `null` for rows older than migration 0027 and rows no request created). The summary also lists `jobs: {name, lastOk, lastFailed, stale}[]` (epoch ms or `null`; `lastOk` is the last `ok` or `skipped` run; `stale` means more than three cadences overdue; platform-wide, names and times only; `null` if job runs could not be read).
+Each delivery view and the detail carry `correlationId` (string or `null` for rows older than migration 0027 and rows no request created). Every caller gets `jobsStatus` (`ok`, `degraded` or `unknown`). Admins (`delivery.replay`) also get `jobs: {name, lastOk, lastFailed, stale}[]` (epoch ms or `null`; `lastOk` is the last `ok` or `skipped` run; `stale` means more than three cadences overdue; platform-wide, names and times only; `null` if job state could not be read) and `alerting: {webhookConfigured, lastSuccessAt, lastFailureAt, consecutiveFailures}` (times and a count; never the URL).
 
 The body is exact, computed from the delivery ledger on request. Ratios are a **cohort by creation time**: rows created inside the window, counted by their current state. `oldestOutboxPendingAgeMs` covers due outbox rows only (a retry parked for later does not count). Shape (abridged):
 

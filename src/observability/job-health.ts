@@ -1,16 +1,16 @@
 /**
- * Job freshness from `job_runs` (docs/specs/13-observability.md F192): the `job_stale` signal and the
+ * Job freshness from `job_state` (docs/specs/13-observability.md F192): the `job_stale` signal and the
  * `jobs` list of `GET /api/observability/summary`.
  *
  * A job is HEALTHY at a run that finished `ok` or `skipped` (it ran; a throttled job with nothing to do
  * is alive). It is STALE when its last healthy run finished more than `3 x cadence` ago
- * (`src/observability/cadence.ts`). A job that has NEVER run is stale only once the table has been
- * collecting for longer than that, measured from the oldest row of any job, so a fresh deployment (or a
- * job added by this release) does not page before its first tick. Staleness is computed from D1, never
- * from logs.
+ * (`src/observability/cadence.ts`). A job with no record at all is NOT stale: it has no deadline until it
+ * first runs, so a job added by a later release, or a fresh deployment, cannot read stale; a job that ran
+ * but never healthily is stale once ITS OWN first run is older than the threshold. Staleness is computed
+ * from D1, never from logs. A job that is scheduled but never executes is caught statically (a test ties
+ * the scheduler to the cadence table), not here.
  *
- * Cost: one statement, one index point-lookup per job and column (`job_runs_job_healthy`), never a scan
- * of the table.
+ * Cost: one read of `job_state` (one row per job, thirteen rows).
  */
 import { JOB_CADENCE, JOB_NAMES, type JobName } from './cadence';
 
@@ -27,48 +27,36 @@ export interface JobHealth {
 
 interface Row {
   job: string;
-  last_ok: number | null;
-  last_failed: number | null;
+  first_seen_at: number;
+  last_healthy_at: number | null;
+  last_failed_at: number | null;
 }
 
-// One bound parameter per job (13): far below the 100-parameter limit.
-const JOB_PLACEHOLDERS = JOB_NAMES.map(() => '(?)').join(',');
-
-const FRESHNESS_SQL = `SELECT j.column1 AS job,
-  (SELECT MAX(r.finished_at) FROM job_runs r WHERE r.job = j.column1 AND r.healthy = 1) AS last_ok,
-  (SELECT MAX(r.finished_at) FROM job_runs r WHERE r.job = j.column1 AND r.healthy = 0) AS last_failed
-FROM (VALUES ${JOB_PLACEHOLDERS}) j`;
+export const JOB_HEALTH_SQL = 'SELECT job, first_seen_at, last_healthy_at, last_failed_at FROM job_state';
 
 /** Pure: stale when the last healthy run is older than the job's threshold. */
 export function isStale(
   name: JobName,
   lastOk: number | null,
-  trackingSince: number | null,
+  firstSeen: number | null,
   nowMs: number,
 ): boolean {
   const threshold = JOB_CADENCE[name].staleAfterMs;
   if (lastOk !== null) return nowMs - lastOk > threshold;
-  return trackingSince !== null && nowMs - trackingSince > threshold;
+  return firstSeen !== null && nowMs - firstSeen > threshold;
 }
 
 export async function readJobHealth(db: Db, nowMs: number): Promise<readonly JobHealth[]> {
-  const [rows, since] = await Promise.all([
-    db
-      .prepare(FRESHNESS_SQL)
-      .bind(...JOB_NAMES)
-      .all<Row>(),
-    db.prepare('SELECT MIN(started_at) AS at FROM job_runs').first<{ at: number | null }>(),
-  ]);
-  const trackingSince = since?.at ?? null;
+  const rows = await db.prepare(JOB_HEALTH_SQL).all<Row>();
   const byJob = new Map(rows.results.map((r) => [r.job, r] as const));
   return JOB_NAMES.map((name) => {
     const row = byJob.get(name);
-    const lastOk = row?.last_ok ?? null;
+    const lastOk = row?.last_healthy_at ?? null;
     return {
       name,
       lastOk,
-      lastFailed: row?.last_failed ?? null,
-      stale: isStale(name, lastOk, trackingSince, nowMs),
+      lastFailed: row?.last_failed_at ?? null,
+      stale: isStale(name, lastOk, row?.first_seen_at ?? null, nowMs),
     };
   });
 }

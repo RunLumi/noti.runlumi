@@ -26,9 +26,9 @@ export const THRESHOLDS = {
   /** `ingress_drop_rate`: provider sources that dropped events inside the window. */
   dropWindowMs: 15 * MINUTE,
   sourcesDropping: 3,
-  /** `cron_heartbeat_missing`: a gap this long between consecutive healthy heartbeats... */
+  /** `cron_heartbeat_missing`: a gap this long between consecutive heartbeats (cron.ts HEARTBEAT_GAP_MS)... */
   heartbeatMaxGapMs: 5 * MINUTE,
-  /** ...looked for inside this trailing window, so a gap stays visible for half an hour. */
+  /** ...recorded inside this trailing window, so a gap stays visible for half an hour. */
   heartbeatWindowMs: 30 * MINUTE,
   /** `dlq_consumer_no_progress`: ledger rows non-terminal for longer than this... */
   deadLetterStuckMs: 6 * 60 * MINUTE,
@@ -41,3 +41,12 @@ export const RENOTIFY_MS = { critical: 60 * MINUTE, warning: 6 * 60 * MINUTE } a
 
 /** After a sink failure, try again this long after the failure rather than waiting a full cadence. */
 export const NOTIFY_RETRY_MS = 10 * MINUTE;
+
+/** Consecutive clear evaluations before an alert resolves (hysteresis; at a minute a tick, three minutes). */
+export const CLEAR_TICKS = 3;
+
+/** A notice a sink did not accept is retried this many times, then dropped (it stays in the log). */
+export const MAX_NOTIFY_FAILURES = 6;
+
+/** Total time one evaluation may spend in sinks, so a hung webhook cannot delay the jobs after it. */
+export const SINK_BUDGET_MS = 15_000;

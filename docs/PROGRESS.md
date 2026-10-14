@@ -1477,8 +1477,11 @@ An independent review (no critical, 3 high, 6 medium, 7 low) is fixed in the sam
 Scope: `docs/specs/REMAINING.md` rows 1.9 to 1.11 and `docs/adr/0024-job-runner-alerting.md`. Migration
 `0027_job_runner_alerting.sql` (expand only; apply before the Worker).
 
-- `job_runs` records every cron execution (ok, failed, skipped, counters, closed error class), written in one
-  batch per tick; one cadence table; staleness at 3x cadence in the summary (`jobs`) and as `job_stale`.
+- `job_state` (one upserted row per job) plus `job_runs` (history of failures and outcome changes only), one
+  batch per tick; one cadence table; staleness at 3x cadence (`jobs` for admins, `jobsStatus` for everyone) and
+  as `job_stale`; a job with no record is not stale. Maintenance windows write one `ops_state` marker so they
+  are not read as a missed cron. Review follow-ups: capped, index-seek alert signals with plan tests; hysteresis
+  and clear streaks; unsent notices re-sent as the same kind; a shared sink budget; webhook health for admins.
 - DLQ consumer writes an `ops_state` run record; `dlq_consumer_no_progress` is a ledger-side proxy, not queue depth.
 - Correlation id on `deliveries`, outbox, attempts, queue message, consumer logs, delivery view;
   `GET /api/deliveries?correlationId=`.

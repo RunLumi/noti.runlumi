@@ -70,9 +70,8 @@ Opsgenie style paging is not built (ADR 0024).
    cron is `* * * * *` (wrangler.jsonc). If it is stale, the Worker may not be deployed with
    its cron trigger, or D1 is unreachable (check `wrangler tail`). Each job is isolated: a
    failing job logs `cron_job_failed` with the job name and the invocation still fails at the
-   end, but the other jobs (stall detection, retention) still run. Every execution is also a
-   `job_runs` row, and `GET /api/observability/summary` lists each job's last healthy run and
-   whether it is stale ("Cron jobs" below).
+   end, but the other jobs (stall detection, retention) still run. Every execution updates the job's `job_state` row (history in `job_runs`), and admins see each job's
+   last healthy run and whether it is stale in `GET /api/observability/summary` ("Cron jobs" below).
 3. Backlog **age**, not depth (spec 13 F198). Platform-wide, in one query:
 
    ```sql
@@ -99,7 +98,7 @@ job is **stale** when its last healthy run (`ok` or `skipped`) is more than thre
 
 | Job | What it does |
 | --- | --- |
-| `heartbeat` | Proves the cron fired (one UPSERT into `ops_state`). |
+| `heartbeat` | Proves the cron fired (one UPSERT into `ops_state`) and records a gap if ticks were missed. |
 | `stall_detection` | Counts stuck outbox, claim and retry rows; logs on entry and recovery. |
 | `alerts` | Evaluates the alert registry and notifies the sinks. |
 | `outbox_reconcile` | Releases stale claims, publishes due outbox rows, purges the outbox. |
@@ -113,76 +112,108 @@ job is **stale** when its last healthy run (`ok` or `skipped`) is more than thre
 | `expired_auth_purge` | Expired sessions, one-time tokens, install states. |
 | `dedup_purge` | Expired dedup rows. |
 
-Last runs, newest first (counters are rows processed; `error_class` is one of `database`, `crypto`,
-`config`, `timeout`, `internal`; the error text is in the redacted `cron_job_failed` log line, never in D1):
+Two tables (migration 0027). `job_state` has ONE row per job, overwritten every run: first seen, last
+start and finish, last outcome, last healthy and last failed time, last counters (rows processed) and
+last `error_class` (one of `database`, `crypto`, `config`, `timeout`, `internal`; the error text is in the
+redacted `cron_job_failed` log line, never in D1). `job_runs` is the history of failures and changes of
+outcome only (a steady healthy job writes none), kept 14 days.
 
 ```sql
-SELECT job, outcome, counters_json, error_class,
-       datetime(finished_at/1000,'unixepoch') AS finished, finished_at - started_at AS ms
+SELECT job, last_outcome, last_counters_json, last_error_class, runs,
+       datetime(last_finished_at/1000,'unixepoch') AS finished,
+       datetime(last_healthy_at/1000,'unixepoch') AS last_healthy,
+       datetime(last_failed_at/1000,'unixepoch') AS last_failed
+FROM job_state ORDER BY job;
+-- When did a job start failing or recover?
+SELECT job, outcome, error_class, datetime(finished_at/1000,'unixepoch') AS at
 FROM job_runs ORDER BY id DESC LIMIT 40;
--- Last healthy and last failed run per job:
-SELECT job, MAX(CASE WHEN healthy=1 THEN finished_at END) AS last_ok_ms,
-       MAX(CASE WHEN healthy=0 THEN finished_at END) AS last_failed_ms
-FROM job_runs GROUP BY job;
 ```
 
-`job_runs` is kept for three days (`JOB_RUNS_RETENTION_MS`), purged by `retention_purge`. Cost: about
-13 small rows per minute (roughly 19,000 a day), written in one batch per tick. Not built from F192:
-leases between overlapping runs, resumable cursors, `cpu_ms`, `partial` outcomes, `job_failing` after
-three consecutive failures (a failing job goes stale instead).
+Cost: 13 `job_state` upserts a minute, one batch per tick, about 19,000 rows written a day with no secondary
+index, plus a few history rows. **Assumption, UNVERIFIED:** the D1 plan's daily rows-written allowance
+covers that on top of the product's own writes (the Free plan's is 100,000 a day, a fifth of it). A job
+with no `job_state` row has never run and is not stale (it has no deadline until it runs). Not built from
+F192: leases between overlapping runs, resumable cursors, `cpu_ms`, `partial` outcomes, `job_failing`
+after three consecutive failures (a failing job goes stale instead), a separate `job_never_ran`.
 
 ## Alerts
 
 Evaluated by the `alerts` job once a minute from signals in D1 and the boot report
-(`src/observability/alerts/`). Each alert fires once, repeats at its re-notify cadence (critical 1 h,
-warning 6 h) while it keeps firing, and announces recovery once. State is in `alert_state`:
+(`src/observability/alerts/`). Every count is capped at its threshold and every query is an index seek
+(`tests/observability/alert-plans.test.ts`). An alert fires once (some need two consecutive breaches),
+repeats at its re-notify cadence (critical 1 h, warning 6 h) while it keeps firing, and sends RESOLVED once
+it has been clear for three evaluations in a row. State is in `alert_state`:
 
 ```sql
-SELECT alert_id, state, datetime(since/1000,'unixepoch') AS since, last_value, dedupe_key
+SELECT alert_id, state, datetime(since/1000,'unixepoch') AS since, last_value, dedupe_key,
+       unsent, notify_failures
 FROM alert_state ORDER BY state, alert_id;
 ```
 
 Delivery: every event is a structured log line (`alert_firing`, `alert_renotify`, `alert_resolved`,
 searchable with `wrangler tail --format json`), and also a message to `ALERT_WEBHOOK_URL` when that
-secret holds a Slack, Discord, Lark or Teams Workflows webhook URL. The message carries the alert id,
-severity, value, threshold, the incident key and the runbook anchor; never a tenant id or a payload.
-A failed webhook post is logged (`alert_sink_failed`) and tried again about ten minutes later, once per
-attempt, never in a loop. `/health` lists `ALERT_WEBHOOK_URL` under `warnings` if it is set but not a
-valid chat webhook. **UNVERIFIED:** no message has been sent to a real Slack, Discord, Lark or Teams
-endpoint from this code; the request shapes follow each provider's documented webhook format and are
-exercised against fakes only.
+secret holds a Slack, Discord, Lark or Teams Workflows webhook URL (surrounding whitespace is ignored).
+The message carries the alert id, severity, value, threshold, the incident key and the runbook anchor;
+never a tenant id or a payload. A notice the webhook refused is kept on its alert row (`unsent`) and re-sent
+as the same kind about ten minutes later, up to six tries, then dropped (`alert_notice_dropped` in the log).
+All sinks together get 15 seconds per evaluation, so a hung endpoint cannot hold up the jobs after it.
+
+Is the webhook working? An admin sees it in `GET /api/observability/summary` under `alerting` (configured,
+last success, last failure, consecutive failures), also readable here:
+
+```sql
+SELECT value, datetime(updated_at/1000,'unixepoch') AS updated FROM ops_state WHERE key='alert_sink_health';
+```
+
+A set but unusable `ALERT_WEBHOOK_URL` logs `alert_webhook_unusable` every tick and `/health` lists it under
+`warnings`. Webhook health is NOT on `/health`, which deliberately touches no dependency. **UNVERIFIED:**
+no message has been sent to a real Slack, Discord, Lark or Teams endpoint from this code; the request
+shapes follow each provider's documented webhook format and are exercised against fakes only.
 
 Thresholds are starting values from the specification, not measured baselines
 (`src/observability/alerts/thresholds.ts`): there is no production traffic to tune them against. Expect
 to change them, and to have noise until you do.
 
+**Maintenance windows.** Under `MAINTENANCE_MODE` the cron skips every job and writes exactly one row, a
+marker in `ops_state` (`cron_maintenance`), so the silence is not read as a missed cron. Nothing else is
+written during the freeze.
+
 ### Alert: job_stale
 
-A cron job has not completed healthily for more than three cadences (three minutes). Fires after two
-consecutive evaluations, so the one tick after a maintenance window (every job is overdue until its
-next run) does not notify. Severity critical.
+**What it means.** A cron job has not completed healthily for more than three cadences (three minutes).
+Fires after two consecutive evaluations, so the one tick after a maintenance window (every job is overdue
+until its next run) does not notify. Severity critical.
+
+**Check.**
 
 ```sql
-SELECT job, MAX(CASE WHEN healthy=1 THEN finished_at END) AS last_ok_ms,
-       MAX(CASE WHEN healthy=0 THEN finished_at END) AS last_failed_ms
-FROM job_runs GROUP BY job ORDER BY last_ok_ms;
+SELECT job, last_outcome, datetime(last_healthy_at/1000,'unixepoch') AS last_ok,
+       datetime(last_failed_at/1000,'unixepoch') AS last_failed
+FROM job_state ORDER BY last_healthy_at;
 ```
 
-A job with `last_failed_ms` newer than `last_ok_ms` is failing: read its `cron_job_failed` log line.
-A job with neither recent means the cron did not run it (see `cron_heartbeat_missing`). Mitigation:
-fix the cause, then wait a tick; redeploy if the cron trigger is gone (`npm run deploy`).
+**What to do.** A job with `last_failed` newer than `last_ok` is failing: read its `cron_job_failed` log
+line. A job with neither recent means the cron did not run it (see `cron_heartbeat_missing`). Fix the
+cause, then wait a tick; redeploy if the cron trigger is gone (`npm run deploy`).
 
 ### Alert: outbox_stall
 
-Outbox rows pending over five minutes, claims older than two leases, or retries overdue by 15 minutes
-(the same predicate as the `delivery_stall` log line). Severity critical. Follow "Stuck outbox" and
-"Queue backlog" below.
+**What it means.** Outbox rows pending over five minutes, claims older than two leases, or retries overdue
+by 15 minutes (the same counts as the `delivery_stall` log line, read once per tick and shared). Severity
+critical.
+
+**Check.** The queries in "Stuck outbox" and "Queue backlog" below; the stall counts are capped at 1000.
+
+**What to do.** Follow "Stuck outbox" and "Queue backlog".
 
 ### Alert: dead_letter_spike
 
-At least 20 delivery attempts dead-lettered in the last 15 minutes (counted from `delivery_attempts`,
-platform-wide; test notifications are included). Severity warning. Group by code to see whether one
-destination, one workspace or one fault class is responsible:
+**What it means.** At least 20 delivery attempts dead-lettered in the last 15 minutes (counted from
+`delivery_attempts`, platform-wide; test notifications are included). Severity warning. **Blind spot:**
+a delivery dead-lettered by the dead-letter queue consumer (its queue retries ran out) writes no attempt
+row, so it is not counted here; `dlq_consumer_no_progress` and the `dlq_consumer` record cover that path.
+
+**Check.** Group by code to see whether one destination, one workspace or one fault class is responsible:
 
 ```sql
 SELECT error_code, COUNT(*) AS n FROM delivery_attempts
@@ -190,82 +221,102 @@ WHERE outcome='dead_lettered' AND started_at >= (strftime('%s','now')*1000 - 900
 GROUP BY error_code ORDER BY n DESC;
 ```
 
-Then follow "Dead-letter inspection and redelivery". Replay only after the cause is fixed.
+**What to do.** Follow "Dead-letter inspection and redelivery". Replay only after the cause is fixed.
 
 ### Alert: breaker_open_many
 
-Three or more destination circuit breakers are open or half-open. Severity warning. One breaker is a
-customer's endpoint failing; several at once usually means our egress, a provider outage or DNS.
+**What it means.** Three or more destination circuit breakers are open or half-open. Severity warning. One
+breaker is a customer's endpoint failing; several at once usually means our egress, a provider outage or DNS.
+
+**Check.**
 
 ```sql
 SELECT destination_host, state, consecutive_failures, last_failure_code, opened_count
 FROM destination_health WHERE state IN ('open','half_open') ORDER BY updated_at DESC LIMIT 20;
 ```
 
-If the hosts are all one provider, check the provider's status page before anything else. See
-"Per-attempt history, duplicates and the circuit breaker".
+**What to do.** If the hosts are all one provider, check the provider's status page before anything else.
+See "Per-attempt history, duplicates and the circuit breaker".
 
 ### Alert: key_config_fault
 
-The boot report names a missing or invalid required binding (storage, credentials or queue). Severity
-critical. Evaluated even when the Worker refuses to serve (`/health` is 503). `GET /health` names the
-bindings and a `code`; follow "What a configuration fault stops" and "KEK check value and environment
-mismatch". Nothing is delivered that needs a credential until it is fixed.
+**What it means.** The boot report names a missing or invalid required binding (storage, credentials or
+queue). Severity critical. Evaluated even when the Worker refuses to serve (`/health` is 503). Nothing is
+delivered that needs a credential until it is fixed.
+
+**Check.** `GET /health` names the bindings and a `code`.
+
+**What to do.** Follow "What a configuration fault stops" and "KEK check value and environment mismatch".
 
 ### Alert: credentials_quarantined_nonzero
 
-At least one integration has credentials the Worker cannot open and has quarantined. Severity
-warning. Follow "Quarantined credentials". One integration is a customer-facing fault, not an outage;
-many at once after a deploy means a key ring or KEK fault (`key_config_fault` fires too).
+**What it means.** At least one integration has credentials the Worker cannot open and has quarantined.
+Severity warning. One integration is a customer-facing fault, not an outage; many at once after a deploy
+means a key ring or KEK fault (`key_config_fault` fires too).
+
+**Check.** The queries in "Quarantined credentials".
+
+**What to do.** Follow "Quarantined credentials".
 
 ### Alert: queue_backlog
 
-The oldest `pending` delivery is older than 15 minutes (age, not depth). Severity critical.
+**What it means.** The oldest `pending` delivery is older than 15 minutes (age, not depth). Severity
+critical. Queue depth itself is not measurable from the Worker (**UNVERIFIED**: the Queues API was not used).
+
+**Check.**
 
 ```sql
 SELECT organization_id, COUNT(*) AS n, MIN(created_at) AS oldest
 FROM deliveries WHERE state='pending' AND is_test=0 GROUP BY organization_id ORDER BY oldest LIMIT 20;
 ```
 
-A pending delivery whose outbox row is `dispatched` is waiting in the queue: look at the consumer
-(`wrangler tail`). A pending delivery with an outbox row still `pending` is "Stuck outbox".
-Queue depth itself is not measurable from the Worker (**UNVERIFIED**: the Queues API was not used).
+**What to do.** A pending delivery whose outbox row is `dispatched` is waiting in the queue: look at the
+consumer (`wrangler tail`). A pending delivery with an outbox row still `pending` is "Stuck outbox".
 
 ### Alert: ingress_drop_rate
 
-Three or more provider sources dropped events (the per-source flood limit) in the last 15 minutes.
-Severity warning.
+**What it means.** Three or more provider sources dropped events (the per-source flood limit) in the last
+15 minutes. Severity warning. One source dropping is one tenant's flood; several at once suggests abuse
+or a provider replaying.
+
+**Check.**
 
 ```sql
 SELECT id, organization_id, kind, dropped_events, last_dropped_at FROM sources
 WHERE last_dropped_at >= datetime('now','-15 minutes') ORDER BY last_dropped_at DESC LIMIT 20;
 ```
 
-One source dropping is one tenant's flood; several at once suggests abuse or a provider replaying.
-See "Generic source: edge rate rule".
+**What to do.** See "Generic source: edge rate rule".
 
 ### Alert: cron_heartbeat_missing
 
-Two healthy heartbeats were five minutes or more apart in the last 30 minutes: the cron missed ticks.
-Severity critical. This is detected **after the fact**, on the first tick that runs again; a cron that
-has stopped entirely cannot report itself, and nothing external watches for that (not built: use an
-external dead-man's-switch against `ops_state.cron_heartbeat` or the job summary). Check:
+**What it means.** A heartbeat came five minutes or more after the one before it, with no maintenance
+skip in between, inside the last 30 minutes: the cron missed ticks. Fires after two evaluations. Severity
+critical. This is detected **after the fact**, on the first tick that runs again; a cron that has stopped
+entirely cannot report itself, and nothing external watches for that (not built: use an external
+dead-man's-switch against `ops_state.cron_heartbeat`).
+
+**Check.**
 
 ```sql
-SELECT finished_at, finished_at - LAG(finished_at) OVER (ORDER BY finished_at) AS gap_ms
-FROM job_runs WHERE job='heartbeat' AND healthy=1 ORDER BY finished_at DESC LIMIT 40;
+SELECT key, value, datetime(updated_at/1000,'unixepoch') AS updated FROM ops_state
+WHERE key IN ('cron_heartbeat','cron_gap','cron_maintenance');
 ```
 
-A gap during a deploy or a Cloudflare incident is expected; a recurring gap means the trigger is
-missing or the invocation is being cut off. Look for `cron_job_failed` and a stalled `job_runs`.
+**What to do.** A gap during a deploy or a Cloudflare incident is expected; a recurring gap means the
+trigger is missing or the invocation is being cut off. Look for `cron_job_failed` and `job_stale`.
 
 ### Alert: dlq_consumer_no_progress
 
-Ledger rows have been non-terminal for six hours or more (pending or claimed since then, or retrying
-and overdue by that long): the footprint of messages that exhausted their queue retries and were never
-moved to `dead_lettered`. Severity critical. **This is a proxy.** The Worker cannot read the
-dead-letter queue's depth (needs the Queues API; **UNVERIFIED**), so it infers from the ledger; a
-stopped dispatcher leaves the same footprint (`outbox_stall` fires first in that case).
+**What it means.** Ledger rows have been non-terminal for six hours or more (pending or claimed since
+then, or retrying and overdue by that long): the footprint of messages that exhausted their queue retries
+and were never moved to `dead_lettered`. Severity critical. **This is a proxy.** The Worker cannot read the
+dead-letter queue's depth (needs the Queues API; **UNVERIFIED**), so it infers from the ledger; a stopped
+dispatcher leaves the same footprint (`outbox_stall` fires first in that case). No legitimate row waits that
+long: a retry waiting for a future time is not overdue, a disabled or deleted integration's delivery is
+still dispatched and then dead-lettered, and test notifications are excluded.
+
+**Check.**
 
 ```sql
 SELECT value, datetime(updated_at/1000,'unixepoch') AS last_run FROM ops_state WHERE key='dlq_consumer';
@@ -274,10 +325,10 @@ WHERE is_test=0 AND state IN ('pending','claimed','retrying') AND created_at < d
 GROUP BY state;
 ```
 
-`dlq_consumer` is written on every run of the dead-letter consumer (`{"at":..,"seen":..,"moved":..}`);
-a stale or absent value with stuck rows suggests the consumer is not attached (check the
-`noti-dead-letters` consumer in the Cloudflare dashboard; the queue deletes unconsumed messages after
-four days). Mitigation: fix the consumer, then replay per "Dead-letter inspection and redelivery".
+**What to do.** `dlq_consumer` is written on every run of the dead-letter consumer
+(`{"at":..,"seen":..,"moved":..}`); a stale or absent value with stuck rows suggests the consumer is not
+attached (check the `noti-dead-letters` consumer in the Cloudflare dashboard; the queue deletes unconsumed
+messages after four days). Fix the consumer, then replay per "Dead-letter inspection and redelivery".
 
 ## Find a delivery by correlation id
 
@@ -293,6 +344,12 @@ UNION ALL
 SELECT 'attempt', delivery_id, organization_id, outcome, datetime(started_at/1000,'unixepoch')
 FROM delivery_attempts WHERE correlation_id = '<id>';
 ```
+
+**Deploy order.** Apply migration 0027 BEFORE deploying the Worker that writes these columns and tables
+(`wrangler d1 migrations apply`, then `npm run deploy`). The previous Worker ignores them, so a rollback
+needs no schema change. The `ADD COLUMN ... CHECK` statements make SQLite validate every existing row once
+(a full scan of `deliveries`, the outbox and attempts inside the migration): run it in a quiet window on a
+large database. It rewrites nothing.
 
 Then the logs: `wrangler tail lumi-noti --format json --search <id>` shows the request's lines and the
 consumer's (`delivery_attempt`, `delivery_deferred`, `delivery_dead_lettered_by_queue`) under the same
@@ -1051,7 +1108,7 @@ Follow-ups filed (every gap this runbook papered over):
 
 - Nobody is paged. Alerts go to the log and, if configured, a chat webhook; no paging service, no acknowledgement, no escalation.
 - A cron that has stopped entirely cannot report itself: `cron_heartbeat_missing` fires on the first tick after a gap, and nothing external watches for the silence.
-- No support evidence bundle (F202); no `job_runs` leases, cursors or `cpu_ms`; `alert_state` is not locked against two overlapping ticks (the worst case is one duplicate message with the same incident key).
+- No support evidence bundle (F202); no job leases, cursors or `cpu_ms`; `alert_state` is not locked against two overlapping ticks (the worst case is one duplicate message with the same incident key).
 - Alert thresholds are unmeasured starting values.
 - No ingress counter, so a silent source cannot be detected (`ingress_gap`).
 - Everything above is unrehearsed.

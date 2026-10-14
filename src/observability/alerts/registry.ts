@@ -9,7 +9,7 @@
  * the spec's other alerts that read Analytics Engine, queue depth or provider health endpoints.
  */
 import type { Signals } from './signals';
-import { RENOTIFY_MS, THRESHOLDS } from './thresholds';
+import { CLEAR_TICKS, RENOTIFY_MS, THRESHOLDS } from './thresholds';
 
 export type AlertSeverity = 'critical' | 'warning';
 export type AlertUnit = 'count' | 'ms';
@@ -46,6 +46,11 @@ export interface AlertDef {
    * is already an observed, sustained fact.
    */
   readonly confirmTicks: number;
+  /**
+   * Consecutive clear evaluations before RESOLVED is sent, so a signal that flaps around its threshold
+   * does not send a FIRING and a RESOLVED every few minutes (hysteresis).
+   */
+  readonly clearTicks: number;
 }
 
 /** The heading anchor in docs/RUNBOOK.md (`### Alert: job_stale`). */
@@ -67,6 +72,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.jobsStale,
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 2,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'outbox_stall',
@@ -77,6 +83,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.outboxStalled,
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'dead_letter_spike',
@@ -87,6 +94,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.deadLettersRecent,
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'breaker_open_many',
@@ -97,6 +105,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.breakersOpen,
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'key_config_fault',
@@ -107,6 +116,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.keyConfigFaults,
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'credentials_quarantined_nonzero',
@@ -117,6 +127,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.credentialsQuarantined,
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'queue_backlog',
@@ -127,6 +138,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.oldestPendingAgeMs,
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'ingress_drop_rate',
@@ -137,6 +149,7 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.sourcesDropping,
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'cron_heartbeat_missing',
@@ -146,7 +159,8 @@ export const ALERTS: readonly AlertDef[] = [
     threshold: THRESHOLDS.heartbeatMaxGapMs,
     read: (s) => s.heartbeatMaxGapMs,
     renotifyMs: RENOTIFY_MS.critical,
-    confirmTicks: 1,
+    confirmTicks: 2,
+    clearTicks: CLEAR_TICKS,
   },
   {
     id: 'dlq_consumer_no_progress',
@@ -158,5 +172,6 @@ export const ALERTS: readonly AlertDef[] = [
     read: (s) => s.deadLetterStuckRows,
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
   },
 ];

@@ -204,7 +204,7 @@ tenants, analytics, AI providers or error trackers"*).
 
 ## F192 — Scheduled job runner and job health
 
-**Priority** P0 · **Status** 🟡 `runCronJobs` records every execution in `job_runs` (migration 0027: ok, failed, skipped, integer counters, closed error class; 3-day retention), one typed cadence table (`src/observability/cadence.ts`), staleness at 3x cadence from D1 (`job-health.ts`) shown in the summary and as the `job_stale` alert, a DLQ consumer run record (ADR 0024; `tests/observability/job-runner.test.ts`). Not built: `job_cursors`, leases, resumable cursors, `cpu_ms`, `partial`, `job_failing`, a separate `job_never_ran` (a never-run job goes stale after 3 cadences of tracking). · **Referenced by F51, F171, F174, F190**
+**Priority** P0 · **Status** 🟡 `runCronJobs` records every execution in `job_state` (one upserted row per job) and `job_runs` (failures and outcome changes; migration 0027: ok, failed, skipped, integer counters, closed error class; 14-day retention), one typed cadence table (`src/observability/cadence.ts`), staleness at 3x cadence from D1 (`job-health.ts`) shown in the summary and as the `job_stale` alert, a DLQ consumer run record (ADR 0024; `tests/observability/job-runner.test.ts`). Not built: `job_cursors`, leases, resumable cursors, `cpu_ms`, `partial`, `job_failing`, a separate `job_never_ran` (a never-run job goes stale after 3 cadences of tracking). · **Referenced by F51, F171, F174, F190**
 
 **Story** As an operator, I want every background job to report whether it ran, how much it did
 and how fresh it is, so that a job which quietly stopped is indistinguishable from a job with

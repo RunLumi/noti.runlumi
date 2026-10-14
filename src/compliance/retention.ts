@@ -755,8 +755,8 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     category: 'platform_state',
     personalData: 'none',
     dataHeld:
-      'One row per cron job execution: job name, start and finish, outcome, a few integer counters (rows processed) and a closed error class. Platform-wide: no workspace id, no event content, no error text.',
-    purpose: 'Proves each background job ran, and how recently, so a stopped job is detected (F192).',
+      'History of cron job failures and changes of outcome: job name, start and finish, outcome, a few integer counters (rows processed) and a closed error class. Platform-wide: no workspace id, no event content, no error text.',
+    purpose: 'Lets an operator see when a background job started failing or recovered (F192).',
     retention: {
       kind: 'fixed',
       ms: JOB_RUNS_RETENTION_MS,
@@ -769,12 +769,27 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     ...placeholders,
   },
   {
+    id: 'job_state',
+    table: 'job_state',
+    category: 'platform_state',
+    personalData: 'none',
+    dataHeld:
+      'One row per cron job, overwritten every run: first seen, last start and finish, last outcome, last healthy and last failed time, last counters, last error class, run count. Platform-wide: no workspace id, no error text.',
+    purpose: 'The freshness of each background job, so a stopped job is detected (F192).',
+    retention: { kind: 'indefinite', reason: 'A fixed set of rows (one per job) overwritten in place.' },
+    deletion: [{ kind: 'none', reason: 'Fixed keys, no personal or tenant data.' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Excluded on purpose: platform operations data that belongs to no workspace.',
+    ...placeholders,
+  },
+  {
     id: 'alert_state',
     table: 'alert_state',
     category: 'platform_state',
     personalData: 'none',
     dataHeld:
-      'One row per alert in the registry: firing or resolved, since when, when it was last notified, the incident key and the last value (a count or a duration).',
+      'One row per alert in the registry: firing or resolved, since when, when it was last notified, the incident key, the last value (a count or a duration), breach and clear streaks and any notice a sink has not accepted yet (its kind and retry time).',
     purpose:
       'Lets the alert engine notify once per incident, re-notify on a cadence and announce recovery (F200).',
     retention: { kind: 'indefinite', reason: 'A fixed set of rows (one per alert) overwritten in place.' },

@@ -31,6 +31,9 @@ describe('alert-to-runbook', () => {
         `${a.id}: missing or empty "### ${runbookHeading(a.id)}" in docs/RUNBOOK.md`,
       ).toBeGreaterThan(80);
       expect(body, a.id).toContain(a.severity);
+      // What a 3am reader needs, as named labels: what it means, what to look at, what to do.
+      for (const label of ['**What it means.**', '**Check.**', '**What to do.**'])
+        expect(body, `${a.id}: missing ${label}`).toContain(label);
     }
   });
 
@@ -75,6 +78,7 @@ describe('the alert tables exist where the runbook queries them', () => {
     const to = runbook.indexOf('## Stuck outbox');
     const blocks = [...runbook.slice(from, to).matchAll(/```sql\n([\s\S]*?)```/g)].map((m) => m[1] ?? '');
     expect(blocks.length).toBeGreaterThanOrEqual(10);
+    // The stalled-job and gap queries must run against the real tables.
     for (const block of blocks) {
       const statements = block
         .replace(/^--.*$/gm, '')

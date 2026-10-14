@@ -23,9 +23,10 @@ import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './p
 import observability from './api/observability';
 import { evaluateAlerts } from './observability/alerts/engine';
 import type { JobName } from './observability/cadence';
-import { runCronJobs, writeHeartbeat, type CronJob } from './observability/cron';
+import { markMaintenanceSkip, runCronJobs, writeHeartbeat, type CronJob } from './observability/cron';
 import { createJobRecorder, type JobReport } from './observability/job-runs';
-import { detectStalls } from './observability/stall';
+import type { StallCounts } from './observability/stall';
+import { countStalls, detectStalls } from './observability/stall';
 import { purgeEventDedup } from './delivery/dedup';
 import { purgeExpiredRecords } from './pipeline/retention';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
@@ -322,8 +323,8 @@ async function purgeRetention(env: Bindings): Promise<JobReport> {
 }
 
 /** Evaluate the alert registry and notify the sinks (docs/specs/13-observability.md F200). */
-async function evaluateAlertRegistry(env: Bindings): Promise<JobReport> {
-  const report = await evaluateAlerts(env);
+async function evaluateAlertRegistry(env: Bindings, stalls: Promise<StallCounts>): Promise<JobReport> {
+  const report = await evaluateAlerts(env, Date.now(), { stallCounts: await stalls });
   return {
     counters: {
       fired: report.fired,
@@ -332,6 +333,7 @@ async function evaluateAlertRegistry(env: Bindings): Promise<JobReport> {
       firing: report.firing,
       unknown: report.unknown,
       notify_failures: report.notifyFailures,
+      resent: report.resent,
     },
   };
 }
@@ -340,11 +342,17 @@ async function evaluateAlertRegistry(env: Bindings): Promise<JobReport> {
  * A misconfigured Worker still records its heartbeat and runs stall detection (so the outage is
  * visible and the silence is measurable), then fails the invocation naming the bindings.
  */
-function bootFailureJobs(env: Bindings): CronJob<JobName>[] {
+/**
+ * Detection first. The stall counts are read ONCE per tick and shared by the stall detector and the alert
+ * engine (`outbox_stall`), so an outage does not double the query load.
+ */
+function detectionJobs(env: Bindings): CronJob<JobName>[] {
+  let stalls: Promise<StallCounts> | undefined;
+  const shared = (): Promise<StallCounts> => (stalls ??= countStalls(env.DB, Date.now()));
   return [
     { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
-    { name: 'stall_detection', run: () => detectStalls(env) },
-    { name: 'alerts', flushBefore: true, run: () => evaluateAlertRegistry(env) },
+    { name: 'stall_detection', run: () => detectStalls(env, Date.now(), shared()) },
+    { name: 'alerts', flushBefore: true, run: () => evaluateAlertRegistry(env, shared()) },
   ];
 }
 
@@ -353,7 +361,7 @@ async function assertBootable(env: Bindings): Promise<void> {
   if (report.names.length === 0) return;
   log('error', 'config_invalid', { misconfigured: report.names, code: report.code });
   // `alerts` is the one that matters here: `key_config_fault` fires from this very state.
-  await runCronJobs(bootFailureJobs(env), { recorder: createJobRecorder(env.DB) }).catch(() => undefined);
+  await runCronJobs(detectionJobs(env), { recorder: createJobRecorder(env.DB) }).catch(() => undefined);
   throw new Error(`config_invalid: ${report.names.join(',')}`);
 }
 
@@ -375,15 +383,15 @@ export default {
   async scheduled(_event: ScheduledEvent, env: Bindings) {
     if (inMaintenance(env)) {
       log('warn', 'maintenance_mode_cron_skipped', {});
+      // The one write the freeze allows: "silence here is on purpose" (see markMaintenanceSkip).
+      await markMaintenanceSkip(env.DB, Date.now());
       return;
     }
     await assertBootable(env);
     // Every execution is recorded in `job_runs` (F192); the alert job runs second so detection survives
     // a later job's failure, and flushes first so it sees this tick's heartbeat.
     const jobs: CronJob<JobName>[] = [
-      { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
-      { name: 'stall_detection', run: () => detectStalls(env) },
-      { name: 'alerts', flushBefore: true, run: () => evaluateAlertRegistry(env) },
+      ...detectionJobs(env),
       { name: 'outbox_reconcile', run: () => reconcileOutbox(env) },
       // After the reconcile, with its own bounded budget (100 notifications per tick), so a large
       // backlog can never starve the reconcile or the jobs after it; what it releases is
