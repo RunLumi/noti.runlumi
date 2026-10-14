@@ -47,7 +47,14 @@ const current = splitTree(
 );
 
 function git(gitArgs) {
-  return execFileSync('git', gitArgs, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  // A hook or wrapper may export variables that point git at some other repository than --root.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+  return execFileSync('git', gitArgs, {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env,
+  });
 }
 
 function readBase(ref) {

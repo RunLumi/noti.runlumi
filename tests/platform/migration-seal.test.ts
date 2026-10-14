@@ -121,13 +121,18 @@ describe('the CLI against a real git repository', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
+  // Run from a pre-push hook, the environment carries variables that redirect every git call to the real
+  // repository; the throwaway repositories must not inherit them.
+  const cleanEnv: NodeJS.ProcessEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')),
+  ) as NodeJS.ProcessEnv;
   const run = (cwd: string, ...args: string[]) =>
-    spawnSync(process.execPath, [CLI, '--root', cwd, ...args], { encoding: 'utf8' });
+    spawnSync(process.execPath, [CLI, '--root', cwd, ...args], { encoding: 'utf8', env: cleanEnv });
   const git = (cwd: string, ...args: string[]) =>
     execFileSync(
       'git',
       ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...args],
-      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+      { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: cleanEnv },
     );
   const put = (cwd: string, name: string, text: string) => writeFileSync(join(cwd, 'migrations', name), text);
 
