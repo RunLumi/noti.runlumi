@@ -57,6 +57,23 @@ export type Bindings = AuthBindings & {
   KEK_V2?: string;
   /** Which KEK version wraps new connection keys. */
   KMS_ACTIVE_VERSION: string;
+  /**
+   * Which deployment this Worker is: `production`, `staging` or `development`. Not a secret. It
+   * is an input to the KEK check value, so a KEK copied between environments is detected (F34).
+   */
+  ENVIRONMENT_NAME: string;
+  /**
+   * Key check values of KEK_V1 / KEK_V2 for this environment: 32 hex characters of
+   * HMAC-SHA-256(KEK, "lumi-noti/kcv/v1:" + ENVIRONMENT_NAME). Public, one-way. Required outside
+   * `development`; a mismatch makes the Worker refuse to serve (docs/RUNBOOK.md).
+   */
+  KEK_CHECK_V1?: string;
+  KEK_CHECK_V2?: string;
+  /**
+   * Optional. 64 hex characters; keys the tenant-scoped credential fingerprint (F39). A dedicated secret
+   * so a KEK rotation does not change fingerprints. Absent: no fingerprints are computed.
+   */
+  FINGERPRINT_KEY?: string;
   /** Delivery ledger retention in days (30..365, default 90). See src/pipeline/retention.ts. */
   DELIVERY_RETENTION_DAYS?: string;
   /**

@@ -7,7 +7,10 @@ import type { AuthMode } from '../connectors/sources/types';
 import {
   generateEndpointId,
   generateSigningSecret,
+  openSourceSecretText,
   sealSourceSecret,
+  SOURCE_CREDENTIAL_COLUMNS,
+  type SourceCredentialRow,
 } from '../connectors/sources/generic/secret';
 import { toBytes } from '../crypto/envelope';
 import { keyringFromEnv } from '../crypto/keyring-env';
@@ -15,6 +18,8 @@ import type { Bindings } from '../env';
 import { asRecord } from '../lib/json';
 import { blob } from '../pipeline/credentials';
 import { hit } from '../security/rate-limit';
+import { sameSecret } from '../lib/digest';
+import { readRevokeReason } from './revoke';
 import { isDeletionPending } from './workspace-lifecycle';
 
 /**
@@ -53,11 +58,14 @@ interface SourceRow {
   livemode: number | null;
   dropped_events: number;
   last_dropped_at: string | null;
+  credential_fingerprint: string | null;
+  credentials_revoked_at: string | null;
   integration_count: number;
 }
 
 const SELECT = `s.id,s.name,s.kind,s.endpoint_id,s.enabled,s.created_at,s.updated_at,s.last_received_at,
   s.secret_rotated_at,s.reused_id_rejections,s.last_reuse_rejected_at,s.auth_mode,s.livemode,s.dropped_events,s.last_dropped_at,
+  s.credential_fingerprint,s.credentials_revoked_at,
   (SELECT COUNT(*) FROM integrations i WHERE i.source_id=s.id AND i.organization_id=s.organization_id) AS integration_count`;
 
 export interface SourceView {
@@ -82,6 +90,10 @@ export interface SourceView {
   /** Events dropped because the source exceeded its rate limit (GitLab flood policy, ADR 0015). */
   readonly droppedEvents: number;
   readonly lastDroppedAt: string | null;
+  /** base32(SHA-256(secret))[0:8] to match the secret in the sender's console; null if sealed before F39. */
+  readonly credentialFingerprint: string | null;
+  /** The credential was revoked (F40): the source stays off until a new secret is entered. */
+  readonly revoked: boolean;
   readonly integrationCount: number;
 }
 
@@ -107,6 +119,8 @@ function toView(row: SourceRow, appOrigin: string): SourceView {
     livemode: row.livemode === null ? null : row.livemode === 1,
     droppedEvents: row.dropped_events,
     lastDroppedAt: row.last_dropped_at,
+    credentialFingerprint: row.credential_fingerprint,
+    revoked: row.credentials_revoked_at !== null,
     integrationCount: row.integration_count,
   };
 }
@@ -180,7 +194,12 @@ async function load(c: Ctx, orgId: string, id: string): Promise<SourceRow | null
 function audit(
   c: Ctx,
   who: Resolved,
-  action: 'source.create' | 'source.update' | 'source.delete' | 'source.secret.rotate',
+  action:
+    | 'source.create'
+    | 'source.update'
+    | 'source.delete'
+    | 'source.secret.rotate'
+    | 'source.credentials.revoke',
   id: string,
   metadata: AuditMetadata,
 ) {
@@ -282,13 +301,14 @@ sources.post('/', async (c) => {
     { organizationId: who.orgId, sourceId: id },
     secret,
     keyringFromEnv(c.env),
+    c.env.FINGERPRINT_KEY,
   );
   // The quota is part of the INSERT, so two concurrent creates cannot both pass a stale count.
   const results = await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO sources(id,organization_id,kind,name,endpoint_id,secret_envelope,key_salt,dek_wrapped,
-         kek_version,enabled,created_by,auth_mode,livemode)
-       SELECT ?,?,?,?,?,?,?,?,?,1,?,?,?
+         kek_version,credential_fingerprint,enabled,created_by,auth_mode,livemode)
+       SELECT ?,?,?,?,?,?,?,?,?,?,1,?,?,?
        WHERE (SELECT COUNT(*) FROM sources WHERE organization_id=?) < ?`,
     ).bind(
       id,
@@ -300,6 +320,7 @@ sources.post('/', async (c) => {
       sealed.keySalt,
       sealed.dekWrapped,
       sealed.kekVersion,
+      sealed.fingerprint,
       who.userId,
       authMode,
       livemode === null ? null : livemode ? 1 : 0,
@@ -326,7 +347,8 @@ sources.patch('/:id', async (c) => {
   const who = await mutationGate(c, 'source.update');
   if (who instanceof Response) return who;
   const id = c.req.param('id');
-  if (!(await load(c, who.orgId, id))) return c.json({ error: 'Not found' }, 404);
+  const current = await load(c, who.orgId, id);
+  if (!current) return c.json({ error: 'Not found' }, 404);
   const read = await readJson(c);
   if (!read.ok) return read.response;
   const body = asRecord(read.body);
@@ -354,6 +376,17 @@ sources.patch('/:id', async (c) => {
     if (typeof body.enabled !== 'boolean')
       return c.json(
         { error: 'Validation failed', fields: [{ field: 'enabled', message: 'Must be true or false.' }] },
+        422,
+      );
+    // A revoked source stays off until a new secret has been entered (rotate), whatever the flag says.
+    if (body.enabled && current.credentials_revoked_at !== null)
+      return c.json(
+        {
+          error: 'Validation failed',
+          fields: [
+            { field: 'enabled', message: 'This source was revoked. Replace its secret to turn it back on.' },
+          ],
+        },
         422,
       );
     sets.push('enabled=?');
@@ -434,14 +467,39 @@ sources.post('/:id/rotate', async (c) => {
     .first<{ dek_wrapped: unknown }>();
   const seenWrap = seen ? blob(toBytes(seen.dek_wrapped)) : null;
   if (!seenWrap) return c.json({ error: 'Not found' }, 404);
+  if (existing.credentials_revoked_at !== null && existing.kind !== 'generic') {
+    // The pasted credential of a revoked provider source must be a NEW one, not the burned value again.
+    const stored = await c.env.DB.prepare(
+      `SELECT ${SOURCE_CREDENTIAL_COLUMNS} FROM sources WHERE id=? AND organization_id=?`,
+    )
+      .bind(id, who.orgId)
+      .first<SourceCredentialRow>();
+    const burned = stored
+      ? await openSourceSecretText(stored, keyringFromEnv(c.env)).catch(() => null)
+      : null;
+    if (burned !== null && (await sameSecret(burned, secret)))
+      return c.json(
+        {
+          error: 'Validation failed',
+          fields: [
+            { field: 'secret', message: 'This credential was revoked. Enter a new one, not the same value.' },
+          ],
+        },
+        422,
+      );
+  }
   const sealed = await sealSourceSecret(
     { organizationId: who.orgId, sourceId: id },
     secret,
     keyringFromEnv(c.env),
+    c.env.FINGERPRINT_KEY,
   );
   const results = await c.env.DB.batch([
     c.env.DB.prepare(
       `UPDATE sources SET secret_envelope=?,key_salt=?,dek_wrapped=?,kek_version=?,auth_mode=?,
+         credential_fingerprint=?,
+         enabled=CASE WHEN credentials_revoked_at IS NOT NULL THEN 1 ELSE enabled END,
+         credentials_revoked_at=NULL,
          secret_rotated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
        WHERE id=? AND organization_id=? AND dek_wrapped=?`,
     ).bind(
@@ -450,6 +508,7 @@ sources.post('/:id/rotate', async (c) => {
       sealed.dekWrapped,
       sealed.kekVersion,
       authMode,
+      sealed.fingerprint,
       id,
       who.orgId,
       seenWrap,
@@ -470,6 +529,40 @@ sources.post('/:id/rotate', async (c) => {
   return existing.kind === 'generic'
     ? c.json({ source: toView(row, c.env.APP_ORIGIN), secret }, 200, NO_STORE)
     : c.json({ source: toView(row, c.env.APP_ORIGIN) }, 200, NO_STORE);
+});
+
+/**
+ * Revoke a source's credentials (F40): the signing secret must be treated as burned. Admin-only.
+ * The source is switched off (ingress already answers 404 for a disabled endpoint, so a sender
+ * holding the burned secret gets nothing) and marked revoked, which keeps it off until a NEW secret
+ * is entered with `rotate` (which seals under fresh key material and turns it back on). Repeating
+ * the call is a no-op and writes no second audit entry.
+ */
+sources.post('/:id/revoke-credentials', async (c) => {
+  const who = await mutationGate(c, 'source.revoke');
+  if (who instanceof Response) return who;
+  const id = c.req.param('id');
+  const existing = await c.env.DB.prepare(
+    'SELECT kind,credentials_revoked_at FROM sources WHERE id=? AND organization_id=?',
+  )
+    .bind(id, who.orgId)
+    .first<{ kind: SourceKind; credentials_revoked_at: string | null }>();
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+  const reason = await readRevokeReason(c);
+  if (reason instanceof Response) return reason;
+  if (existing.credentials_revoked_at === null) {
+    // `audit()` writes its row only if the UPDATE just before it changed one, so two concurrent
+    // revokes leave exactly one audit entry.
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE sources SET enabled=0,credentials_revoked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+         WHERE id=? AND organization_id=? AND credentials_revoked_at IS NULL`,
+      ).bind(id, who.orgId),
+      audit(c, who, 'source.credentials.revoke', id, { kind: existing.kind, reason }),
+    ]);
+  }
+  const row = await load(c, who.orgId, id);
+  return row ? c.json({ source: toView(row, c.env.APP_ORIGIN) }) : c.json({ error: 'Not found' }, 404);
 });
 
 /**

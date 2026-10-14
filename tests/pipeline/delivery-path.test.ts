@@ -43,6 +43,10 @@ function makeEnv(over: Partial<Bindings> = {}): Bindings {
     KEK_V1: K1,
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',
+    ENVIRONMENT_NAME: 'staging',
+    KEK_CHECK_V1: '4464ea2121d3a99ebd188370f1ef6cd0',
+    // Staging check value of K2, so a rotation test can hold K2 alone.
+    KEK_CHECK_V2: 'a05d760333a74120cc3c488d4871cb25',
     ...over,
   } as Bindings;
 }
@@ -494,15 +498,11 @@ describe('consumer', () => {
 
   it('retries, never drops, when the key ring is misconfigured', async () => {
     const m = await queued();
-    const batch = {
-      messages: [message(m)],
-      retriedAll: false,
-      retryAll() {
-        this.retriedAll = true;
-      },
-    };
+    const msg = message(m);
+    const batch = { messages: [msg], retryAll: () => undefined };
     await worker.queue(batch as unknown as MessageBatch<unknown>, makeEnv({ KEK_V1: 'bad' }));
-    expect(batch.retriedAll).toBe(true);
+    expect(msg.retried).toBe(true);
+    expect(msg.acked).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(delivery(m.id)?.state).toBe('pending');
   });
@@ -587,6 +587,7 @@ describe('credential maintenance jobs', () => {
       legacyRemaining: 0,
       staleKekRemaining: 0,
       quarantined: 0,
+      revoked: 0,
     });
 
     env = makeEnv({ KEK_V1: '', KEK_V2: K2, KMS_ACTIVE_VERSION: '2' });
@@ -609,6 +610,7 @@ describe('credential job safety', () => {
       legacyRemaining: 2,
       staleKekRemaining: 0,
       quarantined: 0,
+      revoked: 0,
     });
   });
 
@@ -650,11 +652,14 @@ describe('credential job safety', () => {
 });
 
 describe('/health', () => {
-  it('names a malformed legacy key', async () => {
+  it('warns about a malformed optional legacy key without refusing to serve', async () => {
     env = makeEnv({ ENCRYPTION_KEY: 'nope' });
     const res = await worker.fetch(new Request('https://noti.test/health'), env, {} as ExecutionContext);
-    expect(res.status).toBe(503);
-    expect(await res.text()).toContain('ENCRYPTION_KEY');
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain('ENCRYPTION_KEY');
+    expect(text).not.toContain('nope');
+    expect(JSON.parse(text)).toMatchObject({ ok: true, warnings: ['ENCRYPTION_KEY'] });
   });
 
   it('names the misconfigured key binding without revealing a value', async () => {

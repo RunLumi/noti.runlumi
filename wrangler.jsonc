@@ -75,6 +75,17 @@
     // Which KEK version (secret KEK_V<n>) wraps new connection keys. Not a secret.
     // Flip only after the new KEK secret is deployed; see docs/IMPLEMENTATION.md.
     "KMS_ACTIVE_VERSION": "1",
+    // Which deployment this is: production | staging | development (F34). An input to the KEK check
+    // value below. A staging deploy sets "staging" and its own check values.
+    "ENVIRONMENT_NAME": "production",
+    // Key check values of KEK_V1 / KEK_V2 for THIS environment: 32 hex characters of
+    // HMAC-SHA-256(KEK, "lumi-noti/kcv/v1:" + ENVIRONMENT_NAME). Public and one-way. A Worker whose
+    // KEK does not produce its check value refuses to serve (kek_environment_mismatch). Compute
+    // with `node scripts/kek-destroy-check.mjs check-value` (docs/RUNBOOK.md). Until the real value
+    // is set the Worker fails closed, like the GitHub App placeholders below.
+    "KEK_CHECK_V1": "REPLACE_WITH_KEK_CHECK_V1",
+    // Empty unless a second KEK is deployed for a rotation.
+    "KEK_CHECK_V2": "",
     // Retention for operational records (src/pipeline/retention.ts). Days, as strings.
     // Delivery rows: 30-365 (default 90); audit events: 30-3650 (default 365). Out-of-range
     // or non-numeric values fall back to the default. Not secrets.

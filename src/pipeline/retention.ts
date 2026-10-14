@@ -109,9 +109,12 @@ export const PURGE_ORPHAN_OUTBOX_SQL = `DELETE FROM notification_outbox WHERE ro
     AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.id = o.id)
   LIMIT ?2)`;
 
-/** ?1 text cutoff · ?2 limit */
+/**
+ * ?1 text cutoff · ?2 limit. A `key.destroy` event is platform-level evidence that a KEK version was
+ * authorised for destruction (F37); it is not subject to the workspace audit retention.
+ */
 export const PURGE_AUDIT_SQL = `DELETE FROM audit_events WHERE rowid IN (
-  SELECT rowid FROM audit_events WHERE created_at < ?1 LIMIT ?2)`;
+  SELECT rowid FROM audit_events WHERE created_at < ?1 AND action <> 'key.destroy' LIMIT ?2)`;
 
 async function drain(db: Db, sql: string, binds: readonly unknown[]): Promise<{ n: number; more: boolean }> {
   let n = 0;

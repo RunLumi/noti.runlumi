@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
@@ -59,7 +60,7 @@ beforeEach(() => {
   db.raw
     .prepare('INSERT INTO "session"(id,user_id,token,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?)')
     .run('sess-multi', 'multi', 't', 9_999_999_999, 1, 1);
-  env = { DB: db.d1, APP_ORIGIN: 'https://noti.test' } as unknown as Bindings;
+  env = { ...BOOT_ENV, DB: db.d1, APP_ORIGIN: 'https://noti.test' } as unknown as Bindings;
 });
 
 describe('/api/workspace/me', () => {

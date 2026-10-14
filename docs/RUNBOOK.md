@@ -56,8 +56,10 @@ warn line, `GET /api/observability/summary` and a person looking.
 
 ## What to check first
 
-1. `GET /health` on the Worker. 503 names the misconfigured binding (key ring) and nothing
-   else; 200 only proves the Worker boots.
+1. `GET /health` on the Worker. 503 names the misconfigured bindings and a `code`
+   (`config_invalid`, or `kek_environment_mismatch` for a KEK from another environment) and
+   nothing else; 200 proves the Worker boots with a valid configuration, and says nothing about
+   D1. Then `GET /health/ready` (see "Readiness endpoint").
 2. Is the cron running? Every tick upserts a heartbeat first:
    `SELECT value AS last_tick_ms, updated_at FROM ops_state WHERE key='cron_heartbeat';`
    Compare with `strftime('%s','now')*1000`; it should be under about two minutes old. The
@@ -241,6 +243,163 @@ clears the flag). Break-glass only after the cause is fixed (docs/IMPLEMENTATION
 WHERE id='<id>' AND organization_id='<org>';`. If many rows quarantine at once, suspect
 key-ring configuration (`GET /health`), not the rows, and stop: that is a Sev 1.
 
+## Readiness endpoint
+
+`GET /health/ready` is public and returns booleans only:
+`{"ok":false,"checks":{"config":true,"d1":false,"queue":true}}`, `503` if any is false,
+`Cache-Control: no-store`. `config` is the same check as `/health` (without the names), `d1` is a
+`SELECT 1` with a 3 second bound, `queue` is a presence check of the `DELIVERY_QUEUE` binding. It
+sends no queue message and makes no outbound call. Reading it:
+
+| `config` | `d1` | `queue` | Meaning and first action |
+| --- | --- | --- | --- |
+| false | any | any | A required binding is wrong. `GET /health` names it and says whether it is `config_invalid` or `kek_environment_mismatch`. What that stops depends on the binding (see "What a configuration fault stops"). Fix the deploy. |
+| true | false | true | D1 is unreachable or too slow. `/health` still says 200 (it does not touch D1). Check Cloudflare status and `wrangler tail` for `ready_d1_failed` and `d1_write_shed`. Ingress answers 5xx; see "After an ingress outage". |
+| true | true | false | The queue binding is missing from the deployment. Re-deploy with `wrangler.jsonc` intact. |
+
+The answer is cached for 5 seconds in each isolate, so a probe loop does not turn into D1 load, and a
+change shows up within that time. Warnings (a malformed optional `ENCRYPTION_KEY` or
+`FINGERPRINT_KEY`, a second KEK without a check value) appear on `/health` under `warnings` with a
+200: they stop one job, not the Worker.
+
+## What a configuration fault stops
+
+| Fault | Stops | Keeps working |
+| --- | --- | --- |
+| `DB` missing | every request except `/health` and `/health/ready`, the queue consumer, `scheduled` | the dashboard shell and assets |
+| Key ring invalid, `ENVIRONMENT_NAME` wrong, `KEK_CHECK_V<n>` missing/malformed, or a KEK that does not match (`kek_environment_mismatch`) | creating or editing integrations and sources, rotating a source secret, test sends (503); the delivery consumer; `scheduled` | **webhook ingress**, sign-in, every read, delete and revoke |
+| `DELIVERY_QUEUE` missing | `scheduled` (dispatch) | everything else; ingress still persists to the outbox |
+| `ENCRYPTION_KEY` or `FINGERPRINT_KEY` malformed | only the v0 migration step / fingerprints | everything |
+
+Ingress is deliberately not gated on the key ring: it never opens a destination credential, and a
+refused webhook can be lost for good (GitHub does not redeliver automatically; GitLab disables a hook
+after repeated failures).
+
+While the delivery consumer is gated, **each message** is retried on its own growing delay (5, 10, 20,
+40, 80 minutes, about 2.6 hours across the queue's five retries) and nothing is acknowledged. This
+postpones; it does not make loss impossible:
+
+- An outage longer than about 2.6 hours moves messages to `noti-dead-letters`. The dead-letter consumer
+  is never gated and marks those deliveries `dead_lettered`. The every-minute reconciler does **not**
+  recover them: it only re-dispatches outbox rows that are `pending` or whose claim expired, and these
+  rows are already `dispatched`. Replay them from the delivery log (admin, one at a time; a bulk replay
+  is not built, REMAINING 1.7), or by `POST /api/deliveries/:id/replay`.
+- If the dead-letter consumer could not run either, the platform deletes dead-letter messages after 4
+  days and the deliveries stay non-terminal. Find them:
+
+  ```sql
+  SELECT d.id, d.organization_id, d.state, d.created_at
+  FROM deliveries d JOIN notification_outbox o ON o.id = d.id
+  WHERE d.state IN ('pending','retrying','claimed') AND o.state = 'dispatched'
+    AND d.created_at < datetime('now','-4 hours') ORDER BY d.created_at LIMIT 100;
+  ```
+
+  There is no supported way to re-dispatch these in bulk; treat the list as the work queue for manual
+  replay and tell the affected workspaces.
+
+## After an ingress outage
+
+If `DB` was missing (or D1 down) while webhooks arrived, the senders got 5xx. GitHub will **not** retry
+those on its own: redeliver them by hand (see "Missed GitHub webhooks"). A GitLab hook that failed
+repeatedly may have been disabled by GitLab: re-enable it in the project's webhook settings. A signed
+generic sender usually retries; an unsigned-retry sender may not. Redelivery is safe because ingress is
+idempotent on the provider's delivery id.
+
+A webhook whose first attempt committed but whose response was lost (a connection dropped after the D1
+write) is retried once by the Worker (`withD1Retry`). That retry reports `{"accepted":true,
+"persisted":0,"duplicate":true}` and the event is dispatched by the every-minute reconciler, up to a
+minute later, rather than immediately. This is expected, not an error.
+
+## After a deploy
+
+`npm run deploy` runs `scripts/predeploy-check.mjs` first (it refuses to deploy while a `REPLACE_WITH_`
+placeholder remains in a required var, and warns about the optional GitHub App ones) and
+`scripts/smoke-health.mjs` last, which asks the new deployment for `/health` and `/health/ready`. If
+the smoke check fails it exits non-zero and prints the rollback instruction: run `wrangler rollback`
+(**UNVERIFIED** for this account), then read `/health` for the binding names and fix them before
+deploying again. Run the smoke check by hand any time: `npm run smoke` (or `node scripts/smoke-health.mjs
+https://<origin>`).
+
+## KEK check value and environment mismatch
+
+Each environment carries `ENVIRONMENT_NAME` (`production`, `staging` or `development`) and, for
+every KEK it holds, a public **check value** var: `KEK_CHECK_V1` (`KEK_CHECK_V2` while rotating).
+The check value is the first 32 hex characters of `HKDF-SHA-256(ikm = KEK, salt = empty, info =
+"lumi-noti/kcv/v2:" + ENVIRONMENT_NAME)`. It is one-way and public; the KEK is not. A Worker whose KEK does not produce
+its environment's check value refuses to serve (`kek_environment_mismatch`).
+
+Compute it where the KEK is generated, with the KEK in the process environment, never as an
+argument (it would land in shell history):
+
+```sh
+KEK_HEX=$(openssl rand -hex 32)
+printf '%s' "$KEK_HEX" | wrangler secret put KEK_V1            # production
+KEK_HEX="$KEK_HEX" node scripts/kek-destroy-check.mjs check-value --environment production
+# -> 32 hex characters: set "KEK_CHECK_V1" in wrangler.jsonc, deploy
+unset KEK_HEX
+```
+
+A staging deployment uses `--environment staging` and its **own** KEK, so its check value differs
+even if someone copies the KEK across. Outside `development` at least one KEK must carry a valid check
+value, and a malformed or mismatching one is a fault naming `KEK_CHECK_V<n>` (what it stops: "What a
+configuration fault stops"). A second KEK without a check value is only a warning, so a rotation can
+add the two in either order; `development` is accepted only with a local `APP_ORIGIN`
+(`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`).
+
+When `/health` says `kek_environment_mismatch`: do not "fix" it by editing the check value to match.
+Find out which KEK is loaded: the wrong environment's secret, a stale `KEK_V1` after a rotation, or
+a typo. A wrong KEK that is accepted seals new credentials under a key nothing else can open.
+
+## Destroying a KEK version
+
+Irreversible, and only after the rewrap job is at zero (docs/IMPLEMENTATION.md, "Key rotation").
+The script refuses while any row still depends on the version; it looks at the `kek_version`
+column **and** at the version inside each wrapped key, and counts quarantined and revoked rows too.
+
+```sh
+# 1. Read-only: exits 1 and prints the counts while rows remain.
+node scripts/kek-destroy-check.mjs destroy-check --version 1 --active 2 --remote
+# 2. Check and record in ONE statement: the key.destroy audit event exists only if no row
+#    remained at that instant. It records that destruction is AUTHORISED; it does not delete anything.
+#    --active must be the KMS_ACTIVE_VERSION actually DEPLOYED: read it from the deployed
+#    configuration, do not guess; the script cannot read it and refuses only a value equal to --version.
+node scripts/kek-destroy-check.mjs record-destruction --version 1 --active 2 \
+  --actor "<your login>" --reason retired --remote     # retired | compromised | other
+# 3. Only now: wrangler secret delete KEK_V1, then remove KEK_CHECK_V1 and deploy.
+```
+
+`--remote` runs against the production D1 through `wrangler d1 execute`; without it the local
+database is used. The event is `key.destroy` with `subject_type='key'`, `subject_id='kek_v1'`, no
+workspace, and metadata `{kekVersion, reason, activeVersion}`. It is exempt from the audit retention
+purge, so it outlives `AUDIT_RETENTION_DAYS`:
+
+```sql
+SELECT created_at, actor_id, subject_id, metadata_json FROM audit_events WHERE action='key.destroy';
+```
+
+Step 3 is not atomic with step 2; the script cannot delete a Worker secret. If rows reappear between
+them (a restore, a rollback of the rewrap), stop and rerun step 1.
+
+## Revoked credentials
+
+A customer (admin) can declare a credential burned: `POST /api/integrations/:id/revoke-credentials`
+or `POST /api/sources/:id/revoke-credentials` (docs/API.md). An integration is marked quarantined
+with the reason `revoked`; a source is switched off with `credentials_revoked_at` set. Both stop
+immediately and stay stopped until a new credential is entered.
+
+```sql
+SELECT id, organization_id, destination, credentials_quarantined_at
+FROM integrations WHERE credentials_quarantine_reason='revoked';
+SELECT id, organization_id, kind, credentials_revoked_at FROM sources WHERE credentials_revoked_at IS NOT NULL;
+```
+
+Do **not** clear these by hand the way a quarantine can be cleared: the customer said the secret is
+burned. Through the API, clearing needs a **new** secret: an admin (`integration.revoke`) enters a
+different webhook URL (a member who can edit gets 403; the same value is refused with 422), and a revoked
+provider source refuses the same pasted credential on `rotate`. The `credential_maintenance` log line reports `revoked` separately from `quarantined`. The
+sealed secret stays in D1 until the customer replaces it or deletes the connection (deleting removes
+the wrapped key with the row, which is the cryptographic erasure).
+
 ## KEK rotation (pointer)
 
 The full, ordered procedure with a rollback at every step is **docs/IMPLEMENTATION.md, "Key
@@ -252,7 +411,8 @@ SELECT id, credentials_quarantine_reason FROM integrations WHERE credentials_qua
 ```
 
 Do not `wrangler secret delete KEK_V1` until the first returns 0 and the second returns no
-rows. The `credential_maintenance` log line reports `remaining` per tick. Rotation has not
+rows, and use `scripts/kek-destroy-check.mjs` ("Destroying a KEK version") rather than reading the
+query by eye. Deploy `KEK_CHECK_V2` together with `KEK_V2`. The `credential_maintenance` log line reports `remaining` per tick. Rotation has not
 been rehearsed (docs/RELEASE_GATES.md).
 
 ## Generic source: edge rate rule
@@ -332,6 +492,7 @@ What the files themselves say:
 | 0012 Teams destination | Old Worker cannot deliver `teams` rows | Disable Teams integrations first. Restoring the old CHECK is another rebuild after deleting or retargeting `teams` rows |
 | 0014 rate-limit index | Harmless | `DROP INDEX api_rate_limits_window` |
 | 0021 noise control | Old Worker ignores the column and both tables, but it **stops releasing**: rows in `held`/`claimed` wait until a Worker that knows about them runs again (nothing is lost). Turn noise settings off and let `held_events` drain before rolling back if updates must not be delayed | `DROP TABLE held_events; DROP TABLE noise_open_failures;` is safe only once nothing is waiting; the column stays (dropping it needs a rebuild) |
+| 0024 credential lifecycle | Old Worker ignores the three columns. **Apply before** the new Worker (its queries name them). A rollback past the Worker leaves revoked integrations quarantined (still stopped) but a revoked **source** is only `enabled=0`, which the old Worker also honours; it would let someone re-enable it | Expand-only: the columns stay (dropping them needs `ALTER TABLE ... DROP COLUMN`, SQLite 3.35+) |
 | 0016 observability | Old Worker ignores `ops_state` and the two indexes | `DROP TABLE ops_state; DROP INDEX deliveries_state_created; DROP INDEX audit_events_created;` |
 
 A rollback rehearsal has **not** been performed (docs/RELEASE_GATES.md). A restore from D1

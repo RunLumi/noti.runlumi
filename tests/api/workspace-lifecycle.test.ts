@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
 import { PURGE_ROWS_PER_TICK, purgeDueWorkspace, TENANT_TABLES } from '../../src/pipeline/purge';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
@@ -101,11 +102,14 @@ beforeEach(() => {
       .run(`gi-${inst}`, org, inst, '1', 'acme', 'Organization', 'all');
   }
   env = {
+    ...BOOT_ENV,
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
     KEK_V1: '11'.repeat(32),
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',
+    ENVIRONMENT_NAME: 'staging',
+    KEK_CHECK_V1: '4464ea2121d3a99ebd188370f1ef6cd0',
     ENCRYPTION_KEY: '',
     GITHUB_APP_ID: '1',
   } as unknown as Bindings;

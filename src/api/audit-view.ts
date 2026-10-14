@@ -48,6 +48,7 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
     signed: 'boolean',
     clearedQuarantine: 'boolean',
   },
+  'integration.credentials.revoke': { destinationHost: 'string', reason: 'string' },
   'integration.auto_pause': {
     destination: 'string',
     providerStatus: 'number',
@@ -59,6 +60,7 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
   'source.update': { fields: 'list', enabled: 'boolean' },
   'source.delete': { integrationsDeleted: 'number' },
   'source.secret.rotate': { kind: 'string', authMode: 'string', downgrade: 'boolean' },
+  'source.credentials.revoke': { kind: 'string', reason: 'string' },
   'delivery.replay': { replayDeliveryId: 'string' },
   'access.denied': { capability: 'string', reason: 'string', role: 'string' },
   'github.installation.bind': { account: 'string', selection: 'string', repositories: 'number' },
@@ -77,6 +79,8 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
   'workspace.purged': NONE,
   'account.export': NONE,
   'account.delete': NONE,
+  // Platform-level (no workspace), so it never appears in a workspace's audit view.
+  'key.destroy': NONE,
 };
 
 export const MAX_TEXT = 120;

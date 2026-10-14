@@ -8,12 +8,14 @@ export const AUDIT_ACTIONS = [
   'integration.update',
   'integration.delete',
   'integration.credentials.rotate',
+  'integration.credentials.revoke',
   'integration.auto_pause',
   'integration.test',
   'source.create',
   'source.update',
   'source.delete',
   'source.secret.rotate',
+  'source.credentials.revoke',
   'delivery.replay',
   'access.denied',
   'github.installation.bind',
@@ -26,6 +28,7 @@ export const AUDIT_ACTIONS = [
   'workspace.purged',
   'account.export',
   'account.delete',
+  'key.destroy',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -38,4 +41,5 @@ export const AUDIT_SUBJECT_TYPES = [
   'capability',
   'github_installation',
   'repository',
+  'key',
 ] as const;

@@ -10,6 +10,7 @@ import {
   type Keyring,
   type SealContext,
 } from '../../../crypto/envelope';
+import { credentialFingerprint } from '../../../crypto/fingerprint';
 import { blob } from '../../../pipeline/credentials';
 import { SECRET_PREFIX, fromBase64 } from './encoding';
 
@@ -64,6 +65,8 @@ export interface SealedSourceSecret {
   readonly dekWrapped: ArrayBuffer;
   readonly kekVersion: number;
   readonly secretEnvelope: ArrayBuffer;
+  /** Tenant-keyed fingerprint, non-secret, for display (F39); null without FINGERPRINT_KEY. */
+  readonly fingerprint: string | null;
 }
 
 /** Seal a secret under FRESH key material; used for create and for every rotation. */
@@ -71,6 +74,7 @@ export async function sealSourceSecret(
   ids: { organizationId: string; sourceId: string },
   secret: string,
   keyring: Keyring,
+  fingerprintKey?: string,
 ): Promise<SealedSourceSecret> {
   const { material: m, dek } = await createConnectionKeys(keyring, {
     orgId: ids.organizationId,
@@ -86,7 +90,13 @@ export async function sealSourceSecret(
   const wrapped = blob(m.dekWrapped);
   const sealed = blob(envelope);
   if (!salt || !wrapped || !sealed) throw new CryptoError('malformed_envelope');
-  return { keySalt: salt, dekWrapped: wrapped, kekVersion: m.kekVersion, secretEnvelope: sealed };
+  return {
+    keySalt: salt,
+    dekWrapped: wrapped,
+    kekVersion: m.kekVersion,
+    secretEnvelope: sealed,
+    fingerprint: await credentialFingerprint(secret, ids.organizationId, fingerprintKey),
+  };
 }
 
 /**

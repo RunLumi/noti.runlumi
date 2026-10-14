@@ -48,6 +48,8 @@ export function createHarness(): Harness {
     KEK_V1: '11'.repeat(32),
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',
+    ENVIRONMENT_NAME: 'staging',
+    KEK_CHECK_V1: '4464ea2121d3a99ebd188370f1ef6cd0',
   } as unknown as Bindings;
   return { db, env, sent };
 }

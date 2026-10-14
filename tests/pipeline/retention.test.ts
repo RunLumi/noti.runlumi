@@ -194,6 +194,22 @@ describe('purgeExpiredRecords: audit events', () => {
     expect(ids('audit_events')).toHaveLength(2);
   });
 
+  it('never purges a key.destroy event: it is platform evidence, not workspace history (F37)', async () => {
+    audit(400);
+    db.raw
+      .prepare(
+        "INSERT INTO audit_events(id,organization_id,action,subject_type,outcome,created_at) VALUES('kd',NULL,'key.destroy','key','success',?)",
+      )
+      .run(sqliteTimestamp(NOW - 3000 * DAY));
+    const report = await purgeExpiredRecords({ DB: db.d1 }, NOW);
+    expect(report.audit).toBe(1);
+    expect(db.raw.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='key.destroy'").get()).toEqual(
+      {
+        n: 1,
+      },
+    );
+  });
+
   it('honours a longer window', async () => {
     audit(400);
     expect((await purgeExpiredRecords({ DB: db.d1, AUDIT_RETENTION_DAYS: '730' }, NOW)).audit).toBe(0);
