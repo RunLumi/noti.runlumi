@@ -658,7 +658,7 @@ passes through F12 before storage.
 
 ## F237 — Retention matrix and its enforcement
 
-**Priority** P0 · **Status** 🟡 matrix, enforcement checks and generated doc built (slice S3, `docs/DATA_RETENTION.md`); not built: per-workspace downward retention, job staleness alerts (F190), payload retention rows that do not apply (the raw payload is never stored), expired-invitation purge · **Fixes** D15 (the magic-number half)
+**Priority** P0 · **Status** 🟡 matrix, enforcement checks and generated doc built (slice S3, `docs/DATA_RETENTION.md`); not built: per-workspace downward retention, job staleness alerts (F190), payload retention rows that do not apply (the raw payload is never stored), expired-invitation purge; the delivery ledger is purged at 90 days by default, unlike the spec's workspace lifetime · **Fixes** D15 (the magic-number half)
 
 **Story** As a customer, I want to know how long you keep each kind of my data and to be able to
 ask for it to be kept for less, so that retention is a setting rather than a surprise.
