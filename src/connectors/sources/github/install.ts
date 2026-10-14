@@ -417,6 +417,9 @@ export async function completeVerification(
   userId: string,
   now: number,
   mayConnect: WorkspaceCheck,
+  // EGRESS-ALLOWED: GitHub App install verification (OAuth exchange, user installation check,
+  // token revoke). Every URL is built from the GITHUB_API and GITHUB_WEB constants in this file;
+  // nothing a tenant supplies selects the host (F228).
   f: Fetch = fetch,
 ): Promise<BindResult> {
   const verify = await consumeState(db, params.state, 'verify', userId, now);

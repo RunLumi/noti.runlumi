@@ -73,7 +73,7 @@ adversary classes imply, and it is not published to customers.
 
 ## F228 — Egress policy is ours, not the platform's
 
-**Priority** P0 · **Status** 🟡 one send path `sendRequest` in `src/connectors/destinations/send.ts` re-checks the URL policy, uses `redirect: 'manual'` with 3xx classified `destination_redirected`, timeout and bounded body (`tests/destinations/conformance.test.ts`, `tests/pipeline/destinations.test.ts`, ADR 0006, AR-2 in `docs/THREAT_MODEL.md`); not built: the static only-one-module-calls-fetch test · **Fixes** part of D9
+**Priority** P0 · **Status** ✅ one send path `sendRequest` in `src/connectors/destinations/send.ts` re-checks the URL policy, uses `redirect: 'manual'` with 3xx classified `destination_redirected`, timeout and bounded body (`tests/destinations/conformance.test.ts`, `tests/pipeline/destinations.test.ts`, ADR 0006, AR-2 in `docs/THREAT_MODEL.md`); the static test that only `send.ts` and two listed control-plane files make outbound requests (`tests/security/egress.test.ts`, ADR 0026) · **Fixes** part of D9
 
 **Story** As a security engineer, I want every outbound request to pass through one policy
 function in our code, so that we never assume Cloudflare is filtering egress when it is not.
@@ -146,7 +146,7 @@ never a reason to weaken the application-layer check.
 
 ## F229 — Allowed provider domains, and how that list is maintained
 
-**Priority** P0 · **Status** 🟡 per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); not built: typed registry with `docsUrl` and `verifiedOn`, 180-day staleness CI test, written reason for wildcard-style hosts (Teams `*.logic.azure.com`, AR-15), reconnect prompt when a host is removed · **Fixes** part of D9
+**Priority** P0 · **Status** 🟡 per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); typed registry with `docsUrl`, `verifiedOn`, a 180-day staleness test and a written reason for the Teams wildcard (`src/connectors/destinations/provider-registry.ts`, `tests/destinations/provider-registry.test.ts`, ADR 0026); not built: reconnect prompt when a host is removed (F98), a CI-visible dated `verifiedOn` review that a human, not this change, performs against the live docs · **Fixes** part of D9
 
 **Story** As an operator, I want one reviewable list of the exact hosts we will send to, so that
 adding a destination is a reviewed change with a cited source rather than a regex edit.
@@ -220,7 +220,7 @@ asked".
 
 ## F230 — Send-time egress enforcement and what we cannot enforce
 
-**Priority** P0 · **Status** ✅ URL policy re-run before every send with no network call on rejection (`src/connectors/destinations/send.ts`); IP literals, userinfo, port, fragment, path and length rejected (`tests/destinations/url-policy.test.ts`, `tests/pipeline/extended-destinations.test.ts`); DNS rebinding accepted as AR-3; bounded body; gap: unmapped-response flag in `classify.ts` raises no metric · **Fixes** D9 (send-time half)
+**Priority** P0 · **Status** ✅ URL policy re-run before every send with no network call on rejection (`src/connectors/destinations/send.ts`); IP literals, userinfo, port, fragment, path and length rejected (`tests/destinations/url-policy.test.ts`, `tests/pipeline/extended-destinations.test.ts`); DNS rebinding accepted as AR-3; bounded body; an unmapped provider reply emits a `unmapped_provider_response` log event with kind and status class (ADR 0026; log-derived, not aggregated or persisted) · **Fixes** D9 (send-time half)
 
 **Story** As a security engineer, I want the URL checked again at the moment we send, and an
 honest list of the attacks that a URL string check cannot stop.

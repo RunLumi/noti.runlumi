@@ -42,6 +42,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | S3 | Compliance: retention matrix (code-checked, generated `docs/DATA_RETENTION.md`), hourly purge of expired auth records, account data export and erasure, `security.txt`, subprocessor inventory, incident response skeleton | F237, F238, F242 (each in part) | — | 🟡 | this PR |
 | C | Credential lifecycle and boot hygiene (ADR 0022): credential fingerprint, revoke for integrations and sources, shredding proof, guarded KEK destruction with an audited event, per-environment KEK check value, `assertConfig` at every entrypoint, `/health/ready`, `withD1Retry`, bound-parameter guard (migration 0024) | F34, F37, F39, F40, F04, F09, F10 (each in part) | D1 | 🟡 | this PR |
 | 1.1 | Tenant contract closed in the schema (migration 0026: NOT NULL + foreign key on six tables, derive-or-quarantine backfill, row-count check), static every-query-has-an-org-predicate test with a reviewed allowlist, route registry and route-to-capability test, `docs/AUTHORIZATION.md`, tenant-isolation drill over every route on a fake D1 plus an unrun staging runner (ADR 0021) | F25 (contract), F26 (static half), F232, F233 (static and fake-D1 half) | D2 (at rest) | 🟡 | this PR |
+| 1.19 | Egress proofs (ADR 0026): static only-listed-files-make-outbound-requests test, typed provider registry with 180-day staleness test, `unmapped_provider_response` event | F228, F229 (in part), F230 | — | 🟡 | this PR |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
@@ -1603,3 +1604,15 @@ staging drill and Time Travel re-drill, audit of unknown-installation 403s, type
   exactly what was and was not driven by hand.
 - **Not done:** real-provider validation of the GitHub connect round trip, Slack OAuth, Teams auth capture, screenshots
   pipeline, screen-reader and device matrix, usability test (F226).
+
+## Slice 1.19: egress proofs (ADR 0026)
+
+- **Static test** (`tests/security/egress.test.ts`): comments and strings stripped, then global `fetch(`, aliases,
+  `globalThis.fetch`, `XMLHttpRequest`, `WebSocket`, `cloudflare:sockets` and Node HTTP imports are refused outside three
+  listed files (`send.ts`, `dns-check.ts`, `github/install.ts`), each with a reason and an `EGRESS-ALLOWED:` comment. The
+  GitHub install file was found by the test. Detectors are exercised against good and bad samples.
+- **Registry** (`src/connectors/destinations/provider-registry.ts`): exact hosts, path prefixes, `docsUrl`, `verifiedOn`,
+  written reason for the Teams wildcard; `url-policy.ts` reads it. The 180-day staleness test uses the real clock.
+  `verifiedOn` is the reference's research date, not a fresh read of the provider pages.
+- **Event**: `unmapped_provider_response` (kind, status class, ids; no body or URL). Log only, not aggregated.
+- **Verified:** unit tests for the above. **Not verified:** any real provider.

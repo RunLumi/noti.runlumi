@@ -202,7 +202,20 @@ async function attemptDelivery(
   }
   const result = attemptFromClassification(classification, config.kind, seen.res);
   const shown = config.kind === 'generic_webhook' ? coarsenUnreachable(result) : result;
-  return reportOf(shown, seen.res, classification, deps.now());
+  const report = reportOf(shown, seen.res, classification, deps.now());
+  if (shown.unmapped) {
+    // F230: a provider reply no mapping covers is a countable event of its own, so a provider
+    // changing its error shapes shows up as a rate rather than a scatter of generic failures.
+    // Kind and status CLASS only: never the reply body, the status text or the webhook URL.
+    log('warn', 'unmapped_provider_response', {
+      delivery_id: d.id,
+      workspace_id: d.organizationId,
+      integration_id: d.integrationId,
+      destination_kind: config.kind,
+      status_class: report.statusClass,
+    });
+  }
+  return report;
 }
 
 /**

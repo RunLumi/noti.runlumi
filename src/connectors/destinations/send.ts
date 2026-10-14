@@ -52,6 +52,9 @@ export async function sendRequest(
 ): Promise<ClassifiedResponse> {
   if (!checkDestinationUrl(request.kind, request.url, options.urlPolicy).ok)
     return permanent('destination_url_rejected');
+  // EGRESS-ALLOWED: the only outbound request to a customer-configured URL (F228). The policy
+  // check above and this call are one function, so nothing can change between check and use;
+  // tests/security/egress.test.ts fails if another module issues a request.
   const doFetch = options.fetch ?? ((input, init) => fetch(input, init));
   const now = options.now ?? Date.now;
   try {

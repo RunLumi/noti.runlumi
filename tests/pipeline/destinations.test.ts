@@ -327,6 +327,40 @@ describe('failure classification onto the slice 4 retry policy', () => {
     expect(attempt).toMatchObject({ unmapped_provider_error: true, error_code: 'internal_error' });
   });
 
+  it('emits one countable unmapped_provider_response event per unmapped attempt (F230)', async () => {
+    const lines: string[] = [];
+    const capture = (...data: unknown[]): void => {
+      lines.push(data.map(String).join(' '));
+    };
+    vi.spyOn(console, 'info').mockImplementation(capture);
+    vi.spyOn(console, 'warn').mockImplementation(capture);
+    await integration('slack');
+    fetchMock.mockResolvedValueOnce(new Response('teapot-secret-body', { status: 418 }));
+    await consume(enqueue('d1', 'slack'));
+    const events = lines
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .filter((l) => l.msg === 'unmapped_provider_response');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ level: 'warn', destination_kind: 'slack', delivery_id: 'd1' });
+    // The reply body and the webhook URL are secrets or provider text: never in the event.
+    expect(JSON.stringify(events[0])).not.toContain('teapot-secret-body');
+    expect(JSON.stringify(events[0])).not.toContain('hooks.slack.com');
+  });
+
+  it('a mapped failure emits no unmapped_provider_response event', async () => {
+    const lines: string[] = [];
+    vi.spyOn(console, 'info').mockImplementation(
+      (...d: unknown[]) => void lines.push(d.map(String).join(' ')),
+    );
+    vi.spyOn(console, 'warn').mockImplementation(
+      (...d: unknown[]) => void lines.push(d.map(String).join(' ')),
+    );
+    await integration('slack');
+    fetchMock.mockResolvedValueOnce(new Response('invalid_payload', { status: 400 }));
+    await consume(enqueue('d1', 'slack'));
+    expect(lines.some((l) => l.includes('unmapped_provider_response'))).toBe(false);
+  });
+
   it('an unreadable 2xx from Slack is recorded as accepted, not retried into a duplicate', async () => {
     await integration('slack');
     fetchMock.mockResolvedValueOnce(new Response('<html>proxy</html>', { status: 200 }));
