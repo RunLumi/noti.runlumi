@@ -25,10 +25,18 @@ const SQL = readFileSync(
   'utf8',
 );
 
+/** The file is many statements (workerd allows at most 5 compound SELECT terms each); run them all. */
+const STATEMENTS = SQL.replace(/--[^\n]*/g, '')
+  .split(/;\s*(?:\n|$)/)
+  .map((x) => x.trim())
+  .filter((x) => x.length > 0);
+const runAll = (raw: ReturnType<typeof createFakeD1>['raw']): Check[] =>
+  STATEMENTS.flatMap((statement) => raw.prepare(statement).all() as unknown as Check[]);
+
 function preflight(): { rows: Check[]; truth: number } {
   const { raw } = createFakeD1({ before: '0026' });
   seedLegacy(raw);
-  const rows = raw.prepare(SQL).all() as unknown as Check[];
+  const rows = runAll(raw);
   applyMigration(raw, '0026_tenant_contract.sql');
   const truth = (raw.prepare('SELECT COUNT(*) AS n FROM legacy_orphaned_rows').get() as { n: number }).n;
   return { rows, truth };
@@ -64,7 +72,7 @@ describe('migration 0026 preflight', () => {
 
   it('passes a clean database with no acknowledgement', () => {
     const { raw } = createFakeD1({ before: '0026' });
-    const rows = raw.prepare(SQL).all() as unknown as Check[];
+    const rows = runAll(raw);
     expect(evaluate(rows)).toMatchObject({ ok: true, blockers: [], orphanTotal: 0 });
   });
 
@@ -115,7 +123,7 @@ describe('migration 0026 preflight prediction equals the migration (M3)', () => 
       INSERT INTO notification_outbox(id,payload_json,state,organization_id) VALUES
         ('o-to-ghost','{"integrationId":"i-dangling"}','pending',NULL), ('d-to-case','{}','pending',NULL);
     `);
-    const predicted = perTable(raw.prepare(SQL).all() as unknown as Check[]);
+    const predicted = perTable(runAll(raw));
     applyMigration(raw, '0026_tenant_contract.sql');
     expect(withZeros(predicted)).toEqual(withZeros(actual(raw)));
   });
@@ -157,7 +165,7 @@ describe('migration 0026 preflight prediction equals the migration (M3)', () => 
             orgs[rnd(orgs.length)] ?? null,
           );
       }
-      const predicted = perTable(raw.prepare(SQL).all() as unknown as Check[]);
+      const predicted = perTable(runAll(raw));
       applyMigration(raw, '0026_tenant_contract.sql');
       expect(withZeros(predicted), `round ${round}`).toEqual(withZeros(actual(raw)));
     }

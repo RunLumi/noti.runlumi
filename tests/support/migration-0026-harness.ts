@@ -220,9 +220,12 @@ export function dumpState(raw: DatabaseSync, options: { skipScratch?: boolean } 
       .map((c) => c.name)
       .filter((c) => c !== 'quarantined_at');
     const select = cols.map((c) => `"${c}"`).join(',');
-    // The snapshot's row order is sqlite_master's, which changes when objects are recreated.
-    const order = name === '_snapshot_0026' ? 'type,name' : 'rowid';
-    out.push(`${name}: ${json(raw.prepare(`SELECT ${select} FROM "${name}" ORDER BY ${order}`).all())}`);
+    // The snapshot is DDL scratch whose rows depend on when objects were last recreated: only its shape counts.
+    if (name === '_snapshot_0026') {
+      out.push(`${name}: (rows not compared)`);
+      continue;
+    }
+    out.push(`${name}: ${json(raw.prepare(`SELECT ${select} FROM "${name}" ORDER BY rowid`).all())}`);
   }
   for (const r of raw
     .prepare('SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type,name')

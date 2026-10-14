@@ -79,9 +79,14 @@ by rebuild (the same technique as 0009, 0012 and 0018). In order, in one file:
    <ok> THEN 1 ELSE abs(-9223372036854775808) END`: the ELSE raises "integer overflow", so no table
    appears); every backfill, quarantine and copy has `AND EXISTS (SELECT 1 FROM _gate_0026_ok)` and fails
    to compile without it, and a view over both gates makes every `ALTER TABLE ... RENAME` fail ("error in
-   view ... no such table") until both exist. Known hole: `legacy_alter_table=ON` skips that view check,
-   so it is a tripwire for aborting runners and, for a carrying-on one, leaves empty copies swapped in
-   with the originals whole in `_old` (recoverable). Tested under three runners (rolled back, aborting,
+   view ... no such table") until both exist. The first statement is `PRAGMA legacy_alter_table=OFF` (the sqlite3 shell defaults to ON, which skips that
+   view check; a re-review found a carrying-on runner then swapped EMPTY copies in), and a tripwire verifies it
+   took effect; a runner that ignores pragmas and carries on can still swap empty copies with the originals whole
+   in `_old` (recoverable). **D1 compatibility:** workerd's SQLite allows at most 5 compound SELECT terms (node:sqlite
+   500), which the first version of this file exceeded; every statement in migrations and scripts is now
+   held to 4 and `tests/migration-0026-d1.test.ts` runs the real `wrangler d1 migrations apply --local` on a seeded
+   legacy database, then finalize and recover through wrangler. Local workerd is not the remote service: the
+   `pragma_*` functions, the overflow trick and the view gate on a remote D1 stay UNVERIFIED (runbook rehearsal). Tested under three runners (rolled back, aborting,
    carrying on) with foreign keys off, `defer_foreign_keys`, `legacy_alter_table`, a leftover `_old`, a
    sabotaged copy for each of the six tables, a row written after the verify, the process killed after every
    one of the file's statements (with a re-run in every mode afterwards), and recovery from each of those

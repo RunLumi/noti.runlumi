@@ -103,6 +103,12 @@
 -- =============================================================================
 
 -- --- 0. hygiene for a re-run, tripwires, gates --------------------------------
+-- The poison-view gate below relies on SQLite's modern ALTER TABLE ... RENAME, which checks every view
+-- and trigger. The sqlite3 shell defaults to the legacy behaviour (no check), so say so explicitly; D1
+-- documents this pragma. The tripwire further down still verifies it took effect (a runner that ignores
+-- pragmas fails there).
+PRAGMA legacy_alter_table=OFF;
+
 -- Scratch only: copies, verification rows, tripwire tables, gates, and the guard tables of the first
 -- version of this file. NEVER a `<table>_old`, never `_snapshot_0026`.
 DROP VIEW IF EXISTS _gate_0026_poison;
@@ -188,8 +194,9 @@ CREATE INDEX IF NOT EXISTS legacy_orphaned_rows_table ON legacy_orphaned_rows(so
 
 -- Every index and trigger this file is about to drop and recreate, verbatim, so recovery
 -- (scripts/migration-0026-recover.mjs) can put them back on a restored original. DDL only: no tenant data.
--- Refreshed only while the gate is open, so a tripped re-run never overwrites the snapshot that a
--- restore needs.
+-- Rows are replaced only while the gate is open (a tripped re-run never overwrites the snapshot that a
+-- restore needs), but missing rows are ALWAYS added (INSERT OR IGNORE), so the snapshot is never empty even
+-- when a tripwire fired.
 CREATE TABLE IF NOT EXISTS _snapshot_0026 (
   type TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -198,12 +205,11 @@ CREATE TABLE IF NOT EXISTS _snapshot_0026 (
   PRIMARY KEY (type, name)
 );
 DELETE FROM _snapshot_0026 WHERE EXISTS (SELECT 1 FROM _gate_0026_ok);
-INSERT INTO _snapshot_0026(type, name, tbl_name, sql)
+INSERT OR IGNORE INTO _snapshot_0026(type, name, tbl_name, sql)
 SELECT type, name, tbl_name, sql FROM sqlite_master
 WHERE type IN ('index','trigger') AND sql IS NOT NULL
   AND (tbl_name IN ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures')
-       OR name = 'sources_delete_integrations')
-  AND EXISTS (SELECT 1 FROM _gate_0026_ok);
+       OR name = 'sources_delete_integrations');
 
 -- --- 1. backfill (derivable tenants only) ------------------------------------
 UPDATE integrations
@@ -492,6 +498,8 @@ WHERE organization_id <> '' AND EXISTS (SELECT 1 FROM organization o WHERE o.id 
   AND EXISTS (SELECT 1 FROM _gate_0026_ok);
 
 -- --- 4. verify the copy against the live original (loud: aborts where D1 aborts) ---
+-- One INSERT per row: workerd's SQLite allows at most 5 compound SELECT terms (node:sqlite allows 500, so
+-- tests/migration-0026-d1.test.ts runs the real `wrangler d1 migrations apply --local`).
 CREATE TABLE _contract_verify (
   tbl TEXT NOT NULL,
   balanced INTEGER NOT NULL CONSTRAINT row_counts_must_match CHECK(balanced = 1)
@@ -500,24 +508,29 @@ INSERT INTO _contract_verify(tbl, balanced)
 SELECT 'integrations',
   (SELECT COUNT(*) FROM integrations) = (SELECT COUNT(*) FROM integrations_v4) + (SELECT COUNT(*) FROM integrations o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
   AND NOT EXISTS (SELECT 1 FROM integrations o WHERE (o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'integrations' AND q.row_id = o.id))
-UNION ALL SELECT 'deliveries',
+    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'integrations' AND q.row_id = o.id));
+INSERT INTO _contract_verify(tbl, balanced)
+SELECT 'deliveries',
   (SELECT COUNT(*) FROM deliveries) = (SELECT COUNT(*) FROM deliveries_v4) + (SELECT COUNT(*) FROM deliveries o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
   AND NOT EXISTS (SELECT 1 FROM deliveries o WHERE (o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'deliveries' AND q.row_id = o.id))
-UNION ALL SELECT 'notification_outbox',
+    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'deliveries' AND q.row_id = o.id));
+INSERT INTO _contract_verify(tbl, balanced)
+SELECT 'notification_outbox',
   (SELECT COUNT(*) FROM notification_outbox) = (SELECT COUNT(*) FROM notification_outbox_v4) + (SELECT COUNT(*) FROM notification_outbox o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
   AND NOT EXISTS (SELECT 1 FROM notification_outbox o WHERE (o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'notification_outbox' AND q.row_id = o.id))
-UNION ALL SELECT 'held_events',
+    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'notification_outbox' AND q.row_id = o.id));
+INSERT INTO _contract_verify(tbl, balanced)
+SELECT 'held_events',
   (SELECT COUNT(*) FROM held_events) = (SELECT COUNT(*) FROM held_events_v4) + (SELECT COUNT(*) FROM held_events o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
   AND NOT EXISTS (SELECT 1 FROM held_events o WHERE (o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'held_events' AND q.row_id = o.id))
-UNION ALL SELECT 'routing_decisions',
+    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'held_events' AND q.row_id = o.id));
+INSERT INTO _contract_verify(tbl, balanced)
+SELECT 'routing_decisions',
   (SELECT COUNT(*) FROM routing_decisions) = (SELECT COUNT(*) FROM routing_decisions_v4) + (SELECT COUNT(*) FROM routing_decisions o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
   AND NOT EXISTS (SELECT 1 FROM routing_decisions o WHERE (o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'routing_decisions' AND q.row_id = o.id))
-UNION ALL SELECT 'noise_open_failures',
+    AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'routing_decisions' AND q.row_id = o.id));
+INSERT INTO _contract_verify(tbl, balanced)
+SELECT 'noise_open_failures',
   (SELECT COUNT(*) FROM noise_open_failures) = (SELECT COUNT(*) FROM noise_open_failures_v4) + (SELECT COUNT(*) FROM noise_open_failures o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
   AND NOT EXISTS (SELECT 1 FROM noise_open_failures o WHERE (o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
     AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = 'noise_open_failures' AND q.row_id = CAST(o.id AS TEXT)));
@@ -659,18 +672,24 @@ CREATE TABLE _swap_verify (
 INSERT INTO _swap_verify(tbl, balanced)
 SELECT 'tables', (SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN
     ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures',
-     'integrations_old','deliveries_old','notification_outbox_old','held_events_old','routing_decisions_old','noise_open_failures_old')) = 12
-UNION ALL SELECT 'integrations',
-  (SELECT COUNT(*) FROM integrations_old) = (SELECT COUNT(*) FROM integrations) + (SELECT COUNT(*) FROM integrations_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-UNION ALL SELECT 'deliveries',
-  (SELECT COUNT(*) FROM deliveries_old) = (SELECT COUNT(*) FROM deliveries) + (SELECT COUNT(*) FROM deliveries_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-UNION ALL SELECT 'notification_outbox',
-  (SELECT COUNT(*) FROM notification_outbox_old) = (SELECT COUNT(*) FROM notification_outbox) + (SELECT COUNT(*) FROM notification_outbox_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-UNION ALL SELECT 'held_events',
-  (SELECT COUNT(*) FROM held_events_old) = (SELECT COUNT(*) FROM held_events) + (SELECT COUNT(*) FROM held_events_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-UNION ALL SELECT 'routing_decisions',
-  (SELECT COUNT(*) FROM routing_decisions_old) = (SELECT COUNT(*) FROM routing_decisions) + (SELECT COUNT(*) FROM routing_decisions_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id))
-UNION ALL SELECT 'noise_open_failures',
+     'integrations_old','deliveries_old','notification_outbox_old','held_events_old','routing_decisions_old','noise_open_failures_old')) = 12;
+INSERT INTO _swap_verify(tbl, balanced)
+SELECT 'integrations',
+  (SELECT COUNT(*) FROM integrations_old) = (SELECT COUNT(*) FROM integrations) + (SELECT COUNT(*) FROM integrations_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id));
+INSERT INTO _swap_verify(tbl, balanced)
+SELECT 'deliveries',
+  (SELECT COUNT(*) FROM deliveries_old) = (SELECT COUNT(*) FROM deliveries) + (SELECT COUNT(*) FROM deliveries_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id));
+INSERT INTO _swap_verify(tbl, balanced)
+SELECT 'notification_outbox',
+  (SELECT COUNT(*) FROM notification_outbox_old) = (SELECT COUNT(*) FROM notification_outbox) + (SELECT COUNT(*) FROM notification_outbox_old o WHERE o.organization_id IS NULL OR o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id));
+INSERT INTO _swap_verify(tbl, balanced)
+SELECT 'held_events',
+  (SELECT COUNT(*) FROM held_events_old) = (SELECT COUNT(*) FROM held_events) + (SELECT COUNT(*) FROM held_events_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id));
+INSERT INTO _swap_verify(tbl, balanced)
+SELECT 'routing_decisions',
+  (SELECT COUNT(*) FROM routing_decisions_old) = (SELECT COUNT(*) FROM routing_decisions) + (SELECT COUNT(*) FROM routing_decisions_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id));
+INSERT INTO _swap_verify(tbl, balanced)
+SELECT 'noise_open_failures',
   (SELECT COUNT(*) FROM noise_open_failures_old) = (SELECT COUNT(*) FROM noise_open_failures) + (SELECT COUNT(*) FROM noise_open_failures_old o WHERE o.organization_id = '' OR NOT EXISTS (SELECT 1 FROM organization g WHERE g.id = o.organization_id));
 DROP TABLE _swap_verify;
 DROP VIEW IF EXISTS _gate_0026_poison;

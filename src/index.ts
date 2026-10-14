@@ -141,7 +141,14 @@ const readyCache = new WeakMap<
  */
 async function readyWarnings(db: D1Database): Promise<string[]> {
   try {
-    return (await existingLegacyTables(db)).length > 0 ? ['migration_0026_old_tables_present'] : [];
+    const warnings: string[] = [];
+    if ((await existingLegacyTables(db)).length > 0) warnings.push('migration_0026_old_tables_present');
+    // A failed 0026 run can leave this view behind, and while it exists EVERY `ALTER TABLE ... RENAME` fails.
+    const gate = await db
+      .prepare("SELECT 1 AS present FROM sqlite_master WHERE type='view' AND name='_gate_0026_poison'")
+      .first<{ present: number }>();
+    if (gate) warnings.push('migration_0026_gate_view_present');
+    return warnings;
   } catch {
     return [];
   }

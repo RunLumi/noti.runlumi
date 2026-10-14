@@ -87,34 +87,44 @@ export async function planRecovery(executor, options = {}) {
     statements.push(`ALTER TABLE ${ident(oldName(table))} RENAME TO ${ident(table)}`);
   }
 
-  // 3. Recreate what 0026 dropped, verbatim: triggers first, then indexes.
+  // 3. Recreate what 0026 dropped, verbatim: triggers first, then indexes. The source is the snapshot; for
+  // anything it does not hold (an empty or missing snapshot) the objects now on the live rebuilt table, which
+  // 0026 creates from the same text (the schema-diff test pins that), read BEFORE that table is dropped.
   if (restore.length > 0) {
-    if (!has(SNAPSHOT_TABLE)) {
-      blockers.push(
-        `${SNAPSHOT_TABLE} is missing, so the indexes and triggers cannot be recreated verbatim; restore from the Time Travel bookmark`,
+    const fromSnapshot = has(SNAPSHOT_TABLE)
+      ? await executor.query(`SELECT type, name, tbl_name, sql FROM ${ident(SNAPSHOT_TABLE)} ORDER BY name`)
+      : [];
+    const fromLive = await executor.query(
+      "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('index','trigger') AND sql IS NOT NULL ORDER BY name",
+    );
+    const known = new Set(fromSnapshot.map((r) => String(r.name)));
+    const candidates = [
+      ...fromSnapshot,
+      ...fromLive.filter((r) => !known.has(String(r.name)) && !/_old\b/.test(String(r.sql))),
+    ];
+    const wanted = candidates.filter(
+      (r) =>
+        restore.includes(String(r.tbl_name)) ||
+        (r.name === SOURCES_TRIGGER && restore.includes('integrations')),
+    );
+    if (fromSnapshot.length === 0)
+      notes.push(
+        `${SNAPSHOT_TABLE} is empty or missing: recreating indexes and triggers from the live rebuilt tables`,
       );
-    } else {
-      const snapshot = await executor.query(
-        `SELECT type, name, tbl_name, sql FROM ${ident(SNAPSHOT_TABLE)} ORDER BY name`,
-      );
-      const wanted = snapshot.filter(
-        (r) =>
-          restore.includes(String(r.tbl_name)) ||
-          (r.name === SOURCES_TRIGGER && restore.includes('integrations')),
-      );
-      const triggers = wanted.filter((r) => r.type === 'trigger');
-      const indexes = wanted.filter((r) => r.type === 'index');
-      for (const r of triggers) {
-        drop('TRIGGER', String(r.name));
-        statements.push(String(r.sql));
-      }
-      for (const r of indexes) {
-        drop('INDEX', String(r.name));
-        statements.push(String(r.sql));
-      }
-      if (restore.includes('integrations') && !triggers.some((r) => r.name === SOURCES_TRIGGER))
-        blockers.push(`${SNAPSHOT_TABLE} has no ${SOURCES_TRIGGER}; restore from the Time Travel bookmark`);
+    const triggers = wanted.filter((r) => r.type === 'trigger');
+    const indexes = wanted.filter((r) => r.type === 'index');
+    for (const r of triggers) {
+      drop('TRIGGER', String(r.name));
+      statements.push(String(r.sql));
     }
+    for (const r of indexes) {
+      drop('INDEX', String(r.name));
+      statements.push(String(r.sql));
+    }
+    if (restore.includes('integrations') && !triggers.some((r) => r.name === SOURCES_TRIGGER))
+      blockers.push(
+        `no ${SOURCES_TRIGGER} in ${SNAPSHOT_TABLE} or on the live tables; restore from the Time Travel bookmark`,
+      );
   }
   return { statements, restored: restore, blockers, notes };
 }

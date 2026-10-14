@@ -6,7 +6,8 @@
  *
  *   node scripts/migration-0026-finalize.mjs --database lumi-noti --remote                 # check only
  *   node scripts/migration-0026-finalize.mjs --database lumi-noti --remote --apply         # check, then drop
- *   ... --ack-drift <N>     traffic resumed on the new tables: accept exactly N changed + missing + live-only rows
+ *   ... --ack-drift <N>     traffic resumed: accept exactly N rows that are missing from live or live-only
+ *   ... --ack-changed <N>   accept exactly N rows whose id survives but whose content differs (see evaluate())
  *
  * Refuses unless, per table (scripts/migration-0026-finalize.sql): kept + quarantined = original, every
  * kept row equal to its original in every column, nothing live that the original lacked, no quarantined
@@ -33,10 +34,14 @@ import {
 } from './lib/migration-0026.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-export const RECONCILE_SQL = readFileSync(join(here, 'migration-0026-finalize.sql'), 'utf8')
+/** One query per statement of the .sql file: workerd's SQLite allows at most 5 compound SELECT terms each. */
+export const RECONCILE_STATEMENTS = readFileSync(join(here, 'migration-0026-finalize.sql'), 'utf8')
   .split('\n')
   .filter((line) => !/^\s*--/.test(line))
-  .join('\n');
+  .join('\n')
+  .split(/;\s*(?:\n|$)/)
+  .map((statement) => statement.trim())
+  .filter((statement) => statement.length > 0);
 
 /** @param {Record<string, unknown>[]} rows */
 export function parseReconcile(rows) {
@@ -64,7 +69,11 @@ export function parseReconcile(rows) {
 
 /**
  * @param {ReturnType<typeof parseReconcile>} reconcile
- * @param {{ ackDrift?: number | null }} [options]
+ * @param {{ ackDrift?: number | null, ackChanged?: number | null }} [options]
+ *   ackDrift: exact sum of missing + live_only rows. ackChanged: exact sum of rows whose id survives but
+ *   whose content differs. They are separate on purpose: a changed row in `deliveries` can be a write made
+ *   during the freeze (for example the dead-letter consumer marking a delivery `dead_lettered`), which a
+ *   count never shows, so it needs its own acknowledgement.
  */
 export function evaluate(reconcile, options = {}) {
   const blockers = [];
@@ -74,8 +83,11 @@ export function evaluate(reconcile, options = {}) {
       'PRAGMA foreign_keys is not 1 on this connection; the contract is not enforced here, refusing',
     );
   if (reconcile.fkViolations !== 0)
-    blockers.push(`${reconcile.fkViolations} foreign key violation(s) (PRAGMA foreign_key_check)`);
+    blockers.push(
+      `${reconcile.fkViolations} foreign key violation(s) anywhere in the database (PRAGMA foreign_key_check is database-wide)`,
+    );
   let drift = 0;
+  let changed = 0;
   for (const t of reconcile.tables) {
     const numbers = [
       t.old,
@@ -95,24 +107,65 @@ export function evaluate(reconcile, options = {}) {
       blockers.push(
         `${t.table}: a quarantined id is also live, or the counts overlap (missing=${t.missing}, quarantine_also_live=${t.quarantineAlsoLive})`,
       );
-    drift += Math.max(0, t.changed) + Math.max(0, t.missing) + t.liveOnly;
+    if (t.live === 0 && t.old > 0)
+      blockers.push(
+        `${t.table}: the live table is EMPTY but its original has ${t.old} row(s); this can never be acknowledged. Run scripts/migration-0026-recover.mjs`,
+      );
+    drift += Math.max(0, t.missing) + t.liveOnly;
+    changed += Math.max(0, t.changed);
     if (t.changed + t.missing + t.liveOnly > 0)
       review.push(
         `${t.table}: changed=${t.changed} missing=${t.missing} live_only=${t.liveOnly} (old=${t.old}, live=${t.live}, quarantined=${t.quarantined})`,
       );
   }
-  if (drift > 0 && options.ackDrift !== drift) {
+  if (changed > 0 && options.ackChanged !== changed)
     blockers.push(
-      `the live tables differ from the kept originals by ${drift} row(s) (changed + missing + live_only). If you froze writers this is a defect: ` +
-        `run scripts/migration-0026-recover.mjs. If traffic has resumed it is expected: read the rows above, then re-run with --ack-drift ${drift}`,
+      `${changed} row(s) kept their id but differ from the original in some column. During a freeze that is a defect or a write that slipped through (for example the dead-letter consumer); ` +
+        `after traffic it is expected. Read the ids above, then re-run with --ack-changed ${changed}`,
     );
+  if (drift > 0 && options.ackDrift !== drift)
+    blockers.push(
+      `${drift} original row(s) are missing from the live table without a quarantine entry, or live rows have no original (missing + live_only). If you froze writers this is a defect: ` +
+        `run scripts/migration-0026-recover.mjs. If traffic has resumed it can be expected (retention purge, deleted workspace): read the ids above, then re-run with --ack-drift ${drift}`,
+    );
+  return { ok: blockers.length === 0, blockers, review, drift, changed };
+}
+
+/** The first ids of each kind of drift, so an acknowledgement is made against names, not a count. */
+async function listDrift(executor, reconcile) {
+  const lines = [];
+  for (const t of reconcile.tables) {
+    const table = ident(t.table);
+    const old = ident(oldName(t.table));
+    const sources = [
+      [
+        t.missing > 0,
+        'missing (no live row, no quarantine entry)',
+        `SELECT id FROM ${old} o WHERE NOT EXISTS (SELECT 1 FROM ${table} l WHERE l.id = o.id) AND NOT EXISTS (SELECT 1 FROM legacy_orphaned_rows q WHERE q.source_table = '${t.table}' AND q.row_id = CAST(o.id AS TEXT)) LIMIT 20`,
+      ],
+      [
+        t.changed > 0,
+        'changed',
+        `SELECT id FROM ${old} WHERE id IN (SELECT id FROM ${table}) AND id NOT IN (SELECT id FROM (SELECT * FROM ${old} INTERSECT SELECT * FROM ${table})) LIMIT 20`,
+      ],
+      [
+        t.liveOnly > 0,
+        'live_only',
+        `SELECT id FROM ${table} l WHERE NOT EXISTS (SELECT 1 FROM ${old} o WHERE o.id = l.id) LIMIT 20`,
+      ],
+    ];
+    for (const [wanted, label, sql] of sources) {
+      if (!wanted) continue;
+      const ids = (await executor.query(sql)).map((r) => String(r.id));
+      lines.push(`${t.table} ${label} ids (first 20): ${ids.join(', ')}`);
+    }
   }
-  return { ok: blockers.length === 0, blockers, review, drift };
+  return lines;
 }
 
 /**
- * @param {{ query(sql: string): Promise<Record<string, unknown>[]>, run(statements: string[]): Promise<void> }} executor
- * @param {{ apply?: boolean, ackDrift?: number | null }} [options]
+ * @param {{ query(sql: string): Promise<Record<string, unknown>[]>, queryMany?(statements: string[]): Promise<Record<string, unknown>[]>, run(statements: string[]): Promise<void> }} executor
+ * @param {{ apply?: boolean, ackDrift?: number | null, ackChanged?: number | null }} [options]
  */
 export async function finalize(executor, options = {}) {
   const candidates = [...TABLES.map(oldName), SNAPSHOT_TABLE, ...SCRATCH_TABLES, ...SCRATCH_VIEWS];
@@ -131,10 +184,16 @@ export async function finalize(executor, options = {}) {
   }
   let review = [];
   if (oldPresent.length === TABLES.length) {
-    const result = evaluate(parseReconcile(await executor.query(RECONCILE_SQL)), {
+    let rows = [];
+    if (executor.queryMany) rows = await executor.queryMany(RECONCILE_STATEMENTS);
+    else for (const statement of RECONCILE_STATEMENTS) rows.push(...(await executor.query(statement)));
+    const reconcile = parseReconcile(rows);
+    const result = evaluate(reconcile, {
       ackDrift: options.ackDrift ?? null,
+      ackChanged: options.ackChanged ?? null,
     });
     review = result.review;
+    if (review.length > 0) review = [...review, ...(await listDrift(executor, reconcile))];
     if (!result.ok) return { status: 'refused', removed: [], blockers: result.blockers, review };
   }
   // Views first (they reference the gate tables), then tables.
@@ -157,14 +216,16 @@ async function main() {
   const database = at('--database');
   if (!database || (!args.includes('--remote') && !args.includes('--local'))) {
     console.error(
-      'usage: node scripts/migration-0026-finalize.mjs --database <name> (--remote|--local) [--apply] [--ack-drift N]',
+      'usage: node scripts/migration-0026-finalize.mjs --database <name> (--remote|--local) [--apply] [--ack-drift N] [--ack-changed N]',
     );
     process.exit(2);
   }
   const ack = at('--ack-drift');
+  const ackChanged = at('--ack-changed');
   const result = await finalize(wranglerExecutor({ database, remote: args.includes('--remote') }), {
     apply: args.includes('--apply'),
     ackDrift: ack === undefined ? null : Number(ack),
+    ackChanged: ackChanged === undefined ? null : Number(ackChanged),
   });
   for (const line of result.review) console.log(`REVIEW  ${line}`);
   for (const line of result.blockers) console.log(`BLOCKER ${line}`);

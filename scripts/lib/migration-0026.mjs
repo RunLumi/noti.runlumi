@@ -52,16 +52,29 @@ export function rowsFromWrangler(raw) {
 }
 
 /**
- * @param {{ database: string, remote?: boolean, wrangler?: string[] }} options
+ * @param {{ database: string, remote?: boolean, persistTo?: string, wrangler?: string[] }} options
+ * `persistTo` is for a local D1 (tests); it is ignored with `remote`.
  * Runs `wrangler d1 execute` per call. Statements go through a temporary file so a trigger body
  * keeps its semicolons.
  */
 export function wranglerExecutor({
   database,
   remote = true,
+  persistTo,
   wrangler = ['npx', '--no-install', 'wrangler'],
 }) {
-  const base = [...wrangler.slice(1), 'd1', 'execute', database, remote ? '--remote' : '--local', '--json'];
+  // The name goes to a command line: refuse anything that is not a plain database name.
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$/.test(database))
+    throw new Error(`refusing database name ${database}`);
+  const base = [
+    ...wrangler.slice(1),
+    'd1',
+    'execute',
+    database,
+    remote ? '--remote' : '--local',
+    ...(!remote && persistTo ? ['--persist-to', persistTo] : []),
+    '--json',
+  ];
   const spawn = (extra) => {
     const result = spawnSync(wrangler[0], [...base, ...extra], {
       encoding: 'utf8',
@@ -74,6 +87,17 @@ export function wranglerExecutor({
   return {
     query(sql) {
       return Promise.resolve(rowsFromWrangler(JSON.parse(spawn(['--command', sql]))));
+    },
+    /** One wrangler call for many SELECT statements (wrangler --json returns one result set per statement). */
+    queryMany(statements) {
+      const dir = mkdtempSync(join(tmpdir(), 'noti-0026-'));
+      try {
+        const file = join(dir, 'queries.sql');
+        writeFileSync(file, `${statements.map((x) => x.replace(/;\s*$/, '')).join(';\n')};\n`);
+        return Promise.resolve(rowsFromWrangler(JSON.parse(spawn(['--file', file]))));
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
     run(statements) {
       const dir = mkdtempSync(join(tmpdir(), 'noti-0026-'));

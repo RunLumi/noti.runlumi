@@ -773,7 +773,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     table,
     category: 'legacy_retired',
     personalData: 'indirect',
-    dataHeld: `The pre-0026 original of \`${table.slice(0, -4)}\`, exactly as it was when migration 0026 renamed it aside: every row, including rows that had no valid workspace (quarantined from the live table) and any credential columns they held (sealed v1 envelopes or legacy v0 ciphertext). A duplicate of live data, plus orphans.`,
+    dataHeld: `The pre-0026 original of \`${table.slice(0, -4)}\`, as it was when migration 0026 renamed it aside (derivable tenants backfilled): every row, including rows that had no valid workspace (quarantined from the live table) and any credential columns they held (sealed v1 envelopes or legacy v0 ciphertext). A duplicate of live data, plus orphans.`,
     purpose:
       'Lets the operator restore the originals (scripts/migration-0026-recover.mjs) or reconcile them row for row before dropping them (scripts/migration-0026-finalize.mjs). Read by no code.',
     retention: {

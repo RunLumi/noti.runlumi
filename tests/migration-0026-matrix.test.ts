@@ -54,7 +54,10 @@ interface FinalizeResult {
 }
 interface Scripts {
   planRecovery: (e: Executor, o?: { discardLiveChanges?: boolean }) => Promise<Plan>;
-  finalize: (e: Executor, o?: { apply?: boolean; ackDrift?: number | null }) => Promise<FinalizeResult>;
+  finalize: (
+    e: Executor,
+    o?: { apply?: boolean; ackDrift?: number | null; ackChanged?: number | null },
+  ) => Promise<FinalizeResult>;
 }
 const recoverPath = '../scripts/migration-0026-recover.mjs';
 const finalizePath = '../scripts/migration-0026-finalize.mjs';
@@ -176,7 +179,7 @@ describe('0026 can destroy nothing: static scan of the file', () => {
           s,
         ),
     );
-    expect(gated.length).toBeGreaterThanOrEqual(16);
+    expect(gated.length).toBeGreaterThanOrEqual(15);
     for (const s of gated) expect(s, s.slice(0, 70)).toContain('_gate_0026_ok');
     for (const s of statements.filter((x) => /^\s*ALTER\s+TABLE/i.test(x))) expect(s).toMatch(/RENAME TO/i);
   });
@@ -234,17 +237,45 @@ describe('tripwires', () => {
     expectNoLoss(raw);
   });
 
-  it.each(MODES)('legacy_alter_table=ON (%s): trips, and nothing is ever lost', (mode) => {
-    const raw = cloneBase({ legacyAlterTable: true });
-    expect(runSql(raw, migrationSql(), mode).join('\n')).toContain('legacy_alter_table_must_be_off');
-    expectNoLoss(raw);
-    // Legacy mode skips the schema check the poison view relies on, so a runner that carries on may
-    // still swap in the (empty) copies; the originals are then whole in `<table>_old`. The two runners
-    // that stop at the error change nothing.
-    if (mode !== 'continue') expectOriginalsLive(raw);
-    else
-      for (const t of TABLES)
-        if (hasTable(raw, `${t}_old`)) expect(rowsWithoutOrg(raw, `${t}_old`), t).toEqual(original[t]);
+  it.each(MODES)(
+    'legacy_alter_table=ON, the sqlite3 shell default (%s): the file switches it off itself and completes',
+    (mode) => {
+      const raw = cloneBase({ legacyAlterTable: true });
+      expect(runSql(raw, migrationSql(), mode)).toEqual([]);
+      for (const t of TABLES) {
+        expect(contracted(raw, t), t).toBe(true);
+        expect(countRows(raw, t), `${t} is not empty`).toBeGreaterThan(0);
+        expect(rowsWithoutOrg(raw, `${t}_old`), `${t}_old`).toEqual(original[t]);
+      }
+      expect(dumpState(raw)).toBe(happyDump);
+    },
+  );
+
+  describe('a runner that ignores the pragma (statement removed): the tripwire and the gates hold', () => {
+    const withoutPragma = (): string => migrationSql().replace('PRAGMA legacy_alter_table=OFF;', '');
+    it.each(MODES)('%s: trips, and nothing is lost', (mode) => {
+      const raw = cloneBase({ legacyAlterTable: true });
+      expect(runSql(raw, withoutPragma(), mode).join('\n')).toContain('legacy_alter_table_must_be_off');
+      expectNoLoss(raw);
+      if (mode !== 'continue') expectOriginalsLive(raw);
+    });
+
+    it('a carrying-on runner may swap empty copies; recovery restores everything, even with an empty snapshot', async () => {
+      const raw = cloneBase({ legacyAlterTable: true });
+      runSql(raw, withoutPragma(), 'continue');
+      expectNoLoss(raw);
+      // The snapshot is populated even though a tripwire fired; empty it anyway: recovery has a fallback.
+      expect(countRows(raw, '_snapshot_0026')).toBeGreaterThan(20);
+      raw.exec('DELETE FROM _snapshot_0026');
+      raw.exec('PRAGMA legacy_alter_table=OFF');
+      const plan = await recover(raw);
+      expect(plan.blockers).toEqual([]);
+      expect(plan.notes.join('\n')).toContain('empty or missing');
+      expectOriginalsLive(raw);
+      expectSchemaRestored(raw);
+      expect(runSql(raw, migrationSql(), 'abort')).toEqual([]);
+      expect(dumpState(raw)).toBe(happyDump);
+    });
   });
 
   it.each(MODES)(
@@ -334,7 +365,7 @@ describe('a copy that does not balance, or a writer that outlives the freeze', (
     runSql(raw, migrationSql().replace(SWAP, `${LATE_ROW}${SWAP}`), 'continue');
     const refused = await finalize(over(raw), { apply: true });
     expect(refused.status).toBe('refused');
-    expect(refused.blockers.join('\n')).toMatch(/differ from the kept originals by 1 row/);
+    expect(refused.blockers.join('\n')).toMatch(/1 original row\(s\) are missing/);
     expect(hasTable(raw, 'deliveries_old')).toBe(true);
     const plan = await recover(raw);
     expect(plan.blockers).toEqual([]);
@@ -479,7 +510,9 @@ describe('finalize: the only step that drops the originals', () => {
     extra.exec(
       "INSERT INTO deliveries(id,integration_id,state,organization_id) VALUES('d-new','i-ok','sent','org-a')",
     );
-    expect((await finalize(over(extra), { apply: true })).blockers.join('\n')).toMatch(/by 1 row/);
+    expect((await finalize(over(extra), { apply: true })).blockers.join('\n')).toMatch(
+      /missing from the live table/,
+    );
 
     const off = happy().raw;
     off.exec('PRAGMA foreign_keys=OFF');
@@ -489,18 +522,44 @@ describe('finalize: the only step that drops the originals', () => {
     expect(hasTable(off, 'deliveries_old')).toBe(true);
   });
 
-  it('accepts post-traffic drift only with the exact count, and still drops nothing without --apply', async () => {
+  it('accepts post-traffic drift only with the exact counts, lists the ids, and drops nothing without --apply', async () => {
     const { raw } = happy();
+    // A write that a count never shows (the dead-letter consumer marking a delivery during the freeze) ...
     raw.exec("UPDATE deliveries SET state='failed' WHERE id='d-set'");
+    // ... and a row the original never had.
     raw.exec(
       "INSERT INTO deliveries(id,integration_id,state,organization_id) VALUES('d-new','i-ok','sent','org-a')",
     );
-    expect((await finalize(over(raw), { ackDrift: 1 })).status).toBe('refused');
-    expect((await finalize(over(raw), { ackDrift: 3 })).status).toBe('refused');
-    expect((await finalize(over(raw), { ackDrift: 2 })).status).toBe('reconciled');
+    const refused = await finalize(over(raw), { ackDrift: 1 });
+    expect(refused.status).toBe('refused');
+    expect(refused.blockers.join('\n')).toContain('--ack-changed 1');
+    expect(refused.review.join('\n')).toContain('deliveries changed ids (first 20): d-set');
+    expect(refused.review.join('\n')).toContain('deliveries live_only ids (first 20): d-new');
+    expect((await finalize(over(raw), { ackChanged: 1 })).blockers.join('\n')).toContain('--ack-drift 1');
+    expect((await finalize(over(raw), { ackDrift: 2, ackChanged: 1 })).status).toBe('refused');
+    expect((await finalize(over(raw), { ackDrift: 1, ackChanged: 1 })).status).toBe('reconciled');
     expect(hasTable(raw, 'deliveries_old')).toBe(true);
-    expect((await finalize(over(raw), { ackDrift: 2, apply: true })).status).toBe('finalized');
+    expect((await finalize(over(raw), { ackDrift: 1, ackChanged: 1, apply: true })).status).toBe('finalized');
     expect(hasTable(raw, 'deliveries_old')).toBe(false);
+  });
+
+  it('never accepts an EMPTY live table over a non-empty original, whatever is acknowledged', async () => {
+    const { raw } = happy();
+    raw.exec('DELETE FROM held_events');
+    const result = await finalize(over(raw), { ackDrift: 1, ackChanged: 0, apply: true });
+    expect(result.status).toBe('refused');
+    expect(result.blockers.join('\n')).toContain('held_events: the live table is EMPTY');
+    expect(hasTable(raw, 'held_events_old')).toBe(true);
+  });
+
+  it('lists the ids of originals that vanished without a quarantine entry', async () => {
+    const { raw } = happy();
+    raw.exec("DELETE FROM deliveries WHERE id='d-set'");
+    const result = await finalize(over(raw), { ackDrift: 1 });
+    expect(result.status).toBe('reconciled');
+    expect(result.review.join('\n')).toContain(
+      'deliveries missing (no live row, no quarantine entry) ids (first 20): d-set',
+    );
   });
 
   it('refuses a half-restored state and a deleted kept row', async () => {

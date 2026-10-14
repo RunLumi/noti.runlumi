@@ -599,9 +599,30 @@ What Cloudflare documents, and what it does not (checked 2026-10-14):
   `PRAGMA defer_foreign_keys = true` for changes that would violate foreign keys
   (<https://developers.cloudflare.com/d1/reference/migrations/>).
 - **Not stated** (so **UNVERIFIED**): whether a migration file runs in a transaction, whether a failed
-  statement aborts the file or the runner carries on, any per-file statement limit, whether
-  `foreign_keys` is on and `legacy_alter_table` off in the migration connection (the file trips if not),
-  and whether `pragma_foreign_keys`, `pragma_legacy_alter_table` and `CREATE VIEW` work there.
+  statement aborts the file or the runner carries on, any per-file statement limit.
+- **Measured, not documented.** workerd's SQLite allows **at most 5 compound SELECT terms** (a sixth fails
+  "too many terms in compound SELECT"; node:sqlite allows 500, so unit tests over it cannot see this). Every
+  statement in migrations and scripts is held to 4 by a test, and
+  `tests/migration-0026-d1.test.ts` runs the real `wrangler d1 migrations apply --local` (workerd) on the whole
+  chain and on a seeded legacy database with zero row loss, then finalize and recover through
+  `wrangler d1 execute --local`.
+
+#### UNVERIFIED on a production (remote) D1 (rehearse before relying on any of it)
+
+Local wrangler is workerd's SQLite, not the production D1 service. These are proven locally and **not**
+on a remote database: `pragma_foreign_keys` / `pragma_legacy_alter_table` / `pragma_foreign_key_check` as
+table-valued functions; the overflow trick (`CREATE TABLE ... AS SELECT CASE ... abs(-9223372036854775808)`
+failing the statement without creating the table); `CREATE VIEW` over tables that do not exist yet, and
+`ALTER TABLE ... RENAME` failing on it; `PRAGMA legacy_alter_table=OFF` being accepted as the first statement
+of a migration (and that default for the remote connection); `foreign_keys` being on; a file's
+transaction/abort behaviour; INTERSECT over wide rows and blobs inside the 30 second limit at the 100,000
+row ceiling; `wrangler queues pause-delivery` semantics.
+
+**Mandatory before production: rehearse on a throwaway REMOTE D1** (`wrangler d1 create lumi-noti-rehearsal`,
+never the production database): load a copy of production-shaped legacy rows, run the preflight, apply 0026,
+confirm each item above by observation, run finalize (check, then `--apply`), then repeat from a fresh copy
+and force a failure (drop one `_old` table half way, or edit a copy of the file to fail the verify), run
+recover, and record the results in `docs/RELEASE_GATES.md`. Delete the rehearsal database afterwards.
 
 ### What the file does, and what it cannot do
 
@@ -616,8 +637,11 @@ named constraint: `foreign_keys_must_be_on`, `legacy_alter_table_must_be_off`,
 `old_tables_from_an_earlier_run_must_be_finalized_or_restored_first`, `all_six_tenant_tables_must_exist`.
 A runner that carries on after the error is stopped from doing harm by two gate tables (created only when
 nothing tripped) that every data statement depends on, and by a view that makes every `ALTER TABLE ...
-RENAME` fail until both gates exist. Exception: with `legacy_alter_table=ON` a carrying-on runner can still
-rename; the swapped tables are then empty and the originals are whole in `<table>_old`: run recover.
+RENAME` fail until both gates exist. The very first statement is `PRAGMA legacy_alter_table=OFF` (the sqlite3
+shell defaults to ON, which skips the view check and let a carrying-on runner swap EMPTY copies in); the
+tripwire then verifies it took effect. A runner that ignores pragmas still stops at the tripwire (aborting
+runners) or, if it carries on and has legacy ON, may swap empty copies with the originals whole in
+`<table>_old`: run recover.
 
 ### Procedure (maintenance window; every step is mandatory)
 
@@ -664,13 +688,12 @@ rename; the swapped tables are then empty and the originals are whole in `<table
 6. **Verify before unfreezing** (all must hold):
 
    ```sql
-   -- the foreign key is in place on all six tables (expect 6 rows, each with one row)
-   SELECT 'integrations' t, COUNT(*) fk FROM pragma_foreign_key_list('integrations') WHERE "from"='organization_id'
-   UNION ALL SELECT 'deliveries', COUNT(*) FROM pragma_foreign_key_list('deliveries') WHERE "from"='organization_id'
-   UNION ALL SELECT 'notification_outbox', COUNT(*) FROM pragma_foreign_key_list('notification_outbox') WHERE "from"='organization_id'
-   UNION ALL SELECT 'held_events', COUNT(*) FROM pragma_foreign_key_list('held_events') WHERE "from"='organization_id'
-   UNION ALL SELECT 'routing_decisions', COUNT(*) FROM pragma_foreign_key_list('routing_decisions') WHERE "from"='organization_id'
-   UNION ALL SELECT 'noise_open_failures', COUNT(*) FROM pragma_foreign_key_list('noise_open_failures') WHERE "from"='organization_id';
+   -- the foreign key is in place on all six tables (expect 6 rows, each with fk = 1). One query: workerd's
+   -- SQLite allows at most 5 compound SELECT terms, so no six-way UNION here.
+   SELECT m.name, COUNT(*) AS fk FROM sqlite_master m, pragma_foreign_key_list(m.name) f
+     WHERE m.type='table' AND f."from"='organization_id' AND f."table"='organization'
+       AND m.name IN ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures')
+     GROUP BY m.name;
    -- scratch left over (expect 0 rows): a leftover here means a step failed. The six `_old` tables are EXPECTED.
    SELECT name FROM sqlite_master WHERE name LIKE '%\_v4' ESCAPE '\' OR name LIKE '\_guard%' ESCAPE '\'
      OR name LIKE '\_contract%' ESCAPE '\' OR name LIKE '\_gate%' ESCAPE '\' OR name IN ('_swap_verify','_fk_required','_alter_mode','_old_absent','_live_present');
@@ -703,10 +726,16 @@ node scripts/migration-0026-finalize.mjs --database lumi-noti --remote --apply
 
 It refuses, dropping nothing, unless per table (`scripts/migration-0026-finalize.sql`): kept rows equal
 their originals in every column (a whole-row comparison, stronger than a hash sum), kept + quarantined =
-original, nothing live that the original lacked, and `PRAGMA foreign_keys` is 1 with no violations. It
-drops the six `<table>_old`, `_snapshot_0026` and any scratch. It is idempotent (nothing left: exit 0) and
+original, nothing live that the original lacked, and `PRAGMA foreign_keys` is 1 with no violations (the
+foreign key check is **database-wide**: a violation in any table blocks, on purpose). A live table that is
+EMPTY while its original is not is never acceptable, whatever you acknowledge. It drops the six `<table>_old`, `_snapshot_0026` and any scratch. It is idempotent (nothing left: exit 0) and
 refuses a half-present set of `_old` tables. If traffic has resumed, live rows legitimately differ:
-read the `REVIEW` lines, then pass `--ack-drift <exact sum>`. **Do not leave the `_old` tables in place:**
+read the `REVIEW` lines, which list the first 20 ids of each kind, then acknowledge them separately:
+`--ack-drift <missing + live_only>` and `--ack-changed <changed>`. Changed is separate because a count never
+shows a write to an existing row: during the freeze the dead-letter consumer (never gated, see above) or a
+slipped writer can mark a delivery `dead_lettered`, and a migration that checks counts cannot see it; finalize
+compares every column. Quarantine entries from an earlier cycle that no longer match an `_old` row are ignored;
+one whose id is live blocks. **Do not leave the `_old` tables in place:**
 they are in the retention matrix as TEMPORARY (drop within 7 days), a workspace purge clears its rows from
 them, `/health/ready` carries the warning `migration_0026_old_tables_present` while they exist, and the
 preflight blocks a new run over them.
@@ -717,9 +746,14 @@ Stay in maintenance mode. Do not hand-edit tables to "make the numbers match".
 
 - **Tripwire fired** (`foreign_keys_must_be_on` and the others above): nothing was changed. Fix the cause
   (or finalize/recover for a leftover `_old`) and re-apply.
-- **Anything else, or you cannot tell:** run the recovery script. It works from the database alone, from
-  any state this file can be stopped in (tested from every statement boundary, and after a sabotaged copy
-  and a late writer): drops the scratch objects, drops the live table if there is one and renames
+- **A leftover `_gate_0026_poison` view** (an aborted run can leave it; `/health/ready` then warns
+  `migration_0026_gate_view_present`) makes EVERY later `ALTER TABLE ... RENAME` in this database fail, including
+  other migrations'. Recover and finalize both drop it; `DROP VIEW IF EXISTS _gate_0026_poison` by hand is safe.
+- **Anything else, or you cannot tell:** run the recovery script. It works from the database alone. It is
+  tested from the database state after each of the file's statements has run (the process killed between any
+  two), after a sabotaged copy, a late writer and a runner with `legacy_alter_table` on, on node:sqlite, and
+  from a freshly migrated seeded database on workerd; it is **not** proven from every state a real D1 could
+  leave. It drops the scratch objects, drops the live table if there is one and renames
   `<table>_old` back, then recreates every index and trigger verbatim from `_snapshot_0026`, triggers first
   (`sources_delete_integrations` is dropped before anything else, because a trigger that names a missing
   table makes the rename fail, and is recreated from the snapshot):

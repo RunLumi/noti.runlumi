@@ -1638,3 +1638,10 @@ over a leftover `_old` in a carrying-on runner; foreign keys off; `defer_foreign
 - Tests: `tests/migration-0026-matrix.test.ts` (52) and extended preflight/retention/purge/health tests.
 
 Not done / UNVERIFIED: everything on a real D1 (see RELEASE_GATES); `wrangler queues pause-delivery` semantics for in-flight batches and message age; the wrangler executor of the finalize/recover scripts (tested only through an injected node:sqlite executor); finalize compares whole rows by INTERSECT rather than hashing.
+
+Re-review fixes (same PR): the file used 6- and 7-term compound SELECTs that workerd's SQLite rejects ("too many terms"; node:sqlite allows 500), so
+verification is one INSERT per row and finalize/preflight are many small statements, with a static ban (<= 4 terms across migrations, scripts and
+runbook SQL) and `tests/migration-0026-d1.test.ts` running the real `wrangler d1 migrations apply --local` on a seeded legacy database plus finalize/recover via
+`wrangler d1 execute --local`. `PRAGMA legacy_alter_table=OFF` first (sqlite3 shell default ON let empty copies be swapped in); the snapshot is always populated and recover
+falls back to the live tables' DDL. finalize refuses an empty live table over a non-empty original, lists ids, and needs `--ack-changed` separately from `--ack-drift`;
+`/health/ready` also warns on a leftover `_gate_0026_poison`. Still UNVERIFIED on a remote D1: see the RUNBOOK list and the mandatory throwaway-D1 rehearsal.
