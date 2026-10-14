@@ -31,6 +31,15 @@ export const AUDIT_ACTIONS = [
   'account.export',
   'account.delete',
   'key.destroy',
+  'member.invite',
+  'member.invite.accept',
+  'member.invite.reject',
+  'member.invite.cancel',
+  'member.role.change',
+  'member.remove',
+  'session.revoke',
+  'session.revoke_others',
+  'session.revoke_all',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
@@ -44,4 +53,7 @@ export const AUDIT_SUBJECT_TYPES = [
   'github_installation',
   'repository',
   'key',
+  'member',
+  'invitation',
+  'session',
 ] as const;

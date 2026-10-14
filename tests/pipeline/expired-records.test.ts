@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/d1';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
+import { SESSION_ABSOLUTE_SECONDS } from '../../src/auth/session-policy';
 import {
   AUTH_RATE_LIMIT_MAX_AGE_MS,
   AUTH_STATE_GRACE_MS,
@@ -19,10 +20,10 @@ let db: FakeD1;
 const n = (table: string): number =>
   Number((db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n);
 
-function session(id: string, expiresAt: number): void {
+function session(id: string, expiresAt: number, createdAt: number = NOW - 60_000): void {
   db.raw
     .prepare('INSERT INTO "session"(id,user_id,token,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?)')
-    .run(id, 'u', `t-${id}`, expiresAt, 1, 1);
+    .run(id, 'u', `t-${id}`, expiresAt, createdAt, createdAt);
 }
 
 beforeEach(() => {
@@ -56,6 +57,7 @@ describe('purgeExpiredAuthRecords', () => {
     expect(report).toEqual({
       skipped: false,
       sessions: 1,
+      overAgeSessions: 0,
       verifications: 1,
       authStates: 1,
       authRateLimits: 1,
@@ -93,9 +95,11 @@ describe('purgeExpiredAuthRecords', () => {
       'INSERT INTO "session"(id,user_id,token,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?)',
     );
     const expired = EXPIRED_BATCH * 5 + 10;
-    for (let i = 0; i < expired; i++) insert.run(`s${String(i)}`, 'u', `t${String(i)}`, NOW - 1, 1, 1);
+    for (let i = 0; i < expired; i++)
+      insert.run(`s${String(i)}`, 'u', `t${String(i)}`, NOW - 1, NOW - 60_000, NOW - 60_000);
     // Mostly live rows, so the majority guard does not apply to this backlog.
-    for (let i = 0; i < expired * 2; i++) insert.run(`l${String(i)}`, 'u', `lt${String(i)}`, NOW + 1e9, 1, 1);
+    for (let i = 0; i < expired * 2; i++)
+      insert.run(`l${String(i)}`, 'u', `lt${String(i)}`, NOW + 1e9, NOW - 60_000, NOW - 60_000);
     db.raw.exec('COMMIT');
 
     const first = await purgeExpiredAuthRecords(db.d1, NOW);
@@ -106,6 +110,56 @@ describe('purgeExpiredAuthRecords', () => {
     const second = await purgeExpiredAuthRecords(db.d1, NOW + 1000);
     expect(second).toMatchObject({ sessions: 10, more: false });
     expect(n('"session"')).toBe(2 * (EXPIRED_BATCH * 5 + 10));
+  });
+
+  describe('the absolute session lifetime (ADR 0030)', () => {
+    const DAY = 86_400_000;
+    const absoluteMs = SESSION_ABSOLUTE_SECONDS * 1000;
+
+    it('removes a session in daily use once it is older than the absolute lifetime, and keeps a younger one', async () => {
+      // Both are valid by their idle expiry; only their age differs.
+      session('over', NOW + 20 * DAY, NOW - absoluteMs - 1);
+      session('exactly', NOW + 20 * DAY, NOW - absoluteMs);
+      session('young', NOW + 20 * DAY, NOW - absoluteMs + DAY);
+      const report = await purgeExpiredAuthRecords(db.d1, NOW);
+      expect(report).toMatchObject({ sessions: 0, overAgeSessions: 1, aborted: false });
+      expect(
+        (db.raw.prepare('SELECT id FROM "session" ORDER BY id').all() as Array<{ id: string }>).map(
+          (r) => r.id,
+        ),
+      ).toEqual(['exactly', 'young']);
+    });
+
+    it('is bounded per tick like the other deletes, and reports that more remain', async () => {
+      db.raw.exec('BEGIN');
+      for (let i = 0; i < EXPIRED_BATCH * 5 + 3; i++)
+        session(`o${String(i)}`, NOW + DAY, NOW - absoluteMs - 1000);
+      // Mostly young rows, so the majority guard does not apply to this backlog.
+      for (let i = 0; i < EXPIRED_BATCH * 12; i++) session(`y${String(i)}`, NOW + DAY);
+      db.raw.exec('COMMIT');
+      expect(await purgeExpiredAuthRecords(db.d1, NOW)).toMatchObject({
+        overAgeSessions: EXPIRED_BATCH * 5,
+        more: true,
+      });
+    });
+
+    it('a whole cohort reaching its absolute end together is purged, not mistaken for a unit error', async () => {
+      db.raw.exec('BEGIN');
+      for (let i = 0; i < MAJORITY_FLOOR + 51; i++) session(`c${String(i)}`, NOW + DAY, NOW - 100 * DAY);
+      db.raw.exec('COMMIT');
+      const report = await purgeExpiredAuthRecords(db.d1, NOW);
+      expect(report).toMatchObject({ aborted: false, overAgeSessions: MAJORITY_FLOOR + 51 });
+      expect(n('"session"')).toBe(0);
+    });
+
+    it('aborts instead of deleting when created_at looks like seconds, not milliseconds', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      session('seconds-created', NOW + DAY, Math.floor(NOW / 1000));
+      const report = await purgeExpiredAuthRecords(db.d1, NOW);
+      expect(report.aborted).toBe(true);
+      expect(n('"session"')).toBe(1);
+      error.mockRestore();
+    });
   });
 
   describe('real-shaped rows and the sanity guard (M3)', () => {

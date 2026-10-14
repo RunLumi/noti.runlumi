@@ -8,7 +8,17 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import { sendAuthEmail, type EmailEnvironment } from './email';
 import { ac, roles, isOrgRole } from './permissions';
-import { SESSION_EXPIRES_IN_SECONDS, SESSION_UPDATE_AGE_SECONDS } from './session-policy';
+import { log } from '../platform/log';
+import { createAuditHooks } from './audit-hooks';
+import { AUTH_DEFAULT_RATE, AUTH_RATE_RULES } from './rate-limit-rules';
+import {
+  ADMIN_INVITATION_EXPIRES_IN_SECONDS,
+  EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
+  INVITATION_EXPIRES_IN_SECONDS,
+  RESET_PASSWORD_TOKEN_EXPIRES_IN_SECONDS,
+  SESSION_EXPIRES_IN_SECONDS,
+  SESSION_UPDATE_AGE_SECONDS,
+} from './session-policy';
 
 export interface AuthBindings extends EmailEnvironment {
   DB: D1Database;
@@ -39,6 +49,7 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
     if (executionCtx) executionCtx.waitUntil(promise);
     else return promise;
   };
+  const audit = createAuditHooks(env.DB);
   return betterAuth({
     appName: 'Lumi Noti',
     baseURL: env.APP_ORIGIN,
@@ -53,6 +64,16 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
       minPasswordLength: 12,
       maxPasswordLength: 128,
       revokeSessionsOnPasswordReset: true,
+      resetPasswordTokenExpiresIn: RESET_PASSWORD_TOKEN_EXPIRES_IN_SECONDS,
+      // Counts the sessions about to be ended so the audit row can say how many (src/auth/audit-hooks.ts).
+      // Best effort: a failure to count must never turn a successful password change into an error.
+      onPasswordReset: async ({ user }) => {
+        try {
+          await audit.noteReset(user.id);
+        } catch {
+          log('error', 'audit_note_failed', { action: 'session.revoke_all' });
+        }
+      },
       sendResetPassword: async ({ user, url }) => {
         await send({
           to: user.email,
@@ -65,7 +86,7 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
     emailVerification: {
       sendOnSignUp: true,
       sendOnSignIn: true,
-      expiresIn: 3600,
+      expiresIn: EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
       autoSignInAfterVerification: false,
       sendVerificationEmail: async ({ user, url }) => {
         await send({
@@ -76,6 +97,7 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
         });
       },
     },
+    hooks: { before: audit.before, after: audit.after },
     session: { expiresIn: SESSION_EXPIRES_IN_SECONDS, updateAge: SESSION_UPDATE_AGE_SECONDS },
     databaseHooks: {
       session: {
@@ -83,6 +105,17 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
           // A new session starts in the user's earliest workspace, so a member of several
           // is never left without an active one (every workspace route would answer 403).
           before: async (session) => {
+            // No session for an address nobody has proved they own. Password sign-in already refuses it
+            // (`requireEmailVerification`), but a passkey sign-in does not: Better Auth creates the session
+            // for any account that holds the credential. Our own routes would still answer 401 (workspace.ts
+            // checks `emailVerified`), but Better Auth's organization routes under /api/auth would not, so the
+            // refusal belongs where every session is born (spec 02 F19, tests/auth/passkeys.test.ts).
+            const owner = await db
+              .select({ verified: schema.user.emailVerified })
+              .from(schema.user)
+              .where(eq(schema.user.id, session.userId))
+              .limit(1);
+            if (!owner[0]?.verified) throw new APIError('FORBIDDEN', { message: 'Verify your email first' });
             const first = await db
               .select({ organizationId: schema.member.organizationId })
               .from(schema.member)
@@ -101,16 +134,9 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
     rateLimit: {
       enabled: true,
       storage: 'database',
-      window: 60,
-      max: 60,
-      customRules: {
-        '/sign-up/email': { window: 600, max: 4 },
-        '/sign-in/email': { window: 60, max: 5 },
-        '/request-password-reset': { window: 900, max: 3 },
-        '/send-verification-email': { window: 900, max: 3 },
-        '/organization/invite-member': { window: 60, max: 5 },
-        '/sign-in/passkey': { window: 60, max: 10 },
-      },
+      window: AUTH_DEFAULT_RATE.window,
+      max: AUTH_DEFAULT_RATE.max,
+      customRules: AUTH_RATE_RULES,
     },
     plugins: [
       passkey({
@@ -129,6 +155,7 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
         // (docs/specs/02 F24-F27), never from membership cardinality.
         disableOrganizationDeletion: true,
         requireEmailVerificationOnInvitation: true,
+        invitationExpiresIn: INVITATION_EXPIRES_IN_SECONDS,
         sendInvitationEmail: async ({ id, email, organization: org }) => {
           await send({
             to: email,
@@ -151,6 +178,14 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
           /* eslint-disable @typescript-eslint/require-await */
           beforeCreateInvitation: async ({ invitation }) => {
             if (!isOrgRole(invitation.role)) throw new APIError('BAD_REQUEST', { message: 'Invalid role' });
+            // An invitation that makes someone an admin is a more valuable thing to intercept: it lives 48 hours.
+            if (invitation.role === 'admin')
+              return {
+                data: {
+                  ...invitation,
+                  expiresAt: new Date(Date.now() + ADMIN_INVITATION_EXPIRES_IN_SECONDS * 1000),
+                },
+              };
           },
           beforeUpdateMemberRole: async ({ newRole }) => {
             if (!isOrgRole(newRole))

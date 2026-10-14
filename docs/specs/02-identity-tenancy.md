@@ -112,7 +112,7 @@ client-supplied role.
 
 ## F16 — User identity
 
-**Priority** P0 · **Status** 🟡 Better Auth config sets email verification required, min 12 / max 128 password (`src/auth/better-auth.ts`), unverified sessions refused (`src/auth/workspace.ts`). Not built: tests of the policy itself, explicit email-canonicalization check, account deletion path
+**Priority** P0 · **Status** 🟡 `requireEmailVerification`, 12 to 128 character policy, hash-only storage, lower-cased email with no second account for a case variant, indistinguishable sign-in failures and the verified-email gate are shown through the real handler (`tests/auth/credentials-policy.test.ts`, ADR 0030). Not built: a test that the web client never logs the address (a grep finds no `console` call in `web/src` outside a sample snippet)
 
 **Acceptance** — verified present:
 - [x] `user` table via Better Auth, email unique.
@@ -121,8 +121,8 @@ client-supplied role.
 - [x] Generic responses — Better Auth owns this.
 
 **Remaining**
-- [ ] ⚠️ Email canonicalization is Better Auth's responsibility; verify explicitly rather
-      than assuming (Trimmed/lower-cased comparison).
+- [x] ⚠️ Email canonicalization is Better Auth's responsibility; verified explicitly (lower-cased, case variants
+      are one account, sign-in is case-insensitive): `tests/auth/credentials-policy.test.ts`.
 - [ ] Email is on the F12 log denylist. `web/src/lib/api.ts` must never log it.
 - [x] Account deletion path: `DELETE /api/workspace/me` (slice S3, `docs/DSAR.md`). A sole admin is refused until another admin exists or the workspace is deleted; no step-up re-authentication (AR-41).
 
@@ -134,7 +134,7 @@ exactly the code we should not own.
 
 ## F17 — Email verification
 
-**Priority** P0 · **Status** 🟡 `sendVerificationEmail` 1 h expiry, `sendOnSignIn`, 3/900 s resend limit configured (`src/auth/better-auth.ts`, `src/auth/email.ts`). Not built: tests (resend limit, unverified access), email-volume monitoring or provider migration plan, never sent via real Cloudflare Email Sending · **Note** documented constraint changed
+**Priority** P0 · **Status** 🟡 verification link: 1 h (now a named constant, tested), once only, signs no one in; sign-in before verification is refused and re-sends; 3/900 s resend limit shown per address (`tests/auth/credentials-policy.test.ts`, `tests/auth/rate-limit.test.ts`, ADR 0030). Not built: email-volume monitoring or provider migration plan; never sent via real Cloudflare Email Sending · **Note** documented constraint changed
 
 **What exists** — `sendVerificationEmail` via `src/auth/email.ts`, 1-hour expiry,
 `autoSignInAfterVerification: false`, `sendOnSignIn: true`.
@@ -153,8 +153,8 @@ only send from your routing domains.
 
 **Acceptance**
 - [x] Verification required before sessions grant application access.
-- [ ] Resend cooldown is configured (Better Auth rate limit: 3 per 900 s on
-      `/send-verification-email`).
+- [x] Resend cooldown is configured and shown (Better Auth rate limit: 3 per 900 s on
+      `/send-verification-email`, per client address): `tests/auth/rate-limit.test.ts`.
 - [ ] ⚠️ At 3,000/month, verification mail is a **design constraint**, not a detail. Monitor
       consumption and migrate to a transactional provider before password resets + invites +
       verifications approach the allowance.
@@ -162,19 +162,19 @@ only send from your routing domains.
       summaries even when delivered. Do not build send-success analytics on Email Routing data.
 
 **Tests** — `unverified_user_cannot_access_workspace_api` (present via
-`workspace.ts:12`); `resend_is_rate_limited`.
+`workspace.ts:12`); `resend_is_rate_limited` (`tests/auth/rate-limit.test.ts`).
 
 ---
 
 ## F18 — Password reset
 
-**Priority** P0 · **Status** 🟡 `sendResetPassword` and `revokeSessionsOnPasswordReset: true` configured, 3/900 s limit (`src/auth/better-auth.ts`). Not built: tests for revocation or generic response, documented reset-link TTL, real email delivery check
+**Priority** P0 · **Status** 🟡 reset ends every session, answers identically for a known and an unknown address, is single use, expires after 1 h (explicit constant) and applies the password policy (`tests/auth/credentials-policy.test.ts`); the revocation is audited as `session.revoke_all` with a count (`tests/auth/audit-events.test.ts`, ADR 0030). Not built: a real email delivery check; no notice email to the address on file
 
 **Acceptance**
 - [x] `sendResetPassword` implemented.
 - [x] `revokeSessionsOnPasswordReset: true` — all other sessions die on reset.
-- [ ] Response is generic whether or not the email exists. Rate limited to 3 per 900 s.
-- [ ] Reset link TTL is explicit and documented.
+- [x] Response is generic whether or not the email exists. Rate limited to 3 per 900 s.
+- [x] Reset link TTL is explicit (1 h, `RESET_PASSWORD_TOKEN_EXPIRES_IN_SECONDS`) and tested.
 
 **Tests** — `reset_revokes_other_sessions`; `reset_response_is_generic_for_unknown_email`.
 
@@ -182,16 +182,16 @@ only send from your routing domains.
 
 ## F19 — Passkeys
 
-**Priority** P1 · **Status** 🟡 `@better-auth/passkey` with `rpID`/`origin` from `APP_ORIGIN`, 10/60 s limit (`src/auth/better-auth.ts`), UI `web/src/passkeys.tsx`. Not built: tests, sign-counter regression handling unverified, passkey-only recovery path, no real-device WebAuthn run
+**Priority** P1 · **Status** 🟡 sign-in ceremony run against a software authenticator: a counter that does not advance is refused and not stored, a never-counting authenticator is accepted, a challenge answers once, wrong origin, relying party or key is refused, and a passkey on an unverified email yields no session (a defect found and fixed, `tests/auth/passkeys.test.ts`, ADR 0030). Not built: a prompt to re-register after a counter regression (the person sees a generic failure), passkey-only recovery path, no real-device WebAuthn run
 
 **Acceptance**
 - [x] `@better-auth/passkey` with server-derived `rpID`, `rpName`, `origin`.
 - [x] WebAuthn management UI at `web/src/passkeys.tsx`.
 - [x] Rate limited: 10 per 60 s on `/sign-in/passkey`.
-- [ ] ⚠️ **Verify sign-counter handling.** A counter regression on a non-discoverable
+- [x] ⚠️ **Verify sign-counter handling** (refused and not stored; no re-registration prompt yet). A counter regression on a non-discoverable
       credential signals possible cloning and should prompt re-registration, not pass
       silently.
-- [ ] ⚠️ **A passkey is not proof of ownership of a newly typed email address.** Invariant
+- [x] ⚠️ **A passkey is not proof of ownership of a newly typed email address.** Invariant
       retained from `docs/AUTH_SETUP.md`; `requireEmailVerification` must still gate access.
 - [ ] Recovery path when a passkey-only user has no verified email and no password.
 
@@ -201,7 +201,7 @@ only send from your routing domains.
 
 ## F20 — Sessions
 
-**Priority** P0 · **Status** 🟡 DB sessions, 30-day expiry with 24 h refresh, `cookieCache` off asserted (`tests/security/config-guards.test.ts`), verified-email gate (`src/auth/workspace.ts`). Not built: session/device list and revoke UI, absolute-timeout decision · **Caveat**
+**Priority** P0 · **Status** ✅ DB sessions, 30-day idle expiry with 24 h refresh and a 90-day absolute lifetime (decision in ADR 0030, enforced exactly in `currentSession` and by the hourly purge), `cookieCache` off asserted (`tests/security/config-guards.test.ts`), verified-email gate, and a session and device list with revoke-one and revoke-others in Settings, audited, token never returned (`tests/api/sessions.test.ts`, `web/src/account/sessions.test.tsx`) · **Caveat** the token is stored as is (AR-1); not driven in a real browser
 
 **Acceptance**
 - [x] Database-backed sessions via `session` table.
@@ -215,15 +215,14 @@ to the live schema. It still applies to the dead `0004` table (F31). Do not clai
 about Better Auth's internal token storage beyond what its docs say.
 
 **Remaining**
-- [ ] Session/device management UI — list, revoke, revoke-others (F23).
-- [ ] Idle vs absolute timeout are currently a single 30-day value. Decide whether a second
-      absolute bound is wanted.
+- [x] Session/device management UI — list, revoke, revoke-others (ADR 0030).
+- [x] Idle vs absolute timeout: a second, absolute 90-day bound was decided and built (ADR 0030).
 
 ---
 
 ## F21 — Invitations
 
-**Priority** P0 · **Status** 🟡 `sendInvitationEmail`, role validation, verified-email requirement on accept configured (`src/auth/better-auth.ts`); accept UI `web/src/onboarding.tsx`. Not built: tests for acceptance or role validation, explicit invite TTL, second-org-creation check
+**Priority** P0 · **Status** 🟡 role validation, who may invite, accept only by the invited address (case-insensitive, once), no workspace created on accept, a second workspace allowed, explicit 7-day expiry, cancellation and the last-admin trigger are shown (`tests/auth/invitations.test.ts`, ADR 0030); invitation, acceptance, cancellation, role change and removal are audited (`tests/auth/audit-events.test.ts`). Not built: a check that the accept UI `web/src/onboarding.tsx` never creates a second workspace for an existing person
 
 **Acceptance**
 - [x] `sendInvitationEmail` with a `/invite?id=` link.
@@ -231,8 +230,8 @@ about Better Auth's internal token storage beyond what its docs say.
 - [x] Invites are **role-validated** in `beforeCreateInvitation`.
 - [ ] Invite acceptance UI exists at `web/src/onboarding.tsx`; confirm it does not create a
       second organization for an existing user (this was the original invariant-2 risk).
-- [ ] Invite TTL is explicit.
-- [ ] Per F15, accepting an invite into a second organization is now **allowed**.
+- [x] Invite TTL is explicit (7 days, `INVITATION_EXPIRES_IN_SECONDS`) and tested.
+- [x] Per F15, accepting an invite into a second organization is now **allowed** (shown by test).
 
 **Tests** — `invite_acceptance_does_not_create_an_organisation`;
 `invite_requires_verified_email`.
@@ -241,7 +240,7 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F22 — Rate limiting
 
-**Priority** P0 · **Status** 🟡 Better Auth `rateLimit.storage: 'database'` with per-route rules and `cf-connecting-ip` configured (`src/auth/better-auth.ts`). Not built: any test of these rules; ingress limits live separately (F29)
+**Priority** P0 · **Status** ✅ every rule in `AUTH_RATE_RULES` (`src/auth/rate-limit-rules.ts`) is driven to its limit, reset after its window, counted per `cf-connecting-ip` (a forged `X-Forwarded-For` does not move it; no address shares one bucket) and stored in the database (`tests/auth/rate-limit.test.ts`); ingress limits live separately (F29)
 
 **Acceptance**
 - [x] `storage: "database"` — survives across Worker instances.
@@ -405,7 +404,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F28 — Audit events
 
-**Priority** P1 · **Status** 🟡 `audit_events` append-only with integration, source, replay, denial, installation and workspace events (`src/audit/actions.ts`, PR #9), admin `GET /api/audit` plus page (ADR 0019); the request id is stamped on every row written in a request (migration 0028, ADR 0028). Not built: member/invite/role/session events, actor email by decision; IP and user agent stored but not shown
+**Priority** P1 · **Status** 🟡 `audit_events` append-only with integration, source, replay, denial, installation, workspace, member, invitation, role and session events (`src/audit/actions.ts`, ADR 0019, ADR 0030), admin `GET /api/audit` plus page; the request id is stamped on every row written in a request (migration 0028, ADR 0028). Not built: actor email by decision; IP and user agent stored but not shown; member and invitation rows are written by a Better Auth `after` hook, so they are not atomic with the change; session events have no workspace and are in the person's own export, not a workspace's log
 
 **Acceptance**
 - [ ] `audit_events(id, organization_id, actor_id, action, subject_type, subject_id,

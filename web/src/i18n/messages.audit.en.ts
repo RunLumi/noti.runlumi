@@ -133,6 +133,15 @@ export const auditEn = {
   'audit.action.account.export': 'Account data exported',
   'audit.action.account.delete': 'A member deleted their account',
   'audit.action.key.destroy': 'Encryption key version destruction authorised',
+  'audit.action.member.invite': 'Invitation sent',
+  'audit.action.member.invite.accept': 'Invitation accepted',
+  'audit.action.member.invite.reject': 'Invitation declined',
+  'audit.action.member.invite.cancel': 'Invitation cancelled',
+  'audit.action.member.role.change': 'Member role changed',
+  'audit.action.member.remove': 'Member removed or left',
+  'audit.action.session.revoke': 'A device was signed out',
+  'audit.action.session.revoke_others': 'All other devices were signed out',
+  'audit.action.session.revoke_all': 'Every device was signed out',
   'audit.action.unknown': 'Other event',
 
   'audit.subject.integration': 'Integration',
@@ -143,6 +152,9 @@ export const auditEn = {
   'audit.subject.github_installation': 'GitHub installation',
   'audit.subject.repository': 'Repository',
   'audit.subject.key': 'Encryption key',
+  'audit.subject.member': 'Member',
+  'audit.subject.invitation': 'Invitation',
+  'audit.subject.session': 'Sign-in session',
 
   'audit.detail.repo': 'Repository',
   'audit.detail.sourceId': 'Source',
@@ -185,4 +197,7 @@ export const auditEn = {
   'audit.detail.purgeAfter': 'Data deleted after',
   'audit.detail.disabledIntegrations': 'Integrations paused',
   'audit.detail.restoredIntegrations': 'Integrations turned back on',
+  'audit.detail.previousRole': 'Previous role',
+  'audit.detail.revoked': 'Devices signed out',
+  'audit.detail.self': 'Left on their own',
 } as const;

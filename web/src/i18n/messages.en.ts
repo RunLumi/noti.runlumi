@@ -12,6 +12,7 @@ import { filtersEn } from './messages.filters.en';
 import { ledgerEn } from './messages.ledger.en';
 import { noiseEn } from './messages.noise.en';
 import { providersEn } from './messages.providers.en';
+import { sessionsEn } from './messages.sessions.en';
 import { setupEn } from './messages.setup.en';
 
 export type PluralMessage = { readonly one?: string; readonly other: string };
@@ -25,6 +26,7 @@ export const en = {
   ...flowEn,
   ...providersEn,
   ...destinationsEn,
+  ...sessionsEn,
 
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'CONNECTIONS',

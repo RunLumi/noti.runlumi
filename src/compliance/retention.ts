@@ -191,7 +191,8 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     inAccountExport: true,
     exportNote: 'Metadata only (times, IP address, user agent). The token and the row id are never exported.',
     ...placeholders,
-    notes: 'The session expires 30 days after its last refresh (refreshed at most daily).',
+    notes:
+      'The session expires 30 days after its last refresh (refreshed at most daily) and 90 days after sign-in at the latest, whichever comes first (ADR 0030). The person can list and end their sessions (`/api/workspace/me/sessions`).',
   },
   {
     id: 'account',

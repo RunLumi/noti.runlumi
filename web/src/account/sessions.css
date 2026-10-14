@@ -1,0 +1,66 @@
+/* ============================================================================
+   "Where you are signed in" (Settings). Tokens only (DESIGN.md §5-§8): one evidence sheet, a list of
+   devices separated by hairlines, 44px controls. Metadata is 13px, above the 12px floor.
+   ========================================================================= */
+
+.session-panel {
+  margin-top: var(--space-5);
+}
+
+.session-list {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+}
+
+.session-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-top: var(--border-hairline);
+}
+
+.session-entry:first-child {
+  border-top: 0;
+}
+
+.session-icon {
+  flex: none;
+  color: var(--color-soft-slate);
+}
+
+.session-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.session-meta {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  color: var(--color-soft-slate);
+  overflow-wrap: anywhere;
+}
+
+.session-note {
+  font-size: 13px;
+}
+
+/* On a 320px screen the button drops under the text instead of squeezing it. */
+@media (max-width: 480px) {
+  .session-entry {
+    flex-wrap: wrap;
+  }
+
+  .session-entry .btn {
+    width: 100%;
+  }
+}

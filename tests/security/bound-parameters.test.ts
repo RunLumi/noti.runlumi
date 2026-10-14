@@ -36,6 +36,7 @@ const ALLOWED_FRAGMENTS: Readonly<Record<string, string>> = {
   guard: 'a fixed WHERE clause chosen by a boolean (audit.ts, provenance.ts)',
   filters: "fixed ' AND ...' clauses with ? placeholders, one per filter that is set (audit-view.ts whereOf)",
   keyset: 'a fixed cursor clause chosen by whether a cursor exists (provenance.ts)',
+  metadataColumn: "either '?' or the fixed json_object(?, changes()) chosen by a boolean option (audit.ts)",
   notLegacy: 'a fixed NOT EXISTS clause (github route)',
   suspended: "either 'CURRENT_TIMESTAMP' or 'NULL' (lifecycle.ts)",
   from: 'FROM_VIEW, or FROM_VIEW with the fixed INDEXED BY deliveries_org_correlation, chosen by whether a correlation filter exists (delivery-queries.ts)',

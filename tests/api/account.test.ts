@@ -361,7 +361,7 @@ describe('DELETE /api/workspace/me', () => {
             as: 'alice',
             method: 'DELETE',
             body: { confirm: 'x' },
-            ageMs: 9e9,
+            ageMs: 5e9,
           })
         ).status,
       ).toBe(403);

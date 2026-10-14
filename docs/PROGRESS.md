@@ -43,6 +43,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | C | Credential lifecycle and boot hygiene (ADR 0022): credential fingerprint, revoke for integrations and sources, shredding proof, guarded KEK destruction with an audited event, per-environment KEK check value, `assertConfig` at every entrypoint, `/health/ready`, `withD1Retry`, bound-parameter guard (migration 0024) | F34, F37, F39, F40, F04, F09, F10 (each in part) | D1 | 🟡 | this PR |
 | 1.1 | Tenant contract closed in the schema (migration 0026: NOT NULL + foreign key on six tables, derive-or-quarantine backfill, row-count check), static every-query-has-an-org-predicate test with a reviewed allowlist, route registry and route-to-capability test, `docs/AUTHORIZATION.md`, tenant-isolation drill over every route on a fake D1 plus an unrun staging runner (ADR 0021) | F25 (contract), F26 (static half), F232, F233 (static and fake-D1 half) | D2 (at rest) | 🟡 | this PR |
 | 1.19 | Egress guards (ADR 0026): AST regression guard for the outbound surface, typed provider registry with a weekly 180-day staleness check, `unmapped_provider_response` event | F228, F229 (in part), F230 | — | 🟡 | this PR |
+| 2.1 / 2.2 / 2.3 / 1.24 | Auth behaviour tests and two defects they found (passkey session for an unverified email; implicit lifetimes), session and device list with revoke-one and revoke-others, 90-day absolute lifetime, audit of membership, invitation, role and session changes, restore-revokes-sessions script, token storage verified on Better Auth 1.7.7 (ADR 0030) | F16 to F22, F28, F234 (each in part; F20 and F22 done) | — | 🟡 | this PR |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
@@ -1705,3 +1706,35 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
 - **Not verified:** any real GitHub, GitLab or Stripe reaction to 200, 410 or 415; 0028 on a real D1; the CI jobs on the CI host; a screen reader,
   a 320 px device and the Vietnamese copy by a person; the dashboard against a real server (only the mocked API in the component tests);
   `ingress_usage` is not reconciled with `deliveries` and is not shown in the dashboard.
+
+## Slices 2.1, 2.2, 2.3 and 1.24 (session parts): auth behaviour, sessions, audit (ADR 0030)
+
+- **Tests first, through the real Better Auth** (`tests/auth/`): the deployed `createAuth` over the real migrations, only the
+  email transport replaced by a recorder. About 80 tests: password and email policy and canonicalisation, verification,
+  resend and every rate-limit rule (`src/auth/rate-limit-rules.ts`, one table now shared by the configuration and the tests),
+  reset (generic, single use, one hour, ends sessions), invitations and roles, passkey sign-in with a software authenticator
+  (counter, challenge, origin, relying party, key). Mutation-checked.
+- **Two real defects fixed.** A passkey sign-in created a session for an account whose email was never verified (our routes
+  answered 401, Better Auth's organization routes did not): `databaseHooks.session.create.before` now refuses it. Reset,
+  verification and invitation lifetimes were silent library defaults: now named constants; the invitation lifetime is
+  7 days (a decision, in the ADR).
+- **Sessions.** `GET /api/workspace/me/sessions`, `POST .../:id/revoke`, `POST .../revoke-others` (`src/api/sessions.ts`):
+  own sessions only (another person's id is 404), token never selected, delete and audit row in one batch, exact count,
+  rate limited, `Origin` checked. Better Auth's four token-returning session routes are closed (404). Settings shows
+  "Where you are signed in" (`web/src/account/`), English and Vietnamese, axe-clean in jsdom.
+- **Absolute lifetime of 90 days** from sign-in, enforced exactly in `currentSession` and, for every other path, by the
+  hourly `expired_auth_purge` (`overAgeSessions`, with a `created_at` unit canary).
+- **Audit** for invitation, acceptance, rejection, cancellation, role change (old and new), removal and leaving, a refused
+  attempt by a member, sessions ended by a password reset, and the three session actions (`src/auth/audit-hooks.ts`). Written
+  by a Better Auth `after` hook, so NOT atomic with the change. The invitee's address is never stored.
+- **Restore revokes sessions:** `scripts/revoke-all-sessions.mjs` (plan, then `--apply`), a RUNBOOK section, and a test that
+  restores an ended session, shows it works again, then ends it.
+- **Token storage verified** on Better Auth 1.7.7: stored as is; the cookie is the token plus a signature; the raw or badly
+  signed token authenticates no one (a test fails if the library starts hashing). AR-1 text corrected, not softened.
+- No migration. F20 and F22 are now done; F16, F17, F18, F19, F21, F28 and F234 stay partial with the gaps named in their
+  status lines and in `docs/specs/REMAINING.md`.
+- **Verified:** `npm ci`, `npm run format`, `npm run check` (format, lint, typecheck, typecheck:web, the full suite, web
+  build, worker bundle check) and the spec-status, retention and authorization generators.
+  **Not verified:** any real mail, real WebAuthn device, real browser (320 px, screen reader), Vietnamese review by a native
+  speaker; the restore script against a real D1; the purge on D1 (Node SQLite stand-in only); nothing here is a real-provider
+  or staging result.

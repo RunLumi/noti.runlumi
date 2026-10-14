@@ -115,6 +115,27 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
     access: { kind: 'self' },
   },
   {
+    method: 'GET',
+    path: '/api/workspace/me/sessions',
+    file: 'src/api/sessions.ts',
+    handler: local('/'),
+    access: { kind: 'self' },
+  },
+  {
+    method: 'POST',
+    path: '/api/workspace/me/sessions/revoke-others',
+    file: 'src/api/sessions.ts',
+    handler: local('/revoke-others'),
+    access: { kind: 'self' },
+  },
+  {
+    method: 'POST',
+    path: '/api/workspace/me/sessions/:id/revoke',
+    file: 'src/api/sessions.ts',
+    handler: local('/:id/revoke'),
+    access: { kind: 'self' },
+  },
+  {
     method: 'DELETE',
     path: '/api/workspace/me',
     file: 'src/api/account.ts',

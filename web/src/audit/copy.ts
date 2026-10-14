@@ -3,6 +3,7 @@ import { t, formatNumber } from '../i18n';
 import { formatDateTime } from '../i18n/format';
 import { isDestinationKind } from '../lib/api';
 import { destinationName } from '../deliveries/copy';
+import { roleLabel } from '../lib/role-label';
 import { isAuditAction, type AuditEvent, type FieldChange, type SummaryItem } from './api';
 
 const has = (id: string): id is MessageId => Object.prototype.hasOwnProperty.call(en, id);
@@ -48,6 +49,7 @@ export function detailValue(item: SummaryItem): string {
   if (typeof value !== 'string') return value.join(', ');
   if (key === 'destination' && isDestinationKind(value)) return destinationName(value);
   if (key === 'purgeAfter') return formatDateTime(value);
+  if (key === 'role' || key === 'previousRole') return roleLabel(value);
   return value;
 }
 

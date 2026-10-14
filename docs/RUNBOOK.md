@@ -648,6 +648,27 @@ the smoke check fails it exits non-zero and prints the rollback instruction: run
 deploying again. Run the smoke check by hand any time: `npm run smoke` (or `node scripts/smoke-health.mjs
 https://<origin>`).
 
+## After a restore: end every session
+
+Better Auth stores the session token as is (AR-1). A D1 Time Travel or backup restore can therefore bring back a
+`session` row for a session the person ended, or one a password reset ended, and that row works again. Treat every
+restore as a session-bearing event (spec 15 F234, mitigation 6):
+
+1. Put the Worker in maintenance mode (`MAINTENANCE_MODE=true`, redeploy) so no session is created between the count and the
+   delete.
+2. Plan: `node scripts/revoke-all-sessions.mjs --database lumi-noti --remote --reason restore` (prints how many sessions
+   and one-time records it would clear; changes nothing).
+3. Apply: the same command with `--apply --i-froze-writes` (the second flag is you stating that step 1 is done; without it the
+   script refuses). The count is read before the delete and the statements are not one transaction, so it can be stale under traffic. It deletes every `session` row and every `verification` row (so a restored,
+   already-used reset link is dead too) and writes one `session.revoke_all` audit event with the count and the reason.
+   Everyone signs in again. Use `--reason incident` for a suspected leak of the session table.
+4. Leave maintenance mode. Then re-run the tenant-isolation drill (below).
+
+`tests/security/revoke-all-sessions.test.ts` shows a restored row working again and the script ending it, over the Node
+SQLite stand-in. `wrangler d1 execute --file` has never been run by this script against a real D1 (**UNVERIFIED**,
+`docs/RELEASE_GATES.md`). A session also ends by itself: 30 days after its last use, and 90 days after sign-in at the latest
+(`overAgeSessions` in the hourly `expired_auth_purge`, ADR 0030).
+
 ## KEK check value and environment mismatch
 
 Each environment carries `ENVIRONMENT_NAME` (`production`, `staging` or `development`) and, for

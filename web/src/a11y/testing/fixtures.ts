@@ -442,6 +442,39 @@ export const MEMBERS = [
   },
 ] as const;
 
+/** What `GET /api/workspace/me/sessions` returns: this laptop, a phone and an unrecognised client. */
+export const SESSIONS = [
+  {
+    id: 'ses_laptop',
+    current: true,
+    createdAt: '2026-10-10T08:00:00.000Z',
+    lastActiveAt: '2026-10-14T07:30:00.000Z',
+    expiresAt: '2026-11-13T07:30:00.000Z',
+    ip: '203.0.113.x',
+    userAgent:
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+  },
+  {
+    id: 'ses_phone',
+    current: false,
+    createdAt: '2026-10-01T10:00:00.000Z',
+    lastActiveAt: '2026-10-12T18:20:00.000Z',
+    expiresAt: '2026-11-11T18:20:00.000Z',
+    ip: '198.51.100.x',
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  },
+  {
+    id: 'ses_unknown',
+    current: false,
+    createdAt: '2026-09-20T10:00:00.000Z',
+    lastActiveAt: '2026-09-21T09:00:00.000Z',
+    expiresAt: '2026-10-21T09:00:00.000Z',
+    ip: null,
+    userAgent: null,
+  },
+];
+
 export const PASSKEYS = [{ id: 'pk_1', name: 'Work laptop', createdAt: '2026-09-10T00:00:00.000Z' }];
 
 /** What `GET /api/audit` returns for an admin: names only, allow-listed details, no addresses. */

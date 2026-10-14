@@ -475,7 +475,7 @@ fatigue.
 
 ## F234 — Accepted risk: Better Auth stores session tokens in a cleartext column
 
-**Priority** P0 · **Status** 🟡 accepted as AR-1 in `docs/THREAT_MODEL.md`; in place: 30-day expiry with daily refresh and password-reset revocation (`src/auth/better-auth.ts`), `cookieCache` off asserted in `tests/security/config-guards.test.ts`, retired `auth_tokens` guard (`tests/retired-schema.test.ts`); not built: session list and revoke-others, revoke-all after a restore, installed-version check of token storage, no-token-in-response test · **Relates to** D7, N1
+**Priority** P0 · **Status** 🟡 accepted as AR-1 in `docs/THREAT_MODEL.md`; in place: 30-day idle expiry with daily refresh, a 90-day absolute lifetime, password-reset revocation, a session list with revoke-one and revoke-others that never returns a token, Better Auth's token-returning session routes closed, `scripts/revoke-all-sessions.mjs` after a restore, the installed-version check of token storage and a no-token-in-response test (ADR 0030; `tests/api/sessions.test.ts`, `tests/security/revoke-all-sessions.test.ts`), `cookieCache` off asserted in `tests/security/config-guards.test.ts`, retired `auth_tokens` guard (`tests/retired-schema.test.ts`); not built: the restore script run against a real D1 (UNVERIFIED), a `documented_risk_matches...` test beyond the two token-storage tests, no-token-in-any-log test · **Relates to** D7, N1
 
 **Story** As a security reviewer, I want the session-token storage risk written down plainly with
 its mitigations, so that nobody later discovers it, or claims we fixed it.
@@ -488,7 +488,8 @@ its mitigations, so that nobody later discovers it, or claims we fixed it.
       (`migrations/0005_better_auth.sql:17`). A read of that column yields a usable bearer
       credential.
 - [ ] **ACCEPTED RISK, not a defect we own.** Mitigations, all implemented or scheduled:
-  1. No read path exposes it: the column is never selected into an API response, a log, an
+  1. No endpoint returns a session token other than the caller's own (sign-in and `get-session` still return it to the
+     person it belongs to): the column is never selected into another person's response, a log, an
      export (F30/F238) or a support tool. `token`, `session` and `cookie` are on the F12 denylist.
   2. Blast radius is bounded by time: `expiresIn` 30 days with `updateAge` 24 h
      (`src/auth/better-auth.ts:76`), and `revokeSessionsOnPasswordReset: true` (`02` F18).
@@ -498,18 +499,21 @@ its mitigations, so that nobody later discovers it, or claims we fixed it.
   4. **`session.cookieCache` is not enabled** in our configuration, which matters: the Better Auth
      docs warn that with cookie caching "revoked sessions may remain active on other devices until
      the cookie cache expires". Without it, revocation is immediate. A test asserts it stays off.
-  5. Session listing and revoke-others exist as a user action (`02` F23), so a suspected
-     compromise is a one-click remedy, not a support ticket.
+  5. Session listing and revoke-others exist as a user action (Settings, ADR 0030), so a suspected
+     compromise is a one-click remedy, not a support ticket. Better Auth's own `list-sessions` and
+     `revoke-*` routes, which return tokens, are closed at the Worker.
   6. Any Time Travel restore or backup restore is treated as a **session-bearing event**: all
      sessions are revoked afterwards, because a restored row can resurrect a token the user
-     believes they revoked.
+     believes they revoked (`scripts/revoke-all-sessions.mjs`, `docs/RUNBOOK.md` "After a restore").
+  7. A 90-day absolute lifetime, so a stolen session in daily use still ends.
 - [ ] **What we explicitly do not claim**: that session tokens are hashed, that a database
       compromise is contained, or that the risk is theoretical. `02` F20 already warns against
       claiming anything about Better Auth's internal token storage beyond its docs.
-- [ ] ⚠️ **UNVERIFIED** against the installed version (`better-auth@1.7.7`): whether the session
-      lookup hashes the token or compares it directly. Check `node_modules/better-auth` (session
-      adapter code) or the Better Auth database-schema docs before this text appears anywhere
-      customer-facing. Until then, this file's wording is the conservative one.
+- [x] ⚠️ **Verified** against the installed version (`better-auth@1.7.7`, ADR 0030): the `session.token` column holds the
+      token as is, and the cookie value is that token followed by a signature (`tests/api/sessions.test.ts`; the test fails
+      if Better Auth starts hashing). The raw token, or the token with a missing or wrong signature, authenticates no one;
+      so a read of the column alone does not yield a usable cookie. Anyone holding the column AND
+      `BETTER_AUTH_SECRET` can forge one, so nothing here claims D1 is safe to leak.
 - [ ] **We do not fork or patch Better Auth to hash tokens.** The trade is recorded in `02` F32:
       hand-rolled session and password code is exactly what we should not own. Re-deciding this
       requires an ADR.
@@ -527,14 +531,15 @@ read path, and no cache layer that would defeat revocation.
 
 **Errors** — n/a (risk statement).
 
-**Security** — the residual, stated for the register (AR-1): a full D1 read compromises every
-unexpired session for every user. Detection depends on Cloudflare access logs, not on us.
+**Security** — the residual, stated for the register (AR-1): a full D1 read together with
+`BETTER_AUTH_SECRET` compromises every unexpired session for every user (the cookie is signed, so the column alone is not
+enough; tested). Detection depends on Cloudflare access logs, not on us.
 
 **Tests**
-- `session_token_never_appears_in_any_api_response_or_log`
+- `session_token_never_appears_in_any_api_response_or_log` (the responses: `tests/api/sessions.test.ts`; logs: not built)
 - `cookie_cache_remains_disabled_so_revocation_is_immediate`
 - `dsar_export_excludes_dead_auth_tokens_table`
-- `documented_risk_matches_the_installed_better_auth_behaviour`
+- `documented_risk_matches_the_installed_better_auth_behaviour` (`tests/api/sessions.test.ts`, "where the session token lives")
 
 **Deps** — `02` F18, F20, F23, F31, F32; F12.
 
