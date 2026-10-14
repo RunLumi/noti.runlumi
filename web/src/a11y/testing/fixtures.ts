@@ -269,6 +269,7 @@ export const ATTEMPTS = [
     statusClass: 'none',
     retryAfterSeconds: 270,
     possibleDuplicate: false,
+    repeatCount: 41,
   },
   {
     attempt: 2,
@@ -324,7 +325,7 @@ export const DELIVERIES: readonly DeliveryItem[] = [
   delivery({
     id: 'del_6',
     state: 'suppressed',
-    suppression: { reason: 'duplicate', duplicateOf: 'del_1' },
+    suppression: { reason: 'duplicate', duplicateOf: 'del_3', originalState: 'dead_lettered' },
   }),
   delivery({ id: 'del_5', state: 'sent', isTest: true }),
 ];

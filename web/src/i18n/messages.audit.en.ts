@@ -134,6 +134,7 @@ export const auditEn = {
   'audit.detail.downgrade': 'Verification weakened',
   'audit.detail.deliveryId': 'Delivery',
   'audit.detail.replayDeliveryId': 'New delivery',
+  'audit.detail.phase': 'Step',
   'audit.detail.requested': 'Deliveries selected',
   'audit.detail.replayed': 'Sent again',
   'audit.detail.alreadyInFlight': 'Already sent again earlier',

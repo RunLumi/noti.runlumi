@@ -221,7 +221,10 @@ FROM delivery_attempts WHERE organization_id='<org>' AND delivery_id='<id>' ORDE
 ended without the provider confirming it (timeout, dropped connection, 5xx, expired claim) and the send
 was retried. It is a possibility: Noti cannot tell. A `suppressed` row (`duplicate_of`, reason
 `duplicate`) is a provider redelivery that was recognised and NOT sent again; `event_dedup.hit_count` is
-how many times that event came back. Neither means exactly-once, and nothing should say so.
+how many times that event came back. Neither means exactly-once, and nothing should say so. `possible_duplicate` is an upper bound (it also marks
+a claim a crashed consumer abandoned, `reason = 'claim_expired'` in the attempt log); at most 20 suppressed
+rows are kept per original, `event_dedup.hit_count` keeps counting. A suppressed row whose original is
+`dead_lettered` means the FIRST delivery failed: redeliver the original, not the repeat.
 
 **"Why is nothing arriving at X?"** Check the breaker before anything else:
 
@@ -231,6 +234,9 @@ SELECT integration_id, state, consecutive_failures, opened_count, last_failure_c
 FROM destination_health WHERE organization_id='<org>' AND (state <> 'closed' OR paused_until > strftime('%s','now')*1000);
 ```
 
+A delivery held back (`circuit_open` or `destination_paced`) for more than 24 hours with no real attempt is
+dead-lettered with the reason `circuit_open_timeout` or `destination_paced_timeout`; it is replayable once
+the destination works. Consecutive identical waits are one `delivery_attempts` row (`repeat_count`).
 `open` means the destination failed 5 times in a row; deliveries wait (`retrying`, `last_error =
 circuit_open`) and spend no attempt. After `open_until` one probe goes out; success closes it. The integration
 page and the delivery say so in plain words. **Noti never disables an integration because of the breaker**, so

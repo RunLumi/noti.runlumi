@@ -592,7 +592,7 @@ responses carry `guarantee: "at_least_once"` and the dashboard says so.
 | `GET /api/deliveries/summary` | `delivery.read` | `{windowHours: 24, counts}` by state for deliveries created in the last 24 hours. |
 | `GET /api/deliveries/:id` | `delivery.read` | `{delivery, timeline, attempts, attemptDetail: "full" \| "summary", replays, guarantee}`. `attempts` is the per-attempt history, oldest first (see below); `attemptDetail` is `summary` for a delivery from before migration 0025, which has only the coarse `timeline`. |
 | `POST /api/deliveries/replay-plan` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. Body `{integrationId?, from?, to?}` (`from`/`to` are `YYYY-MM-DD` or ISO). Writes nothing. `200 {plan: {eligible, total, totalCapped, remaining, bound: 200, token, typedConfirmationAbove: 20}}`. `422` on a bad filter, `429` past 6 a minute. |
-| `POST /api/deliveries/replay` | `delivery.replay` (admin) | Body `{integrationId?, from?, to?, token, expectedCount}` from the plan. `202 {result: {requested, replayed, alreadyInFlight, refused, remaining}}`. `409 {reason: "plan_stale", eligible}` when the eligible set is no longer exactly the one the token names (nothing written), `409 nothing_to_replay`, `409` while workspace deletion is pending, `422 count_mismatch` when `expectedCount` is not the planned count, `429` past 6 a minute. At most 200 deliveries per request. One `delivery.bulk_replay` audit row with the counts and the filter. |
+| `POST /api/deliveries/replay` | `delivery.replay` (admin) | Body `{integrationId?, from?, to?, token, expectedCount}` from the plan. `202 {result: {requested, replayed, alreadyInFlight, refused, remaining}}`. `409 {reason: "plan_stale", eligible}` when the eligible set is no longer exactly the one the token names (nothing written), `409 nothing_to_replay`, `409` while workspace deletion is pending, `422 count_mismatch` when `expectedCount` is not the planned count, `429` past 6 a minute. At most 200 deliveries per request. Audited twice as `delivery.bulk_replay`: a `phase: started` row (requested count and filter) written before the first replay, so a failed audit write sends nothing (`503`, retry), and a `phase: finished` row with the counts, written after (best effort, logged). |
 | `POST /api/deliveries/:id/replay` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. `202 {replay: {deliveryId, replayOf, created: true}}`; `200` with `created: false` while an earlier replay of the same delivery is queued or succeeded (idempotent). `409` if the delivery is not dead-lettered, already delivered, its original message is gone, its integration is deleted, paused or quarantined (`reason: "integration_unavailable"`), or workspace deletion is pending. `429` when rate limited. Audited as `delivery.replay`; the audit row commits in the same batch as the replay and exists only if a new replay row was created. |
 
 Each delivery carries `isTest` (a test notification, ADR 0018); tests stay in the log, labelled, but are left out of `/summary`.
@@ -608,7 +608,9 @@ Each delivery also carries, from [ADR 0023](adr/0023-delivery-ledger-depth.md):
   row of its own, pointing at the original.
 - `pausedReason`: `"circuit_open"` or `"destination_paced"` on a `retrying` delivery that has not been
   sent again yet because the destination keeps failing or asked to be left alone. No attempt is spent
-  and nothing is dead-lettered.
+  and nothing is dead-lettered by a short wait. After 24 hours with no real attempt it is dead-lettered
+  (`destination_unavailable`, reason `circuit_open_timeout` or `destination_paced_timeout`) and can be
+  redelivered. `suppression.originalState` is the state of the delivery a repeat repeats.
 
 `attempts[]` entries: `{attempt, startedAt, durationMs, outcome: "delivered" | "accepted" |
 "retry_scheduled" | "dead_lettered" | "deferred", error, detail, statusClass: "2xx" | "3xx" | "4xx" | "5xx" |
@@ -616,7 +618,10 @@ Each delivery also carries, from [ADR 0023](adr/0023-delivery-ledger-depth.md):
 usual taxonomy object, `detail` a code Noti minted (`provider_http_503`, `circuit_open`), never provider
 text, a URL or a header. For a test sent to a custom webhook `statusClass` is `none` and `detail` null
 (the class of a customer-chosen host's answer is a probing oracle). `deferred` rows are waits, not
-attempts: the attempt number is the one that was about to run. `providerMessageId` is always null today:
+attempts: `attempt` is the number of attempts already spent (0 when none), and `repeatCount` is how many
+further identical waits were folded into the row (a long outage is one row). The history returns the newest
+50 rows, oldest first, so the final outcome is never cut off. A `claim_expired` row is an attempt a crashed
+consumer abandoned: it may have reached the provider. `providerMessageId` is always null today:
 no adapter response carries one.
 
 A replay never edits the original row (not even `updated_at`): it writes a new delivery with
@@ -629,8 +634,10 @@ with `Retry-After`.
 workspace whose integration is enabled and not quarantined, whose original message is still stored, and
 whose latest replay (if any) is itself dead-lettered. `eligible` is at most `bound` (200); `total` is the
 full count up to 10,000 (`totalCapped` says it stopped there). The `token` is a SHA-256 over the tenant,
-the filter and the sorted ids: it proves which set was shown and does not authorise anything. A second
-run of the same plan finds nothing eligible and replays nothing.
+the filter and the sorted ids: it detects that the set changed since it was shown; it is not a secret and not
+a security boundary, and does not authorise anything. Only chain roots (`replayOf` null) are eligible, so a
+replay that itself failed is never replayed on its own. A second run of the same plan finds nothing
+eligible and replays nothing; two identical concurrent requests create each replay once.
 
 ## Setup progress
 

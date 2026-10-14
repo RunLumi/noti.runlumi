@@ -63,6 +63,7 @@ interface Seed {
   outbox?: boolean;
   lastError?: string | null;
   possibleDuplicate?: number;
+  replayOf?: string | null;
   suppressedReason?: string | null;
   duplicateOf?: string | null;
 }
@@ -73,8 +74,8 @@ function delivery(d: Seed): void {
   db.raw
     .prepare(
       `INSERT INTO deliveries(id,integration_id,organization_id,state,attempts,last_error_code,last_error,created_at,updated_at,
-         dead_lettered_at,is_test,possible_duplicate,suppressed_reason,duplicate_of)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         dead_lettered_at,is_test,possible_duplicate,suppressed_reason,duplicate_of,replay_of)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .run(
       d.id,
@@ -91,6 +92,7 @@ function delivery(d: Seed): void {
       d.possibleDuplicate ?? 0,
       d.suppressedReason ?? null,
       d.duplicateOf ?? null,
+      d.replayOf ?? null,
     );
   if (d.outbox !== false)
     db.raw
@@ -419,6 +421,30 @@ describe('bulk replay (F182)', () => {
     expect(p.eligible).toBe(1);
   });
 
+  it('a failed replay does not make the same notification eligible twice (chain roots only)', async () => {
+    delivery({ id: 'A' });
+    // A was replayed once; that replay (R1) itself failed.
+    delivery({ id: 'R1', state: 'dead_lettered', replayOf: 'A' });
+    const p = await plan();
+    expect(p.eligible).toBe(1);
+    const res = await call('POST', '/api/deliveries/replay', {
+      as: 'alice',
+      body: { token: p.token, expectedCount: 1 },
+    });
+    expect(res.status).toBe(202);
+    // One new replay, of the ROOT; none of R1.
+    expect(
+      db.raw
+        .prepare(
+          "SELECT replay_of FROM deliveries WHERE replay_of IS NOT NULL AND id NOT IN ('R1') ORDER BY rowid",
+        )
+        .all(),
+    ).toEqual([{ replay_of: 'A' }]);
+    expect(db.raw.prepare("SELECT COUNT(*) AS n FROM deliveries WHERE replay_of='R1'").get()).toEqual({
+      n: 0,
+    });
+  });
+
   it('narrows by integration and by time window', async () => {
     delivery({ id: 'a1', integrationId: 'int-a', updatedAt: '2026-10-10 10:00:00' });
     delivery({ id: 'a2', integrationId: 'int-a', updatedAt: '2026-10-13 10:00:00' });
@@ -475,10 +501,18 @@ describe('bulk replay (F182)', () => {
       .prepare('SELECT replay_of FROM deliveries WHERE replay_of IS NOT NULL ORDER BY replay_of')
       .all();
     expect(pointing).toEqual([{ replay_of: 'd0' }, { replay_of: 'd1' }, { replay_of: 'd2' }]);
-    const [audit, ...rest] = bulkAudits();
+    // Intent first, counts second: two rows, in that order.
+    const [started, finished, ...rest] = bulkAudits();
     expect(rest).toEqual([]);
+    expect(JSON.parse(started?.metadata_json ?? '{}')).toEqual({
+      phase: 'started',
+      requested: 3,
+      integrationId: 'int-a',
+    });
+    const audit = finished;
     expect(audit).toMatchObject({ organization_id: 'org-a', actor_id: 'alice' });
     expect(JSON.parse(audit?.metadata_json ?? '{}')).toEqual({
+      phase: 'finished',
       requested: 3,
       replayed: 3,
       alreadyInFlight: 0,
@@ -496,6 +530,65 @@ describe('bulk replay (F182)', () => {
     ).toEqual({ n: 3 });
   });
 
+  it('a failed intent-audit write sends NOTHING and fails the request whole (retryable)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (let i = 0; i < 3; i++) delivery({ id: `d${i}` });
+    const p = await plan();
+    db.raw.exec(
+      "CREATE TRIGGER audit_down BEFORE INSERT ON audit_events WHEN new.action='delivery.bulk_replay' BEGIN SELECT RAISE(ABORT,'audit down'); END",
+    );
+    const res = await call('POST', '/api/deliveries/replay', {
+      as: 'alice',
+      body: { token: p.token, expectedCount: 3 },
+    });
+    expect(res.status).toBe(503);
+    expect(replays()).toBe(0);
+    // Retryable: once the audit store is back, the same plan runs.
+    db.raw.exec('DROP TRIGGER audit_down');
+    expect(
+      (
+        await call('POST', '/api/deliveries/replay', {
+          as: 'alice',
+          body: { token: p.token, expectedCount: 3 },
+        })
+      ).status,
+    ).toBe(202);
+    expect(replays()).toBe(3);
+  });
+
+  it('a failed counts-audit write after the replays does not turn them into an error', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    for (let i = 0; i < 3; i++) delivery({ id: `d${i}` });
+    const p = await plan();
+    db.raw.exec(
+      "CREATE TRIGGER audit_half BEFORE INSERT ON audit_events WHEN new.metadata_json LIKE '%finished%' BEGIN SELECT RAISE(ABORT,'audit down'); END",
+    );
+    const res = await call('POST', '/api/deliveries/replay', {
+      as: 'alice',
+      body: { token: p.token, expectedCount: 3 },
+    });
+    expect(res.status).toBe(202);
+    expect(replays()).toBe(3);
+    // Audited as started: the replays are never unaudited.
+    expect(bulkAudits()).toHaveLength(1);
+    expect(JSON.parse(bulkAudits()[0]?.metadata_json ?? '{}')).toMatchObject({
+      phase: 'started',
+      requested: 3,
+    });
+  });
+
+  it('two identical concurrent requests send each delivery once', async () => {
+    for (let i = 0; i < 3; i++) delivery({ id: `d${i}` });
+    const p = await plan();
+    const body = { token: p.token, expectedCount: 3 };
+    const [a, b] = await Promise.all([
+      call('POST', '/api/deliveries/replay', { as: 'alice', body }),
+      call('POST', '/api/deliveries/replay', { as: 'alice', body }),
+    ]);
+    expect([a.status, b.status].every((s) => s === 202 || s === 409)).toBe(true);
+    expect(replays()).toBe(3);
+  });
+
   it('is idempotent: submitting the same plan twice replays once', async () => {
     for (let i = 0; i < 3; i++) delivery({ id: `d${i}` });
     const p = await plan();
@@ -505,7 +598,7 @@ describe('bulk replay (F182)', () => {
     expect(again.status).toBe(409);
     expect((await again.json<{ reason: string }>()).reason).toBe('nothing_to_replay');
     expect(replays()).toBe(3);
-    expect(bulkAudits()).toHaveLength(1);
+    expect(bulkAudits()).toHaveLength(2);
   });
 
   it('refuses a stale plan and writes nothing: the backlog changed after the preview', async () => {

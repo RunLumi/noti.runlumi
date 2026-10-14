@@ -161,7 +161,7 @@ describe('attempt history and duplicate disclosure (ADR 0023)', () => {
     // Outcome is text, never colour alone; a wait is not an attempt.
     expect(within(items[0]).getByText('Attempt 1')).toBeTruthy();
     expect(within(items[0]).getByText('Did not work, will retry')).toBeTruthy();
-    expect(within(items[1]).getByText('Waited, nothing sent')).toBeTruthy();
+    expect(within(items[1]).getByText('Waited, and then 41 more times. Nothing was sent.')).toBeTruthy();
     expect(
       within(items[1]).getByText('Paused automatically because the destination keeps failing.'),
     ).toBeTruthy();
@@ -192,6 +192,10 @@ describe('attempt history and duplicate disclosure (ADR 0023)', () => {
     await within(dialog).findByText('Not sent again');
     expect(within(dialog).getByText(/recorded this repeat instead of sending it again/)).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: 'Show the first delivery' })).toBeTruthy();
+    // The original failed: say so and point at it, rather than implying this repeat could be redelivered.
+    expect(
+      within(dialog).getByText(/The first delivery of this event failed\. Redeliver that one/),
+    ).toBeTruthy();
     await expectClean('suppressed duplicate');
   });
 
@@ -220,7 +224,11 @@ describe('redeliver all failed (F182)', () => {
     await user.type(screen.getByLabelText('Type 25 to confirm'), '25');
     expect(screen.getByRole('button', { name: 'Send them again' }).getAttribute('aria-disabled')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Send them again' }));
-    await screen.findByText(/Queued 24 new deliveries/);
+    const queued = await screen.findByText(/Queued 24 new deliveries/);
+    // The confirm button unmounted: focus moves to the outcome, not to the top of the page.
+    await waitFor(() =>
+      expect(queued.closest('[tabindex="-1"]')?.contains(document.activeElement)).toBe(true),
+    );
     expect(screen.getByText('1 had already been sent again earlier.')).toBeTruthy();
     expect(screen.getByText('5 more are waiting for another round.')).toBeTruthy();
     await expectClean('bulk redeliver result');

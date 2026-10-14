@@ -71,6 +71,9 @@ function Duplicates({
       {suppression ? (
         <>
           <p>{t(`delivery.detail.suppressed.${suppression.reason}`)}</p>
+          {suppression.originalState === 'dead_lettered' && (
+            <p>{t('delivery.detail.suppressed.originalFailed')}</p>
+          )}
           {suppression.duplicateOf && (
             <>
               <p className="mono-wrap muted">

@@ -51,41 +51,35 @@ export interface DedupInput {
 }
 
 /**
- * Statements to append DIRECTLY after the ingress statement whose `changes()` is 0 exactly when the
- * event was already accepted: the outbox insert on the deliver path (it only inserts when the delivery
- * row was new) and the `held_events` insert on the hold path. They run in that same batch, so the
- * record commits or fails with the event, and none of them reads anything outside the tenant.
+ * F185: at most this many `suppressed` rows are written per original. The counter keeps counting past
+ * it (`hit_count` is the truth), so a provider stuck in a retry loop cannot fill the log with rows.
+ */
+export const SUPPRESSED_ROWS_PER_ORIGINAL = 20;
+
+/**
+ * Statements to append DIRECTLY after the statement whose `changes()` is zero exactly when the event
+ * was already accepted: the outbox insert on the deliver path and the `held_events` insert on the hold
+ * path. The outbox insert only runs when the DELIVERY insert before it changed a row, and it is an upsert,
+ * so an outbox row that outlived its purged delivery (an orphan) is taken over by the new delivery and
+ * still counts as a change: it can never make a brand-new delivery look like a repeat. They run in that
+ * same batch, so the record commits or fails with the event, and none of them reads outside the tenant.
  *
- * 1. a `suppressed` row, only when the previous statement changed nothing AND the original exists;
- * 2. the hit counter on the existing `event_dedup` row, only when (1) inserted;
- * 3. the `event_dedup` row itself (first sight), a no-op when it exists.
+ * 1. on a repeat: count it, creating the `event_dedup` row if it expired and was purged;
+ * 2. on a repeat: a `suppressed` row, while the original has fewer than
+ *    {@link SUPPRESSED_ROWS_PER_ORIGINAL} of them;
+ * 3. first sight: the `event_dedup` row itself, a no-op when it exists.
  */
 export function dedupStatements(db: D1Database, input: DedupInput): D1PreparedStatement[] {
-  const suppressedId = crypto.randomUUID();
   const expires = input.nowMs + DEDUP_TTL_MS;
   return [
     db
       .prepare(
-        `INSERT INTO deliveries(id,integration_id,organization_id,state,duplicate_of,suppressed_reason,created_at)
-         SELECT ?1,?2,?3,'suppressed',?4,'duplicate',CURRENT_TIMESTAMP
+        `INSERT INTO event_dedup(organization_id,delivery_id,dedup_key,integration_id,first_seen,last_seen,hit_count,expires_at)
+         SELECT ?1,?2,?3,?4,?5,?5,1,?6
          WHERE changes() = 0
-           AND (EXISTS (SELECT 1 FROM deliveries WHERE id=?4 AND organization_id=?3)
-                OR EXISTS (SELECT 1 FROM held_events WHERE id=?4 AND organization_id=?3))`,
-      )
-      .bind(suppressedId, input.integrationId, input.organizationId, input.deliveryId),
-    db
-      .prepare(
-        `UPDATE event_dedup SET hit_count = hit_count + 1, last_seen = ?3
-         WHERE organization_id = ?1 AND delivery_id = ?2
-           AND EXISTS (SELECT 1 FROM deliveries WHERE id = ?4 AND organization_id = ?1)`,
-      )
-      .bind(input.organizationId, input.deliveryId, input.nowMs, suppressedId),
-    db
-      .prepare(
-        `INSERT OR IGNORE INTO event_dedup(organization_id,delivery_id,dedup_key,integration_id,first_seen,last_seen,hit_count,expires_at)
-         VALUES(?1,?2,?3,?4,?5,?5,
-                CASE WHEN EXISTS (SELECT 1 FROM deliveries WHERE id = ?7 AND organization_id = ?1) THEN 1 ELSE 0 END,
-                ?6)`,
+           AND (EXISTS (SELECT 1 FROM deliveries WHERE id=?2 AND organization_id=?1)
+                OR EXISTS (SELECT 1 FROM held_events WHERE id=?2 AND organization_id=?1))
+         ON CONFLICT(organization_id,delivery_id) DO UPDATE SET hit_count = hit_count + 1, last_seen = excluded.last_seen`,
       )
       .bind(
         input.organizationId,
@@ -94,7 +88,33 @@ export function dedupStatements(db: D1Database, input: DedupInput): D1PreparedSt
         input.integrationId,
         input.nowMs,
         expires,
-        suppressedId,
+      ),
+    db
+      .prepare(
+        `INSERT INTO deliveries(id,integration_id,organization_id,state,duplicate_of,suppressed_reason,created_at)
+         SELECT ?1,?2,?3,'suppressed',?4,'duplicate',CURRENT_TIMESTAMP
+         WHERE changes() = 1
+           AND (SELECT hit_count FROM event_dedup WHERE organization_id=?3 AND delivery_id=?4) <= ?5`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        input.integrationId,
+        input.organizationId,
+        input.deliveryId,
+        SUPPRESSED_ROWS_PER_ORIGINAL,
+      ),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO event_dedup(organization_id,delivery_id,dedup_key,integration_id,first_seen,last_seen,hit_count,expires_at)
+         VALUES(?1,?2,?3,?4,?5,?5,0,?6)`,
+      )
+      .bind(
+        input.organizationId,
+        input.deliveryId,
+        input.dedupKey,
+        input.integrationId,
+        input.nowMs,
+        expires,
       ),
   ];
 }

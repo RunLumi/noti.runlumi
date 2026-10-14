@@ -56,6 +56,8 @@ export interface DeliveryItem {
   readonly suppression?: {
     readonly reason: 'duplicate' | 'claim_conflict' | 'provider_idempotency';
     readonly duplicateOf: string | null;
+    /** State of the delivery this repeats; `dead_lettered` means the original failed. */
+    readonly originalState: DeliveryState | null;
   } | null;
   /** Why a waiting delivery has not been sent although nothing failed this time. */
   readonly pausedReason?: 'circuit_open' | 'destination_paced' | null;
@@ -94,6 +96,8 @@ export interface AttemptItem {
   readonly statusClass: StatusClass;
   readonly retryAfterSeconds: number | null;
   readonly possibleDuplicate: boolean;
+  /** For a wait: further identical waits folded into this row. */
+  readonly repeatCount: number;
 }
 
 export interface DeliveryDetail {
@@ -236,7 +240,11 @@ function parseSuppression(value: unknown): DeliveryItem['suppression'] {
   if (!isRecord(value)) return null;
   const reason = value.reason;
   if (reason !== 'duplicate' && reason !== 'claim_conflict' && reason !== 'provider_idempotency') return null;
-  return { reason, duplicateOf: typeof value.duplicateOf === 'string' ? value.duplicateOf : null };
+  return {
+    reason,
+    duplicateOf: typeof value.duplicateOf === 'string' ? value.duplicateOf : null,
+    originalState: isDeliveryState(value.originalState) ? value.originalState : null,
+  };
 }
 
 /** An attempt we cannot read is dropped from the list rather than failing the whole dialog. */
@@ -261,6 +269,7 @@ function parseAttempt(value: unknown): AttemptItem[] {
       statusClass: value.statusClass as StatusClass,
       retryAfterSeconds: typeof value.retryAfterSeconds === 'number' ? value.retryAfterSeconds : null,
       possibleDuplicate: value.possibleDuplicate === true,
+      repeatCount: typeof value.repeatCount === 'number' ? value.repeatCount : 0,
     },
   ];
 }

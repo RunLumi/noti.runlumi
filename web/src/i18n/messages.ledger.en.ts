@@ -14,6 +14,7 @@ export const ledgerEn = {
     'This delivery was made before Noti kept a line for each try, so only the summary above is available.',
   'attempts.list': 'Attempts, oldest first',
   'attempts.item': 'Attempt {number}',
+  'attempts.stoppedWaiting': 'Stopped waiting',
   'attempts.waited': 'Waited, nothing sent',
   'attempts.outcome.delivered': 'Delivered',
   'attempts.outcome.accepted': 'Accepted, not confirmed',
@@ -27,6 +28,16 @@ export const ledgerEn = {
   'attempts.statusClass.timeout': 'No answer in time',
   'attempts.statusClass.network': 'Noti could not connect',
   'attempts.statusClass.none': 'No request was made',
+  'attempts.waitedTimes': {
+    one: 'Waited, and then {count} more time. Nothing was sent.',
+    other: 'Waited, and then {count} more times. Nothing was sent.',
+  } satisfies PluralMessage,
+  'attempts.reason.circuit_open_timeout':
+    'Stopped waiting: the destination kept failing for more than a day. Redeliver it once the destination works.',
+  'attempts.reason.destination_paced_timeout':
+    'Stopped waiting: the destination kept asking Noti to slow down for more than a day. Redeliver it later.',
+  'attempts.reason.claim_expired':
+    'A worker stopped in the middle of sending, so this try may have reached the destination.',
   'attempts.duration': 'Took {ms} ms',
   'attempts.retryAfter': 'The destination asked Noti to wait {seconds} seconds.',
   'attempts.possibleDuplicate': 'The destination may already have received this one.',
@@ -44,6 +55,8 @@ export const ledgerEn = {
     'Another worker was already sending this, so Noti did not send it a second time.',
   'delivery.detail.suppressed.provider_idempotency':
     'The destination recognised this as a message it already had.',
+  'delivery.detail.suppressed.originalFailed':
+    'The first delivery of this event failed. Redeliver that one: this repeat is not sent.',
   'delivery.detail.suppressed.of': 'Repeat of delivery {id}',
   'delivery.detail.suppressed.open': 'Show the first delivery',
   'delivery.detail.paused.circuit_open':

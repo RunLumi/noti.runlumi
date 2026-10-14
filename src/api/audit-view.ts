@@ -63,6 +63,7 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
   'source.credentials.revoke': { kind: 'string', reason: 'string' },
   'delivery.replay': { replayDeliveryId: 'string' },
   'delivery.bulk_replay': {
+    phase: 'string',
     requested: 'number',
     replayed: 'number',
     alreadyInFlight: 'number',

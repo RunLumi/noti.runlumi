@@ -21,8 +21,8 @@
 --
 -- 4. destination_health: per (workspace, integration) circuit-breaker and outbound-pacing state.
 --
--- All three tables carry organization_id and are purged by the bounded workspace purge
--- (src/pipeline/purge.ts TENANT_TABLES). event_dedup also cascades from the organization.
+-- All three tables carry organization_id NOT NULL with a foreign key that cascades from the organization,
+-- and are also drained by the bounded workspace purge (src/pipeline/purge.ts TENANT_TABLES).
 --
 -- Expand-only. ROLLBACK: the previous Worker ignores the new columns and tables. It would stop
 -- writing event_dedup and delivery_attempts and stop honouring the breaker, nothing else.
@@ -51,10 +51,12 @@ CREATE INDEX event_dedup_key ON event_dedup(organization_id, dedup_key);
 
 CREATE TABLE delivery_attempts (
   id TEXT PRIMARY KEY,
-  organization_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
   delivery_id TEXT NOT NULL,
   integration_id TEXT NOT NULL,
-  attempt INTEGER NOT NULL CHECK(attempt >= 1),
+  -- Attempts used so far when the row was written: a deferral stores the count already spent (0 when
+  -- none), so it never takes the number of the next real attempt.
+  attempt INTEGER NOT NULL CHECK(attempt >= 0),
   started_at INTEGER NOT NULL,
   finished_at INTEGER NOT NULL,
   outcome TEXT NOT NULL CHECK(outcome IN ('delivered','accepted','retry_scheduled','dead_lettered','deferred')),
@@ -64,13 +66,18 @@ CREATE TABLE delivery_attempts (
     CHECK(status_class IN ('2xx','3xx','4xx','5xx','timeout','network','none')),
   retry_after_ms INTEGER CHECK(retry_after_ms IS NULL OR retry_after_ms >= 0),
   provider_message_id TEXT CHECK(provider_message_id IS NULL OR length(provider_message_id) <= 200),
-  possible_duplicate INTEGER NOT NULL DEFAULT 0 CHECK(possible_duplicate IN (0,1))
+  possible_duplicate INTEGER NOT NULL DEFAULT 0 CHECK(possible_duplicate IN (0,1)),
+  -- Consecutive identical waits are folded into one `deferred` row: this is how many extra times it
+  -- waited (a 24 hour outage is one row, not hundreds).
+  repeat_count INTEGER NOT NULL DEFAULT 0 CHECK(repeat_count >= 0)
 );
 CREATE INDEX delivery_attempts_delivery ON delivery_attempts(organization_id, delivery_id, started_at);
 CREATE INDEX delivery_attempts_started ON delivery_attempts(organization_id, started_at);
+-- The retention purge walks old attempts across workspaces by age.
+CREATE INDEX delivery_attempts_age ON delivery_attempts(started_at);
 
 CREATE TABLE destination_health (
-  organization_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
   integration_id TEXT NOT NULL,
   destination_host TEXT CHECK(destination_host IS NULL OR length(destination_host) <= 255),
   state TEXT NOT NULL DEFAULT 'closed' CHECK(state IN ('closed','open','half_open')),

@@ -275,12 +275,15 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
         });
         expect(first.status).toBe(202);
         expect(again.status).toBe(202);
-        const accepted = rig.count('deliveries');
+        const real = "state != 'suppressed'";
+        const accepted = rig.count('deliveries', real);
         expect((await first.json<{ persisted: number }>()).persisted).toBe(accepted);
         expect((await again.json<{ persisted: number }>()).persisted).toBe(0);
         expect(accepted).toBeGreaterThan(0);
-        expect(rig.count('deliveries')).toBe(accepted);
+        expect(rig.count('deliveries', real)).toBe(accepted);
         expect(rig.count('notification_outbox')).toBe(accepted);
+        // The repeat is not dropped: each integration records it as a suppressed row (F185).
+        expect(rig.count('deliveries', "state = 'suppressed'")).toBe(accepted);
       });
     });
 

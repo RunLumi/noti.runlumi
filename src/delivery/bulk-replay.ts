@@ -11,16 +11,23 @@
  *    it refuses with `plan_stale` and the new count, and writes nothing. So a double click, a retried
  *    request or a changed backlog can never replay more than was previewed.
  *
- * The token is the SHA-256 of the tenant, the filter and the sorted delivery ids, not a secret: it
- * proves "this is the set you were shown", it does not authorise (the route's capability check does).
+ * The token is the SHA-256 of the tenant, the filter and the sorted delivery ids. It is not a secret and
+ * not a security boundary: it detects that the set changed since it was shown, nothing more;
+ * authorisation is the route's capability check.
  *
  * Bounds: at most {@link BULK_REPLAY_MAX} deliveries per request (the rest are reported as
  * `remaining`, run again). Each replay goes through `redeliver()`, so every guard of a single replay
  * applies: the integration must be usable, the original message must still exist, a workspace pending
  * deletion refuses. A replay never mutates the original; it is a new delivery with `replay_of`.
  *
- * Subrequest cost: about three D1 calls per replay (read, batch, existence check), so a full request
- * is ~600 calls, under the 1,000-per-invocation Workers Paid limit. UNVERIFIED on a real deployment.
+ * Subrequest cost: two D1 calls per created replay (the source read and the write batch; the existence
+ * check runs only when nothing was created), plus the plan and the audit rows, so a full request is about
+ * 400 calls, under the 1,000-per-invocation Workers Paid limit. UNVERIFIED on a real deployment.
+ *
+ * Concurrent identical requests: both may pass the plan check, and both then call `redeliver()`, whose ids
+ * are deterministic in `(original, replay sequence)` and whose sequence advances only inside the batch that
+ * inserts the row. One creates the replay, the other is told `created: false` and counts it as
+ * `alreadyInFlight`. Nothing is sent twice; both requests are audited.
  *
  * Audit: ONE `delivery.bulk_replay` row with the counts and the filter, not one row per replay; each
  * new delivery carries `replay_of`, so the log still links every replay to its original.
@@ -61,6 +68,10 @@ function whereOf(orgId: string, f: BulkFilter): { where: string; values: (string
              AND i.enabled = 1 AND i.credentials_quarantined_at IS NULL)`,
     // Replay re-reads the stored message; after outbox retention there is nothing to send.
     `EXISTS (SELECT 1 FROM notification_outbox o WHERE o.id = d.id AND o.organization_id = d.organization_id)`,
+    // Chain ROOTS only. A replay that itself failed is not a second thing to replay: its root is, and the
+    // latest-replay clause below decides whether the root is eligible, so the same notification is
+    // never sent twice by one bulk request.
+    'd.replay_of IS NULL',
     // Not while a replay of it is in flight or has succeeded (the same rule as a single replay).
     `COALESCE((SELECT r.state FROM deliveries r WHERE r.replay_of = d.id AND r.organization_id = d.organization_id
                ORDER BY r.rowid DESC LIMIT 1), 'dead_lettered') IN ('dead_lettered','failed')`,
@@ -138,6 +149,12 @@ export interface BulkRunRequest {
   readonly token: string;
   /** The count the person confirmed (typed, above the threshold). */
   readonly expectedCount: number;
+  /**
+   * Called once the plan is verified and BEFORE the first replay. The route writes its audit row here: if
+   * that write throws, nothing has been replayed and the request fails whole (retryable), so a failed
+   * audit can never leave up to 200 unaudited replays behind.
+   */
+  readonly beforeReplay?: (requested: number) => Promise<void>;
 }
 
 /**
@@ -152,6 +169,7 @@ export async function runBulkReplay(db: D1Database, req: BulkRunRequest): Promis
   if (req.expectedCount !== plan.ids.length) {
     return { ok: false, error: 'count_mismatch', eligible: plan.ids.length };
   }
+  await req.beforeReplay?.(plan.ids.length);
   let replayed = 0;
   let alreadyInFlight = 0;
   let refused = 0;

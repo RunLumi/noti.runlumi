@@ -15,6 +15,8 @@ import { SESSION_EXPIRES_IN_SECONDS } from '../auth/session-policy';
 import { RETENTION_DAYS as WORKSPACE_DELETION_GRACE_DAYS } from '../api/workspace-lifecycle';
 import { STATE_TTL_MS } from '../connectors/sources/github/install';
 import { OUTBOX_RETENTION_MS } from '../delivery/claim';
+import { DEDUP_TTL_MS } from '../delivery/dedup';
+import { HEALTH_RETENTION_MS } from '../delivery/health';
 import { AUTH_RATE_LIMIT_MAX_AGE_MS, AUTH_STATE_GRACE_MS } from '../pipeline/expired-records';
 import { AUDIT_RETENTION, DELIVERY_RETENTION } from '../pipeline/retention';
 import { FAILED_RETENTION_MS, HELD_RETENTION_MS, OPEN_FAILURE_RETENTION_MS } from '../routing/noise-store';
@@ -562,6 +564,74 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     ...placeholders,
     notes:
       'Only terminal deliveries are purged; a dead-lettered row is kept until both its creation and its dead-lettering are older than the cutoff.',
+  },
+  {
+    id: 'delivery_attempts',
+    table: 'delivery_attempts',
+    category: 'delivery_metadata',
+    personalData: 'none',
+    dataHeld:
+      'One row per delivery attempt or wait: outcome, our own error code, a diagnostic code we minted, an HTTP status class, a retry delay in milliseconds. No notification text, no destination URL, no provider response.',
+    purpose: 'Answers "what happened on each try?" in the delivery log.',
+    retention: {
+      kind: 'configurable',
+      variable: 'DELIVERY_RETENTION_DAYS',
+      defaultMs: daysMs(DELIVERY_RETENTION.default),
+      minMs: daysMs(DELIVERY_RETENTION.min),
+      maxMs: daysMs(DELIVERY_RETENTION.max),
+    },
+    deletion: [
+      { kind: 'cron_job', job: 'retention_purge' },
+      { kind: 'workspace_purge', route: 'tenant_tables' },
+    ],
+    inWorkspaceExport: true,
+    inAccountExport: false,
+    exportNote: 'The most recent 2,000 rows.',
+    ...placeholders,
+    notes: 'Deleted with the delivery it belongs to; a delivery is only purged once none remain.',
+  },
+  {
+    id: 'event_dedup',
+    table: 'event_dedup',
+    category: 'delivery_metadata',
+    personalData: 'none',
+    dataHeld:
+      'Per accepted event and integration: the delivery id, a dedup key (a hash), timestamps and a count of repeats.',
+    purpose: 'Recognises a provider redelivery and counts it instead of dropping it silently.',
+    retention: {
+      kind: 'fixed',
+      ms: DEDUP_TTL_MS,
+      basis: 'DEDUP_TTL_MS (src/delivery/dedup.ts)',
+    },
+    deletion: [
+      { kind: 'cron_job', job: 'dedup_purge' },
+      { kind: 'workspace_purge', route: 'tenant_tables' },
+    ],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    ...placeholders,
+  },
+  {
+    id: 'destination_health',
+    table: 'destination_health',
+    category: 'delivery_metadata',
+    personalData: 'none',
+    dataHeld:
+      'Per integration: circuit-breaker state, failure counts, the last failure code, rate-limit hold times, the destination host name.',
+    purpose: 'Stops sending to a destination that keeps failing and respects its rate limits.',
+    retention: {
+      kind: 'fixed',
+      ms: HEALTH_RETENTION_MS,
+      basis: 'HEALTH_RETENTION_MS (src/delivery/health.ts)',
+      note: 'Only rows whose breaker is closed and that have been quiet for this long; an open breaker is state, not garbage.',
+    },
+    deletion: [
+      { kind: 'cron_job', job: 'retention_purge' },
+      { kind: 'workspace_purge', route: 'tenant_tables' },
+    ],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    ...placeholders,
   },
   {
     id: 'routing_decisions',

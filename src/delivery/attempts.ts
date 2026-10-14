@@ -67,6 +67,87 @@ export function isUnconfirmed(report: AttemptReport): boolean {
   );
 }
 
+export interface DeferralRow {
+  /** Attempts already spent (0 when none): a deferral never takes the number of the next real attempt. */
+  readonly attemptsUsed: number;
+  readonly nowMs: number;
+  /** The wait ends here; the ledger row is `retrying` due at exactly this instant. */
+  readonly untilMs: number;
+  readonly errorCode: ErrorCode;
+  readonly reason: string;
+  readonly retryAfterMs: number;
+}
+
+/** The newest row of this delivery is a wait with this reason. ?1 org · ?2 delivery · ?3 reason */
+const LAST_IS_SAME_WAIT = `EXISTS (SELECT 1 FROM delivery_attempts l
+  WHERE l.rowid = (SELECT rowid FROM delivery_attempts WHERE organization_id=?1 AND delivery_id=?2 ORDER BY rowid DESC LIMIT 1)
+    AND l.outcome='deferred' AND l.reason=?3)`;
+
+/**
+ * Record a wait (the breaker is open or the destination asked to be left alone) WITHOUT one row per wait:
+ * a 24 hour outage or a one-second pacing hold would otherwise write hundreds of rows per delivery and push
+ * the real outcome out of the history. Consecutive identical waits are folded into the previous `deferred`
+ * row (its end moves, `repeat_count` counts the folds); a different reason, or any real attempt in between,
+ * starts a new row.
+ *
+ * Place both directly after the ledger's deferral write: the first is gated on that write's `changes()`,
+ * the second on the ledger row being `retrying` and due at exactly `untilMs`, so a consumer that lost its
+ * claim records nothing.
+ */
+export function deferralStatements(
+  db: D1Database,
+  ref: DeliveryRef,
+  row: DeferralRow,
+): D1PreparedStatement[] {
+  return [
+    db
+      .prepare(
+        `UPDATE delivery_attempts SET finished_at=?4, repeat_count=repeat_count+1, retry_after_ms=?5
+         WHERE rowid = (SELECT rowid FROM delivery_attempts WHERE organization_id=?1 AND delivery_id=?2 ORDER BY rowid DESC LIMIT 1)
+           AND organization_id=?1 AND outcome='deferred' AND reason=?3 AND changes()=1`,
+      )
+      .bind(ref.organizationId, ref.id, row.reason, row.nowMs, row.retryAfterMs),
+    db
+      .prepare(
+        `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,started_at,finished_at,
+           outcome,error_code,reason,status_class,retry_after_ms)
+         SELECT ?4,?1,?2,?5,?6,?7,?7,'deferred',?8,?3,'none',?9
+         WHERE EXISTS (SELECT 1 FROM deliveries WHERE id=?2 AND organization_id=?1 AND state='retrying'
+                         AND next_attempt_at=?10 AND claim_token IS NULL)
+           AND NOT ${LAST_IS_SAME_WAIT}`,
+      )
+      .bind(
+        ref.organizationId,
+        ref.id,
+        row.reason,
+        crypto.randomUUID(),
+        ref.integrationId,
+        row.attemptsUsed,
+        row.nowMs,
+        row.errorCode,
+        row.retryAfterMs,
+        row.untilMs,
+      ),
+  ];
+}
+
+/** Since when this delivery has been held back with no real attempt in between, or null. ?1 org · ?2 delivery */
+export async function waitingSince(
+  db: D1Database,
+  ref: Pick<DeliveryRef, 'id' | 'organizationId'>,
+): Promise<number | null> {
+  const row = await db
+    .prepare(
+      `SELECT MIN(started_at) AS since FROM delivery_attempts
+       WHERE organization_id=?1 AND delivery_id=?2 AND outcome='deferred'
+         AND rowid > COALESCE((SELECT MAX(rowid) FROM delivery_attempts
+                                WHERE organization_id=?1 AND delivery_id=?2 AND outcome<>'deferred'),0)`,
+    )
+    .bind(ref.organizationId, ref.id)
+    .first<{ since: number | null }>();
+  return row?.since ?? null;
+}
+
 export interface AttemptRow {
   readonly attempt: number;
   readonly startedAtMs: number;
@@ -120,9 +201,13 @@ type StoredAttempt = {
   retry_after_ms: number | null;
   provider_message_id: string | null;
   possible_duplicate: number;
+  repeat_count: number;
 };
 
-/** A delivery has at most 13 attempts plus deferrals, so this is a safety bound, not a page size. */
+/**
+ * Safety bound. A delivery has at most 13 attempts, and consecutive waits fold into one row, so this is
+ * never reached in practice; if it is, the NEWEST rows are kept (the outcome matters most).
+ */
 export const ATTEMPT_LIST_LIMIT = 50;
 
 const OUTCOMES: ReadonlySet<string> = new Set(ATTEMPT_ROW_OUTCOMES);
@@ -137,13 +222,13 @@ export async function listAttempts(
   const rows = await db
     .prepare(
       `SELECT attempt,started_at,finished_at,outcome,error_code,reason,status_class,retry_after_ms,
-              provider_message_id,possible_duplicate
+              provider_message_id,possible_duplicate,repeat_count
        FROM delivery_attempts WHERE organization_id = ?1 AND delivery_id = ?2
-       ORDER BY started_at, finished_at, rowid LIMIT ?3`,
+       ORDER BY started_at DESC, rowid DESC LIMIT ?3`,
     )
     .bind(organizationId, deliveryId, ATTEMPT_LIST_LIMIT)
     .all<StoredAttempt>();
-  return rows.results.map((r) => ({
+  return rows.results.reverse().map((r) => ({
     attempt: r.attempt,
     startedAtMs: r.started_at,
     finishedAtMs: r.finished_at,
@@ -154,5 +239,6 @@ export async function listAttempts(
     retryAfterMs: r.retry_after_ms,
     providerMessageId: r.provider_message_id,
     possibleDuplicate: r.possible_duplicate === 1,
+    repeatCount: r.repeat_count,
   }));
 }

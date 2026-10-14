@@ -14,6 +14,8 @@ export const SELECT_VIEW = `
   (SELECT r.state FROM deliveries r
      WHERE r.replay_of = d.id AND r.organization_id = d.organization_id
      ORDER BY r.rowid DESC LIMIT 1) AS latest_replay_state,
+  (SELECT o.state FROM deliveries o
+     WHERE o.id = d.duplicate_of AND o.organization_id = d.organization_id) AS original_state,
   (SELECT COUNT(*) FROM held_events h
      WHERE h.organization_id = d.organization_id AND h.released_in = d.id) AS held_count,
   (SELECT h.hold_reason FROM held_events h

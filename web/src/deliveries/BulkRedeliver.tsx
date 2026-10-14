@@ -30,6 +30,7 @@ export function BulkRedeliver({ orgId, scope, integrationName }: BulkRedeliverPr
   const inputId = useId();
   const startRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const outcomeRef = useRef<HTMLDivElement>(null);
 
   const counted: BulkPlan | undefined = plan.data;
   const needsTyping = counted !== undefined && counted.eligible > counted.typedConfirmationAbove;
@@ -40,6 +41,11 @@ export function BulkRedeliver({ orgId, scope, integrationName }: BulkRedeliverPr
   useEffect(() => {
     if (open && counted) cancelRef.current?.focus();
   }, [open, counted]);
+  // The confirm button unmounts when the result or a stale notice replaces it; move focus to what
+  // replaced it so keyboard and screen-reader users land on the outcome, not on the page top.
+  useEffect(() => {
+    if (run.isSuccess || stale) outcomeRef.current?.focus();
+  }, [run.isSuccess, stale]);
 
   const begin = () => {
     setOpen(true);
@@ -74,7 +80,11 @@ export function BulkRedeliver({ orgId, scope, integrationName }: BulkRedeliverPr
           </Button>
         </div>
       )}
-      {open && plan.isPending && <p className="muted">{t('bulk.loading')}</p>}
+      {open && plan.isPending && (
+        <p className="muted" role="status">
+          {t('bulk.loading')}
+        </p>
+      )}
       {open && plan.isError && (
         <Notice kind="error">
           <p>{describeDeliveryError(plan.error).message}</p>
@@ -123,9 +133,11 @@ export function BulkRedeliver({ orgId, scope, integrationName }: BulkRedeliverPr
             </>
           )}
           {stale && (
-            <Notice kind="warning">
-              <p>{t('bulk.stale')}</p>
-            </Notice>
+            <div ref={outcomeRef} tabIndex={-1}>
+              <Notice kind="warning">
+                <p>{t('bulk.stale')}</p>
+              </Notice>
+            </div>
           )}
           {error && (
             <Notice kind="error">
@@ -151,15 +163,17 @@ export function BulkRedeliver({ orgId, scope, integrationName }: BulkRedeliverPr
         </div>
       )}
       {result && (
-        <Notice kind="success">
-          <p>{tp('bulk.done', result.replayed)}</p>
-          {result.alreadyInFlight > 0 && <p>{tp('bulk.done.already', result.alreadyInFlight)}</p>}
-          {result.refused > 0 && <p>{tp('bulk.done.refused', result.refused)}</p>}
-          {result.remaining > 0 && <p>{tp('bulk.done.more', result.remaining)}</p>}
-          <Button type="button" variant="outline" onClick={close}>
-            {t('bulk.cancel')}
-          </Button>
-        </Notice>
+        <div ref={outcomeRef} tabIndex={-1}>
+          <Notice kind="success">
+            <p>{tp('bulk.done', result.replayed)}</p>
+            {result.alreadyInFlight > 0 && <p>{tp('bulk.done.already', result.alreadyInFlight)}</p>}
+            {result.refused > 0 && <p>{tp('bulk.done.refused', result.refused)}</p>}
+            {result.remaining > 0 && <p>{tp('bulk.done.more', result.remaining)}</p>}
+            <Button type="button" variant="outline" onClick={close}>
+              {t('bulk.cancel')}
+            </Button>
+          </Notice>
+        </div>
       )}
     </section>
   );

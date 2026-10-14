@@ -1510,11 +1510,21 @@ capability, CSRF, rate limit, deletion pending), `tests/migration-0025.test.ts`,
 sources, observability and workspace-lifecycle tests, and web axe scenarios in
 `web/src/a11y/dialogs.a11y.test.tsx`.
 
+**Review follow-up (independent review of this PR):** bulk replay is chain-roots-only (a failed replay can no
+longer be replayed twice in one request); waits are folded into one `deferred` row with `repeat_count` and the
+history returns the newest 50 rows; a delivery held back for more than 24 hours is dead-lettered
+(`circuit_open_timeout`, replayable); suppressed rows are capped at 20 per original; a repeat of a failed
+original is shown as such; the bulk audit is an intent row before the replays plus a counts row after; the
+stale-claim sweep writes an attempt row; deferrals no longer reuse the next real attempt number; the attempts
+purge is driven by age (`delivery_attempts_age`); `delivery_attempts` and `destination_health` have an
+organization foreign key with cascade; the suppression gate cannot be fooled by an orphan outbox row; the
+"~600 D1 calls" figure is corrected to about 400.
+
 **Not done / unverified:** `provider_message_id` is never populated (no adapter response carries one);
 a per-connection dedup TTL; `semantic_dedup`; the per-destination client-side window (F186) and Lark
 `uuid` (F188); `claim_conflict` and `provider_idempotency` suppressions are never written; a budget per
 provider account (the consumer cannot tell which account a stored webhook belongs to), Slack API codes;
-an alert when a breaker opens; the Discord global breaker; replay after outbox purge; the ~600
+an alert when a breaker opens; the Discord global breaker; replay after outbox purge; the ~400
 D1 calls of a full bulk replay against the real subrequest limit; a real browser at 320 px and a screen
 reader for the new surfaces; Vietnamese copy review. No real provider has seen any of this: every
 provider response in the tests is a fixture.

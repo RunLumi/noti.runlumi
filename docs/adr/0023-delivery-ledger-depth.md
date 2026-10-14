@@ -34,6 +34,16 @@ its own rate limit. Replay was one delivery at a time.
    - The suppressed row's `dedup_key` is NULL on purpose: the generic route looks up
      `WHERE dedup_key = ?` for the first delivery of an event, and a suppressed row must never be
      found there.
+   - **At most 20 suppressed rows per original** (`SUPPRESSED_ROWS_PER_ORIGINAL`). `hit_count` and
+     `last_seen` keep counting past it, so a provider stuck in a retry loop cannot fill the log; the count
+     is the truth, the rows are the sample.
+   - **Gated on the right statement.** The suppression statements follow the outbox insert, which only runs
+     when the DELIVERY insert before it changed a row. The outbox insert is an upsert, so an outbox row that
+     outlived its purged delivery (an orphan) is taken over by the new delivery, still counts as a change,
+     and can never make a brand-new delivery look like a repeat.
+   - **A repeat of a FAILED original** is shown as such: the view carries the original's state, and the
+     dialog says "the first delivery of this event failed, redeliver that one", with a link. Noti does not
+     auto-create a replay: a repeat is not a request to send, and a person decides about a failed one.
    - **What the window does and does not bound.** It bounds the counter and the suppression record.
      The delivery row still blocks a repeat for the whole delivery-retention period, so a repeat
      after the TTL is recorded again with a fresh `event_dedup` row. It is never processed twice. The
@@ -55,8 +65,21 @@ its own rate limit. Replay was one delivery at a time.
      carries one. UNVERIFIED against real providers.
    - Retention deletes a delivery's attempts first and only deletes a delivery once none remain, so
      an interruption cannot strand rows. The workspace export includes attempts.
-   - A claim that expires mid-attempt (the stale-claim sweep) sets `possible_duplicate` but writes no
-     attempt row: nothing is known about that attempt.
+   - A claim that expires mid-attempt (the stale-claim sweep) writes an attempt row too (outcome
+     `retry_scheduled` or `dead_lettered`, reason `claim_expired`) and sets `possible_duplicate`, so the log
+     and the ledger agree. `possible_duplicate` is an UPPER BOUND: it marks deliveries that could have been
+     shown twice, not ones that were.
+   - **Waits are folded.** A wait (breaker open or paced) is recorded as one `deferred` row per run of
+     identical waits: the next identical wait moves that row's end and bumps `repeat_count`, in the same
+     batch. A 24 hour outage or a one-second pacing hold is one row, not hundreds (tested with 2,000 waits).
+     A deferral stores the attempts already spent (0 when none), never the number of the next real attempt
+     (`attempt >= 0`). The history returns the newest 50 rows (oldest first for display), so the final
+     outcome is never the row cut off.
+   - Retention is driven by attempt age (`delivery_attempts_age`) so the purge does not scan; a delivery is
+     only purged once none of its attempts remain (checked by index).
+   - `delivery_attempts` and `destination_health` carry `organization_id NOT NULL REFERENCES organization
+     ON DELETE CASCADE`, like `event_dedup`, and are also drained by the bounded workspace purge. The
+     cross-workspace retention statements are reviewed as such (they delete by age, not by tenant).
 3. **Bulk replay is two steps (F182).** `POST /api/deliveries/replay-plan` counts the eligible
    dead-lettered deliveries for a workspace, optionally one integration and a time window, and
    returns a token. `POST /api/deliveries/replay` takes the same filter, the token and the confirmed
@@ -66,14 +89,28 @@ its own rate limit. Replay was one delivery at a time.
    a double click or a retried request cannot replay twice (the second finds nothing eligible), and a
    backlog that changed since the preview cannot send more than was previewed.
    - At most 200 per request; the rest is reported as `remaining` and a second round sends it.
+   - **Chain roots only.** Eligibility requires `replay_of IS NULL`: a replay that itself failed is not a
+     second thing to replay, its root is, and the latest-replay clause decides whether the root is eligible.
+     So "A failed, its replay R1 failed" plans one delivery and creates one new replay of A.
+   - **Audit is written in two steps.** An intent row (`phase: started`, with the requested count and the
+     filter) is written after the plan is verified and BEFORE the first replay: if that write fails nothing
+     has been replayed and the request fails whole with 503 (retryable). The counts row (`phase: finished`)
+     is written after, best effort and logged loudly: the replays are already durable and audited as
+     started, so a failure must not turn them into an error the person would retry.
+   - **Concurrent identical requests** both pass the plan check; `redeliver()`'s ids are deterministic in
+     `(original, replay sequence)` and the sequence advances only inside the batch that inserts the row, so
+     one creates each replay and the other counts it as `alreadyInFlight`. Nothing is sent twice.
+   - The token is not a secret and not a security boundary: it detects that the set changed since it was
+     shown. Authorisation is the capability check.
    - Each replay goes through `redeliver()`, so every single-replay guard applies (usable
      integration, original message present, deletion pending). Eligibility also excludes test
      deliveries and rows whose latest replay is in flight or delivered.
    - One audit row (`delivery.bulk_replay`) with the counts and the filter, not 200 rows; each new
      delivery carries `replay_of`. Rate limit 6 per minute per user. The dashboard asks the person to
      type the count above 20.
-   - Cost: about three D1 calls per replay, so a full request is ~600 against a 1,000-per-invocation
-     limit. UNVERIFIED on a real deployment.
+   - Cost: two D1 calls per created replay (the source read and the write batch), plus the plan and the
+     two audit rows, so a full request is about 400 against a 1,000-per-invocation limit. UNVERIFIED on a
+     real deployment.
 4. **Circuit breaker and pacing share one table (F183, F187, F178).** `destination_health`, one row
    per `(workspace, integration)`, created only when something needs recording (a healthy
    destination with no rate-limit signal writes nothing).
@@ -88,6 +125,12 @@ its own rate limit. Replay was one delivery at a time.
      proved nothing (our own fault) releases the slot. An answer from a live endpoint (a 4xx, a rate
      limit, a revoked webhook) resets the count: the destination is reachable, and a permanent error
      dead-letters without retries anyway.
+   - **A late success closes the breaker** (intended): an attempt that began before it opened and finished
+     after is evidence the destination is alive.
+   - **A destination that never recovers does not hold deliveries for weeks.** A delivery held back for more
+     than 24 hours with no real attempt in between is dead-lettered with `destination_unavailable` and the
+     reason `circuit_open_timeout` (or `destination_paced_timeout`). It spends no attempt and stays
+     replayable. A real attempt in between resets the clock.
    - **While open** the consumer does not call the destination. The delivery returns to `retrying`
      with `next_attempt_at` at the end of the wait, no attempt is spent, nothing is dead-lettered, and
      the attempt log shows a `deferred` row with reason `circuit_open`. The wait goes through the
@@ -96,7 +139,9 @@ its own rate limit. Replay was one delivery at a time.
    - **Pacing.** After any response, `x-ratelimit-remaining: 0` (with `-reset-after`, `-reset` or
      `Retry-After`) and a 429's `Retry-After` set `paused_until`. Later deliveries of that integration
      wait without a request and without spending an attempt (`destination_paced`). No provider limit
-     is hard-coded (F187: parse headers). A hostile reset is capped at 5 minutes.
+     is hard-coded (F187: parse headers). Two ceilings, on purpose: a 429's own `Retry-After` is obeyed up
+     to an hour (the retry policy's ceiling, F178: a provider that says "in 30 minutes" is believed), whereas
+     a bare `x-ratelimit-remaining: 0` header carries no such promise and is capped at 5 minutes.
    - **Surfaced** on the integration view (`health`) and on each waiting delivery
      (`pausedReason`), in plain words: "Paused automatically because the destination keeps failing".
      The observability summary adds counts of open, half-open and paced integrations and deferred

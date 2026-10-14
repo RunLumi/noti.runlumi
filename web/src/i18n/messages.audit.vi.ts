@@ -133,6 +133,7 @@ export const auditVi = {
   'audit.detail.downgrade': 'Hạ mức xác minh',
   'audit.detail.deliveryId': 'Lượt gửi',
   'audit.detail.replayDeliveryId': 'Lượt gửi mới',
+  'audit.detail.phase': 'Bước',
   'audit.detail.requested': 'Số lượt gửi được chọn',
   'audit.detail.replayed': 'Đã gửi lại',
   'audit.detail.alreadyInFlight': 'Đã được gửi lại trước đó',

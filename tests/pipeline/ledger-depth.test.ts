@@ -281,6 +281,7 @@ describe('delivery attempts (F184)', () => {
     // Both deliveries are old and terminal; only d1 is past retention.
     db.raw.prepare("UPDATE deliveries SET created_at='2020-01-01 00:00:00' WHERE id='d1'").run();
     db.raw.prepare("UPDATE deliveries SET created_at='2026-10-14 11:00:00' WHERE id='d2'").run();
+    db.raw.prepare("UPDATE delivery_attempts SET started_at=1000 WHERE delivery_id='d1'").run();
     const report = await purgeExpiredRecords(
       { DB: db.d1, DELIVERY_RETENTION_DAYS: '90', AUDIT_RETENTION_DAYS: '365' },
       NOW,
@@ -614,5 +615,141 @@ describe('breaker and pacing helpers', () => {
     expect(effectOf({ kind: 'failed', code: 'destination_rate_limited' }, '4xx')).toBe('success');
     expect(effectOf({ kind: 'failed', code: 'destination_revoked' }, '4xx')).toBe('success');
     expect(effectOf({ kind: 'failed', code: 'internal_error' }, 'none')).toBe('neutral');
+  });
+});
+
+describe('waits are folded, bounded and never hide the outcome (H2, M1, M7)', () => {
+  const pause = (untilMs: number) =>
+    db.raw
+      .prepare(
+        `INSERT INTO destination_health(organization_id,integration_id,state,paused_until,updated_at)
+         VALUES('org-a','int-a','closed',?,?)
+         ON CONFLICT(organization_id,integration_id) DO UPDATE SET paused_until=excluded.paused_until, updated_at=excluded.updated_at`,
+      )
+      .run(untilMs, clock);
+
+  it('thousands of identical waits are one row, counted, not thousands of rows', async () => {
+    const body = enqueue('d1');
+    for (let i = 0; i < 2_000; i++) {
+      pause(clock + 1_000);
+      await consume(body);
+      clock += 1_000;
+    }
+    const rows = attemptRows('d1');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ outcome: 'deferred', reason: 'destination_paced' });
+    const stored = db.raw
+      .prepare('SELECT repeat_count,started_at,finished_at FROM delivery_attempts')
+      .get() as { repeat_count: number; started_at: number; finished_at: number };
+    expect(stored.repeat_count).toBe(1_999);
+    expect(stored.finished_at).toBeGreaterThan(stored.started_at);
+    // And the delivery has still not spent an attempt.
+    expect(delivery('d1')).toMatchObject({ state: 'retrying', attempts: 0 });
+  });
+
+  it('a wait does not take the number of the next real attempt, and a real attempt starts a new run', async () => {
+    const body = enqueue('d1');
+    pause(clock + 1_000);
+    await consume(body);
+    expect(attemptRows('d1')[0]).toMatchObject({ attempt: 0, outcome: 'deferred' });
+    clock += 2_000;
+    fetchMock.mockImplementationOnce(() => Promise.resolve(unavailable()));
+    await consume(body);
+    clock += 60_000;
+    pause(clock + 1_000);
+    await consume(body);
+    expect(attemptRows('d1').map((r) => [r.attempt, r.outcome])).toEqual([
+      [0, 'deferred'],
+      [1, 'retry_scheduled'],
+      // After one real attempt the next wait records the attempts already spent.
+      [1, 'deferred'],
+    ]);
+  });
+
+  it('a different reason is a new row', async () => {
+    const body = enqueue('d1');
+    pause(clock + 1_000);
+    await consume(body);
+    db.raw
+      .prepare(
+        "UPDATE destination_health SET state='open', open_until=?, paused_until=0 WHERE integration_id='int-a'",
+      )
+      .run(clock + 120_000);
+    clock += 2_000;
+    await consume(body);
+    expect(attemptRows('d1').map((r) => r.reason)).toEqual(['destination_paced', 'circuit_open']);
+  });
+
+  it('listAttempts keeps the NEWEST rows, so the final outcome is never the one cut off', async () => {
+    enqueue('d1');
+    const insert = db.raw.prepare(
+      `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,started_at,finished_at,outcome,status_class)
+       VALUES(?,?,?,?,?,?,?,?,?)`,
+    );
+    for (let i = 0; i < 80; i++)
+      insert.run(`a${i}`, 'org-a', 'd1', 'int-a', i % 13, 1000 + i, 1000 + i, 'deferred', 'none');
+    insert.run('last', 'org-a', 'd1', 'int-a', 13, 9000, 9001, 'dead_lettered', '5xx');
+    const rows = await listAttempts(db.d1, 'org-a', 'd1');
+    expect(rows).toHaveLength(50);
+    expect(rows.at(-1)).toMatchObject({ outcome: 'dead_lettered', attempt: 13 });
+    expect(rows[0]?.startedAtMs).toBeLessThan(rows.at(-1)?.startedAtMs ?? 0);
+  });
+
+  it('a delivery held back for more than a day is dead-lettered, replayable, with its reason', async () => {
+    const body = enqueue('d1');
+    pause(clock + 1_000);
+    await consume(body);
+    expect(delivery('d1').state).toBe('retrying');
+    clock += 25 * 3_600_000;
+    pause(clock + 1_000);
+    const msg = await consume(body);
+    expect(msg.acked).toBe(true);
+    expect(delivery('d1')).toMatchObject({
+      state: 'dead_lettered',
+      attempts: 0,
+      last_error_code: 'destination_unavailable',
+      last_error: 'destination_paced_timeout',
+    });
+    expect(attemptRows('d1').at(-1)).toMatchObject({
+      outcome: 'dead_lettered',
+      reason: 'destination_paced_timeout',
+    });
+    // Replayable: the outbox message is still there.
+    expect(db.raw.prepare("SELECT state FROM notification_outbox WHERE id='d1'").get()).toBeDefined();
+  });
+
+  it('a real attempt in between resets the clock: no timeout while the destination answers', async () => {
+    const body = enqueue('d1');
+    pause(clock + 1_000);
+    await consume(body);
+    clock += 23 * 3_600_000;
+    fetchMock.mockImplementationOnce(() => Promise.resolve(unavailable()));
+    await consume(body);
+    expect(delivery('d1').state).toBe('retrying');
+    clock += 23 * 3_600_000;
+    pause(clock + 1_000);
+    await consume(body);
+    expect(delivery('d1').state).toBe('retrying');
+  });
+});
+
+describe('abandoned attempts are in the log too (M6)', () => {
+  it('a swept claim writes an attempt row and flags a possible duplicate (an upper bound)', async () => {
+    enqueue('d1');
+    db.raw
+      .prepare(
+        "UPDATE deliveries SET state='claimed',claim_token='dead',claimed_at=?,last_attempt_at=NULL WHERE id='d1'",
+      )
+      .run(NOW - 10 * 60_000);
+    await sweepStaleClaims(env, NOW);
+    expect(attemptRows('d1')).toMatchObject([
+      {
+        attempt: 1,
+        outcome: 'retry_scheduled',
+        reason: 'claim_expired',
+        error_code: 'internal_error',
+        possible_duplicate: 1,
+      },
+    ]);
   });
 });

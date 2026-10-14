@@ -42,8 +42,18 @@ export const BREAKER_OPEN_MS = 5 * 60_000;
 export const PROBE_LEASE_MS = 60_000;
 /** How long a delivery waits when another consumer holds the probe. */
 export const PROBE_WAIT_MS = 30_000;
-/** Ceiling for a pacing hold derived from rate-limit headers (a `Retry-After` is clamped by the retry policy). */
+/**
+ * Ceiling for a pacing hold derived from rate-limit HEADERS. A 429's own `Retry-After` is honoured up to an
+ * hour (the same ceiling as the retry policy, F178): a provider that says "come back in 30 minutes" is
+ * obeyed, whereas a bare "remaining: 0" header carries no such promise, so it is capped at five minutes.
+ */
 export const MAX_PACE_MS = 5 * 60_000;
+/**
+ * A delivery held back (breaker open or paced) for longer than this since it last made a real attempt is
+ * dead-lettered with `circuit_open_timeout` instead of waiting for weeks behind a permanently broken
+ * destination. It stays replayable. Engineering judgment: one day matches the first Tier 2 retry rung.
+ */
+export const MAX_DEFERRED_MS = 24 * 3_600_000;
 /** `x-ratelimit-remaining: 0` with no reset information: leave the destination alone this long. */
 export const DEFAULT_PACE_MS = 1_000;
 
@@ -153,6 +163,8 @@ export async function gateAttempt(
   const pausedUntil = row.paused_until ?? 0;
   const openUntil = row.state === 'open' ? (row.open_until ?? 0) : 0;
   const waitUntil = Math.max(pausedUntil, openUntil);
+  // A late SUCCESS closes the breaker (healthStatement): an attempt that began before it opened and
+  // finished after is evidence the destination is alive, so closing on it is intended.
   if (waitUntil > nowMs) {
     return {
       action: 'defer',
@@ -345,7 +357,3 @@ export function toHealthView(row: Partial<HealthColumns>, nowMs: number): Destin
 
 /** Housekeeping: rows of closed, quiet destinations (or deleted integrations) are dropped after this. */
 export const HEALTH_RETENTION_MS = 30 * 24 * 3_600_000;
-
-/** ?1 cutoff (epoch ms) · ?2 limit. Only closed rows: an open breaker is state, never garbage. */
-export const PURGE_DESTINATION_HEALTH_SQL = `DELETE FROM destination_health WHERE rowid IN (
-  SELECT rowid FROM destination_health WHERE state='closed' AND updated_at < ?1 LIMIT ?2)`;

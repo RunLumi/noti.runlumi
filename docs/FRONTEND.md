@@ -138,7 +138,7 @@ labelled `<ol>`, and the bulk panel is a labelled group with a labelled number f
 `a11y/dialogs.a11y.test.tsx` (attempts, possible duplicate, suppressed, bulk preview and result, each in English
 and the key ones in Vietnamese) and by the integrations and settings page scenarios, which now include an open
 breaker. **Not verified:** a real browser at 320 px and with a screen reader for these new surfaces; the
-Vietnamese copy has not been reviewed by a native speaker.
+Vietnamese copy has not been reviewed by a native speaker. A run of identical waits is one line ("Waited, and then 41 more times"), a delivery held back for more than a day reads "Stopped waiting", a repeat of a failed original says to redeliver the original, and after the bulk confirm button unmounts focus moves to the result or stale notice (the loading line is a status region).
 
 ## Workspace switcher and audit log (`web/src/workspace/`, `web/src/audit/`)
 

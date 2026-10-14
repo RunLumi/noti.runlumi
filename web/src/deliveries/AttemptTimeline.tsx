@@ -1,4 +1,4 @@
-import { t } from '../i18n';
+import { t, tp } from '../i18n';
 import { useLocale } from '../i18n/LocaleProvider';
 import type { MessageId } from '../i18n/messages.en';
 import type { AttemptItem, DeliveryItem } from './api';
@@ -8,6 +8,9 @@ import { Time, absoluteTime } from './Time';
 const REASON_COPY: Readonly<Record<string, MessageId>> = {
   circuit_open: 'attempts.reason.circuit_open',
   destination_paced: 'attempts.reason.destination_paced',
+  circuit_open_timeout: 'attempts.reason.circuit_open_timeout',
+  destination_paced_timeout: 'attempts.reason.destination_paced_timeout',
+  claim_expired: 'attempts.reason.claim_expired',
 };
 
 interface AttemptTimelineProps {
@@ -26,13 +29,20 @@ export function AttemptTimeline({ attempts, destination }: AttemptTimelineProps)
     <ol className="attempt-list" aria-label={t('attempts.list')}>
       {attempts.map((a, index) => {
         const waited = a.outcome === 'deferred';
+        const stopped = a.outcome === 'dead_lettered' && a.detail?.endsWith('_timeout') === true;
         const reason = a.detail ? REASON_COPY[a.detail] : undefined;
         const failure = a.error && !waited ? failureCopy(a.error, destination) : null;
         return (
           <li key={`${a.attempt}-${a.startedAt}-${index}`} className={`attempt attempt-${a.outcome}`}>
             <div className="attempt-head">
               <span className="attempt-title">
-                {waited ? t('attempts.waited') : t('attempts.item', { number: a.attempt })}
+                {stopped
+                  ? t('attempts.stoppedWaiting')
+                  : waited
+                    ? a.repeatCount > 0
+                      ? tp('attempts.waitedTimes', a.repeatCount)
+                      : t('attempts.waited')
+                    : t('attempts.item', { number: a.attempt })}
               </span>
               <span className="badge badge-neutral attempt-outcome">
                 {t(`attempts.outcome.${a.outcome}`)}

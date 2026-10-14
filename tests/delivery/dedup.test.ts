@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  SUPPRESSED_ROWS_PER_ORIGINAL,
   DEDUP_PURGE_BATCH,
   DEDUP_PURGE_MAX_ROUNDS,
   DEDUP_TTL_MS,
@@ -91,6 +92,40 @@ describe('suppression is recorded, not silent (F185)', () => {
     });
     expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(2);
     expect(count(h, 'deliveries', "state != 'suppressed'")).toBe(1);
+  });
+
+  it('caps suppressed rows per original but keeps counting hits', async () => {
+    const h = createHarness();
+    insertIntegration(h, 'i1', 'org-a', null);
+    setNow(T0);
+    await postGithub(h, 'issue_comment', comment(7), 'gh-1');
+    const repeats = SUPPRESSED_ROWS_PER_ORIGINAL + 7;
+    for (let i = 0; i < repeats; i++) {
+      setNow(new Date(T0_MS + (i + 1) * 1000).toISOString());
+      await postGithub(h, 'issue_comment', comment(7), 'gh-1');
+    }
+    expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(SUPPRESSED_ROWS_PER_ORIGINAL);
+    expect(dedupRows(h)).toMatchObject([
+      { hit_count: repeats, last_seen: T0_MS + repeats * 1000, first_seen: T0_MS },
+    ]);
+    // Still exactly one message.
+    expect(count(h, 'notification_outbox')).toBe(1);
+  });
+
+  it('an orphan outbox row that outlived its purged delivery is not a repeat: the new delivery takes it over', async () => {
+    const h = createHarness();
+    insertIntegration(h, 'i1', 'org-a', null);
+    setNow(T0);
+    await postGithub(h, 'issue_comment', comment(7), 'gh-1');
+    // Retention removed the delivery (and its dedup row) but not yet the outbox row.
+    h.db.raw.prepare('DELETE FROM deliveries').run();
+    h.db.raw.prepare('DELETE FROM event_dedup').run();
+    expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toMatchObject({ persisted: 1 });
+    expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(0);
+    expect(count(h, 'deliveries', "state = 'pending'")).toBe(1);
+    // The takeover re-dispatched it: the notification is sent again rather than silently lost.
+    expect(h.sent).toHaveLength(2);
+    expect(count(h, 'notification_outbox')).toBe(1);
   });
 
   it('a genuinely new event is never suppressed', async () => {

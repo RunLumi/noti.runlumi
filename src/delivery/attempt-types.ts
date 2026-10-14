@@ -25,4 +25,6 @@ export interface AttemptRecord {
   readonly retryAfterMs: number | null;
   readonly providerMessageId: string | null;
   readonly possibleDuplicate: boolean;
+  /** For a `deferred` row: how many further identical waits were folded into it. */
+  readonly repeatCount: number;
 }

@@ -17,16 +17,26 @@ import { keyringFromEnv } from '../crypto/keyring-env';
 import { SCHEDULE_REDISPATCH_SQL, scheduleRedispatchParams } from '../delivery/claim';
 import {
   attemptStatement,
+  deferralStatements,
+  waitingSince,
   isUnconfirmed,
   statusClassOf,
   type AttemptReport,
   type AttemptRowOutcome,
 } from '../delivery/attempts';
-import { effectOf, gateAttempt, healthStatement, paceFromResponse, type Gate } from '../delivery/health';
+import {
+  MAX_DEFERRED_MS,
+  effectOf,
+  gateAttempt,
+  healthStatement,
+  paceFromResponse,
+  type Gate,
+} from '../delivery/health';
 import { attemptFromClassification, failed, type AttemptResult } from '../delivery/classify';
 import {
   DELIVERY_CLAIM_LEASE_MS,
   claimDelivery,
+  deadLetterDeferredStatement,
   deferStatement,
   loadDelivery,
   recordOutcomeStatement,
@@ -536,8 +546,11 @@ async function gateOrProceed(env: Bindings, d: DeliveryMessage, claim: Claim, no
 
 /**
  * Send the delivery back without calling the destination (breaker open, or the destination asked to
- * be left alone). No attempt is spent and nothing is dead-lettered; the attempt log gets a `deferred`
- * row so "why has this not been sent" has an answer.
+ * be left alone). No attempt is spent and nothing is dead-lettered by a SHORT wait; the attempt log gets
+ * one `deferred` row per run of identical waits, so "why has this not been sent" has an answer without
+ * hundreds of rows. A delivery held back for more than {@link MAX_DEFERRED_MS} with no real attempt in
+ * between is dead-lettered instead (replayable), so a destination that never recovers cannot hold
+ * deliveries for weeks.
  */
 async function deferDelivery(
   env: Bindings,
@@ -547,23 +560,47 @@ async function deferDelivery(
   gate: Extract<Gate, { action: 'defer' }>,
   nowMs: number,
 ): Promise<void> {
+  const since = await waitingSince(env.DB, d);
+  if (since !== null && nowMs - since > MAX_DEFERRED_MS) {
+    const reason = `${gate.reason}_timeout`;
+    const [written] = await env.DB.batch([
+      deadLetterDeferredStatement(env.DB, d, claim.token, nowMs, reason),
+      attemptStatement(env.DB, d, {
+        attempt: claim.attempts,
+        startedAtMs: nowMs,
+        finishedAtMs: nowMs,
+        outcome: 'dead_lettered',
+        errorCode: 'destination_unavailable',
+        reason,
+        statusClass: 'none',
+        retryAfterMs: null,
+        providerMessageId: null,
+        possibleDuplicate: false,
+      }),
+    ]);
+    msg.ack();
+    log('warn', 'delivery_deferral_timeout', {
+      delivery_id: d.id,
+      workspace_id: d.organizationId,
+      integration_id: d.integrationId,
+      reason,
+      recorded: written?.meta.changes === 1,
+    });
+    return;
+  }
   const code = gate.reason === 'circuit_open' ? 'destination_unavailable' : 'destination_rate_limited';
   const wait = secondsUntil(gate.untilMs, nowMs);
   const viaQueue = queueRetriesLeft(msg) && wait <= QUEUE_MAX_DELAY_SECONDS;
   const untilMs = nowMs + wait * 1000;
   const [written] = await env.DB.batch([
     deferStatement(env.DB, d, claim.token, untilMs, code, gate.reason),
-    attemptStatement(env.DB, d, {
-      attempt: claim.attempts + 1,
-      startedAtMs: nowMs,
-      finishedAtMs: nowMs,
-      outcome: 'deferred',
+    ...deferralStatements(env.DB, d, {
+      attemptsUsed: claim.attempts,
+      nowMs,
+      untilMs,
       errorCode: code,
       reason: gate.reason,
-      statusClass: 'none',
       retryAfterMs: wait * 1000,
-      providerMessageId: null,
-      possibleDuplicate: false,
     }),
     ...(viaQueue ? [] : [scheduleStatement(env, d, untilMs)]),
   ]);

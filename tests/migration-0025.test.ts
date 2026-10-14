@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
+import { PURGE_ATTEMPTS_SQL, PURGE_DELIVERIES_SQL } from '../src/pipeline/retention';
 import { applyMigration, createFakeD1, seedOrganization } from './support/d1';
 
 /**
@@ -57,6 +58,7 @@ describe('migration 0025', () => {
     const after = objects(raw);
     const added = [...after.keys()].filter((k) => !before.has(k)).sort();
     expect(added).toEqual([
+      'index:delivery_attempts_age',
       'index:delivery_attempts_delivery',
       'index:delivery_attempts_started',
       'index:destination_health_state',
@@ -133,6 +135,11 @@ describe('migration 0025', () => {
     expect(plan('SELECT rowid FROM event_dedup WHERE expires_at < 5 LIMIT 10')).toContain(
       'event_dedup_expires',
     );
+    // The retention purge is driven by attempt AGE (M8), and a delivery is only purged once its attempts are
+    // gone: neither may scan a table.
+    const bound = (sql: string) => sql.replace(/\?1/g, "'x'").replace(/\?2/g, '5').replace(/\?3/g, '10');
+    expect(plan(bound(PURGE_ATTEMPTS_SQL))).toContain('delivery_attempts_age');
+    expect(plan(bound(PURGE_DELIVERIES_SQL))).toContain('delivery_attempts_delivery');
     expect(
       plan(
         "SELECT * FROM delivery_attempts WHERE organization_id='o' AND delivery_id='d' ORDER BY started_at",

@@ -364,8 +364,11 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
       // Only when the delivery row above was new (`changes()` is the previous statement's row
       // count): a redelivery after the outbox row was purged must not be sent again.
       c.env.DB.prepare(
-        `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
-         SELECT ?,?,? ${notLegacy} AND changes() > 0`,
+        `INSERT INTO notification_outbox(id,organization_id,payload_json)
+         SELECT ?,?,? ${notLegacy} AND changes() > 0
+         ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json, state='pending', lease_token=NULL,
+           claimed_at=NULL, lease_expires_at=NULL, not_before=NULL, dispatched_at=NULL
+         WHERE notification_outbox.organization_id=excluded.organization_id`,
       ).bind(id, organizationId, JSON.stringify(message), legacyId, organizationId),
       // Directly after the outbox insert, whose `changes()` is 0 exactly for a duplicate (F171, F185).
       ...dedupStatements(c.env.DB, {

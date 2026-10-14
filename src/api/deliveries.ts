@@ -13,6 +13,7 @@ import {
 import { redeliver } from '../delivery/redeliver';
 import { normalizeDeliveryState, type DeliveryState } from '../delivery/state';
 import type { Bindings } from '../env';
+import { log } from '../platform/log';
 import { hit } from '../security/rate-limit';
 import { FROM_VIEW, SELECT_VIEW, SUMMARY_SQL, buildListQuery } from './delivery-queries';
 import {
@@ -293,12 +294,36 @@ deliveries.post('/replay', async (c) => {
       },
       422,
     );
-  const outcome = await runBulkReplay(c.env.DB, {
-    organizationId: who.orgId,
-    filter: body.filter,
-    token: body.token,
-    expectedCount: body.expectedCount,
-  });
+  const scope = {
+    ...(body.filter.integrationId ? { integrationId: body.filter.integrationId } : {}),
+    ...(body.filter.from ? { from: body.filter.from } : {}),
+    ...(body.filter.to ? { to: body.filter.to } : {}),
+  };
+  const origin = requestOrigin(c.req.raw.headers);
+  let outcome;
+  try {
+    outcome = await runBulkReplay(c.env.DB, {
+      organizationId: who.orgId,
+      filter: body.filter,
+      token: body.token,
+      expectedCount: body.expectedCount,
+      // Intent first: if this audit write fails, nothing has been replayed and the request fails whole.
+      beforeReplay: (requested) =>
+        recordAudit(c.env.DB, {
+          organizationId: who.orgId,
+          actorId: who.userId,
+          action: 'delivery.bulk_replay',
+          subjectType: 'delivery',
+          subjectId: null,
+          outcome: 'success',
+          ...origin,
+          metadata: { phase: 'started', requested, ...scope },
+        }),
+    });
+  } catch (e) {
+    log('error', 'bulk_replay_not_started', { error: e });
+    return c.json({ error: 'Could not start. Nothing was sent. Try again.' }, 503);
+  }
   if (!outcome.ok) {
     const refusal = BULK_REFUSALS[outcome.error];
     return c.json(
@@ -307,26 +332,30 @@ deliveries.post('/replay', async (c) => {
     );
   }
   const r = outcome.result;
-  // One audit row with the counts and the filter; each new delivery carries `replay_of`.
-  await recordAudit(c.env.DB, {
-    organizationId: who.orgId,
-    actorId: who.userId,
-    action: 'delivery.bulk_replay',
-    subjectType: 'delivery',
-    subjectId: null,
-    outcome: 'success',
-    ...requestOrigin(c.req.raw.headers),
-    metadata: {
-      requested: r.requested,
-      replayed: r.replayed,
-      alreadyInFlight: r.alreadyInFlight,
-      refused: r.refused,
-      remaining: r.remaining,
-      ...(body.filter.integrationId ? { integrationId: body.filter.integrationId } : {}),
-      ...(body.filter.from ? { from: body.filter.from } : {}),
-      ...(body.filter.to ? { to: body.filter.to } : {}),
-    },
-  });
+  // The counts, as a second row. Best effort and loud: the replays are already durable and audited as
+  // started, so a failure here must not turn them into an error the person would retry.
+  try {
+    await recordAudit(c.env.DB, {
+      organizationId: who.orgId,
+      actorId: who.userId,
+      action: 'delivery.bulk_replay',
+      subjectType: 'delivery',
+      subjectId: null,
+      outcome: 'success',
+      ...origin,
+      metadata: {
+        phase: 'finished',
+        requested: r.requested,
+        replayed: r.replayed,
+        alreadyInFlight: r.alreadyInFlight,
+        refused: r.refused,
+        remaining: r.remaining,
+        ...scope,
+      },
+    });
+  } catch (e) {
+    log('error', 'bulk_replay_audit_incomplete', { replayed: r.replayed, error: e });
+  }
   if (r.deletionPending)
     return c.json(
       { error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.', result: r },

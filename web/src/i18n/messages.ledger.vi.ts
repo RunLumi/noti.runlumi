@@ -15,6 +15,7 @@ export const ledgerVi = {
     'Lượt gửi này được tạo trước khi Noti ghi lại từng lần thử, nên chỉ có phần tóm tắt ở trên.',
   'attempts.list': 'Các lần thử, từ cũ đến mới',
   'attempts.item': 'Lần thử {number}',
+  'attempts.stoppedWaiting': 'Đã ngừng chờ',
   'attempts.waited': 'Đã chờ, chưa gửi gì',
   'attempts.outcome.delivered': 'Đã gửi',
   'attempts.outcome.accepted': 'Đã được chấp nhận, chưa xác nhận',
@@ -28,6 +29,15 @@ export const ledgerVi = {
   'attempts.statusClass.timeout': 'Không có phản hồi kịp lúc',
   'attempts.statusClass.network': 'Noti không kết nối được',
   'attempts.statusClass.none': 'Chưa gửi yêu cầu nào',
+  'attempts.waitedTimes': {
+    other: 'Đã chờ, rồi chờ thêm {count} lần nữa. Chưa gửi gì.',
+  },
+  'attempts.reason.circuit_open_timeout':
+    'Đã ngừng chờ: nơi nhận liên tục lỗi hơn một ngày. Hãy gửi lại khi nơi nhận hoạt động.',
+  'attempts.reason.destination_paced_timeout':
+    'Đã ngừng chờ: nơi nhận liên tục yêu cầu Noti gửi chậm lại hơn một ngày. Hãy gửi lại sau.',
+  'attempts.reason.claim_expired':
+    'Một tiến trình đã dừng giữa chừng khi đang gửi, nên lần thử này có thể đã đến nơi nhận.',
   'attempts.duration': 'Mất {ms} ms',
   'attempts.retryAfter': 'Nơi nhận yêu cầu Noti chờ {seconds} giây.',
   'attempts.possibleDuplicate': 'Nơi nhận có thể đã nhận được tin này rồi.',
@@ -44,6 +54,8 @@ export const ledgerVi = {
   'delivery.detail.suppressed.claim_conflict':
     'Một tiến trình khác đang gửi tin này, nên Noti không gửi lần thứ hai.',
   'delivery.detail.suppressed.provider_idempotency': 'Nơi nhận nhận ra đây là tin nó đã có.',
+  'delivery.detail.suppressed.originalFailed':
+    'Lượt gửi đầu tiên của sự kiện này đã thất bại. Hãy gửi lại lượt đó: lần lặp này không được gửi.',
   'delivery.detail.suppressed.of': 'Lặp lại của lượt gửi {id}',
   'delivery.detail.suppressed.open': 'Xem lượt gửi đầu tiên',
   'delivery.detail.paused.circuit_open':

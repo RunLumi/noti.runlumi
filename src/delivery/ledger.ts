@@ -158,6 +158,43 @@ export function deferStatement(
 }
 
 /**
+ * F183: a delivery that has only ever been held back (breaker open or paced) for longer than
+ * `MAX_DEFERRED_MS` is dead-lettered instead of waiting for weeks: it stays replayable and visible, with
+ * the reason `circuit_open_timeout` / `destination_paced_timeout`. No attempt is spent. Fenced on the
+ * claim token. ?4 now · ?5 diagnostic · ?6 claim token
+ */
+export function deadLetterDeferredStatement(
+  db: D1Database,
+  ref: DeliveryRef,
+  claimToken: string,
+  nowMs: number,
+  diagnostic: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE deliveries SET state='dead_lettered', last_error_code='destination_unavailable', last_error=?5,
+         dead_lettered_at=?4, next_attempt_at=NULL,
+         first_attempt_at=CASE WHEN attempts=0 THEN NULL ELSE first_attempt_at END,
+         claimed_at=NULL, claim_token=NULL, updated_at=CURRENT_TIMESTAMP
+       ${WHERE_REF} AND state='claimed' AND claim_token=?6`,
+    )
+    .bind(ref.id, ref.organizationId, ref.integrationId, nowMs, diagnostic, claimToken);
+}
+
+/**
+ * The attempt row for a claim the stale-claim sweep released (M6): so the attempt log and the ledger
+ * agree. It follows {@link RELEASE_STALE_CLAIM_SQL} directly and is written only when that changed a
+ * row. The abandoned attempt may have reached the provider, so `possible_duplicate` is set; that flag is
+ * an UPPER BOUND on duplicates, never a count. ?1 attempt row id · ?2 id · ?3 organization_id
+ */
+export const RECORD_STALE_ATTEMPT_SQL = `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,
+  started_at,finished_at,outcome,error_code,reason,status_class,possible_duplicate)
+SELECT ?1, organization_id, id, integration_id, attempts, COALESCE(last_attempt_at,0), COALESCE(last_attempt_at,0),
+  CASE WHEN state='dead_lettered' THEN 'dead_lettered' ELSE 'retry_scheduled' END,
+  'internal_error','claim_expired','none',1
+FROM deliveries WHERE id=?2 AND organization_id=?3 AND changes()=1`;
+
+/**
  * Backstop (cron): which workspaces hold claims older than the lease. Oldest first, so no
  * workspace starves. Returns organization ids only. ?1 cutoff (epoch ms) · ?2 limit
  */

@@ -137,6 +137,8 @@ export interface DeliveryRowRecord {
   possible_duplicate: number | null;
   suppressed_reason: string | null;
   duplicate_of: string | null;
+  /** State of the delivery a suppressed row repeats. */
+  original_state: string | null;
   integration_name: string | null;
   integration_repo: string | null;
   integration_destination: string | null;
@@ -209,6 +211,8 @@ export interface DeliveryView {
   readonly suppression: {
     readonly reason: 'duplicate' | 'claim_conflict' | 'provider_idempotency';
     readonly duplicateOf: string | null;
+    /** The original's state, so a repeat of a FAILED delivery points at the original, not at itself. */
+    readonly originalState: DeliveryState | null;
   } | null;
   /**
    * Why a waiting delivery has not been sent yet although nothing failed this time (F183, F187): the
@@ -312,6 +316,7 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
         ? {
             reason: row.suppressed_reason as 'duplicate' | 'claim_conflict' | 'provider_idempotency',
             duplicateOf: row.duplicate_of,
+            originalState: row.original_state ? normalizeDeliveryState(row.original_state) : null,
           }
         : null,
     pausedReason:
@@ -342,6 +347,8 @@ export interface AttemptView {
   readonly retryAfterSeconds: number | null;
   readonly providerMessageId: string | null;
   readonly possibleDuplicate: boolean;
+  /** For a wait: how many further identical waits were folded into this row. */
+  readonly repeatCount: number;
 }
 
 const DETAIL_PATTERN = /^[a-z0-9_]{1,80}$/;
@@ -365,6 +372,7 @@ export function toAttemptView(a: AttemptRecord, hideProviderDetail: boolean): At
     retryAfterSeconds: a.retryAfterMs === null ? null : Math.ceil(a.retryAfterMs / 1000),
     providerMessageId: a.providerMessageId,
     possibleDuplicate: a.possibleDuplicate,
+    repeatCount: a.repeatCount,
   };
 }
 
