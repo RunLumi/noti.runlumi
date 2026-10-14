@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { en } from '../i18n';
 import { crumbsFor } from './crumbs';
 import { NAV_ENTRIES, ROUTE_RULES, accessFor, isShellRoute, mayOpen, visibleNav } from './route-guard';
-import { returnToFor, safeReturnTo } from './return-to';
+import { destinationAfterSignIn, returnToFor, safeReturnTo } from './return-to';
 
 const ORIGIN = 'https://noti.test';
 
@@ -78,7 +78,18 @@ describe('returnTo is open-redirect safe', () => {
     ['/\\evil.example', 'a backslash spelling'],
     ['\\\\evil.example', 'backslashes'],
     ['/\t/evil.example', 'a tab the parser would strip'],
-    ['/%0d%0a', 'fine path but encoded control is kept inert'],
+    ['/%0d%0a', 'an encoded control character'],
+    ['/.//evil.example', 'a dot-segment that collapses to //'],
+    ['/a/..//evil.example', 'a parent-segment that collapses to //'],
+    ['/%2e//evil.example', 'an encoded dot-segment'],
+    ['/%2e%2e//evil.example', 'encoded parent segments'],
+    ['/%252e//evil.example', 'a double-encoded dot-segment'],
+    ['/%2f/evil.example', 'an encoded slash that decodes to //'],
+    ['/%2F%2Fevil.example', 'encoded slashes'],
+    ['/%5cevil.example', 'an encoded backslash'],
+    ['/%255cevil.example', 'a double-encoded backslash'],
+    ['/a/%2e%2e/%2e%2e//evil.example', 'mixed segments'],
+    ['/%', 'a broken escape'],
     ['', 'empty'],
     ['evil', 'not rooted'],
     ['/signin', 'a sign-in loop'],
@@ -86,8 +97,9 @@ describe('returnTo is open-redirect safe', () => {
     [`/${'a'.repeat(3000)}`, 'too long'],
   ])('refuses %s (%s)', (input, why) => {
     const out = safeReturnTo(input, ORIGIN);
-    if (why.startsWith('fine path')) expect(out).toBe('/%0d%0a');
-    else expect(out, why).toBeNull();
+    expect(out, why).toBeNull();
+    // Whatever happens, an accepted value is never protocol-relative.
+    if (out !== null) expect(out.startsWith('//')).toBe(false);
   });
 
   it('refuses non-strings and never returns the raw input', () => {
@@ -101,6 +113,35 @@ describe('returnTo is open-redirect safe', () => {
       '/integrations/i1?created=true',
     );
     expect(returnToFor({ pathname: '/', search: '' })).toBeNull();
+  });
+});
+
+describe('safeReturnTo output is always a same-origin path', () => {
+  it('never starts with // for any dot-segment or encoding mix', () => {
+    const parts = ['.', '..', '%2e', '%2E', '%2e%2e', '%252e', 'a', ''];
+    const seps = ['/', '//', '/%2f', '/%5c'];
+    for (const a of parts)
+      for (const b of parts)
+        for (const sep of seps) {
+          const out = safeReturnTo(`/${a}${sep}${b}${sep}evil.example`, ORIGIN);
+          if (out !== null) {
+            expect(out.startsWith('//'), out).toBe(false);
+            expect(new URL(out, ORIGIN).origin).toBe(ORIGIN);
+          }
+        }
+  });
+
+  it('is what sign-in and passkey sign-in both follow', () => {
+    expect(destinationAfterSignIn('?returnTo=%2Finvite%3Fid%3Dinv_1', ORIGIN)).toBe('/invite?id=inv_1');
+    expect(destinationAfterSignIn('?returnTo=%2F.%2F%2Fevil.example', ORIGIN)).toBe('/');
+    expect(destinationAfterSignIn('', ORIGIN)).toBe('/');
+  });
+
+  it('pages.tsx has no other returnTo handling', () => {
+    const source = readFileSync(join(__dirname, '..', 'pages.tsx'), 'utf8');
+    expect(source).not.toMatch(/startsWith\('\/invite/);
+    expect(source).not.toMatch(/window\.location\.assign\(back\)/);
+    expect(source.match(/destinationAfterSignIn\(/g)?.length).toBe(2);
   });
 });
 

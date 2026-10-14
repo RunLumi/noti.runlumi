@@ -36,7 +36,7 @@ import { RouteA11y } from './a11y/RouteA11y';
 import { SkipLink } from './a11y/SkipLink';
 import { Breadcrumbs } from './shell/Breadcrumbs';
 import { accessFor, isShellRoute, visibleNav } from './shell/route-guard';
-import { returnToFor, safeReturnTo } from './shell/return-to';
+import { destinationAfterSignIn, returnToFor } from './shell/return-to';
 import { useDeliverySummary } from './deliveries/hooks';
 import { roleLabel } from './lib/role-label';
 import { useLocale } from './i18n/LocaleProvider';
@@ -371,7 +371,6 @@ function AuthFrame({
 }
 export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
   useLocale();
-  const nav = useNavigate();
   const router = useRouter();
   const qc = useQueryClient();
   const [email, setEmail] = useState(''),
@@ -398,12 +397,7 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
         await authApi.signin(email, password);
         await qc.invalidateQueries({ queryKey: ['me'] });
         // Only a same-origin, path-relative address is followed; anything else lands on Overview.
-        const back = safeReturnTo(
-          new URLSearchParams(window.location.search).get('returnTo'),
-          window.location.origin,
-        );
-        if (back) router.history.push(back);
-        else await nav({ to: '/' });
+        router.history.push(destinationAfterSignIn(window.location.search, window.location.origin));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : t('auth.error.generic'));
@@ -480,9 +474,7 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
               try {
                 await authApi.signinPasskey();
                 await qc.invalidateQueries({ queryKey: ['me'] });
-                const back = new URLSearchParams(window.location.search).get('returnTo');
-                if (back?.startsWith('/invite?id=')) window.location.assign(back);
-                else await nav({ to: '/' });
+                router.history.push(destinationAfterSignIn(window.location.search, window.location.origin));
               } catch (e) {
                 setError(e instanceof Error ? e.message : t('auth.error.passkey'));
               } finally {

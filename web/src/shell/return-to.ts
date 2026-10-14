@@ -12,6 +12,15 @@ const AUTH_PAGES = new Set(['/signin', '/signup', '/forgot-password', '/verify',
 // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
+/** Percent-decode up to twice (a double-encoded `%252e` must not slip through); undecodable input is refused. */
+function decodedTwice(path: string): string | null {
+  try {
+    return decodeURIComponent(decodeURIComponent(path));
+  } catch {
+    return null;
+  }
+}
+
 export function safeReturnTo(raw: unknown, origin: string): string | null {
   if (typeof raw !== 'string' || raw.length === 0 || raw.length > MAX_LENGTH) return null;
   // Absolute and protocol-relative URLs, and the backslash spellings browsers treat as `/`.
@@ -24,7 +33,33 @@ export function safeReturnTo(raw: unknown, origin: string): string | null {
   }
   if (url.origin !== new URL(origin).origin) return null;
   if (AUTH_PAGES.has(url.pathname.replace(/\/+$/, ''))) return null;
-  return `${url.pathname}${url.search}${url.hash}`;
+  const rebuilt = `${url.pathname}${url.search}${url.hash}`;
+  // The checks above ran on the raw text, but the parser collapses dot-segments: `/.//evil.com`
+  // and `/a/..//evil.com` rebuild to `//evil.com`, which a browser reads as another host. So the
+  // REBUILT value is what is validated, including what its path says once percent-decoded.
+  const decoded = decodedTwice(url.pathname);
+  if (
+    decoded === null ||
+    !rebuilt.startsWith('/') ||
+    rebuilt.startsWith('//') ||
+    decoded.startsWith('//') ||
+    // Doubly-encoded dot-segments or empty segments are never a page of ours; refuse rather than guess.
+    decoded
+      .split('/')
+      .slice(1)
+      .some(
+        (segment, i, all) => segment === '.' || segment === '..' || (segment === '' && i < all.length - 1),
+      ) ||
+    decoded.includes('\\') ||
+    CONTROL.test(decoded)
+  )
+    return null;
+  return rebuilt;
+}
+
+/** Where to go after signing in: the validated `returnTo` of the current address, else the Overview. */
+export function destinationAfterSignIn(search: string, origin: string): string {
+  return safeReturnTo(new URLSearchParams(search).get('returnTo'), origin) ?? '/';
 }
 
 /** The `returnTo` value for the page the visitor was on, or `null` for the Overview (no point carrying it). */

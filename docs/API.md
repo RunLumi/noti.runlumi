@@ -677,7 +677,8 @@ type SetupProgress = {
 - `events_chosen` (optional): `done` when the newest integration has events other than the quiet default
   (`workflow_run.failure`, `workflow_run.timed_out`), filters, noise settings or a generic source; else `skipped`.
 - `test_delivered`: a `sent` delivery (`confirmed`) or an `accepted` one (`accepted`, not confirmed shown) within 30
-  days, test or real, to an integration that exists, is enabled and not quarantined. `blocked` when the newest
+  days, test or real, to the **newest** integration, provided it is enabled and not quarantined. At most the newest
+  500 deliveries of the window are read, so the cost does not grow with the ledger. `blocked` when the newest
   integration is paused or quarantined.
 - `activated` (optional): any non-test delivery, in any state.
 - Exactly one step is `doing` when `next` is a `todo` step; a `blocked` next step stays `blocked`. `resume.point`

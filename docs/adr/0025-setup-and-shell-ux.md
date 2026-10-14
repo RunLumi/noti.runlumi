@@ -23,6 +23,10 @@ page the person came from, settings had no repair or health sections, and errors
    - `events_chosen` is `skipped` while the integration still has the quiet default and `done` once the events,
      filters or noise settings differ. "Skipped" therefore means "untouched, defaults apply", never "the user
      declined". The server default list is a constant kept equal to the wizard's by a test.
+   - `test_delivered` belongs to the newest integration (an older one that works proves nothing about the one being
+     set up) and is evidence-bounded: one query reads at most 500 index rows (newest first, last 30 days) and
+     `activated` reads the oldest 500, so a miss costs what a hit does. The price: a workspace whose oldest 500
+     deliveries are all tests would not see `activated` done. Same-second integrations are ordered by `rowid`.
    - `test_delivered` is `done` with `verification: accepted` for Teams-style destinations: a message was accepted,
      and the UI says it was not confirmed shown. (ADR 0018 kept this as a non-done status; the spec's four-state
      vocabulary has no place for it, and the qualifier carries the same honesty.)
@@ -46,8 +50,11 @@ page the person came from, settings had no repair or health sections, and errors
    a file route has no row or a navigation item has no route. An address with no row renders the 404 page inside the
    shell for a signed-in person and bare otherwise; it never redirects. Sign-in carries `returnTo`, and
    `safeReturnTo` accepts only a path that starts with a single `/`, has no backslash or control character, parses to
-   the page's own origin, is not an auth page and is at most 2,048 characters; the result is rebuilt from the parsed
-   parts. Admin-only Audit stays hidden from members (the page explains itself if opened directly); a disabled
+   the page's own origin, is not an auth page and is at most 2,048 characters. The URL parser collapses dot-segments
+   (`/.//evil.com` becomes `//evil.com`), so the value is rebuilt from the parsed parts and the REBUILT value is
+   validated: it must not start with `//`, and its path, percent-decoded up to twice, must contain no backslash,
+   control character, `.` or `..` segment or empty segment (so `%2e`, `%252e`, `%2f` and `%5c` variants are refused).
+   Sign-in and passkey sign-in share one helper, `destinationAfterSignIn`, and navigate with the router. Admin-only Audit stays hidden from members (the page explains itself if opened directly); a disabled
    entry was rejected because it adds a seventh item for people who can do nothing with it. Breadcrumbs exist where
    there are nested routes (integration settings, new integration, setup steps). A delivery's detail is a dialog and
    a source's detail is a card, so neither has a breadcrumb.
@@ -69,7 +76,9 @@ page the person came from, settings had no repair or health sections, and errors
 8. **Accessibility process (ADR 0013).** Every new route and state has an axe scenario in English and Vietnamese
    (setup resume, GitHub blocked and connected, repository, destination prerequisite and saved, events, test, done,
    unfinished, progress error, 404). A static 320px reflow test covers the new stylesheets (jsdom has no layout);
-   the real 320px check was done by hand.
+   the 320px check by hand was a script that loaded each setup page, integration settings, the Overview and the 404 in
+   a 320px viewport and compared `document.documentElement.scrollWidth` to the width: no horizontal overflow. It did
+   not look at wrapping or truncation by eye and did not cover every state.
 
 ## Verification
 

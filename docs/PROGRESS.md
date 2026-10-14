@@ -1589,7 +1589,7 @@ staging drill and Time Travel re-drill, audit of unknown-installation 403s, type
 
 - **Server model.** `GET /api/setup/progress` v2: seven steps, five states, `blockedBy`, `nextAction`, `resume`.
   Derived from `github_installations`, `sources`, `integrations` and the delivery ledger; "GitHub App not configured"
-  is a real `blocked` state from `githubAppConfig(env)`. `tests/api/setup-progress.test.ts`: 38 tests (pure table,
+  is a real `blocked` state from `githubAppConfig(env)`. `tests/api/setup-progress.test.ts`: 43 tests (pure table,
   API, tenant isolation, index-driven plans).
 - **`/setup/:step`** (`web/src/setup/`): GitHub, repository, destination (creates the integration through the normal
   `POST /api/integrations`), events (optional), test, done. State comes from the server on every load; the only

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOOT_ENV } from '../support/boot-env';
 import {
   DEFAULT_EVENT_TYPES,
+  EVIDENCE_ROWS,
   FIRST_EVENT_SQL,
   STEP_IDS,
   VERIFIED_SQL,
@@ -473,9 +474,85 @@ describe('GET /api/setup/progress', () => {
     expect(b.resume.integrationId).toBeNull();
   });
 
+  it('test evidence belongs to the newest integration: an older working one proves nothing', async () => {
+    installation('org-a', 'active');
+    integration('int-a', 'org-a');
+    db.raw.prepare("UPDATE integrations SET created_at='2026-01-01 00:00:00' WHERE id='int-a'").run();
+    delivery('s1', 'org-a', 'sent', { test: true });
+    expect(state(await body(), 'test_delivered')).toBe('done');
+    // A new integration B, never tested.
+    integration('int-b', 'org-a');
+    db.raw.prepare("UPDATE integrations SET created_at='2026-09-01 00:00:00' WHERE id='int-b'").run();
+    const b = await body();
+    expect(b.resume.integrationId).toBe('int-b');
+    expect(state(b, 'test_delivered')).toBe('doing');
+    // Testing B (deliveries carry the integration id) completes it.
+    db.raw
+      .prepare(
+        'INSERT INTO deliveries(id,integration_id,organization_id,state,created_at,is_test) VALUES(?,?,?,?,?,1)',
+      )
+      .run('s2', 'int-b', 'org-a', 'sent', nowSql());
+    expect(state(await body(), 'test_delivered')).toBe('done');
+  });
+
+  it('same-second integrations: the later insert is the focus, deterministically', async () => {
+    installation('org-a', 'active');
+    for (const id of ['int-z', 'int-a', 'int-m']) {
+      integration(id, 'org-a');
+      db.raw.prepare("UPDATE integrations SET created_at='2026-09-01 00:00:00' WHERE id=?").run(id);
+    }
+    expect((await body()).resume.integrationId).toBe('int-m');
+  });
+
+  it('a confirmed delivery wins over an accepted one in the single evidence query', async () => {
+    installation('org-a', 'active');
+    integration('int-a', 'org-a');
+    delivery('a1', 'org-a', 'accepted', { test: true });
+    delivery('s1', 'org-a', 'sent', { test: true });
+    const b = await body();
+    expect(b.steps.find((x) => x.id === 'test_delivered')?.verification).toBe('confirmed');
+  });
+
+  it('evidence reads are bounded: a miss reads as few rows as a hit', async () => {
+    installation('org-a', 'active');
+    integration('int-a', 'org-a');
+    for (const [sql, args] of [
+      [VERIFIED_SQL, ['org-a', '2026-01-01 00:00:00', 'int-a']],
+      [FIRST_EVENT_SQL, ['org-a', '1970-01-01 00:00:00']],
+    ] as const) {
+      expect(sql).toMatch(new RegExp(`LIMIT ${EVIDENCE_ROWS}`));
+      const rows = await db.d1
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .bind(...args)
+        .all<{ detail: string }>();
+      const plan = rows.results.map((r) => r.detail).join('\n');
+      expect(plan).toContain('deliveries_org_created');
+      expect(plan).not.toMatch(/SCAN d(eliveries)?(?! USING)\b/);
+    }
+  });
+
+  it('with more than EVIDENCE_ROWS test deliveries ahead, a real event is not found (documented bound)', async () => {
+    installation('org-a', 'active');
+    integration('int-a', 'org-a');
+    const insert = db.raw.prepare(
+      'INSERT INTO deliveries(id,integration_id,organization_id,state,created_at,is_test) VALUES(?,?,?,?,?,?)',
+    );
+    for (let i = 0; i < EVIDENCE_ROWS; i += 1)
+      insert.run(
+        `t${i}`,
+        'int-a',
+        'org-a',
+        'sent',
+        `2026-09-01 00:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}`,
+        1,
+      );
+    insert.run('real', 'int-a', 'org-a', 'sent', '2026-09-02 00:00:00', 0);
+    expect(state(await body(), 'activated')).not.toBe('done');
+  });
+
   it('every evidence query is index-driven: EXPLAIN QUERY PLAN names deliveries_org_created and no full scan of deliveries', async () => {
     for (const [sql, args] of [
-      [VERIFIED_SQL, ['org-a', '2026-01-01 00:00:00', 'sent']],
+      [VERIFIED_SQL, ['org-a', '2026-01-01 00:00:00', 'int-a']],
       [FIRST_EVENT_SQL, ['org-a', '1970-01-01 00:00:00']],
     ] as const) {
       const rows = await db.d1

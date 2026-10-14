@@ -233,6 +233,15 @@ export function deriveProgress(evidence: SetupEvidence): SetupProgress {
   };
 }
 
+/**
+ * Delivery evidence reads at most this many index rows, in index order, so a workspace's cost
+ * does not grow with its ledger and a miss is as cheap as a hit. The consequence is stated, not
+ * hidden: "verified" looks at the newest {EVIDENCE_ROWS} deliveries of the last 30 days, and "a real
+ * event arrived" at the oldest {EVIDENCE_ROWS} of all time (it fails only if every one of those is
+ * a test). One query answers both `sent` and `accepted`, preferring the confirmed one.
+ */
+export const EVIDENCE_ROWS = 500;
+
 /** Stand-in for a row that predates `created_at`: it exists, so the step is done; when is unknown. */
 const EPOCH = '1970-01-01 00:00:00';
 
@@ -240,21 +249,26 @@ const EPOCH = '1970-01-01 00:00:00';
  * Each statement reads one index. The delivery queries name `deliveries_org_created` (INDEXED BY)
  * and take the first row in index order, so a missing migration fails loudly instead of scanning
  * a workspace's whole ledger, and cost does not grow with the number of deliveries.
- * ?1 organization · ?2 window start (or the epoch stand-in) · ?3 state.
+ * ?1 organization · ?2 window start (or the epoch stand-in) · ?3 integration id (VERIFIED_SQL only).
+ * Same-second integrations are ordered by rowid DESC, so the newest insert wins deterministically.
  */
 export const INSTALLATION_SQL = `SELECT MIN(COALESCE(created_at, ?2)) AS t FROM github_installations WHERE organization_id=?1 AND status='active'`;
 export const SOURCE_SQL = `SELECT MIN(COALESCE(created_at, ?2)) AS t FROM sources WHERE organization_id=?1 AND enabled=1`;
 export const INTEGRATION_SQL = `SELECT MIN(COALESCE(created_at, updated_at, ?2)) AS t FROM integrations WHERE organization_id=?1`;
 export const FOCUS_SQL = `SELECT id, event_types, filters_json, noise_json, source_id, enabled, credentials_quarantined_at AS quarantined_at
-  FROM integrations WHERE organization_id=?1 ORDER BY COALESCE(created_at, updated_at, ?2) DESC, id DESC LIMIT 1`;
-export const VERIFIED_SQL = `SELECT d.created_at AS t FROM deliveries d INDEXED BY deliveries_org_created
-  WHERE d.organization_id=?1 AND d.created_at>=?2 AND d.state=?3
-    AND EXISTS (SELECT 1 FROM integrations i
-                WHERE i.id=d.integration_id AND i.organization_id=d.organization_id
-                  AND i.enabled=1 AND i.credentials_quarantined_at IS NULL)
-  ORDER BY d.created_at LIMIT 1`;
-export const FIRST_EVENT_SQL = `SELECT COALESCE(d.created_at, ?2) AS t FROM deliveries d INDEXED BY deliveries_org_created
-  WHERE d.organization_id=?1 AND d.is_test=0 ORDER BY d.created_at LIMIT 1`;
+  FROM integrations WHERE organization_id=?1 ORDER BY COALESCE(created_at, updated_at, ?2) DESC, rowid DESC LIMIT 1`;
+export const VERIFIED_SQL = `SELECT t, state FROM (
+    SELECT d.created_at AS t, d.state AS state, d.integration_id AS integration_id
+    FROM deliveries d INDEXED BY deliveries_org_created
+    WHERE d.organization_id=?1 AND d.created_at>=?2
+    ORDER BY d.created_at DESC LIMIT ${EVIDENCE_ROWS})
+  WHERE integration_id=?3 AND state IN ('sent','accepted')
+  ORDER BY (state='sent') DESC, t DESC LIMIT 1`;
+export const FIRST_EVENT_SQL = `SELECT t FROM (
+    SELECT COALESCE(d.created_at, ?2) AS t, d.is_test AS is_test
+    FROM deliveries d INDEXED BY deliveries_org_created
+    WHERE d.organization_id=?1 ORDER BY d.created_at LIMIT ${EVIDENCE_ROWS})
+  WHERE is_test=0 LIMIT 1`;
 
 export interface FocusRow {
   id: string;
@@ -301,16 +315,23 @@ setup.get('/progress', async (c) => {
         .bind(...args)
         .first<{ t: string | null }>()
     )?.t ?? null;
-  const [installation, otherSource, integration, verified, verifiedAccepted, firstEvent, focusRow] =
-    await Promise.all([
-      read(INSTALLATION_SQL, who.orgId, EPOCH),
-      read(SOURCE_SQL, who.orgId, EPOCH),
-      read(INTEGRATION_SQL, who.orgId, EPOCH),
-      read(VERIFIED_SQL, who.orgId, since, 'sent'),
-      read(VERIFIED_SQL, who.orgId, since, 'accepted'),
-      read(FIRST_EVENT_SQL, who.orgId, EPOCH),
-      c.env.DB.prepare(FOCUS_SQL).bind(who.orgId, EPOCH).first<FocusRow>(),
-    ]);
+  const [installation, otherSource, integration, firstEvent, focusRow] = await Promise.all([
+    read(INSTALLATION_SQL, who.orgId, EPOCH),
+    read(SOURCE_SQL, who.orgId, EPOCH),
+    read(INTEGRATION_SQL, who.orgId, EPOCH),
+    read(FIRST_EVENT_SQL, who.orgId, EPOCH),
+    c.env.DB.prepare(FOCUS_SQL).bind(who.orgId, EPOCH).first<FocusRow>(),
+  ]);
+  // The test step belongs to the newest integration: an older one that works proves nothing about
+  // the one being set up. A paused or quarantined integration cannot have verified anything.
+  const usable = focusRow !== null && focusRow.enabled === 1 && focusRow.quarantined_at === null;
+  const proof = usable
+    ? await c.env.DB.prepare(VERIFIED_SQL)
+        .bind(who.orgId, since, focusRow.id)
+        .first<{ t: string; state: string }>()
+    : null;
+  const verified = proof?.state === 'sent' ? proof.t : null;
+  const verifiedAccepted = proof?.state === 'accepted' ? proof.t : null;
   const focus: IntegrationEvidence | null = focusRow
     ? {
         id: focusRow.id,

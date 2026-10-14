@@ -3,12 +3,16 @@
  * by every component test. They are inert stand-ins: they let code run, they do not emulate
  * layout, so nothing here can make a layout-dependent check pass.
  */
+import { configure } from '@testing-library/react';
 import { vi } from 'vitest';
 
 // Each of these tests renders the whole app and runs axe over it, which takes ~1 s on an idle
 // machine and several times that when the suite runs in parallel. The 5 s default made the
 // pre-push run flaky; these are not tests of speed, so give them headroom.
 vi.setConfig({ testTimeout: 30_000 });
+// Same reasoning for `findBy*` and `waitFor`: the 1 s default expires on a page that is merely slow
+// under a loaded full run (the quiet-hours settings scenario did), without anything being wrong.
+configure({ asyncUtilTimeout: 8000 });
 
 type FetchHandler = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 let fetchHandler: FetchHandler = () => Promise.reject(new TypeError('fetch is not mocked in this test'));
