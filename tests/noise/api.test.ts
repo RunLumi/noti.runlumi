@@ -389,7 +389,7 @@ describe('a source integration', () => {
 
     // A repeat of the held event is not "duplicate" noise: it is simply not held twice.
     const again = await post(src, { ...EVENT, severity: 'info', type: 'deploy.ok' }, 'msg_1');
-    expect(again.status).toBe(202);
+    expect(again.status).toBe(200);
     expect(h.db.raw.prepare('SELECT COUNT(*) AS n FROM held_events').get()).toEqual({ n: 1 });
 
     const status = await call('GET', `/api/integrations/${id}/noise-status`, { as: 'alice' });

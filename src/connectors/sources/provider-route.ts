@@ -9,7 +9,7 @@ import { displayOf } from '../../events/canonical';
 import { boundedEventId } from '../../events/id';
 import { buildCanonical } from './build';
 import { validateCanonicalEvent } from '../../events/validate';
-import { readBodyCapped } from '../../lib/body';
+import { isJsonContentType, readBodyCapped } from '../../lib/body';
 import { correlationField, currentCorrelationId } from '../../platform/correlation';
 import { log } from '../../platform/log';
 import { ingressBatch } from '../../db/retry';
@@ -17,6 +17,7 @@ import { dispatchOutbox } from '../../pipeline/outbox';
 import { createNoisePlanner } from '../../routing/noise-ingress';
 import { decisionStatement } from '../../routing/provenance';
 import { hit, sourceIngressLimiter } from '../../security/rate-limit';
+import { recordIngressUsage } from '../../security/ingress-usage';
 import { DECOY_MAX_BODY_BYTES } from './generic/route';
 import { openSourceSecretText, type SourceCredentialRow } from './generic/secret';
 import { connectorFor } from './registry';
@@ -41,10 +42,6 @@ type SourceRow = SourceCredentialRow & {
   auth_mode: AuthMode | null;
   livemode: number | null;
 };
-
-function isJson(contentType: string | undefined): boolean {
-  return /^application\/json\s*(;|$)/i.test(contentType ?? '');
-}
 
 const notFound = (c: Context<{ Bindings: Bindings }>): Response => c.text('Not found', 404);
 
@@ -112,7 +109,7 @@ async function recordNoiseDecision(
 export function providerWebhook(kind: ProviderKind) {
   const connector = connectorFor(kind);
   return async (c: Context<{ Bindings: Bindings }>): Promise<Response> => {
-    if (!isJson(c.req.header('content-type'))) return c.text('Expected application/json', 415);
+    if (!isJsonContentType(c.req.header('content-type'))) return c.text('Expected application/json', 415);
     const read = await readBodyCapped(c.req.raw, connector.maxBodyBytes);
     if (!read.ok) return c.text('Too large', 413);
     const raw = read.bytes;
@@ -128,7 +125,9 @@ export function providerWebhook(kind: ProviderKind) {
           .bind(endpointId, kind)
           .first<SourceRow>()
       : null;
-    if (!source || source.enabled !== 1) {
+    // F50/F76: disabled is 410 Gone (see the generic route and ADR 0028); unknown and malformed stay 404.
+    if (source && source.enabled !== 1) return c.text('Gone', 410);
+    if (!source) {
       // Best-effort timing parity with a live endpoint, skipped for large bodies (ADR 0012).
       if (raw.length <= DECOY_MAX_BODY_BYTES)
         await connector.verify({
@@ -175,6 +174,7 @@ export function providerWebhook(kind: ProviderKind) {
 
     const limit = await sourceIngressLimiter(c.env, source.id, nowMs);
     if (limit.limited) {
+      await recordIngressUsage(c.env.DB, source.organization_id, kind, { rateLimited: 1 }, nowMs);
       if (connector.onFlood === 'retry')
         return c.text('Too many requests', 429, { 'retry-after': String(limit.retryAfterSeconds) });
       // Absorb: a 4xx would count toward the provider disabling the webhook. The drop is logged
@@ -359,14 +359,23 @@ export function providerWebhook(kind: ProviderKind) {
       c.executionCtx.waitUntil(
         dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }),
       );
+    // F50: an exact duplicate is 200, not 202 and never 4xx.
+    const duplicate = targets.length > 0 && queued === 0 && held === 0;
+    await recordIngressUsage(
+      c.env.DB,
+      organizationId,
+      kind,
+      duplicate ? { duplicate: 1 } : queued + held > 0 ? { accepted: 1 } : {},
+      nowMs,
+    );
     return c.json(
       {
         accepted: true,
         persisted: queued,
         ...(held > 0 ? { held } : {}),
-        ...(targets.length > 0 && queued === 0 && held === 0 ? { duplicate: true } : {}),
+        ...(duplicate ? { duplicate: true } : {}),
       },
-      202,
+      duplicate ? 200 : 202,
     );
   };
 }

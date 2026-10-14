@@ -434,7 +434,7 @@ type Source = {
 | `POST /api/sources` | `{name, kind?}` (1–80 characters, no control characters; `kind` defaults to `generic`; GitLab and Stripe take a pasted credential, see [Provider sources](#provider-sources-gitlab-and-stripe)) | `201 {source, secret}` for `generic`, `201 {source}` for a provider; `Cache-Control: no-store` |
 | `PATCH /api/sources/:id` | `{name?, enabled?}` | `200 {source}`; any other field is `422` |
 | `POST /api/sources/:id/rotate` | none for `generic`; the new pasted credential for a provider | **Admin only** (`source.rotate`). `200 {source, secret}` (generic) or `200 {source}` (provider), `Cache-Control: no-store`; the previous secret is invalid at once. `409` if the source changed while rotating (nothing changed; retry). |
-| `POST /api/sources/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` | **Admin only** (`source.revoke`). `200 {source}` with `revoked: true, enabled: false`: ingress answers 404 for it at once and `PATCH {enabled: true}` is `422` until `rotate` seals a new secret (which clears `revoked` and turns the source back on; a revoked GitLab or Stripe source refuses the same pasted credential with `422`). Repeating the call, or two racing calls, is a no-op (one audit entry). |
+| `POST /api/sources/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` | **Admin only** (`source.revoke`). `200 {source}` with `revoked: true, enabled: false`: ingress answers `410 Gone` for it at once and `PATCH {enabled: true}` is `422` until `rotate` seals a new secret (which clears `revoked` and turns the source back on; a revoked GitLab or Stripe source refuses the same pasted credential with `422`). Repeating the call, or two racing calls, is a no-op (one audit entry). |
 | `DELETE /api/sources/:id[?cascade=true]` | none | **Admin only** (`source.delete`). `204`. A source with connected chats returns `409 {error, integrations: n}` unless `cascade=true`, which also deletes those integrations and their saved webhook URLs. |
 
 `secret` (`whsec_` + base64 of 32 random bytes) is returned **only** by create and rotate and is
@@ -472,12 +472,16 @@ remain `422` for every source integration.
 ### Receiving provider events: `POST /webhooks/gitlab/:endpointId`, `POST /webhooks/stripe/:endpointId`
 
 No session. `Content-Type: application/json`; body at most 1 MiB (GitLab) or 512 KiB (Stripe).
-Unknown, malformed, disabled and wrong-kind endpoints all answer one identical `404 Not found`.
+Unknown, malformed and wrong-kind endpoints answer one identical `404 Not found`; a paused, revoked or disabled
+endpoint answers `410 Gone` (the sender is told to stop; it needs the unguessable endpoint id, ADR 0028).
+Every non-2xx body is JSON and carries `correlation_id`, the same value as the `x-request-id` header
+(never a signature, secret or payload).
 
 | Situation | Answer |
 | --- | --- |
 | Credential missing, wrong, stale or malformed | `401 Unauthorized` (nothing is parsed or routed) |
-| Authentic event, stored | `202 {accepted, persisted}`; `duplicate: true` when the provider id was already accepted |
+| Authentic event, stored | `202 {accepted, persisted}` |
+| Exact duplicate (the provider id was already accepted) | `200 {accepted, persisted: 0, duplicate: true}`, never a 4xx, so the sender stops retrying |
 | Authentic event Noti does not notify about (type or action outside the catalogue, GitLab merge request update, Stripe thin or Connect event, other livemode) | `200 {accepted: true, ignored: reason}`; nothing is routed |
 | Per-source flood limit (600/min), GitLab | `200 {accepted: false, dropped: "rate_limited"}` (GitLab disables webhooks after repeated 4xx); counted in `droppedEvents` |
 | More than 1200 requests a minute to one endpoint id, before authentication | `429` with `Retry-After` |
@@ -524,11 +528,13 @@ both render as failure) and `summary` plus `fields` within a 280-character budge
 
 | Status | Meaning |
 | --- | --- |
-| `202 {accepted: true, persisted: n}` | Durably accepted for `n` integrations (`0` if the source has none). `duplicate: true` marks a repeat of an already-accepted `webhook-id`. |
+| `202 {accepted: true, persisted: n}` | Durably accepted for `n` integrations (`0` if the source has none). |
+| `200 {accepted: true, persisted: 0, duplicate: true}` | A repeat of an already-accepted `webhook-id` with the same body (idempotent, nothing queued). |
 | `400 {error, fields: [{field, message}]}` | Authentic but invalid JSON or event; names fields, never echoes values. |
 | `409 {error: "webhook_id_reused"}` | This `webhook-id` was already accepted with a different body. Nothing was queued; the source's `reusedIdRejections` counter increments. Give every event its own id. |
 | `401 Unauthorized` | Missing or malformed headers, wrong signature, or timestamp outside the window (all identical). |
-| `404 Not found` | Unknown, malformed or paused endpoint (all identical). |
+| `404 Not found` | Unknown or malformed endpoint (identical). |
+| `410 Gone` | The endpoint is paused or its credential was revoked: stop sending to it. |
 | `413` / `415` | Body over 256 KiB (counted as it streams in, so chunked and lying `Content-Length` requests are cut off at the cap) / not `application/json`. |
 | `429` | More than 600 verified events per minute for this source; honour `Retry-After`. |
 | `500` | The stored secret could not be opened; retry later. |
@@ -714,8 +720,22 @@ request) and do not resolve a workspace, so `?org=` is ignored. Scope, decisions
 
 Query: `limit` (1 to 100, default 25), `cursor` (the opaque `nextCursor` of the previous page, keyed on
 `(created_at, id)`), `action` (one of the recorded action ids, `src/audit/actions.ts`), `outcome`
-(`success` or `denied`), `from` and `to` (`YYYY-MM-DD`, the whole UTC day, or an ISO instant). Anything
-invalid is `422 {"error":"Validation failed","fields":[...]}`.
+(`success` or `denied`), `from` and `to` (`YYYY-MM-DD`, the whole UTC day, or an ISO instant), and, since
+ADR 0028:
+
+- `actor`: a CURRENT member's user id, or `~system` for events no person took (no user id can start with `~`). Anyone who is not a member of
+  this workspace (an outsider whose probe was recorded here, a former member) matches nothing, so the filter
+  cannot be used to ask whether a user id ever touched the workspace. Ids come from `GET /api/workspace/team`.
+- `target` and `targetType`: the id and kind (`integration`, `source`, `delivery`, `organization`,
+  `capability`, `github_installation`, `repository`, `key`) of the thing the event is about.
+- `correlationId`: the request id of one request (4 to 64 characters), as quoted from an error body, the
+  `x-request-id` header or a delivery. Only changes made after migration 0028 carry one.
+
+Anything invalid is `422 {"error":"Validation failed","fields":[...]}`. The first page (no `cursor`) also
+carries `total`, the number of events the filters match in this workspace, counted up to 10,000
+(`totalCapped: true` means "more than that"); later pages carry `total: null`. With no `from`, the count covers the last 90
+days and `totalSince` (a UTC time) says so, otherwise `totalSince` is null. The count never fails the list: if it errors or
+overruns 1.5 s the page still answers with `total: null, totalCapped: true`.
 
 ```ts
 type AuditPage = {
@@ -733,8 +753,16 @@ type AuditPage = {
       | { kind: 'former' }                 // a successful action by someone no longer a member
       | { kind: 'other' };                 // a refused request from someone who never was (an outsider's probe)
     summary: { key: string; value: string | number | boolean | string[] }[];  // allow-listed, bounded
+    correlationId: string | null;      // the request the change was made in; null for older rows and jobs
+    changes: (                          // before and after of a few NON-SECRET fields an update changed
+      | { field: 'enabled' | 'repo'; kind: 'value'; before: string | boolean; after: string | boolean }
+      | { field: 'eventTypes'; kind: 'list'; added: string[]; removed: string[] }
+    )[];                                // empty for rows written before the diff existed
   }[];
   nextCursor: string | null;
+  total: number | null;                // first page only; capped at 10,000
+  totalCapped: boolean;
+  totalSince: string | null;           // UTC start of the default 90-day count window, or null
   retentionDays: number;               // AUDIT_RETENTION_DAYS in force
 };
 ```
@@ -742,7 +770,12 @@ type AuditPage = {
 What is **not** returned, deliberately: the actor's email or id, `ip`, `user_agent`, and any
 `metadata_json` key that is not in the per-action allow-list (`SUMMARY_FIELDS` in
 `src/api/audit-view.ts`). Strings are cut to 120 characters, lists to 10 items, and control and bidi
-characters are removed. See ADR 0019.
+characters are removed. A webhook URL, a signing secret, a filter body or a name is never diffed: those
+rows say only that the field changed. See ADR 0019 and ADR 0028.
+
+**Fails closed.** A failed read, a failed limiter write or a row that is not this
+workspace's answers `503 {error, correlation_id}` with no events and `Retry-After: 5`: never an empty or
+partial list. The dashboard shows that as an error, not as "no events".
 
 ## Observability
 

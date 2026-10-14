@@ -145,7 +145,7 @@ describe('route policy matches the routes the app registers (F232)', () => {
     const middleware = (app.routes as readonly { method: string; path: string }[]).filter(
       (r) => r.method === 'ALL' && MIDDLEWARE_PATHS.includes(r.path),
     );
-    expect(middleware.map((m) => m.path)).toEqual(['/*', '/*', '/*', '/api/*', '/*']);
+    expect(middleware.map((m) => m.path)).toEqual(['/*', '/webhooks/*', '/*', '/*', '/api/*', '/*']);
   });
 
   it('has a policy for every registered route, and no policy for a route that is not registered', () => {

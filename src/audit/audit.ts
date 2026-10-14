@@ -7,6 +7,8 @@
  */
 export { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction } from './actions';
 import type { AUDIT_SUBJECT_TYPES, AuditAction } from './actions';
+import { currentCorrelationId } from '../platform/correlation';
+import { sanitiseCorrelationId } from '../platform/correlation-id';
 
 export type AuditMetadata = Readonly<Record<string, string | number | boolean | null | readonly string[]>>;
 
@@ -57,8 +59,8 @@ export function auditStatement(
       : [];
   return db
     .prepare(
-      `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json)
-       SELECT ?,?,?,?,?,?,?,?,?,?${guard}`,
+      `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json,correlation_id)
+       SELECT ?,?,?,?,?,?,?,?,?,?,?${guard}`,
     )
     .bind(
       crypto.randomUUID(),
@@ -71,6 +73,9 @@ export function auditStatement(
       entry.ip ?? null,
       entry.userAgent ? entry.userAgent.slice(0, MAX_USER_AGENT) : null,
       serialiseMetadata(entry.metadata),
+      // The request this change was made in (F222), so a support quote of the id finds it. Null in a
+      // cron job or queue consumer with no request; never a sender-supplied value.
+      sanitiseCorrelationId(currentCorrelationId()),
       ...guardValues,
     );
 }
@@ -81,22 +86,42 @@ export async function recordAudit(db: D1Database, entry: AuditEntry): Promise<vo
 
 const DENIAL_DEDUPE_SECONDS = 60;
 
+export interface DenialOptions {
+  /** How long an identical denial (same action, actor, workspace and subject) collapses into one row. */
+  readonly dedupeSeconds?: number;
+  /**
+   * Asked only when no identical denial exists yet, so a repeat never spends a budget. Return false to
+   * skip the write (a cap). A throwing gate skips it too; the response is never affected.
+   */
+  readonly gate?: () => Promise<boolean>;
+}
+
 /**
  * Record a denial without letting it become a weapon: identical denials by the same actor
  * within a minute collapse into one row, and a failed write never changes the response
  * (a 500 where a 404 was due would itself leak that the target exists).
  */
-export async function recordDenial(db: D1Database, entry: AuditEntry): Promise<void> {
+export async function recordDenial(
+  db: D1Database,
+  entry: AuditEntry,
+  options: DenialOptions = {},
+): Promise<void> {
   try {
     const recent = await db
       .prepare(
         `SELECT 1 AS x FROM audit_events
-         WHERE action='access.denied' AND actor_id IS ? AND organization_id IS ? AND subject_id IS ?
+         WHERE action=? AND actor_id IS ? AND organization_id IS ? AND subject_id IS ?
            AND created_at >= datetime('now', ?) LIMIT 1`,
       )
-      .bind(entry.actorId, entry.organizationId, entry.subjectId, `-${DENIAL_DEDUPE_SECONDS} seconds`)
+      .bind(
+        entry.action,
+        entry.actorId,
+        entry.organizationId,
+        entry.subjectId,
+        `-${options.dedupeSeconds ?? DENIAL_DEDUPE_SECONDS} seconds`,
+      )
       .first();
-    if (!recent) await recordAudit(db, entry);
+    if (!recent && (options.gate ? await options.gate() : true)) await recordAudit(db, entry);
   } catch {
     console.error(JSON.stringify({ event: 'audit_write_failed', action: entry.action }));
   }

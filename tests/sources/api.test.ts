@@ -208,7 +208,7 @@ describe('read, authorization and CSRF', () => {
 });
 
 describe('update', () => {
-  it('renames and disables; a disabled source answers 404 at ingress, re-enabling restores it', async () => {
+  it('renames and disables; a disabled source answers 410 at ingress, re-enabling restores it', async () => {
     const c = await createOk();
     const path = `/api/sources/${c.source.id}`;
     const renamed = await (
@@ -216,7 +216,8 @@ describe('update', () => {
     ).json<{ source: View }>();
     expect(renamed.source.name).toBe('Renamed');
     await call('PATCH', path, { as: 'alice', body: { enabled: false } });
-    expect((await ingest(c)).status).toBe(404);
+    // A disabled endpoint is 410 Gone: the sender is told to stop (F50, ADR 0028).
+    expect((await ingest(c)).status).toBe(410);
     await call('PATCH', path, { as: 'alice', body: { enabled: true } });
     expect((await ingest(c)).status).toBe(202);
     expect(audits('org-a')).toEqual(['source.create', 'source.update', 'source.update', 'source.update']);

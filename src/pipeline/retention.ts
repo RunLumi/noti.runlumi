@@ -38,6 +38,7 @@ import { HEALTH_RETENTION_MS } from '../delivery/health';
 import type { Bindings } from '../env';
 import { JOB_RUNS_RETENTION_MS } from '../observability/job-runs';
 import { log } from '../platform/log';
+import { INGRESS_USAGE_RETENTION_DAYS, usageDay } from '../security/ingress-usage';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const RETENTION_BATCH = 500;
@@ -89,6 +90,8 @@ export interface RetentionReport {
   readonly audit: number;
   /** `job_runs` rows older than {@link JOB_RUNS_RETENTION_MS}. */
   readonly jobRuns: number;
+  /** `ingress_usage` day rows older than {@link INGRESS_USAGE_RETENTION_DAYS}. */
+  readonly ingressUsage: number;
   /** True when a table hit the per-tick cap, so the next tick continues. */
   readonly more: boolean;
 }
@@ -160,6 +163,10 @@ export const PURGE_AUDIT_SQL = `DELETE FROM audit_events WHERE rowid IN (
 export const PURGE_JOB_RUNS_SQL = `DELETE FROM job_runs WHERE rowid IN (
   SELECT rowid FROM job_runs WHERE started_at < ?1 LIMIT ?2)`;
 
+/** ?1 cutoff day `YYYY-MM-DD` · ?2 limit. Platform-wide by age (a range seek on `ingress_usage_day`). */
+export const PURGE_INGRESS_USAGE_SQL = `DELETE FROM ingress_usage WHERE rowid IN (
+  SELECT rowid FROM ingress_usage WHERE day < ?1 LIMIT ?2)`;
+
 async function drain(db: Db, sql: string, binds: readonly unknown[]): Promise<{ n: number; more: boolean }> {
   let n = 0;
   for (let i = 0; i < RETENTION_MAX_ROUNDS; i++) {
@@ -208,7 +215,16 @@ export async function purgeExpiredRecords(
   for (const name of invalidRetentionVars(env)) log('warn', 'retention_config_invalid', { var: name });
   const previous = await lastRun(env.DB);
   if (previous !== null && nowMs - previous >= 0 && nowMs - previous < RETENTION_INTERVAL_MS) {
-    return { skipped: true, deliveries: 0, attempts: 0, outbox: 0, audit: 0, jobRuns: 0, more: false };
+    return {
+      skipped: true,
+      deliveries: 0,
+      attempts: 0,
+      outbox: 0,
+      audit: 0,
+      jobRuns: 0,
+      ingressUsage: 0,
+      more: false,
+    };
   }
   const deliveryCutoff = nowMs - parseRetentionDays(env.DELIVERY_RETENTION_DAYS, DELIVERY_RETENTION) * DAY_MS;
   const auditCutoff = nowMs - parseRetentionDays(env.AUDIT_RETENTION_DAYS, AUDIT_RETENTION) * DAY_MS;
@@ -221,8 +237,12 @@ export async function purgeExpiredRecords(
   // Closed, quiet destinations only: an open breaker is state, not garbage.
   const health = await drain(env.DB, PURGE_DESTINATION_HEALTH_SQL, [nowMs - HEALTH_PURGE_AGE_MS]);
   const jobRuns = await drain(env.DB, PURGE_JOB_RUNS_SQL, [nowMs - JOB_RUNS_RETENTION_MS]);
+  const usage = await drain(env.DB, PURGE_INGRESS_USAGE_SQL, [
+    usageDay(nowMs - INGRESS_USAGE_RETENTION_DAYS * DAY_MS),
+  ]);
   const more =
     attempts.more ||
+    usage.more ||
     deliveries.more ||
     legacy.more ||
     outbox.more ||
@@ -237,6 +257,7 @@ export async function purgeExpiredRecords(
     outbox: outbox.n,
     audit: audit.n,
     jobRuns: jobRuns.n,
+    ingressUsage: usage.n,
     more,
   };
 }

@@ -152,6 +152,18 @@ switcher was explicitly not built" note from slice Fix F is closed by this.
 | `audit/AuditPage.tsx`, `AuditFilters.tsx`, `AuditTable.tsx` | `/audit`, admin only: filters in the URL, table that stacks into cards, load more, empty/error/forbidden states, retention note, CSV of the loaded events |
 | `audit/api.ts`, `hooks.ts`, `search.ts`, `copy.ts`, `csv.ts` | Strict parsing, query keys `['audit', orgId, ...]`, URL validation, plain-language labels (`audit.action.<id>`, `audit.detail.<key>`), formula-safe CSV |
 
+**Read side (ADR 0028).** Filters in the URL: action, result, **actor** (a select of current members, from `GET /api/workspace/team`, plus
+"Noti (automatic)"), **target** (`target` and `targetType`), **request id** (`correlationId`) and dates. The two text fields apply on Enter
+or when left, not per keystroke; an id that cannot be valid shows an error in words (`aria-invalid`) and is not sent; `validateAuditSearch`
+drops anything that does not match the server's shapes. The first page shows a total ("N events match", "More than N events match" past
+10,000). Each row has two text actions that replace the filters in one click ("Show events about this", "Show events from this request",
+both 44 px tall) and a "What changed" block: `from X to Y` lines for `enabled`, `repo` and the subscribed updates (added and removed),
+built from the server's `changes`, never from a secret. Words, not an arrow: the bundled Geist subset has no U+2192, which the
+Vietnamese glyph test would reject. A failed read is the existing error panel (the server answers 503 and fails closed), never an empty
+log. Verification: `web/src/audit/audit.test.tsx` (URL search, diff lines, Enter-to-apply, invalid id, one-click filters, member list
+names only, CSV) and axe on the filtered and diff states in English and Vietnamese (`web/src/a11y/pages.a11y.test.tsx`). Not verified: a
+screen reader, a real 320 px device, and the Vietnamese copy by a native speaker.
+
 | `workspace/bound.tsx` | `useBoundWorkspace`: a form, wizard or dialog keeps the workspace it was opened for; `StaleWorkspaceNotice` |
 | `workspace/drift.tsx` | `WorkspaceDriftBanner`: detects an active-workspace change made in another tab (`BroadcastChannel('noti-workspace')`, focus), drops caches, alerts |
 

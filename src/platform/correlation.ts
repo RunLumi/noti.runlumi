@@ -28,21 +28,10 @@ export interface CorrelationContext {
 
 export const REQUEST_ID_HEADER = 'x-request-id';
 
-/** Printable, URL- and log-safe, and short enough that it cannot bloat a log line. */
-const EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{3,63}$/;
+import { sanitiseCorrelationId, sanitiseExternalId } from './correlation-id';
 
-/** Returns the value when it is a sane opaque handle (4-64 chars, restricted set), else null. */
-export function sanitiseExternalId(value: string | null | undefined): string | null {
-  return typeof value === 'string' && EXTERNAL_ID.test(value) ? value : null;
-}
-
-/**
- * An id read back from a queue message or a query string: our own opaque id or a sane handle, 4-64
- * characters from a restricted set. Anything else is dropped, never repaired.
- */
-export function sanitiseCorrelationId(value: unknown): string | null {
-  return typeof value === 'string' ? sanitiseExternalId(value) : null;
-}
+// The id shape lives in `correlation-id.ts` (no Node dependency, so the dashboard can share it).
+export { sanitiseCorrelationId, sanitiseExternalId };
 
 export function mintCorrelationId(): string {
   return crypto.randomUUID();

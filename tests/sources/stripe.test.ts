@@ -348,7 +348,7 @@ describe('ingress end to end', () => {
     const now = Math.floor(Date.now() / 1000);
     expect((await send(src, INVOICE_PAYMENT_FAILED, { ts: now - 10 })).status).toBe(202);
     const retry = await send(src, INVOICE_PAYMENT_FAILED, { ts: now });
-    expect(retry.status).toBe(202);
+    expect(retry.status).toBe(200);
     expect(await retry.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
     expect(count('deliveries', "state != 'suppressed'")).toBe(1);
     expect(count('deliveries', "state = 'suppressed'")).toBe(1);
@@ -441,6 +441,6 @@ describe('ingress end to end', () => {
     );
     const dead = await postTo(`/webhooks/stripe/${'B'.repeat(24)}`, body, headers);
     expect(dead.status).toBe(404);
-    expect(await dead.text()).toBe('Not found');
+    expect((await dead.json<{ error: string }>()).error).toBe('Not found');
   });
 });

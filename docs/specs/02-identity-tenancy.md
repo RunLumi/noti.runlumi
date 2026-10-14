@@ -405,7 +405,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F28 — Audit events
 
-**Priority** P1 · **Status** 🟡 `audit_events` append-only with integration, source, replay, denial, installation and workspace events (`src/audit/actions.ts`, PR #9), admin `GET /api/audit` plus page (ADR 0019). Not built: member/invite/role/session events, correlation id, actor email by decision; IP and user agent stored but not shown
+**Priority** P1 · **Status** 🟡 `audit_events` append-only with integration, source, replay, denial, installation and workspace events (`src/audit/actions.ts`, PR #9), admin `GET /api/audit` plus page (ADR 0019); the request id is stamped on every row written in a request (migration 0028, ADR 0028). Not built: member/invite/role/session events, actor email by decision; IP and user agent stored but not shown
 
 **Acceptance**
 - [ ] `audit_events(id, organization_id, actor_id, action, subject_type, subject_id,
@@ -424,7 +424,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F29 — Webhook ingress protection
 
-**Priority** P0 · **Status** 🟡 per-installation GitHub limiter (`ingressLimiter`, `tests/security/rate-limit.test.ts`) and per-source flood limit with 429 + Retry-After for generic and provider sources (`tests/sources/ingress.test.ts`); D1 counters, fails open. Not built: quota or billing accounting, GitHub route 429 test
+**Priority** P0 · **Status** 🟡 per-installation GitHub limiter (`ingressLimiter`, `tests/security/rate-limit.test.ts`) and per-source flood limit with 429 + Retry-After for generic and provider sources (`tests/sources/ingress.test.ts`); D1 counters, fails open. Built in ADR 0028: the full-route GitHub 429 with `Retry-After` (`tests/github/ingress-codes.test.ts`) and usage accounting kept apart from the abuse counters (`ingress_usage`, `src/security/ingress-usage.ts`: accepted, duplicate and rate-limited events per workspace, UTC day and source; best effort, so it can under-count, and it is not a billing meter). Not built: keying per `(organization_id, connection_id)` (F27), billing-grade metering (F253)
 
 **Story** As an operator, I want webhook ingress bounded, so that one misbehaving provider
 cannot exhaust our Worker quota.

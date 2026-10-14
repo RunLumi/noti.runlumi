@@ -239,8 +239,8 @@ describe('revoking a source credential (F40)', () => {
       revoked: true,
       enabled: false,
     });
-    // The burned secret gets nothing from ingress.
-    expect((await ingest(src)).status).toBe(404);
+    // The burned secret gets nothing from ingress; the endpoint is off, so it is 410 Gone (F50).
+    expect((await ingest(src)).status).toBe(410);
     expect((await call('PATCH', path, { as: 'alice', body: { enabled: true } })).status).toBe(422);
     expect(auditRows('source.credentials.revoke')).toHaveLength(1);
     // Idempotent: no second audit entry.

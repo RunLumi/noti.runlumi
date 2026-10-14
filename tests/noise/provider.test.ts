@@ -58,7 +58,7 @@ describe('GitLab source with quiet hours', () => {
 
     // The provider retries the held push: still one held row, no delivery.
     const retry = await post(src, 'Push Hook', PUSH, 'msg_1');
-    expect(retry.status).toBe(202);
+    expect(retry.status).toBe(200);
     expect(count('held_events')).toBe(1);
     expect(count('deliveries', "state != 'suppressed'")).toBe(1);
     expect(count('deliveries', "state = 'suppressed'")).toBe(1);

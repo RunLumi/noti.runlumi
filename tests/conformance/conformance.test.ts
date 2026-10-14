@@ -114,6 +114,10 @@ function setPath(root: Record<string, unknown>, path: string, value: unknown): v
 
 const writes = (rig: Rig): number => rig.count('deliveries') + rig.count('notification_outbox');
 
+/** An error body with the per-request `correlation_id` (F50) taken out, so two refusals can be compared. */
+const sameShape = async (res: Response): Promise<string> =>
+  (await res.text()).replace(/,?"correlation_id":"[^"]*"/, '');
+
 describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
   'connector conformance: %s',
   (_kind, d: SourceDescriptor) => {
@@ -216,18 +220,17 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
 
     describe('content type', () => {
       if (d.kind === 'github') {
-        // GitHub can be configured to send application/x-www-form-urlencoded (`payload=<json>`). The
-        // route does not gate on the header: it verifies the raw bytes and then needs JSON, so a
-        // form-encoded body is refused as unparseable (400) and a JSON body is accepted whatever the
-        // header says. Documented in spec 05 F59.
-        it('a form-encoded delivery is refused (400) after verification and writes nothing', async () => {
+        // GitHub can be configured to send application/x-www-form-urlencoded (`payload=<json>`). We read
+        // JSON only, so that configuration is refused up front with 415 (F50, ADR 0028) instead of failing
+        // later as an unparseable 400. Documented in spec 05 F59.
+        it('a form-encoded delivery is refused (415) before anything is read and writes nothing', async () => {
           const rig = await createRig(d.kind, worker);
           const body = `payload=${encodeURIComponent(valid(rig))}`;
           const res = await rig.post(body, {
             headers: entry.headers,
             contentType: 'application/x-www-form-urlencoded',
           });
-          expect(res.status).toBe(400);
+          expect(res.status).toBe(415);
           expect(writes(rig)).toBe(0);
         });
       } else {
@@ -274,7 +277,8 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
           timestamp: now + 7,
         });
         expect(first.status).toBe(202);
-        expect(again.status).toBe(202);
+        // F50: an exact duplicate is 200 (already accepted, stop retrying), never 202 and never 4xx.
+        expect(again.status).toBe(200);
         const real = "state != 'suppressed'";
         const accepted = rig.count('deliveries', real);
         expect((await first.json<{ persisted: number }>()).persisted).toBe(accepted);
@@ -289,7 +293,7 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
 
     describe('tenant resolution answers once', () => {
       if (d.tenantResolution === 'endpoint') {
-        it('unknown, malformed and disabled endpoints are the same 404', async () => {
+        it('unknown and malformed endpoints are the same 404; a disabled one is 410 Gone (F50, ADR 0028)', async () => {
           const rig = await createRig(d.kind, worker);
           const body = valid(rig);
           const unknown = await rig.post(body, {
@@ -299,9 +303,10 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
           const malformed = await rig.post(body, { headers: entry.headers, path: `/webhooks/${d.kind}/x` });
           rig.h.db.raw.prepare('UPDATE sources SET enabled=0').run();
           const disabled = await rig.post(body, { headers: entry.headers });
-          const texts = await Promise.all([unknown, malformed, disabled].map((r) => r.text()));
-          expect([unknown.status, malformed.status, disabled.status]).toEqual([404, 404, 404]);
+          const texts = await Promise.all([unknown, malformed].map(sameShape));
+          expect([unknown.status, malformed.status, disabled.status]).toEqual([404, 404, 410]);
           expect(new Set(texts).size).toBe(1);
+          expect((await disabled.json<{ correlation_id: string }>()).correlation_id).toBeTruthy();
           expect(writes(rig)).toBe(0);
         });
       } else {
@@ -317,7 +322,7 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
           const foreign = await rig.post(JSON.stringify({ ...json, installation: { id: 1001, app_id: 1 } }), {
             headers: entry.headers,
           });
-          const texts = await Promise.all([none, unknown, foreign].map((r) => r.text()));
+          const texts = await Promise.all([none, unknown, foreign].map(sameShape));
           expect([none.status, unknown.status, foreign.status]).toEqual([403, 403, 403]);
           expect(new Set(texts).size).toBe(1);
           expect(writes(rig)).toBe(0);

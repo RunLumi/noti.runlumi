@@ -1,9 +1,10 @@
-import { AUDIT_ACTIONS, type AuditAction } from '../../../src/audit/actions';
+import { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction } from '../../../src/audit/actions';
 import { ApiError, api } from '../lib/api';
 
 /** Audit log client (docs/API.md "Audit log"). The server returns allow-listed facts only. */
 
-export { AUDIT_ACTIONS, type AuditAction };
+export { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction };
+export type AuditSubjectType = (typeof AUDIT_SUBJECT_TYPES)[number];
 export type AuditOutcome = 'success' | 'denied';
 
 export type AuditActor =
@@ -18,6 +19,21 @@ export interface SummaryItem {
   readonly value: SummaryValue;
 }
 
+/** Before and after of a field an update changed (only a few non-secret fields have one). */
+export type FieldChange =
+  | {
+      readonly field: 'enabled' | 'repo';
+      readonly kind: 'value';
+      readonly before: string | boolean;
+      readonly after: string | boolean;
+    }
+  | {
+      readonly field: 'eventTypes';
+      readonly kind: 'list';
+      readonly added: readonly string[];
+      readonly removed: readonly string[];
+    };
+
 export interface AuditEvent {
   readonly id: string;
   readonly createdAt: string;
@@ -28,23 +44,40 @@ export interface AuditEvent {
   readonly outcome: AuditOutcome;
   readonly actor: AuditActor;
   readonly summary: readonly SummaryItem[];
+  /** The request this change was made in; null for older rows and for background jobs. */
+  readonly correlationId: string | null;
+  readonly changes: readonly FieldChange[];
 }
 
 export interface AuditPage {
   readonly events: readonly AuditEvent[];
   readonly nextCursor: string | null;
   readonly retentionDays: number;
+  /** How many events match the filters (first page only), counted up to a cap. */
+  readonly total: number | null;
+  readonly totalCapped: boolean;
+  /** ISO start of the window the total covers when no `from` filter was set; null otherwise. */
+  readonly totalSince: string | null;
 }
 
 export interface AuditFilters {
   readonly action?: AuditAction;
   readonly outcome?: AuditOutcome;
+  /** A member's user id, or `system`. */
+  readonly actor?: string;
+  readonly target?: string;
+  readonly targetType?: AuditSubjectType;
+  readonly correlationId?: string;
   readonly from?: string;
   readonly to?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function isAuditSubjectType(value: unknown): value is AuditSubjectType {
+  return AUDIT_SUBJECT_TYPES.some((t) => t === value);
 }
 
 export function isAuditAction(value: unknown): value is AuditAction {
@@ -75,6 +108,29 @@ function parseSummary(value: unknown): SummaryItem[] {
   });
 }
 
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+
+/** A malformed change is dropped: it only decorates a row the log already shows. */
+function parseChanges(value: unknown): FieldChange[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item: unknown): FieldChange[] => {
+    if (!isRecord(item)) return [];
+    if (
+      item.kind === 'value' &&
+      (item.field === 'enabled' || item.field === 'repo') &&
+      (typeof item.before === 'string' || typeof item.before === 'boolean') &&
+      (typeof item.after === 'string' || typeof item.after === 'boolean')
+    )
+      return [{ field: item.field, kind: 'value', before: item.before, after: item.after }];
+    if (item.kind === 'list' && item.field === 'eventTypes')
+      return [
+        { field: 'eventTypes', kind: 'list', added: strings(item.added), removed: strings(item.removed) },
+      ];
+    return [];
+  });
+}
+
 /** Narrow one row. A malformed row is an error, never silently dropped (F225). */
 export function parseAuditEvent(value: unknown): AuditEvent {
   if (
@@ -96,6 +152,8 @@ export function parseAuditEvent(value: unknown): AuditEvent {
     outcome: value.outcome,
     actor: parseActor(value.actor),
     summary: parseSummary(value.summary),
+    correlationId: typeof value.correlationId === 'string' ? value.correlationId : null,
+    changes: parseChanges(value.changes),
   };
 }
 
@@ -103,6 +161,10 @@ function query(orgId: string, filters: AuditFilters, cursor: string | null): str
   const params = new URLSearchParams({ org: orgId });
   if (filters.action) params.set('action', filters.action);
   if (filters.outcome) params.set('outcome', filters.outcome);
+  if (filters.actor) params.set('actor', filters.actor);
+  if (filters.target) params.set('target', filters.target);
+  if (filters.targetType) params.set('targetType', filters.targetType);
+  if (filters.correlationId) params.set('correlationId', filters.correlationId);
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   if (cursor) params.set('cursor', cursor);
@@ -116,13 +178,17 @@ export const auditApi = {
       !isRecord(body) ||
       !Array.isArray(body.events) ||
       (body.nextCursor !== null && typeof body.nextCursor !== 'string') ||
-      typeof body.retentionDays !== 'number'
+      typeof body.retentionDays !== 'number' ||
+      (body.total !== null && body.total !== undefined && typeof body.total !== 'number')
     )
       throw bad('audit list');
     return {
       events: body.events.map(parseAuditEvent),
       nextCursor: body.nextCursor,
       retentionDays: body.retentionDays,
+      total: typeof body.total === 'number' ? body.total : null,
+      totalCapped: body.totalCapped === true,
+      totalSince: typeof body.totalSince === 'string' ? `${body.totalSince.replace(' ', 'T')}Z` : null,
     };
   },
 };

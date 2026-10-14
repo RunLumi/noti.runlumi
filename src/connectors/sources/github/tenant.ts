@@ -18,8 +18,8 @@ export type TenantResolution =
   | { kind: 'ok'; organizationId: string; installationId: string }
   | { kind: 'no-installation' }
   | { kind: 'app-mismatch' }
-  | { kind: 'unknown-installation' }
-  | { kind: 'not-active' };
+  | { kind: 'unknown-installation'; installationId: string }
+  | { kind: 'not-active'; organizationId: string; installationId: string };
 
 /** Pure part of tenant resolution: validate the payload's installation block. */
 export function readInstallationBlock(
@@ -59,8 +59,9 @@ export async function resolveTenant(
     .bind(block.installationId, appId)
     .first<InstallationRow>();
 
-  if (!row) return { kind: 'unknown-installation' };
-  if (row.status !== 'active') return { kind: 'not-active' };
+  if (!row) return { kind: 'unknown-installation', installationId: block.installationId };
+  if (row.status !== 'active')
+    return { kind: 'not-active', organizationId: row.organization_id, installationId: block.installationId };
   return { kind: 'ok', organizationId: row.organization_id, installationId: block.installationId };
 }
 

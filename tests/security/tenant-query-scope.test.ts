@@ -509,6 +509,13 @@ const ALLOWLIST: readonly Allowed[] = [
   },
   {
     file: 'src/pipeline/retention.ts',
+    includes: 'DELETE FROM ingress_usage WHERE rowid IN ( SELECT rowid FROM ingress_usage WHERE day < ?1',
+    category: 'retention',
+    reason:
+      'PURGE_INGRESS_USAGE_SQL: usage day rows past their retention, for every tenant alike (counts only).',
+  },
+  {
+    file: 'src/pipeline/retention.ts',
     includes:
       "DELETE FROM destination_health WHERE rowid IN ( SELECT rowid FROM destination_health WHERE state='closed' AND updated_at < ?1",
     category: 'retention',

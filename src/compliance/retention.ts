@@ -23,6 +23,7 @@ import { LEGACY_OLD_TABLES } from '../pipeline/purge';
 import { FAILED_RETENTION_MS, HELD_RETENTION_MS, OPEN_FAILURE_RETENTION_MS } from '../routing/noise-store';
 import { ROUTING_RETENTION_MS } from '../routing/provenance';
 import { JOB_RUNS_RETENTION_MS } from '../observability/job-runs';
+import { INGRESS_USAGE_RETENTION_DAYS } from '../security/ingress-usage';
 import { RATE_LIMIT_RETENTION_MS } from '../security/rate-limit';
 
 export const OPERATOR_TO_DECIDE = 'to be decided by the operator';
@@ -628,6 +629,28 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
       ms: HEALTH_RETENTION_MS,
       basis: 'HEALTH_RETENTION_MS (src/delivery/health.ts)',
       note: 'Only rows whose breaker is closed and that have been quiet for this long; an open breaker is state, not garbage.',
+    },
+    deletion: [
+      { kind: 'cron_job', job: 'retention_purge' },
+      { kind: 'workspace_purge', route: 'tenant_tables' },
+    ],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    ...placeholders,
+  },
+  {
+    id: 'ingress_usage',
+    table: 'ingress_usage',
+    category: 'delivery_metadata',
+    personalData: 'none',
+    dataHeld:
+      'Per workspace, UTC day and source kind: how many inbound events were accepted, were duplicates, or were answered with the flood limit. Counts only.',
+    purpose:
+      'Usage accounting, kept apart from the abuse counters. Best effort: it can under-count, and it is not a billing meter.',
+    retention: {
+      kind: 'fixed',
+      ms: INGRESS_USAGE_RETENTION_DAYS * DAY_MS,
+      basis: 'INGRESS_USAGE_RETENTION_DAYS (src/security/ingress-usage.ts)',
     },
     deletion: [
       { kind: 'cron_job', job: 'retention_purge' },

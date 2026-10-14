@@ -23,6 +23,7 @@ export const AUDIT_ACTIONS = [
   'github.installation.bind_refused',
   'github.installation.lifecycle',
   'github.repository.out_of_scope',
+  'github.webhook.refused',
   'workspace.export',
   'workspace.deletion.request',
   'workspace.deletion.cancel',

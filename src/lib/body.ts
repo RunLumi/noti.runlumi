@@ -59,3 +59,8 @@ export async function readBodyCapped(
   }
   return { ok: true, bytes };
 }
+
+/** `application/json`, with or without parameters (`; charset=utf-8`). Nothing else is JSON for ingress (F50: 415). */
+export function isJsonContentType(contentType: string | null | undefined): boolean {
+  return /^application\/json\s*(;|$)/i.test(contentType ?? '');
+}

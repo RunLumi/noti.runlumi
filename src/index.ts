@@ -38,6 +38,7 @@ import { purgeRoutingDecisions } from './routing/provenance';
 import { purgeNoiseRecords, releaseHeldEvents } from './pipeline/noise-release';
 import { sweepStaleClaims } from './pipeline/sweep';
 import { correlation } from './platform/correlation';
+import { ingressErrorBodies } from './platform/ingress-errors';
 import { bootReport } from './platform/config';
 import { log } from './platform/log';
 import { requireSameOrigin } from './security/csrf';
@@ -47,6 +48,7 @@ import { RETRY_AFTER_SECONDS, inMaintenance, maintenance } from './platform/main
 export const app = new Hono<{ Bindings: Bindings }>();
 
 app.use('*', correlation);
+app.use('/webhooks/*', ingressErrorBodies);
 app.use('*', securityHeaders);
 app.use('*', maintenance);
 app.use('/api/*', requireSameOrigin);
@@ -318,6 +320,7 @@ async function purgeRetention(env: Bindings): Promise<JobReport> {
       outbox: retention.outbox,
       audit: retention.audit,
       job_runs: retention.jobRuns,
+      ingress_usage: retention.ingressUsage,
     },
   };
 }

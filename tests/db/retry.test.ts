@@ -220,7 +220,9 @@ describe('ingress write retry (the whole batch, never half)', () => {
     const src = await setupSource();
     const flaky = flakyBatch(1, true);
     const res = await ingest(src);
-    expect(res.status).toBe(202);
+    // The first attempt committed before the connection dropped, so the retry finds the event already
+    // accepted: an exact duplicate is 200 (F50), with exactly one delivery and one outbox row.
+    expect(res.status).toBe(200);
     expect(flaky.attempts()).toBe(2);
     expect(rows('deliveries')).toBe(1);
     expect(rows('outbox')).toBe(1);
