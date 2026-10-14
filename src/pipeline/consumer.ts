@@ -206,12 +206,15 @@ async function attemptDelivery(
   if (shown.unmapped) {
     // F230: a provider reply no mapping covers is a countable event of its own, so a provider
     // changing its error shapes shows up as a rate rather than a scatter of generic failures.
-    // Kind and status CLASS only: never the reply body, the status text or the webhook URL.
+    // Kind, attempt, numeric status and status class only: never the reply body, the status text or the webhook URL.
     log('warn', 'unmapped_provider_response', {
       delivery_id: d.id,
       workspace_id: d.organizationId,
       integration_id: d.integrationId,
       destination_kind: config.kind,
+      attempt,
+      // The numeric HTTP status is not a secret and is what tells an operator which reply to map.
+      provider_status: seen.res?.status ?? null,
       status_class: report.statusClass,
     });
   }

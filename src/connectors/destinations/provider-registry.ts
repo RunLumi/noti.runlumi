@@ -5,14 +5,17 @@ import type { DestinationKind } from './types';
  * normal PR with a citation; removing one is a breaking change (existing destinations start
  * failing `destination_url_rejected`); a host is never widened silently when a provider moves.
  *
- * Each entry carries the provider documentation that justifies it and the date a human read
- * that documentation. `tests/destinations/provider-registry.test.ts` fails the build when
- * `verifiedOn` is older than {@link REGISTRY_MAX_AGE_DAYS}. The fix is to re-read the page and
- * correct the entry, then bump the date; never to bump the date alone.
+ * Each entry carries the provider documentation that justifies it and a `verifiedOn` date.
+ * Staleness is reported (not enforced in the pull-request check) once `verifiedOn` is older than
+ * {@link REGISTRY_MAX_AGE_DAYS}: see `npm run check:stale` and the scheduled workflow
+ * `.github/workflows/registry-staleness.yml`. The fix is to re-read the page and correct the
+ * entry, then bump the date; never to bump the date alone.
  *
- * `verifiedOn` records the day the destination reference
- * (`docs/DESTINATION_API_REFERENCE.md`, "Research date: 2026-10-13") was written from the
- * provider pages in `docsUrl`. Anything that reference marks UNVERIFIED is repeated in `caveat`.
+ * ATTESTATION: `verifiedOn` is NOT a record that anyone re-read `docsUrl`. For every entry today
+ * it is the research date of `docs/DESTINATION_API_REFERENCE.md` (2026-10-13), which cites those
+ * pages; the pages themselves were not re-read when this registry was written. A person who
+ * re-reads a page and updates the date is making the attestation, and should say so in the PR.
+ * Anything that reference marks UNVERIFIED is repeated in `caveat`.
  *
  * The generic webhook destination has no entry on purpose: the customer chooses the host, so
  * it is governed by a shape policy (`url-policy.ts`) rather than a list.
@@ -27,8 +30,10 @@ export interface WildcardSubdomain {
 
 export interface AllowedDestination {
   readonly kind: Exclude<DestinationKind, 'generic_webhook'>;
-  /** Exact, lowercase hostnames. Matching is exact: never `endsWith`. */
+  /** Exact, lowercase hostnames. Matching is exact string equality. */
   readonly hosts: readonly string[];
+  /** Optional short label per host (Lark: the regional deployment). Keys must be in `hosts`. */
+  readonly hostLabels?: Readonly<Record<string, string>>;
   /** Required path prefixes (each starts and ends with `/`); empty only with `opaquePathReason`. */
   readonly pathPrefixes: readonly string[];
   readonly opaquePathReason?: string;
@@ -74,6 +79,7 @@ export const ALLOWED_DESTINATIONS: readonly AllowedDestination[] = [
   {
     kind: 'lark',
     hosts: ['open.larksuite.com', 'open.feishu.cn'],
+    hostLabels: { 'open.larksuite.com': 'larksuite', 'open.feishu.cn': 'feishu' },
     pathPrefixes: ['/open-apis/bot/v2/hook/'],
     docsUrl: 'https://open.larksuite.com/document/client-docs/bot-v3/add-custom-bot',
     verifiedOn: '2026-10-13',
@@ -95,6 +101,12 @@ const BY_KIND: ReadonlyMap<DestinationKind, AllowedDestination> = new Map(
 
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
+/**
+ * A well-formed subdomain of a declared wildcard suffix: the part before `.suffix` must be one
+ * or more valid DNS labels. The suffix is compared with a dot boundary (`'.' + suffix`), so
+ * `evillogic.azure.com` and `logic.azure.com` itself do not match; a bare `endsWith(suffix)`
+ * would accept the first.
+ */
 function isSubdomainOf(hostname: string, suffix: string): boolean {
   if (!hostname.endsWith('.' + suffix)) return false;
   const labels = hostname.slice(0, -(suffix.length + 1)).split('.');
@@ -118,6 +130,15 @@ export function isAllowedHost(kind: DestinationKind, hostname: string): boolean 
   if (!entry || hostname === '') return false;
   if (entry.hosts.includes(hostname)) return true;
   return (entry.wildcardSubdomains ?? []).some((w) => isSubdomainOf(hostname, w.suffix));
+}
+
+/** The label registered for a host (for example the Lark deployment), if any. */
+export function hostLabelOf(
+  kind: Exclude<DestinationKind, 'generic_webhook'>,
+  hostname: string,
+): string | undefined {
+  const labels = registryEntryFor(kind).hostLabels;
+  return labels && Object.prototype.hasOwnProperty.call(labels, hostname) ? labels[hostname] : undefined;
 }
 
 /** Whole days from `verifiedOn` (UTC midnight) to `now`. Negative when the date is in the future. */

@@ -1,4 +1,4 @@
-import { isAllowedHost, registryEntryFor } from './provider-registry';
+import { hostLabelOf, isAllowedHost, registryEntryFor } from './provider-registry';
 import type { DestinationKind } from './types';
 
 /**
@@ -41,13 +41,6 @@ interface HostRule {
   /** A host rule that needs a more specific rejection than `host`. */
   readonly hostRejection?: (hostname: string, options: UrlPolicyOptions) => UrlRejectionRule | undefined;
 }
-
-// A Map, not an object literal: `'constructor' in {}` is true, and `constructor` is a valid
-// single-label hostname.
-const LARK_HOSTS: ReadonlyMap<string, LarkDomain> = new Map([
-  ['open.larksuite.com', 'larksuite'],
-  ['open.feishu.cn', 'feishu'],
-]);
 
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
@@ -268,5 +261,6 @@ export function checkDestinationUrl(
 
 /** Which Lark deployment a validated Lark URL belongs to. The two are not interchangeable. */
 export function larkDomainOf(url: URL): LarkDomain | undefined {
-  return LARK_HOSTS.get(url.hostname);
+  const label = hostLabelOf('lark', url.hostname);
+  return label === 'larksuite' || label === 'feishu' ? label : undefined;
 }

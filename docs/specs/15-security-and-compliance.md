@@ -73,7 +73,7 @@ adversary classes imply, and it is not published to customers.
 
 ## F228 — Egress policy is ours, not the platform's
 
-**Priority** P0 · **Status** ✅ one send path `sendRequest` in `src/connectors/destinations/send.ts` re-checks the URL policy, uses `redirect: 'manual'` with 3xx classified `destination_redirected`, timeout and bounded body (`tests/destinations/conformance.test.ts`, `tests/pipeline/destinations.test.ts`, ADR 0006, AR-2 in `docs/THREAT_MODEL.md`); the static test that only `send.ts` and two listed control-plane files make outbound requests (`tests/security/egress.test.ts`, ADR 0026) · **Fixes** part of D9
+**Priority** P0 · **Status** 🟡 one send path `sendRequest` in `src/connectors/destinations/send.ts` re-checks the URL policy, uses `redirect: 'manual'` with 3xx classified `destination_redirected`, timeout and bounded body (`tests/destinations/conformance.test.ts`, `tests/pipeline/destinations.test.ts`, ADR 0006, AR-2 in `docs/THREAT_MODEL.md`); an AST regression guard (not a proof: aliasing is not followed) that only `send.ts` and two listed control-plane files make outbound-capable calls, with their call sites pinned (`tests/security/egress.test.ts`, ADR 0026); not built: proof that no other path exists, and the credential-host binding test (`credential_is_never_sent_to_a_host_other_than_its_own`) · **Fixes** part of D9
 
 **Story** As a security engineer, I want every outbound request to pass through one policy
 function in our code, so that we never assume Cloudflare is filtering egress when it is not.
@@ -146,7 +146,7 @@ never a reason to weaken the application-layer check.
 
 ## F229 — Allowed provider domains, and how that list is maintained
 
-**Priority** P0 · **Status** 🟡 per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); typed registry with `docsUrl`, `verifiedOn`, a 180-day staleness test and a written reason for the Teams wildcard (`src/connectors/destinations/provider-registry.ts`, `tests/destinations/provider-registry.test.ts`, ADR 0026); not built: reconnect prompt when a host is removed (F98), a CI-visible dated `verifiedOn` review that a human, not this change, performs against the live docs · **Fixes** part of D9
+**Priority** P0 · **Status** 🟡 per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); typed registry with `docsUrl`, `verifiedOn`, a weekly 180-day staleness check (`npm run check:stale`, not in the PR check) and a written reason for the Teams wildcard (`src/connectors/destinations/provider-registry.ts`, `tests/destinations/provider-registry.test.ts`, ADR 0026); not built: reconnect prompt when a host is removed (F98), a CI-visible dated `verifiedOn` review that a human, not this change, performs against the live docs · **Fixes** part of D9
 
 **Story** As an operator, I want one reviewable list of the exact hosts we will send to, so that
 adding a destination is a reviewed change with a cited source rather than a regex edit.

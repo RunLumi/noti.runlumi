@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ALLOWED_DESTINATIONS,
@@ -11,8 +13,7 @@ import { DESTINATION_KINDS } from '../../src/connectors/destinations/types';
 
 /**
  * F229: the allowlist is a typed registry with provenance (a docs URL and the date a human
- * read it) and expiry. The staleness test below is deliberately annoying: it fires when
- * nobody has re-read a provider's documentation in 180 days, and the fix is to re-read it.
+ * read it) and expiry. Staleness is checked weekly, outside this file (tests/stale/).
  */
 describe('provider registry (F229)', () => {
   it('has an entry for every destination kind except the customer-chosen one', () => {
@@ -31,15 +32,14 @@ describe('provider registry (F229)', () => {
     }
   });
 
-  it('no_allowlist_entry_is_older_than_180_days', () => {
+  // Staleness (older than 180 days) is deliberately NOT asserted here: a date-driven failure
+  // would break every pull request at once. It lives in tests/stale/ and runs weekly via
+  // `npm run check:stale` (.github/workflows/registry-staleness.yml).
+  it('the staleness limit is 180 days and the weekly check exists', () => {
     expect(REGISTRY_MAX_AGE_DAYS).toBe(180);
-    const stale = ALLOWED_DESTINATIONS.filter(
-      (e) => daysSinceVerified(e, new Date()) > REGISTRY_MAX_AGE_DAYS,
-    );
-    expect(
-      stale.map((e) => e.kind),
-      'Re-read the provider documentation, fix the entry if it moved, then update verifiedOn',
-    ).toEqual([]);
+    const wf = readFileSync(join(process.cwd(), '.github/workflows/registry-staleness.yml'), 'utf8');
+    expect(wf).toContain('npm run check:stale');
+    expect(wf).toMatch(/schedule:/);
   });
 
   it('staleness is measured, not assumed (a clock past the limit fails)', () => {
@@ -121,6 +121,23 @@ describe('provider registry (F229)', () => {
     const lark = registryEntryFor('lark');
     expect([...lark.hosts].sort()).toEqual(['open.feishu.cn', 'open.larksuite.com']);
     for (const h of lark.hosts) expect(larkDomainOf(new URL(`https://${h}/`))).toBeDefined();
+  });
+
+  it('Lark host labels and hosts agree in both directions (single source)', () => {
+    const lark = registryEntryFor('lark');
+    const labels = lark.hostLabels ?? {};
+    for (const h of lark.hosts) expect(labels[h], `${h} has no label`).toBeDefined();
+    for (const h of Object.keys(labels)) expect(lark.hosts, `${h} is labelled but not a host`).toContain(h);
+    expect(larkDomainOf(new URL('https://open.larksuite.com/'))).toBe('larksuite');
+    expect(larkDomainOf(new URL('https://open.feishu.cn/'))).toBe('feishu');
+    expect(larkDomainOf(new URL('https://open.larksuite.com.evil.com/'))).toBeUndefined();
+    expect(larkDomainOf(new URL('https://constructor/'))).toBeUndefined();
+  });
+
+  it('the registry states that verifiedOn is not a re-read attestation', () => {
+    const src = readFileSync(join(process.cwd(), 'src/connectors/destinations/provider-registry.ts'), 'utf8');
+    expect(src).toContain('ATTESTATION');
+    expect(src).toContain('NOT a record that anyone re-read');
   });
 
   it('a host the registry does not list is rejected, never widened', () => {

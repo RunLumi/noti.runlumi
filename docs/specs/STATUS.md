@@ -14,8 +14,8 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 37 | 155 | 49 | 4 | 17 | 262 |
-| P0 | 33 | 106 | 8 | 3 | 8 | 158 |
+| All features | 36 | 156 | 49 | 4 | 17 | 262 |
+| P0 | 32 | 107 | 8 | 3 | 8 | 158 |
 | P1 | 4 | 43 | 23 | 0 | 2 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
@@ -36,7 +36,7 @@
 | [12-delivery-reliability.md](12-delivery-reliability.md) | 7 | 15 | 0 | 0 | 0 | 22 |
 | [13-observability.md](13-observability.md) | 0 | 10 | 4 | 0 | 0 | 14 |
 | [14-dashboard-and-ux.md](14-dashboard-and-ux.md) | 0 | 18 | 3 | 1 | 0 | 22 |
-| [15-security-and-compliance.md](15-security-and-compliance.md) | 4 | 11 | 1 | 0 | 0 | 16 |
+| [15-security-and-compliance.md](15-security-and-compliance.md) | 3 | 12 | 1 | 0 | 0 | 16 |
 | [16-ai-and-roadmap.md](16-ai-and-roadmap.md) | 0 | 3 | 5 | 1 | 11 | 20 |
 
 ## Features
@@ -270,8 +270,8 @@
 | F225 | Loading, skeleton, empty and error states | [14](14-dashboard-and-ux.md) | P0 | 🟡 | per-page aria-busy skeleton cards and loading, empty and error states on integrations, activity, audit, sources and settings (e.g. `web/src/integrations/IntegrationsPage.tsx`, `web/src/deliveries/DeliveryLogPage.tsx`); not built: … |
 | F226 | Usability test plan | [14](14-dashboard-and-ux.md) | P0 | ⛔ | gate not run: needs ten recruited participants and a real Slack and GitHub path to test against, and the preset, wizard and destination screens (F210, F211, F212, F216) are unfinished; no study plan artifact, consent form or … |
 | F227 | Threat model | [15](15-security-and-compliance.md) | P0 | 🟡 | `docs/THREAT_MODEL.md` has assets, adversaries, trust boundaries, STRIDE per entry point and a not-defended list; not built: the CI check that every control ID referenced exists in `docs/specs/`; `docs/SECURITY.md` was not … |
-| F228 | Egress policy is ours, not the platform's | [15](15-security-and-compliance.md) | P0 | ✅ | one send path `sendRequest` in `src/connectors/destinations/send.ts` re-checks the URL policy, uses `redirect: 'manual'` with 3xx classified `destination_redirected`, timeout and bounded body … |
-| F229 | Allowed provider domains, and how that list is maintained | [15](15-security-and-compliance.md) | P0 | 🟡 | per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); typed registry with `docsUrl`, `verifiedOn`, a … |
+| F228 | Egress policy is ours, not the platform's | [15](15-security-and-compliance.md) | P0 | 🟡 | one send path `sendRequest` in `src/connectors/destinations/send.ts` re-checks the URL policy, uses `redirect: 'manual'` with 3xx classified `destination_redirected`, timeout and bounded body … |
+| F229 | Allowed provider domains, and how that list is maintained | [15](15-security-and-compliance.md) | P0 | 🟡 | per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); typed registry with `docsUrl`, `verifiedOn`, a weekly … |
 | F230 | Send-time egress enforcement and what we cannot enforce | [15](15-security-and-compliance.md) | P0 | ✅ | URL policy re-run before every send with no network call on rejection (`src/connectors/destinations/send.ts`); IP literals, userinfo, port, fragment, path and length rejected (`tests/destinations/url-policy.test.ts`, … |
 | F231 | Rate limiting, quotas and abuse | [15](15-security-and-compliance.md) | P0 | 🟡 | D1 fixed-window limiter (`src/security/rate-limit.ts`) wired into GitHub ingress, generic and provider sources and the dashboard APIs with 429 plus Retry-After (`tests/security/rate-limit.test.ts`, … |
 | F232 | Authentication and authorization: what is decided elsewhere | [15](15-security-and-compliance.md) | P0 | ✅ | `docs/AUTHORIZATION.md` (pointer table, the four rules, generated roles-by-capability and route-by-guard tables); route registry `src/auth/route-policy.ts`; `tests/security/route-capability.test.ts` compares the routes the app … |

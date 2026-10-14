@@ -341,7 +341,13 @@ describe('failure classification onto the slice 4 retry policy', () => {
       .map((l) => JSON.parse(l) as Record<string, unknown>)
       .filter((l) => l.msg === 'unmapped_provider_response');
     expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ level: 'warn', destination_kind: 'slack', delivery_id: 'd1' });
+    expect(events[0]).toMatchObject({
+      level: 'warn',
+      destination_kind: 'slack',
+      delivery_id: 'd1',
+      attempt: 1,
+      provider_status: 418,
+    });
     // The reply body and the webhook URL are secrets or provider text: never in the event.
     expect(JSON.stringify(events[0])).not.toContain('teapot-secret-body');
     expect(JSON.stringify(events[0])).not.toContain('hooks.slack.com');

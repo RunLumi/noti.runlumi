@@ -1,15 +1,26 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+import {
+  callsTo,
+  enclosingFunction,
+  findOutbound,
+  parse,
+  startsWithConstant,
+  statementIndex,
+  topLevelStringConst,
+} from '../support/egress-ast';
 
 /**
- * F228 static proof: the Workers runtime has no egress filter, so the only thing standing
- * between a tenant-chosen URL and the network is our own code. Exactly one module may issue
- * an outbound request to a customer-configured URL (`send.ts`, after the URL policy), and the
- * small set of other outbound calls is listed here, each with a reason and a marker comment in
- * the file. Like the other static guards this is a heuristic over source text: it catches the
- * common regression, not a determined evasion, and each detector is exercised against samples.
+ * F228 regression guard: the Workers runtime has no egress filter, so the only thing between a
+ * tenant-chosen URL and the network is our own code. This test parses every file under `src/`
+ * with the TypeScript compiler and fails when outbound-capable code appears outside a short,
+ * reasoned list. It is a guard against regressions, NOT a proof that no other path exists: see
+ * the header of tests/support/egress-ast.ts for what it cannot follow (value aliasing). The
+ * allowed files are additionally pinned to an exact call-site count and shape, so widening one
+ * of them is a visible test change.
  */
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
@@ -21,71 +32,10 @@ function filesUnder(dir: string): string[] {
   });
 }
 
-/** Source text with comments and string/template contents blanked, so prose cannot trigger a match. */
-export function stripNonCode(source: string): string {
-  let out = '';
-  let i = 0;
-  while (i < source.length) {
-    const c = source[i] ?? '';
-    const next = source[i + 1] ?? '';
-    if (c === '/' && next === '/') {
-      while (i < source.length && source[i] !== '\n') i++;
-    } else if (c === '/' && next === '*') {
-      i += 2;
-      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
-      i += 2;
-    } else if (c === '"' || c === "'" || c === '`') {
-      const quote = c;
-      out += quote;
-      i++;
-      while (i < source.length && source[i] !== quote) {
-        if (source[i] === '\\') i++;
-        if (source[i] === '\n' && quote !== '`') break;
-        i++;
-      }
-      out += quote;
-      i++;
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
-}
+const rel = (f: string): string => relative(root, f).split('\\').join('/');
+const read = (path: string): string => readFileSync(join(root, path), 'utf8');
 
-const OUTBOUND_PATTERNS: readonly { readonly name: string; readonly re: RegExp }[] = [
-  // `fetch(...)`, `await fetch(...)`; not `x.fetch(` (a binding or handler method) and not a
-  // method definition at the start of a line (`fetch(request, env) {`).
-  { name: 'global fetch call', re: /(?<![.\w$])(?<!^\s*)fetch\s*\(/m },
-  { name: 'globalThis/self fetch', re: /\b(?:globalThis|self)\s*\.\s*fetch\b/ },
-  // `const f = fetch`, `?? fetch`, `: fetch,` references that would alias the global.
-  { name: 'fetch reference', re: /(?:=|\?\?|\|\||\(|,)\s*fetch\s*(?:[,;)\]}]|$)/m },
-  { name: 'XMLHttpRequest', re: /\bXMLHttpRequest\b/ },
-  { name: 'WebSocket client', re: /\bnew\s+WebSocket\s*\(/ },
-  { name: 'raw sockets', re: /cloudflare:sockets/ },
-  { name: 'node http client', re: /(?:from|require\()\s*['"](?:node:)?https?['"]/ },
-];
-
-export function outboundUses(source: string): string[] {
-  const code = stripNonCode(source);
-  const hits: string[] = [];
-  for (const { name, re } of OUTBOUND_PATTERNS) {
-    if (re.test(code)) hits.push(name);
-  }
-  // The string-blanking above removes `'cloudflare:sockets'` and import specifiers, so check
-  // module specifiers on the raw text with comments only removed.
-  const noComments = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  if (/cloudflare:sockets/.test(noComments) && !hits.includes('raw sockets')) hits.push('raw sockets');
-  if (/from\s*['"](?:node:)?https?['"]/.test(noComments) && !hits.includes('node http client')) {
-    hits.push('node http client');
-  }
-  return hits;
-}
-
-/**
- * Every file in `src/` that may make an outbound request. Adding a row is a security review:
- * say what the destination is and why it cannot be a customer-chosen URL.
- */
+/** Every file in `src/` that may make an outbound request, and why. Adding a row is a review. */
 const ALLOWED_OUTBOUND: Readonly<Record<string, string>> = {
   'src/connectors/destinations/send.ts':
     'THE destination send path: the URL policy runs in the same function, redirect is manual, body and time are bounded.',
@@ -95,79 +45,217 @@ const ALLOWED_OUTBOUND: Readonly<Record<string, string>> = {
     'Save-time DNS-over-HTTPS lookup against one fixed, hard-coded resolver (DOH_ENDPOINT); the customer controls only the query name, never the URL.',
 };
 
-/** The comment every allowed file carries, so a reader of the file sees the rule. */
 const MARKER = 'EGRESS-ALLOWED:';
-
 const srcFiles = filesUnder(join(root, 'src'));
-const rel = (f: string): string => relative(root, f);
 
-describe('egress detectors', () => {
+describe('egress detector: constructs that must be flagged', () => {
   it.each([
-    ['await fetch(url)', true],
-    ['const r = await fetch(url, { method: "POST" });', true],
-    ['const f = options.fetch ?? fetch;', true],
-    ['const send = (input, init) => fetch(input, init);', true],
-    ['globalThis.fetch(url)', true],
-    ['self.fetch(url)', true],
-    ['new XMLHttpRequest()', true],
-    ['const ws = new WebSocket(u)', true],
-    ["import { connect } from 'cloudflare:sockets';", true],
-    ["import https from 'node:https';", true],
-    ['assets.fetch(request)', false],
-    ['return app.fetch(request, env, ctx);', false],
-    ['  fetch(request: Request, env: Bindings): Response {', false],
-    ['readonly fetch?: Fetcher;', false],
-    ['// we call fetch(url) here', false],
-    ['/* fetch(url) */ const x = 1;', false],
-    ["const s = 'fetch(url)';", false],
-    ['const s = `fetch(${x})`;', false],
-    ['prefetch(url); refetch(url);', false],
-  ] as const)('%s -> %s', (source, flagged) => {
-    expect(outboundUses(source).length > 0).toBe(flagged);
+    ['await fetch(url)'],
+    ['const r = await fetch(url, { method: "POST" });'],
+    ['fetch(url).catch(() => undefined);'], // line-start statement call
+    ['ctx.waitUntil(\n  fetch(u)\n);'], // multi-line, line-start argument
+    ['fetch\n(u)'], // call split across lines
+    ['const s = `${fetch(u)}`;'], // inside a template interpolation
+    ['tag`x${fetch(u)}`;'], // tagged template with interpolation
+    ['const re = /[\'"]/; await fetch(u);'], // a regex literal with a quote before the call
+    ["const a = /'/g, b = 1; fetch(u);"],
+    ['const f = fetch;'],
+    ['const send = (i, n) => fetch(i, n);'],
+    ['const g = options.fetch ?? fetch;'],
+    ['fetch.bind(globalThis)(u)'],
+    ['const { fetch } = globalThis;'],
+    ['const { fetch: f } = globalThis;'],
+    ["globalThis['fetch'](u)"],
+    ["self['fetch'](u)"],
+    ['globalThis.fetch(u)'],
+    ['window.fetch(u)'],
+    ['self.fetch(u)'],
+    ['const f = x ? fetch : null;'],
+    ['export default { fetch };'], // handler shorthand: must not be the global
+    ['function run(f = fetch) { f(u); }'], // default parameter
+    ['const g = globalThis;'],
+    ['const k = "fe" + "tch"; globalThis[k](u);'],
+    ['new WebSocket(u)'],
+    ['new EventSource(u)'],
+    ['new XMLHttpRequest()'],
+    ['navigator.sendBeacon(u, d)'],
+    ["navigator['sendBeacon'](u)"],
+    ["import { connect } from 'cloudflare:sockets';"],
+    ["import https from 'node:https';"],
+    ["import net from 'net';"],
+    ["import axios from 'axios';"],
+    ["export * from 'node:http';"],
+    ["const m = await import('node:http');"],
+    ["const m = await import('cloudflare:sockets');"],
+    ['const m = await import(name);'],
+    ["const h = require('https');"],
+    ['eval("fetch(u)")'],
+    ['new Function("return fetch")()'],
+    ['x.somethingElse.fetch(u)'], // unrecognised receiver
+  ] as const)('flags %j', (source) => {
+    expect(findOutbound(source, 'src/x.ts').length).toBeGreaterThan(0);
   });
 });
 
-describe('only_one_module_constructs_destination_requests (F228)', () => {
-  it('src/ contains no outbound request outside the listed files', () => {
+describe('egress detector: constructs that must not be flagged', () => {
+  it.each([
+    ['// we call fetch(url) here'],
+    ['/* fetch(url) */ const x = 1;'],
+    ["const s = 'fetch(url)';"],
+    ['const s = `fetch(${x})`;'],
+    ['prefetch(url); refetch(url);'],
+    ['const o = { fetch: 1 };'],
+    ['interface Deps { readonly fetch?: Fetcher; }'],
+    ['type Fetch = typeof fetch;'],
+    ['export default { fetch(request: Request) { return new Response(); } };'],
+    ['class A { fetch() {} }'],
+    ['function f(fetch: Fn) {}'],
+    ['const { retry_after: seconds, global } = parsed; const x = { global: global === true };'],
+    ['const x = { window: 60 }; x.window;'],
+    ['globalThis.crypto.randomUUID();'],
+    ['const p = Promise.resolve();'],
+    ['env.ASSETS.fetch(request)'],
+    ['c.env.SERVICE.fetch(request)'],
+    ['await import("@tanstack/react-start/server-entry")'],
+    ["import { Hono } from 'hono';"],
+  ] as const)('does not flag %j', (source) => {
+    expect(findOutbound(source, 'src/x.ts')).toEqual([]);
+  });
+
+  it('exempts X.fetch only for an env binding or a per-file in-process receiver', () => {
+    expect(findOutbound('assets.fetch(r)', 'src/web/shell.ts')).toEqual([]);
+    expect(findOutbound('assets.fetch(r)', 'src/other.ts').length).toBe(1);
+    expect(findOutbound('app.fetch(r, env, ctx)', 'src/worker.ts')).toEqual([]);
+    expect(findOutbound('app.fetch(r, env, ctx)', 'src/other.ts').length).toBe(1);
+    expect(findOutbound('env.DB_PROXY.fetch(r)', 'src/other.ts')).toEqual([]);
+    expect(findOutbound('globalThis.fetch(r)', 'src/worker.ts').length).toBe(1);
+  });
+
+  it('reports the line of the finding', () => {
+    expect(findOutbound('const a = 1;\n\nfetch(u);', 'src/x.ts')).toEqual([
+      { kind: 'global fetch reference', line: 3 },
+    ]);
+  });
+});
+
+describe('only listed modules make outbound requests (F228 regression guard)', () => {
+  it('src/ contains no outbound-capable code outside the listed files', () => {
     const offenders = srcFiles
       .filter((f) => !(rel(f) in ALLOWED_OUTBOUND))
-      .map((f) => ({ file: rel(f), uses: outboundUses(readFileSync(f, 'utf8')) }))
-      .filter((o) => o.uses.length > 0);
+      .map((f) => ({ file: rel(f), findings: findOutbound(readFileSync(f, 'utf8'), rel(f)) }))
+      .filter((o) => o.findings.length > 0);
     expect(
       offenders,
-      'Outbound requests must go through src/connectors/destinations/send.ts (F228). If a new control-plane call is truly needed, list it in ALLOWED_OUTBOUND with a reason.',
+      'Outbound requests must go through src/connectors/destinations/send.ts (F228). If a new control-plane call is truly needed, list it in ALLOWED_OUTBOUND with a reason and pin its call sites below.',
     ).toEqual([]);
   });
 
   it('every listed file exists, still makes an outbound call, and carries the marker comment', () => {
     for (const file of Object.keys(ALLOWED_OUTBOUND)) {
-      const text = readFileSync(join(root, file), 'utf8');
+      const text = read(file);
       expect(
-        outboundUses(text).length,
-        `${file} no longer makes an outbound call: remove it from the list`,
+        findOutbound(text, file).length,
+        `${file} makes no outbound call: remove it from the list`,
       ).toBeGreaterThan(0);
       expect(text, `${file} must carry a ${MARKER} comment`).toContain(MARKER);
     }
   });
 
-  it('exactly one listed file takes a customer-configured URL', () => {
-    const sendsToCustomerUrls = Object.keys(ALLOWED_OUTBOUND).filter((f) => f.endsWith('/send.ts'));
-    expect(sendsToCustomerUrls).toEqual(['src/connectors/destinations/send.ts']);
+  it('pins the exact outbound constructs in each allowed file', () => {
+    // One reference to the global `fetch` per file (a default parameter or an injected default),
+    // and nothing else: no sockets, no WebSocket, no second reference.
+    for (const file of Object.keys(ALLOWED_OUTBOUND)) {
+      expect(
+        findOutbound(read(file), file).map((f) => f.kind),
+        file,
+      ).toEqual(['global fetch reference']);
+    }
+  });
+});
+
+describe('send.ts: the policy decision and the request are one function (F228)', () => {
+  const sf = parse(read('src/connectors/destinations/send.ts'), 'src/connectors/destinations/send.ts');
+  const fetchRef = (() => {
+    let found: ts.Identifier | undefined;
+    const visit = (n: ts.Node): void => {
+      if (
+        ts.isIdentifier(n) &&
+        n.text === 'fetch' &&
+        ts.isCallExpression(n.parent) &&
+        n.parent.expression === n
+      ) {
+        found = n;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return found;
+  })();
+
+  it('has exactly one reference to the global fetch, inside sendRequest', () => {
+    expect(fetchRef).toBeDefined();
+    expect(enclosingFunction(fetchRef as ts.Node)?.name?.text).toBe('sendRequest');
   });
 
-  it('the send path re-checks the URL policy before any request is built', () => {
-    const text = readFileSync(join(root, 'src/connectors/destinations/send.ts'), 'utf8');
-    const policy = text.indexOf('checkDestinationUrl(');
-    const request = text.search(/doFetch\(/);
-    expect(policy).toBeGreaterThan(-1);
-    expect(request).toBeGreaterThan(policy);
-    expect(text).toContain("redirect: 'manual'");
+  it('a rejecting policy check precedes, at the top level of the function, every use of the fetch', () => {
+    const fn = enclosingFunction(fetchRef as ts.Node);
+    if (!fn?.body) throw new Error('sendRequest not found');
+    const checks = fn.body.statements
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => ts.isIfStatement(s) && /checkDestinationUrl\(/.test(s.expression.getText(sf)));
+    expect(checks).toHaveLength(1);
+    const { s: guard, i: guardIndex } = checks[0] as { s: ts.IfStatement; i: number };
+    // `if (!check(...).ok) return ...;` dominates what follows: a failure returns.
+    expect(guard.expression.getText(sf)).toMatch(
+      /^!checkDestinationUrl\(request\.kind, request\.url, [^)]*\)\.ok$/,
+    );
+    const thenStatement = ts.isBlock(guard.thenStatement)
+      ? guard.thenStatement.statements.at(-1)
+      : guard.thenStatement;
+    expect(thenStatement && ts.isReturnStatement(thenStatement)).toBe(true);
+    expect(guardIndex).toBeLessThan(statementIndex(fn, fetchRef as ts.Node));
+    // The request goes to the URL that was checked: same expression, no reassignment between.
+    const calls = callsTo(sf, 'doFetch');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.arguments[0]?.getText(sf)).toBe('request.url');
+    expect(statementIndex(fn, calls[0] as ts.Node)).toBeGreaterThan(guardIndex);
+    expect(fn.body.getText(sf)).not.toMatch(/\brequest\s*=[^=]|request\.url\s*=[^=]/);
+    expect(fn.body.getText(sf)).toContain("redirect: 'manual'");
+  });
+});
+
+describe('dns-check.ts: the lookup URL is built from the constant (F228)', () => {
+  const file = 'src/connectors/destinations/dns-check.ts';
+  const sf = parse(read(file), file);
+
+  it('DOH_ENDPOINT is a fixed https string', () => {
+    expect(topLevelStringConst(sf, 'DOH_ENDPOINT')).toBe('https://cloudflare-dns.com/dns-query');
   });
 
-  it('the control-plane DNS lookup targets a constant, not a variable URL', () => {
-    const text = readFileSync(join(root, 'src/connectors/destinations/dns-check.ts'), 'utf8');
-    expect(text).toMatch(/export const DOH_ENDPOINT = 'https:\/\/cloudflare-dns\.com\/dns-query'/);
-    // Every fetcher call is built from DOH_ENDPOINT.
-    expect(text).toMatch(/fetcher\(`\$\{DOH_ENDPOINT\}\?name=/);
+  it('the single call through `fetcher` starts with ${DOH_ENDPOINT}', () => {
+    const calls = callsTo(sf, 'fetcher');
+    expect(calls).toHaveLength(1);
+    expect(startsWithConstant(calls[0]?.arguments[0], ['DOH_ENDPOINT'])).toBe('DOH_ENDPOINT');
+  });
+});
+
+describe('github/install.ts: every request URL starts from a GitHub constant (F228)', () => {
+  const file = 'src/connectors/sources/github/install.ts';
+  const sf = parse(read(file), file);
+
+  it('the host constants are fixed https strings', () => {
+    expect(topLevelStringConst(sf, 'GITHUB_API')).toBe('https://api.github.com');
+    expect(topLevelStringConst(sf, 'GITHUB_WEB')).toBe('https://github.com');
+  });
+
+  it('there are exactly three calls through `f`, each starting with a GitHub constant', () => {
+    const calls = callsTo(sf, 'f');
+    expect(calls).toHaveLength(3);
+    for (const c of calls) {
+      expect(
+        startsWithConstant(c.arguments[0], ['GITHUB_API', 'GITHUB_WEB']),
+        c.getText(sf).slice(0, 60),
+      ).toBeDefined();
+    }
   });
 });
