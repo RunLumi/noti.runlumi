@@ -307,7 +307,7 @@ workspace.get('/team', async (c) => {
 /**
  * Probes recorded per person per minute; a scan of organization ids must not fill the log.
  *
- * Decision (ADR 0030, REMAINING 1.23): NOT every cross-tenant probe is recorded, and the cap is what
+ * Decision (ADR 0028, REMAINING 1.23): NOT every cross-tenant probe is recorded, and the cap is what
  * keeps this log usable. Past it the response is unchanged and the loss is not silent: the FIRST
  * suppressed probe in a window writes one `probe_audit_capped` row (no workspace, so an operator reads
  * it from D1, never a tenant) and a warning goes to the log, each once per person per minute.

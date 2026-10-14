@@ -149,7 +149,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
       break;
     case 'unknown-installation':
       // Signed by GitHub but bound to no workspace: there is no tenant to show it to, so it is
-      // recorded as a bounded platform row, never as one row per event (ADR 0030, 1.23).
+      // recorded as a bounded platform row, never as one row per event (ADR 0028, 1.23).
       await recordWebhookProbe(c.env.DB, {
         organizationId: null,
         installationId: tenant.installationId,

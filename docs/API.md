@@ -473,7 +473,7 @@ remain `422` for every source integration.
 
 No session. `Content-Type: application/json`; body at most 1 MiB (GitLab) or 512 KiB (Stripe).
 Unknown, malformed and wrong-kind endpoints answer one identical `404 Not found`; a paused, revoked or disabled
-endpoint answers `410 Gone` (the sender is told to stop; it needs the unguessable endpoint id, ADR 0030).
+endpoint answers `410 Gone` (the sender is told to stop; it needs the unguessable endpoint id, ADR 0028).
 Every non-2xx body is JSON and carries `correlation_id`, the same value as the `x-request-id` header
 (never a signature, secret or payload).
 
@@ -721,7 +721,7 @@ request) and do not resolve a workspace, so `?org=` is ignored. Scope, decisions
 Query: `limit` (1 to 100, default 25), `cursor` (the opaque `nextCursor` of the previous page, keyed on
 `(created_at, id)`), `action` (one of the recorded action ids, `src/audit/actions.ts`), `outcome`
 (`success` or `denied`), `from` and `to` (`YYYY-MM-DD`, the whole UTC day, or an ISO instant), and, since
-ADR 0030:
+ADR 0028:
 
 - `actor`: a CURRENT member's user id, or `system` for events no person took. Anyone who is not a member of
   this workspace (an outsider whose probe was recorded here, a former member) matches nothing, so the filter
@@ -729,7 +729,7 @@ ADR 0030:
 - `target` and `targetType`: the id and kind (`integration`, `source`, `delivery`, `organization`,
   `capability`, `github_installation`, `repository`, `key`) of the thing the event is about.
 - `correlationId`: the request id of one request (4 to 64 characters), as quoted from an error body, the
-  `x-request-id` header or a delivery. Only changes made after migration 0030 carry one.
+  `x-request-id` header or a delivery. Only changes made after migration 0028 carry one.
 
 Anything invalid is `422 {"error":"Validation failed","fields":[...]}`. The first page (no `cursor`) also
 carries `total`, the number of events the filters match in this workspace, counted up to 10,000
@@ -768,7 +768,7 @@ What is **not** returned, deliberately: the actor's email or id, `ip`, `user_age
 `metadata_json` key that is not in the per-action allow-list (`SUMMARY_FIELDS` in
 `src/api/audit-view.ts`). Strings are cut to 120 characters, lists to 10 items, and control and bidi
 characters are removed. A webhook URL, a signing secret, a filter body or a name is never diffed: those
-rows say only that the field changed. See ADR 0019 and ADR 0030.
+rows say only that the field changed. See ADR 0019 and ADR 0028.
 
 **Fails closed.** A failed read, a failed limiter write, a failed count or a row that is not this
 workspace's answers `503 {error, correlation_id}` with no events and `Retry-After: 5`: never an empty or

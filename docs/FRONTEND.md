@@ -152,7 +152,7 @@ switcher was explicitly not built" note from slice Fix F is closed by this.
 | `audit/AuditPage.tsx`, `AuditFilters.tsx`, `AuditTable.tsx` | `/audit`, admin only: filters in the URL, table that stacks into cards, load more, empty/error/forbidden states, retention note, CSV of the loaded events |
 | `audit/api.ts`, `hooks.ts`, `search.ts`, `copy.ts`, `csv.ts` | Strict parsing, query keys `['audit', orgId, ...]`, URL validation, plain-language labels (`audit.action.<id>`, `audit.detail.<key>`), formula-safe CSV |
 
-**Read side (ADR 0030).** Filters in the URL: action, result, **actor** (a select of current members, from `GET /api/workspace/team`, plus
+**Read side (ADR 0028).** Filters in the URL: action, result, **actor** (a select of current members, from `GET /api/workspace/team`, plus
 "Noti (automatic)"), **target** (`target` and `targetType`), **request id** (`correlationId`) and dates. The two text fields apply on Enter
 or when left, not per keystroke; an id that cannot be valid shows an error in words (`aria-invalid`) and is not sent; `validateAuditSearch`
 drops anything that does not match the server's shapes. The first page shows a total ("N events match", "More than N events match" past

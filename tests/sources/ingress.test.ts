@@ -407,7 +407,7 @@ describe('unknown, malformed and disabled endpoints', () => {
     }
     for (const r of results) expect(r).toEqual(results[0]);
     expect(results[0]?.status).toBe(404);
-    // A disabled endpoint is 410 Gone (F50, ADR 0030), signed or not, and nothing is queued.
+    // A disabled endpoint is 410 Gone (F50, ADR 0028), signed or not, and nothing is queued.
     for (const opts of [{}, { sign: false }]) {
       const gone = await post(disabled, EVENT, opts);
       expect(gone.status).toBe(410);
@@ -449,7 +449,7 @@ describe('idempotency', () => {
         .get(),
     ).toMatchObject({ suppressed_reason: 'duplicate' });
     expect(count('SELECT hit_count AS n FROM event_dedup')).toBe(1);
-    // Accounting (F29, ADR 0030): one accepted event and one duplicate, for this workspace and source.
+    // Accounting (F29, ADR 0028): one accepted event and one duplicate, for this workspace and source.
     expect(
       h.db.raw
         .prepare(

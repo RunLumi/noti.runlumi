@@ -28,7 +28,7 @@ export const TENANT_TABLES = [
   'delivery_attempts',
   'event_dedup',
   'destination_health',
-  // Ingress usage accounting (0030). Cascades from the organization too; drained first to keep that small.
+  // Ingress usage accounting (0028). Cascades from the organization too; drained first to keep that small.
   'ingress_usage',
 ] as const;
 

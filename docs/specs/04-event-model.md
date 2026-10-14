@@ -436,7 +436,7 @@ variable (F12).
 
 ## F50 — Inbound response codes
 
-**Priority** P0 · **Status** ✅ 202 on durable accept (`tests/pipeline/delivery-path.test.ts`), 200 for an exact duplicate on every source, 401 bad signature, 400 malformed, 413 oversize, 415 for a non-JSON content type on every route including GitHub, 410 for a disabled endpoint, 429 plus Retry-After (full route on GitHub: `tests/github/ingress-codes.test.ts`), and our `correlation_id` in the body of every non-2xx webhook answer (`src/platform/ingress-errors.ts`, `tests/platform/ingress-errors.test.ts`), ADR 0030. A 3xx is never returned by an ingress route (no route redirects); a destination's 410 is a different thing (F179)
+**Priority** P0 · **Status** ✅ 202 on durable accept (`tests/pipeline/delivery-path.test.ts`), 200 for an exact duplicate on every source, 401 bad signature, 400 malformed, 413 oversize, 415 for a non-JSON content type on every route including GitHub, 410 for a disabled endpoint, 429 plus Retry-After (full route on GitHub: `tests/github/ingress-codes.test.ts`), and our `correlation_id` in the body of every non-2xx webhook answer (`src/platform/ingress-errors.ts`, `tests/platform/ingress-errors.test.ts`), ADR 0028. A 3xx is never returned by an ingress route (no route redirects); a destination's 410 is a different thing (F179)
 
 **Story** As an operator, I want our ack codes to match what providers expect, so that a
 correct receipt does not cause a provider to retry forever.

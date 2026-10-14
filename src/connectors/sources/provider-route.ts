@@ -125,7 +125,7 @@ export function providerWebhook(kind: ProviderKind) {
           .bind(endpointId, kind)
           .first<SourceRow>()
       : null;
-    // F50/F76: disabled is 410 Gone (see the generic route and ADR 0030); unknown and malformed stay 404.
+    // F50/F76: disabled is 410 Gone (see the generic route and ADR 0028); unknown and malformed stay 404.
     if (source && source.enabled !== 1) return c.text('Gone', 410);
     if (!source) {
       // Best-effort timing parity with a live endpoint, skipped for large bodies (ADR 0012).

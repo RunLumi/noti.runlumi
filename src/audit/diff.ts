@@ -1,5 +1,5 @@
 /**
- * What an "updated" audit row says changed (docs/specs/02-identity-tenancy.md F222, ADR 0030).
+ * What an "updated" audit row says changed (docs/specs/02-identity-tenancy.md F222, ADR 0028).
  *
  * Only a closed set of non-secret fields has a before value: whether it is on, which repository it
  * watches, which updates it subscribes to. A webhook URL, a signing secret, a filter body or a name is

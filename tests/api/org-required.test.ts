@@ -144,7 +144,7 @@ describe('recorded probes are rate limited per person', () => {
           .prepare(`SELECT COUNT(*) AS n FROM audit_events WHERE action='access.denied' AND ${where}`)
           .get() as { n: number }
       ).n;
-    // 20 recorded probes, then ONE marker that the rest were not recorded (ADR 0030): the loss is visible.
+    // 20 recorded probes, then ONE marker that the rest were not recorded (ADR 0028): the loss is visible.
     expect(count(`metadata_json LIKE '%not_a_member%'`)).toBe(20);
     expect(count(`metadata_json LIKE '%probe_audit_capped%'`)).toBe(1);
     expect(count('1=1')).toBe(21);

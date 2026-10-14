@@ -1,6 +1,6 @@
 -- =============================================================================
--- 0030 - Ingress usage accounting and the audit read side
---        (docs/specs/02-identity-tenancy.md F29, F28/F222; ADR 0030)
+-- 0028 - Ingress usage accounting and the audit read side
+--        (docs/specs/02-identity-tenancy.md F29, F28/F222; ADR 0028)
 -- =============================================================================
 -- 1. ingress_usage (F29): per workspace, per UTC day, per source kind, how many inbound events were
 --    accepted (a delivery or a held row committed), how many were duplicates of an event already

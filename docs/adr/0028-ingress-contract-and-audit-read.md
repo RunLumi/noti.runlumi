@@ -1,11 +1,11 @@
-# ADR 0030: Ingress response contract, usage accounting, refused-tenant audit, and the audit read side
+# ADR 0028: Ingress response contract, usage accounting, refused-tenant audit, and the audit read side
 
 Status: Accepted · Date: 2026-10-14 · Implements slices 1.17, 1.23, 1.32 (audit read side) and 2.4 of
 [`docs/specs/REMAINING.md`](../specs/REMAINING.md): F50, F59, F76 (410 only), F29, F222, F233 (the audit half) and F28 (request id).
 Specs 02, 04, 05, 14 and 15 are authoritative. Builds on [ADR 0012](0012-generic-source.md),
 [ADR 0019](0019-workspace-switcher-audit-log.md), [ADR 0024](0024-job-runner-alerting.md) (correlation ids) and
-[ADR 0026](0026-egress-guards.md). **One migration: `0030_ingress_usage_audit_read.sql`** (0028 and 0029 belong to other slices; the
-seal check wants a contiguous chain, so this file merges after them).
+[ADR 0026](0026-egress-guards.md). **One migration: `0028_ingress_usage_audit_read.sql`** (the next contiguous number on `main`; parallel
+slices also claim 0028, and whichever merges second renumbers on rebase).
 
 ## Context
 
@@ -54,7 +54,7 @@ records about a refusal, and how an admin reads that record back.
 
 ### 2. Usage accounting, and the 429 test (F29)
 
-1. **`ingress_usage`** (migration 0030): per workspace, UTC day and source kind, `events_accepted`, `events_duplicate`,
+1. **`ingress_usage`** (migration 0028): per workspace, UTC day and source kind, `events_accepted`, `events_duplicate`,
    `events_rate_limited`. It is accounting and is **separate from `api_rate_limits`** (the abuse counters, pruned hourly, keyed by
    installation or source): nothing in `src/security/ingress-usage.ts` reads or writes that table, and a test pins it (F29 asks for
    exactly this). The workspace comes from the verified installation or source row, never the payload; every statement is keyed by it.
@@ -140,7 +140,7 @@ Everything is in English and Vietnamese (`messages.audit.en.ts` / `.vi.ts`; Viet
   told to stop; a customer quoting `correlation_id` from a failed delivery can find the request, and the audit rows it wrote.
 - **Rolling back the Worker past this migration needs no schema change** (the old Worker ignores the table and the column), but it
   stops counting usage and stamping request ids. See the RUNBOOK migration table.
-- Apply `0030` **before** the new Worker: its queries name the column and the table.
+- Apply `0028` **before** the new Worker: its queries name the column and the table.
 - Behaviour change worth a line in a release note: 202 to 200 for repeats, 404 to 410 for disabled endpoints, plain-text webhook
   errors to JSON.
 

@@ -1,5 +1,5 @@
 /**
- * Ingress usage accounting (docs/specs/02-identity-tenancy.md F29, ADR 0030).
+ * Ingress usage accounting (docs/specs/02-identity-tenancy.md F29, ADR 0028).
  *
  * How many inbound events a workspace sent us, per UTC day and per source kind: accepted,
  * duplicate, and answered with the flood limit. It is accounting and is kept APART from the abuse

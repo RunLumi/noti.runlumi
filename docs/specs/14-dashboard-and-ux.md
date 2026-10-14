@@ -1871,7 +1871,7 @@ building a feature ("it's fine, it's a preview").
 
 ## F222 — Audit trail and change history
 
-**Priority** P0 · **Status** 🟡 slice 6e, ADR 0019: admin-only `/audit` over `GET /api/audit` with action, result and date filters, en/vi labels, allow-listed details, stated retention (`web/src/audit/`, `tests/api/audit.test.ts`); ADR 0030 adds the actor (current member or system), target and request-id filters in the URL, a total (capped at 10,000), "show events about this" and "from this request" links, a before/after diff for the few non-secret fields an update changes (`tests/api/audit-read.test.ts`, `web/src/audit/audit.test.tsx`), and fail-closed reads (503, never an empty or partial page); not built: non-admin actors, installation actor rendering, audit-failure-fails-action, export-before-delete · **Referenced by `05:F68` as the write trigger for
+**Priority** P0 · **Status** 🟡 slice 6e, ADR 0019: admin-only `/audit` over `GET /api/audit` with action, result and date filters, en/vi labels, allow-listed details, stated retention (`web/src/audit/`, `tests/api/audit.test.ts`); ADR 0028 adds the actor (current member or system), target and request-id filters in the URL, a total (capped at 10,000), "show events about this" and "from this request" links, a before/after diff for the few non-secret fields an update changes (`tests/api/audit-read.test.ts`, `web/src/audit/audit.test.tsx`), and fail-closed reads (503, never an empty or partial page); not built: non-admin actors, installation actor rendering, audit-failure-fails-action, export-before-delete · **Referenced by `05:F68` as the write trigger for
 installation lifecycle events**
 
 **Story** As an administrator, I want to see who changed what in my workspace, so that I can

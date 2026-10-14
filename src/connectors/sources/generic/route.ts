@@ -75,7 +75,7 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
         .first<SourceRow>()
     : null;
   // F50/F76: a disabled endpoint is 410 Gone, which tells a well-behaved sender to stop and disable its
-  // webhook. It needs the unguessable endpoint id, so it reveals nothing to someone without it (ADR 0030).
+  // webhook. It needs the unguessable endpoint id, so it reveals nothing to someone without it (ADR 0028).
   if (source && source.enabled !== 1) return c.text('Gone', 410);
   if (!source) {
     // Timing parity is best effort and only worth its CPU for ordinary bodies: above the

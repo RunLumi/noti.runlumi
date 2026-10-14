@@ -216,7 +216,7 @@ describe('update', () => {
     ).json<{ source: View }>();
     expect(renamed.source.name).toBe('Renamed');
     await call('PATCH', path, { as: 'alice', body: { enabled: false } });
-    // A disabled endpoint is 410 Gone: the sender is told to stop (F50, ADR 0030).
+    // A disabled endpoint is 410 Gone: the sender is told to stop (F50, ADR 0028).
     expect((await ingest(c)).status).toBe(410);
     await call('PATCH', path, { as: 'alice', body: { enabled: true } });
     expect((await ingest(c)).status).toBe(202);

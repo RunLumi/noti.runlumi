@@ -27,7 +27,7 @@ import { encodeCursor } from './delivery-view';
  * name only (never an email, never someone outside the workspace), and no IP address or
  * user agent. The route reads; it never changes the log.
  *
- * FAIL CLOSED (ADR 0030): this is evidence, so it is either complete and this workspace's or it is an
+ * FAIL CLOSED (ADR 0028): this is evidence, so it is either complete and this workspace's or it is an
  * error. A failed query, a failed limiter write or a row that is not this workspace's answers 503 with
  * no events: never an empty list, never a partial page. The dashboard shows that as an error, not as
  * "no events".

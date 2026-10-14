@@ -661,7 +661,7 @@ integrations.patch('/:id', async (c) => {
         ...(input.eventTypes ? { eventTypes: input.eventTypes } : {}),
         ...(input.sourceEventTypes ? { eventTypes: input.sourceEventTypes } : {}),
         ...(input.repo ? { repo: input.repo } : {}),
-        // Before values for the few non-secret fields that have one (F222, ADR 0030).
+        // Before values for the few non-secret fields that have one (F222, ADR 0028).
         ...diffMetadata(
           {
             enabled: existing.enabled === 1,

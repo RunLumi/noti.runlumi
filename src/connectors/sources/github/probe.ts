@@ -1,5 +1,5 @@
 /**
- * Audit of a signed GitHub event that no workspace can receive (docs/specs/02 F233, ADR 0030, 1.23):
+ * Audit of a signed GitHub event that no workspace can receive (docs/specs/02 F233, ADR 0028, 1.23):
  * an installation we have no row for, or one that is suspended or uninstalled.
  *
  * The response is unchanged by anything here (a 403, one body for every unroutable case), and a

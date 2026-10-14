@@ -221,7 +221,7 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
     describe('content type', () => {
       if (d.kind === 'github') {
         // GitHub can be configured to send application/x-www-form-urlencoded (`payload=<json>`). We read
-        // JSON only, so that configuration is refused up front with 415 (F50, ADR 0030) instead of failing
+        // JSON only, so that configuration is refused up front with 415 (F50, ADR 0028) instead of failing
         // later as an unparseable 400. Documented in spec 05 F59.
         it('a form-encoded delivery is refused (415) before anything is read and writes nothing', async () => {
           const rig = await createRig(d.kind, worker);
@@ -293,7 +293,7 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
 
     describe('tenant resolution answers once', () => {
       if (d.tenantResolution === 'endpoint') {
-        it('unknown and malformed endpoints are the same 404; a disabled one is 410 Gone (F50, ADR 0030)', async () => {
+        it('unknown and malformed endpoints are the same 404; a disabled one is 410 Gone (F50, ADR 0028)', async () => {
           const rig = await createRig(d.kind, worker);
           const body = valid(rig);
           const unknown = await rig.post(body, {
