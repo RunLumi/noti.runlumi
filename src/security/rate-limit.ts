@@ -43,6 +43,9 @@ export async function hit(
   };
 }
 
+/** Counters older than this are pruned by the `rate_limit_prune` cron job. */
+export const RATE_LIMIT_RETENTION_MS = 60 * 60 * 1000;
+
 /** Delete windows that ended before `olderThan`. Bounded so one cron tick stays cheap. */
 export async function pruneRateLimits(db: Db, olderThan: number, batch = 500): Promise<number> {
   const res = await db

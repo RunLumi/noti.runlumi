@@ -124,7 +124,7 @@ client-supplied role.
 - [ ] ⚠️ Email canonicalization is Better Auth's responsibility; verify explicitly rather
       than assuming (Trimmed/lower-cased comparison).
 - [ ] Email is on the F12 log denylist. `web/src/lib/api.ts` must never log it.
-- [ ] Account deletion path — see F30.
+- [x] Account deletion path: `DELETE /api/workspace/me` (slice S3, `docs/DSAR.md`). A sole admin is refused until another admin exists or the workspace is deleted; no step-up re-authentication (AR-41).
 
 **Security** — Better Auth does the hashing; we do not reimplement. `AGENTS.md`'s lean-
 dependency rule is deliberately traded here: hand-rolled session and password handling is
@@ -447,7 +447,7 @@ cannot exhaust our Worker quota.
 
 ## F30 — Workspace deletion and data export
 
-**Priority** P1 · **Status** ✅ two-phase workspace deletion, bounded resumable purge, credential-free export; admin only (PR #12, `src/pipeline/purge.ts`, `src/api/workspace-lifecycle.ts`, `tests/api/workspace-lifecycle.test.ts`)
+**Priority** P1 · **Status** ✅ two-phase deletion, bounded purge, credential-free export (PR #12); personal-account export and erasure added in slice S3 (`docs/DSAR.md`)
 
 **Acceptance**
 - [ ] ⚠️ `disableOrganizationDeletion: true` currently makes this **impossible**. Either

@@ -617,6 +617,17 @@ are limited to 120 per minute per user (`429` with `Retry-After`).
 
 While a deletion is pending, integration and source mutations and `POST /api/github/install` return `409`.
 
+## Your own data and account (any signed-in member)
+
+These act on the caller's own identity only (the id comes from the session, never from the
+request) and do not resolve a workspace, so `?org=` is ignored. Scope, decisions and limits are in
+[`DSAR.md`](DSAR.md).
+
+| Method and path | Result |
+| --- | --- |
+| `GET /api/workspace/me/data-export` | `200` JSON attachment, `format: "lumi-noti-account-export/v1"`, `credentialsIncluded: false`, `Cache-Control: no-store`. Contains the caller's user record, memberships, session metadata (no token), sign-in methods (provider and date only), passkey metadata (no keys), invitations they sent (no invitee address) and audit rows where they are the actor (IP address and user agent, no subject or metadata), at most 2,000 audit rows (`truncated` says if more exist). Limited to 5 per hour per user (`429` with `Retry-After`). Audited as `account.export`. |
+| `DELETE /api/workspace/me` | Body `{confirm: "<your account email>"}`, `Origin` and `application/json` required. `200 {deleted: true}` and `Clear-Site-Data: "cookies"`. `422` on a wrong confirmation. `409` with `blockers: [{workspaceId, workspaceName, otherMembers, action: "transfer_admin_role" \| "delete_workspace"}]` while the caller is the only admin of any workspace; nothing is changed. `429` after 5 attempts an hour. Deletes the user, sessions, sign-in methods, passkeys, memberships, invitations they sent and invitations addressed to their email. Never deletes a workspace or any other member's data. Audited as `account.delete` in each workspace the person left. |
+
 ## Audit log (admin)
 
 | Method and path | Capability | Result |

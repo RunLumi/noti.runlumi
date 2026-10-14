@@ -96,6 +96,8 @@ export const auditEn = {
   'audit.action.workspace.deletion.request': 'Workspace deletion requested',
   'audit.action.workspace.deletion.cancel': 'Workspace deletion cancelled',
   'audit.action.workspace.purged': 'Workspace data deleted',
+  'audit.action.account.export': 'Account data exported',
+  'audit.action.account.delete': 'A member deleted their account',
   'audit.action.unknown': 'Other event',
 
   'audit.subject.integration': 'Integration',

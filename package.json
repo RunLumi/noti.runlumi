@@ -23,6 +23,7 @@
     "check": "npm run format:check && npm run lint && npm run verify",
     "audit:gate": "node scripts/audit-gate.mjs",
     "docs:spec-status": "node scripts/spec-status.mjs",
+    "docs:retention": "node scripts/render-retention.mjs",
     "schema:test": "python3 scripts/test_auth_schema.py"
   },
   "dependencies": {

@@ -95,6 +95,8 @@ export const auditVi = {
   'audit.action.workspace.deletion.request': 'Đã yêu cầu xóa không gian làm việc',
   'audit.action.workspace.deletion.cancel': 'Đã hủy yêu cầu xóa không gian làm việc',
   'audit.action.workspace.purged': 'Đã xóa dữ liệu không gian làm việc',
+  'audit.action.account.export': 'Đã xuất dữ liệu tài khoản',
+  'audit.action.account.delete': 'Một thành viên đã xóa tài khoản của họ',
   'audit.action.unknown': 'Sự kiện khác',
 
   'audit.subject.integration': 'Tích hợp',

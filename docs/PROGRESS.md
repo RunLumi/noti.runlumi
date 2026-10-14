@@ -38,6 +38,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 10 | Additional sources and destinations, gated on demand evidence | F73–F90, F105–F120 | — | ⬜ | — |
 | 10a | Generic signed-webhook source: Standard Webhooks verification, sealed per-source secrets, sources API and dashboard page, routing to source integrations | F74, F75, F76, F77, F78, F79, F80 (each in part, see section) | — | 🟡 | this PR |
 | W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
+| S3 | Compliance: retention matrix (code-checked, generated `docs/DATA_RETENTION.md`), hourly purge of expired auth records, account data export and erasure, `security.txt`, subprocessor inventory, incident response skeleton | F237, F238, F242 (each in part) | — | 🟡 | this PR |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
@@ -941,6 +942,55 @@ resolution: 600 events per installation per minute, `429` with `Retry-After` bey
 Lifecycle events and pings return before it, so a revocation is never delayed. A limiter
 fault fails open and logs a redacted `rate_limit_error`. Covered by three tests in
 `tests/pipeline/delivery-path.test.ts`. AR-16 is reworded to the residual risk.
+
+## Slice S3 — compliance: retention, DSAR, disclosure (this PR)
+
+Real code plus honest documentation. No legal claims, certifications or audit evidence were
+written, because none exist.
+
+**What changed**
+
+- `src/compliance/retention.ts`: the retention matrix, one row per table or column family
+  (data, purpose, category, retention, removal mechanism, export position, legal-basis and role
+  fields set to "to be decided by the operator"). Every period is imported from the code that
+  enforces it. `tests/compliance/retention.test.ts` fails when a migration table has no row, when
+  a split table's columns are not each covered once, when a claimed cron job, workspace-purge route,
+  foreign-key cascade, customer delete or account erasure does not exist, when a tenant table is
+  neither purged nor a declared ledger, when the Worker vars drift, and when `docs/DATA_RETENTION.md`
+  differs from `renderRetentionDoc()` (`npm run docs:retention` rewrites it).
+- `src/pipeline/expired-records.ts` and the `expired_auth_purge` cron job: expired sessions,
+  verification records, GitHub install states (one day past expiry) and Better Auth rate-limit
+  rows were never deleted; they are now, hourly and bounded. Found by writing the matrix.
+- `src/api/account.ts`: `GET /api/workspace/me/data-export` and `DELETE /api/workspace/me`
+  (`docs/DSAR.md`). Audit actions `account.export` and `account.delete`, with en and vi labels.
+- `web/public/.well-known/security.txt` (RFC 9116), tested through `worker.fetch` and against
+  `SECURITY.md`.
+- `docs/SUBPROCESSORS.md`, `docs/INCIDENT_RESPONSE.md`, `docs/DSAR.md`; RUNBOOK operator procedure
+  and security.txt renewal; `docs/API.md`; threat model section 4.6b, AR-40 and AR-41; release gates;
+  spec 15 F237, F238, F242 statuses.
+- Small refactors so the matrix reads real constants: `src/auth/session-policy.ts`,
+  `RATE_LIMIT_RETENTION_MS`, and the purge table lists exported from `src/pipeline/purge.ts`.
+
+**Verified by**
+
+- `tests/api/account.test.ts`, `tests/pipeline/expired-records.test.ts`,
+  `tests/compliance/retention.test.ts`, `tests/web/security-txt.test.ts`, and
+  `npm run format && npm run check`. The account routes run the real Worker over the real
+  migrations on the Node SQLite D1 fake with the session faked by a header.
+
+**Not done**
+
+- Data processing agreement templates, legal review, the legal-basis and controller or processor
+  decisions, a privacy policy, notification-deadline decisions.
+- A penetration test, SOC 2, ISO 27001 or any audit: none exists and none is claimed.
+- Anything against real Cloudflare: D1 delete semantics, the assets layer serving
+  `/.well-known/security.txt` with the right content type, Time Travel, `Clear-Site-Data`.
+- Step-up re-authentication before erasure (AR-41); scrubbing audit IP and user agent on erasure
+  (AR-40, blocked by the append-only trigger); correction and restriction mechanisms.
+- Expired invitations and the retired `auth_*` tables are not purged; no per-workspace retention
+  setting; no staleness alerts on purge jobs; the workspace export omits notification content.
+- Rehearsal of the incident playbooks, a monitored security contact, response targets, an
+  automatic evidence hold, a sign-up kill switch.
 
 ## Slice 10a — generic signed-webhook source (this PR)
 

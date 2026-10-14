@@ -1,7 +1,7 @@
 # Release gates
 
-Living checklist. Last reconciled with [`PROGRESS.md`](PROGRESS.md) on 2026-10-13, after
-slice S. It supersedes the earlier "gates for PR #1" list; every item from that list is still
+Living checklist. Last reconciled with [`PROGRESS.md`](PROGRESS.md) on 2026-10-14, after
+slice S3 (compliance documentation). It supersedes the earlier "gates for PR #1" list; every item from that list is still
 here with its current status.
 
 Current state: **engineering alpha**. Do not describe anything as production-ready, secure or
@@ -49,16 +49,28 @@ needs a named owner, a written rationale and an entry in the register in
 | Dependency review on PRs | partly | Job present but `continue-on-error` until it has run green |
 | Dependabot | done | `.github/dependabot.yml` |
 | `SECURITY.md` disclosure policy | partly | Present. Private vulnerability reporting must be enabled in repository settings (not verified) |
+| `/.well-known/security.txt` (F242) | partly | `web/public/.well-known/security.txt` (RFC 9116: Contact is the GitHub private advisory form, Expires, Preferred-Languages, Policy, Canonical). A test drives it through `worker.fetch` and checks it against `SECURITY.md`. **Not verified:** that the deployed assets layer serves a `.well-known` path with `text/plain; charset=utf-8`; that private vulnerability reporting is on; that anyone watches it. The `Expires` date must be renewed (RUNBOOK "security.txt renewal") |
+| Retention matrix (F237) | partly | `src/compliance/retention.ts` is the single source; a test fails when a migration table is missing or a claimed removal mechanism does not exist; `docs/DATA_RETENTION.md` is generated and drift-tested. Hourly `expired_auth_purge` added for sessions, verification records, install states and auth rate-limit rows. **Open:** expired invitations and the retired `auth_*` tables are not purged; no per-workspace downward retention setting; no staleness alerts on the jobs (F190); never run against real D1 |
+| Data-subject access and erasure (F238) | partly | `GET /api/workspace/me/data-export`, `DELETE /api/workspace/me` (`docs/DSAR.md`), tested over the Node SQLite fake with a faked session. **Open:** no real-session or real-D1 test; no step-up before erasure (AR-41); audit rows keep actor id, IP and user agent (AR-40); no correction or restriction mechanism; deadlines and roles are the operator's |
+| Subprocessor and data-flow inventory | partly | `docs/SUBPROCESSORS.md`, derived from the code. Contracts, DPAs, regions and the public list are the operator's |
 | Threat model and risk register | done | `THREAT_MODEL.md` (own analysis, not an audit) |
 | Static guards (console, origin checks, config secrets, XSS sinks) | done | `tests/security/static-guards.test.ts` |
 | `npm audit signatures`, install-script review, OIDC deploy | not done | F239 |
 | Abuse alerting, audit coverage of unknown-installation 403s | not done | F231, F233 |
-| Incident runbooks, `security.txt` | partly | Availability and delivery-loss runbook exists (`RUNBOOK.md`, never rehearsed, several Cloudflare behaviours UNVERIFIED). Security incident response and `security.txt` are not done (F242) |
+| Incident runbooks | partly | Availability and delivery-loss runbook (`RUNBOOK.md`) and a security incident skeleton (`INCIDENT_RESPONSE.md`: severity classes, playbooks tied to the real rotation and revocation mechanisms, evidence handling). Neither has been rehearsed; no on-call, no monitored contact, no automatic evidence hold; response targets are unset; several Cloudflare behaviours UNVERIFIED (F242) |
 | Delivery SLIs, stall detection, retention (spec 13) | partly | `GET /api/observability/summary`, cron stall log line and bounded retention are tested against the Node SQLite fake only (ADR 0011). No paging, no `job_runs`, no ingress counter; nothing is measured against a real deployment, so no SLI may be published externally |
 | Assets layer with `html_handling: none` and `not_found_handling: none` serves only fingerprinted files and `/_shell.html`, and sends every other path to the Worker (ADR 0017) | not done | Checked in local workerd only. Verify on a staging deployment: `/signin`, `/x.js` (404 with the baseline headers, `no-store`) and `/_serverFn/x` all answer from the Worker |
 | `_headers` rules reach `/assets/*` on a real deployment (immutable cache, CSP, `nosniff`) | not done | Local workerd applies them; no deployed response has been inspected |
 | Live queue message and DLQ message processed through the Vite-built Worker entry (`src/worker.ts`) | not done | The bundle exports `fetch`, `scheduled` and `queue` (asserted by `verify:worker-bundle`) and both consumers are in the built config; no message has been consumed through this entry |
 | Production can never render through TanStack Start (ADR 0017 decision 5) | partly | Behavioural tests (`tests/web/worker.test.ts`) cover the Worker entry; not exercised against a real deployment. Start's server handler is also reachable only when the shell is absent, on a loopback host, with the exact build header |
+
+## 3b. Not done for compliance (spec 15 F237, F238, F242), stated so it is not assumed
+
+Data processing agreement templates; legal review of any document here; the legal-basis and
+controller or processor decisions (every matrix row says "to be decided by the operator"); a
+privacy policy; breach-notification decisions; a penetration test; SOC 2, ISO 27001 or any other
+certification or audit (none exists, none is claimed); audit evidence of any kind; a monitored
+security contact; rehearsals of the incident playbooks and of account erasure on real Cloudflare.
 
 ## 4. Known limitations
 

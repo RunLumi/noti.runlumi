@@ -26,7 +26,9 @@ import { detectStalls } from './observability/stall';
 import { purgeExpiredRecords } from './pipeline/retention';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { purgeDueWorkspace } from './pipeline/purge';
-import { pruneRateLimits } from './security/rate-limit';
+import { pruneRateLimits, RATE_LIMIT_RETENTION_MS } from './security/rate-limit';
+import { purgeExpiredAuthRecords } from './pipeline/expired-records';
+import account from './api/account';
 import { purgeRoutingDecisions } from './routing/provenance';
 import { purgeNoiseRecords, releaseHeldEvents } from './pipeline/noise-release';
 import { sweepStaleClaims } from './pipeline/sweep';
@@ -42,6 +44,7 @@ app.use('*', securityHeaders);
 app.use('/api/*', requireSameOrigin);
 
 app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
+app.route('/api/workspace/me', account);
 app.route('/api/workspace', workspace);
 app.route('/api/workspace', workspaceLifecycle);
 app.route('/api/integrations', integrations);
@@ -95,7 +98,7 @@ async function reconcileOutbox(env: Bindings): Promise<void> {
 /** Fixed-window counters older than an hour are dead weight; drain them in bounded rounds. */
 async function pruneRateLimitWindows(env: Bindings): Promise<void> {
   for (let i = 0; i < 5; i++) {
-    if ((await pruneRateLimits(env.DB, Date.now() - 60 * 60 * 1000, 1000)) < 1000) break;
+    if ((await pruneRateLimits(env.DB, Date.now() - RATE_LIMIT_RETENTION_MS, 1000)) < 1000) break;
   }
 }
 
@@ -119,6 +122,13 @@ async function releaseNoise(env: Bindings): Promise<void> {
 async function purgeNoiseState(env: Bindings): Promise<void> {
   const purged = await purgeNoiseRecords(env);
   if (purged.held + purged.openFailures > 0) log('info', 'noise_purged', { ...purged });
+}
+
+/** Expired sessions, one-time tokens, install states and auth rate-limit rows (F237); hourly, bounded. */
+async function purgeExpiredAuth(env: Bindings): Promise<void> {
+  const purged = await purgeExpiredAuthRecords(env.DB, Date.now());
+  const total = purged.sessions + purged.verifications + purged.authStates + purged.authRateLimits;
+  if (total > 0) log('info', 'expired_auth_records_purged', { ...purged });
 }
 
 async function purgeRetention(env: Bindings): Promise<void> {
@@ -148,6 +158,7 @@ export default {
       { name: 'retention_purge', run: () => purgeRetention(env) },
       { name: 'routing_decisions_purge', run: () => purgeRouting(env) },
       { name: 'noise_purge', run: () => purgeNoiseState(env) },
+      { name: 'expired_auth_purge', run: () => purgeExpiredAuth(env) },
     ]);
   },
 

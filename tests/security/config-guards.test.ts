@@ -71,7 +71,16 @@ describe('accepted-risk register (F241)', () => {
   const defined = new Set(
     [...read('docs/THREAT_MODEL.md').matchAll(/^\|\s*(AR-\d+)\s*\|/gm)].map((m) => m[1]),
   );
-  const docs = ['docs/SECURITY.md', 'docs/RELEASE_GATES.md', 'docs/THREAT_MODEL.md', 'SECURITY.md'];
+  const docs = [
+    'docs/SECURITY.md',
+    'docs/RELEASE_GATES.md',
+    'docs/THREAT_MODEL.md',
+    'docs/DSAR.md',
+    'docs/DATA_RETENTION.md',
+    'docs/SUBPROCESSORS.md',
+    'docs/INCIDENT_RESPONSE.md',
+    'SECURITY.md',
+  ];
 
   it('defines the registered risks', () => {
     expect(defined.size).toBeGreaterThanOrEqual(12);

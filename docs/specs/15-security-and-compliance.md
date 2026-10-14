@@ -658,7 +658,7 @@ passes through F12 before storage.
 
 ## F237 — Retention matrix and its enforcement
 
-**Priority** P0 · **Status** 🟡 age-based chunked, resumable, throttled purge of terminal deliveries (default 90 days) and audit events (default 365 days) from deployment vars (`src/pipeline/retention.ts`, `tests/pipeline/retention.test.ts`); not built: single retention-matrix doc, per-workspace downward setting and UI, staleness alert per job, doc-matches-default test; ledger is purged at 90 days, unlike the spec's workspace lifetime · **Fixes** D15 (the magic-number half)
+**Priority** P0 · **Status** 🟡 matrix, enforcement checks and generated doc built (slice S3, `docs/DATA_RETENTION.md`); not built: per-workspace downward retention, job staleness alerts (F190), payload retention rows that do not apply (the raw payload is never stored), expired-invitation purge · **Fixes** D15 (the magic-number half)
 
 **Story** As a customer, I want to know how long you keep each kind of my data and to be able to
 ask for it to be kept for less, so that retention is a setting rather than a surprise.
@@ -721,7 +721,7 @@ new store is added.
 
 ## F238 — Data-subject requests
 
-**Priority** P1 · **Status** 🟡 workspace-level export without credentials and two-phase deletion with bounded purge and dashboard screens (`src/api/workspace-lifecycle.ts`, `tests/api/workspace-lifecycle.test.ts`, PR #12); N3 is resolved so no longer blocked; not built: per-user access and erasure flows, account deletion, DSR rate-limit and audit tests, erasure-limits wording, legal review of roles and deadlines
+**Priority** P1 · **Status** 🟡 N3 is resolved (workspace deletion, slice W). Built in slice S3: signed-in access (`GET /api/workspace/me/data-export`) and account erasure (`DELETE /api/workspace/me`), with the decisions in `docs/DSAR.md`; operator procedure in `RUNBOOK.md`. Not done: legal basis, deadlines and roles (the operator's), correction and restriction mechanisms, a person-level search of notification content, step-up before erasure (AR-41), erasure of audit IP and user agent (AR-40), any test against real Cloudflare
 
 **Story** As a user, I want to see and delete my personal data, so that I can exercise the rights
 my jurisdiction gives me without emailing support.
@@ -943,7 +943,7 @@ stopped thinking about.
 
 ## F242 — Incident response and disclosure
 
-**Priority** P1 · **Status** 🟡 root `SECURITY.md` with GitHub private vulnerability reporting (no invented address) and scope; `docs/RUNBOOK.md` has severity levels, an incident record template and availability runbooks; not done: S1-S4 security runbooks, postmortem template, `security.txt`, evidence-preservation rule against retention purge; no incident exercise run
+**Priority** P1 · **Status** 🟡 root `SECURITY.md` (GitHub private vulnerability reporting, no invented address), `security.txt` (served, tested, deployed reachability unverified), `docs/INCIDENT_RESPONSE.md` skeleton with severity classes, playbooks and a postmortem template. Not done: rehearsal, a monitored contact, response targets, an evidence hold that blocks retention jobs, sign-up kill switch, notification-deadline decisions
 
 **Story** As a customer whose data or credentials were affected, I want a fast, honest and
 documented response, so that an incident costs me less than silence would.

@@ -7,6 +7,8 @@ for what we protect and the risks we have knowingly accepted, and
 
 ## Reporting a vulnerability
 
+The same contact is published at `/.well-known/security.txt` (RFC 9116).
+
 Please report privately, not in a public issue or pull request.
 
 Use GitHub private vulnerability reporting: open the repository's **Security** tab and choose

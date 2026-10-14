@@ -24,6 +24,8 @@ export const AUDIT_ACTIONS = [
   'workspace.deletion.request',
   'workspace.deletion.cancel',
   'workspace.purged',
+  'account.export',
+  'account.delete',
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
