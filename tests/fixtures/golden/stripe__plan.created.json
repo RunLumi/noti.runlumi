@@ -1,0 +1,15 @@
+{
+  "fixture": "stripe/plan.created",
+  "provenance": "documented",
+  "response": {
+    "status": 200,
+    "body": {
+      "accepted": true,
+      "ignored": "event_not_supported"
+    }
+  },
+  "canonical": null,
+  "delivered": 0,
+  "message": null,
+  "rendered": null
+}

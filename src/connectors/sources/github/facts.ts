@@ -50,18 +50,47 @@ function labelsOf(event: Record<string, unknown>): string[] | null {
   return names;
 }
 
-export function extractGithubFacts(kind: string, event: Record<string, unknown>): RoutingFacts {
+/** The sender's login as a hint for display and filters. Never authorization (F60). */
+export interface SenderFacts {
+  readonly login: string | null;
+  readonly isBot: boolean | null;
+  readonly isGhost: boolean | null;
+}
+
+const BOT_SUFFIX = '[bot]';
+
+/**
+ * Who GitHub says triggered the event, from `sender.login` and `sender.type` ONLY (F60). Display
+ * names and free-text profile fields are never read: any user can set them to anything.
+ *
+ * `isBot` is known when GitHub sent `sender.type`, or when the login carries the `[bot]` suffix
+ * that only GitHub Apps get; otherwise it is `null` (unknown), never a guess of `false`. GitHub's
+ * placeholder for a deleted account is the login "ghost": it is flagged and must not be shown as a
+ * person.
+ */
+export function senderFacts(event: Record<string, unknown>): SenderFacts {
   const sender = asRecord(event.sender);
   const login = str(sender?.login) ?? null;
   const type = str(sender?.type);
+  let isBot: boolean | null = null;
+  if (type !== undefined) isBot = type === 'Bot';
+  else if (login !== null && login.toLowerCase().endsWith(BOT_SUFFIX)) isBot = true;
+  return {
+    login,
+    isBot,
+    isGhost: login === null ? null : login.toLowerCase() === 'ghost',
+  };
+}
+
+export function extractGithubFacts(kind: string, event: Record<string, unknown>): RoutingFacts {
+  const sender = senderFacts(event);
   const draft = asRecord(event.pull_request)?.draft;
   return {
     branch: branchOf(kind, event),
     baseBranch: str(asRecord(asRecord(event.pull_request)?.base)?.ref) ?? null,
-    actorLogin: login,
-    actorIsBot: type === undefined ? null : type === 'Bot',
-    // GitHub's placeholder for a deleted account is the login "ghost" (F60/F138).
-    actorIsGhost: login === null ? null : login.toLowerCase() === 'ghost',
+    actorLogin: sender.login,
+    actorIsBot: sender.isBot,
+    actorIsGhost: sender.isGhost,
     draft: typeof draft === 'boolean' ? draft : null,
     labels: labelsOf(event),
   };

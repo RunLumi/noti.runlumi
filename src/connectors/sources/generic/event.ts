@@ -1,4 +1,6 @@
 import { SUMMARY_MAX_CHARS, type DeliveryMessage } from '../../../env';
+import { canonicalFromDisplay, type CanonicalEvent } from '../../../events/canonical';
+import { cutAt } from '../../../events/text';
 import { asRecord } from '../../../lib/json';
 
 /**
@@ -188,7 +190,7 @@ export function toDisplayFields(event: GenericEvent): Display {
   const fieldsLine = event.fields.map(([k, v]) => `${k}: ${v}`).join(' · ');
   const joined = [event.summary, fieldsLine].filter((p): p is string => !!p).join('\n');
   const summary =
-    joined.length > SUMMARY_MAX_CHARS ? `${joined.slice(0, SUMMARY_MAX_CHARS - 1).trimEnd()}…` : joined;
+    joined.length > SUMMARY_MAX_CHARS ? `${cutAt(joined, SUMMARY_MAX_CHARS - 1).trimEnd()}…` : joined;
   return {
     title: event.title,
     url: event.url ?? '',
@@ -197,4 +199,23 @@ export function toDisplayFields(event: GenericEvent): Display {
     ...(event.actor ? { actor: event.actor } : {}),
     ...(summary ? { summary } : {}),
   };
+}
+
+/** Version of the generic mapping; recorded on every canonical event (spec 04 F54). */
+export const GENERIC_ADAPTER_VERSION = '1.0.0';
+
+/**
+ * The generic event as a canonical event. `id` is the signed `webhook-id`; the severity the sender
+ * chose is kept as is (it can be `critical`, which has no status of its own). The `source` is the
+ * product, not the sender: a generic endpoint has no public identity beyond its secret URL.
+ */
+export function toCanonicalEvent(event: GenericEvent, id: string): CanonicalEvent {
+  const canonical = canonicalFromDisplay({
+    provider: 'generic',
+    adapterVersion: GENERIC_ADAPTER_VERSION,
+    id,
+    source: 'urn:lumi:noti:generic',
+    display: toDisplayFields(event),
+  });
+  return { ...canonical, data: { ...canonical.data, severity: event.severity } };
 }

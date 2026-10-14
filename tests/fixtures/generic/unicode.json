@@ -1,0 +1,8 @@
+{
+  "type": "deploy.finished",
+  "title": "Triển khai thành công — môi trường sản xuất ✅",
+  "summary": "Đã hoàn tất sau 3 phút",
+  "severity": "info",
+  "actor": "nguyễn.văn.a",
+  "fields": { "region": "ap-southeast-1" }
+}

@@ -1,0 +1,39 @@
+{
+  "fixture": "generic/minimal",
+  "provenance": "contract",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "urn:lumi:noti:generic",
+    "type": "io.lumi.noti.generic.build.passed",
+    "dataschema": "urn:lumi:noti:schema:generic:build.passed:v1",
+    "provider": "generic",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Build passed",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      }
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Build passed",
+    "url": "",
+    "status": "info",
+    "eventType": "build.passed"
+  },
+  "rendered": null
+}

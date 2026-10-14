@@ -1,0 +1,50 @@
+{
+  "fixture": "gitlab/merge_request.close",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/flightjs/flight-management",
+    "type": "io.lumi.noti.gitlab.merge_request.closed",
+    "dataschema": "urn:lumi:noti:schema:gitlab:merge_request.closed:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "!16 closed: Add input validation to booking form",
+      "status": "warning",
+      "severity": "warning",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "flightjs/flight-management",
+      "actor": {
+        "login": "agarcia",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "feature/booking-validation → main"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "!16 closed: Add input validation to booking form",
+    "url": "",
+    "status": "warning",
+    "eventType": "merge_request.closed",
+    "summary": "feature/booking-validation → main",
+    "repo": "flightjs/flight-management",
+    "actor": "agarcia"
+  },
+  "rendered": null
+}

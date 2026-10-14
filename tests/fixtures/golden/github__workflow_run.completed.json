@@ -1,0 +1,59 @@
+{
+  "fixture": "github/workflow_run.completed",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 6
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/octo-org/octo-repo",
+    "type": "io.lumi.noti.github.workflow_run.success",
+    "dataschema": "urn:lumi:noti:schema:github:workflow_run.success:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "workflow_run.success",
+      "status": "success",
+      "severity": "info",
+      "facts": {
+        "branch": "master",
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+      "repo": "octo-org/octo-repo",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "master · success · completed"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "delivered",
+    "humans-only": "delivered",
+    "actor-allow": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 6,
+  "message": {
+    "title": "workflow_run.success",
+    "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+    "status": "success",
+    "eventType": "workflow_run.success",
+    "repo": "octo-org/octo-repo",
+    "actor": "Codertocat",
+    "summary": "master · success · completed"
+  },
+  "rendered": null
+}

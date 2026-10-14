@@ -1,0 +1,62 @@
+{
+  "fixture": "github/issues.reopened",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 6
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/Codertocat/Hello-World",
+    "type": "io.lumi.noti.github.issues.reopened",
+    "subject": "Codertocat/Hello-World#1",
+    "dataschema": "urn:lumi:noti:schema:github:issues.reopened:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Spelling error in the README file",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": [
+          "bug"
+        ]
+      },
+      "url": "https://github.com/Codertocat/Hello-World/issues/1",
+      "repo": "Codertocat/Hello-World",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "#1 · reopened"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "delivered",
+    "humans-only": "delivered",
+    "actor-allow": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 6,
+  "message": {
+    "title": "Spelling error in the README file",
+    "url": "https://github.com/Codertocat/Hello-World/issues/1",
+    "status": "info",
+    "eventType": "issues.reopened",
+    "repo": "Codertocat/Hello-World",
+    "actor": "Codertocat",
+    "summary": "#1 · reopened"
+  },
+  "rendered": null
+}

@@ -1,0 +1,62 @@
+{
+  "fixture": "github/pull_request.opened_labeled",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 5
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/Codertocat/Hello-World",
+    "type": "io.lumi.noti.github.pull_request.opened",
+    "subject": "Codertocat/Hello-World#2",
+    "dataschema": "urn:lumi:noti:schema:github:pull_request.opened:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Update the README with new information.",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": "changes",
+        "baseBranch": "master",
+        "draft": false,
+        "labels": [
+          "bug"
+        ]
+      },
+      "url": "https://github.com/Codertocat/Hello-World/pull/2",
+      "repo": "Codertocat/Hello-World",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "#2 · changes → master · opened"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "filtered:not_in_allow_list",
+    "humans-only": "delivered",
+    "actor-allow": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 5,
+  "message": {
+    "title": "Update the README with new information.",
+    "url": "https://github.com/Codertocat/Hello-World/pull/2",
+    "status": "info",
+    "eventType": "pull_request.opened",
+    "repo": "Codertocat/Hello-World",
+    "actor": "Codertocat",
+    "summary": "#2 · changes → master · opened"
+  },
+  "rendered": null
+}

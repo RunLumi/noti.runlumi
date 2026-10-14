@@ -1,0 +1,49 @@
+{
+  "fixture": "generic/flat",
+  "provenance": "contract",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "urn:lumi:noti:generic",
+    "type": "io.lumi.noti.generic.deploy.failed",
+    "dataschema": "urn:lumi:noti:schema:generic:deploy.failed:v1",
+    "provider": "generic",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Deploy failed on production",
+      "status": "failure",
+      "severity": "error",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "url": "https://ci.example.com/runs/42",
+      "actor": {
+        "login": "deploy-bot",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "Exit code 1\nenv: prod"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Deploy failed on production",
+    "url": "https://ci.example.com/runs/42",
+    "status": "failure",
+    "eventType": "deploy.failed",
+    "actor": "deploy-bot",
+    "summary": "Exit code 1\nenv: prod"
+  },
+  "rendered": null
+}

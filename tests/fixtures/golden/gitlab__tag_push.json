@@ -1,0 +1,48 @@
+{
+  "fixture": "gitlab/tag_push",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/jsmith/example",
+    "type": "io.lumi.noti.gitlab.tag_push",
+    "dataschema": "urn:lumi:noti:schema:gitlab:tag_push:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Tag v1.0.0 pushed",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "jsmith/example",
+      "actor": {
+        "login": "jsmith",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      }
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Tag v1.0.0 pushed",
+    "url": "",
+    "status": "info",
+    "eventType": "tag_push",
+    "repo": "jsmith/example",
+    "actor": "jsmith"
+  },
+  "rendered": null
+}

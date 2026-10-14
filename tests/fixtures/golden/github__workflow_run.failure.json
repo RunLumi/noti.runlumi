@@ -1,0 +1,202 @@
+{
+  "fixture": "github/workflow_run.failure",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 6
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/octo-org/octo-repo",
+    "type": "io.lumi.noti.github.workflow_run.failure",
+    "dataschema": "urn:lumi:noti:schema:github:workflow_run.failure:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "workflow_run.failure",
+      "status": "failure",
+      "severity": "error",
+      "facts": {
+        "branch": "master",
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+      "repo": "octo-org/octo-repo",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "master · failure · completed"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "delivered",
+    "humans-only": "delivered",
+    "actor-allow": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 6,
+  "message": {
+    "title": "workflow_run.failure",
+    "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+    "status": "failure",
+    "eventType": "workflow_run.failure",
+    "repo": "octo-org/octo-repo",
+    "actor": "Codertocat",
+    "summary": "master · failure · completed"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Failed: workflow_run.failure*\nocto-org/octo-repo · by Codertocat\n<https://github.com/octo-org/octo-repo/actions/runs/289782451|Open in source>\n\nmaster · failure · completed",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Failed: workflow_run.failure"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "octo-org/octo-repo · by Codertocat"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "master · failure · completed"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "<https://github.com/octo-org/octo-repo/actions/runs/289782451|Open in source>"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Failed: workflow_run.failure"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Failed: workflow_run.failure"
+            },
+            "template": "red"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "octo-org/octo-repo · by Codertocat"
+              },
+              {
+                "tag": "markdown",
+                "content": "master · failure · completed"
+              },
+              {
+                "tag": "markdown",
+                "content": "[Open in source](https://github.com/octo-org/octo-repo/actions/runs/289782451)"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Failed: workflow_run.failure",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Attention"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "octo-org/octo-repo · by Codertocat",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "master · failure · completed",
+                  "wrap": true
+                }
+              ],
+              "actions": [
+                {
+                  "type": "Action.OpenUrl",
+                  "title": "Open in source",
+                  "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Failed: workflow\\_run.failure",
+        "embeds": [
+          {
+            "title": "Failed: workflow_run.failure",
+            "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+            "description": "master · failure · completed",
+            "color": 14042437,
+            "footer": {
+              "text": "octo-org/octo-repo · by Codertocat"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

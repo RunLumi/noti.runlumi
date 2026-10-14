@@ -208,7 +208,7 @@ GitHub's model; per-installation isolation comes from F57, not from the secret.
 
 ## F59 — GitHub header contract
 
-**Priority** P0 · **Status** 🟡 uses `X-GitHub-Delivery`, `X-GitHub-Event`, `X-Hub-Signature-256` via case-insensitive `Headers`, action from body (`route.ts`, `events.ts`); not built: header contract test, 400 on missing `X-GitHub-Event` (currently acked), hook-id logging
+**Priority** P0 · **Status** ✅ header contract pinned (`tests/github/ingress-contract.test.ts`): missing event or delivery is 400, opaque delivery id, action from the body, case-insensitive, SHA-1 refused, target headers unused; the route does not gate on `Content-Type`
 
 **Story** As an operator, I want to see exactly which GitHub headers we rely on documented,
 so that a GitHub change breaks a test rather than production.
@@ -247,7 +247,7 @@ so that a GitHub change breaks a test rather than production.
 
 ## F60 — Actor trust and the ghost user
 
-**Priority** P0 · **Status** 🟡 `actorIsBot` and `actorIsGhost` facts (`facts.ts`, `tests/routing/filters.test.ts`); not built: canonical `isGhost`, renderers still show raw `sender.login` as actor (`route.ts`), ghost-never-a-person test
+**Priority** P0 · **Status** ✅ login and `sender.type` only; ghost flagged and not shown as a person; `[bot]` suffix or `Bot` type sets `isBot`; display names never read (`tests/events/canonical.test.ts`, `tests/github/ingress-contract.test.ts`)
 
 **Story** As a user, I want notifications to attribute activity correctly, so that a bot or a
 system account is never presented as a colleague who broke the build.
@@ -336,7 +336,7 @@ is a supply-chain risk.
 
 ## F62 — Event normalization
 
-**Priority** P0 · **Status** 🟡 `classifyGithubEvent` maps into the closed catalog and `displayFields` builds bounded display fields (`events.ts`, `route.ts`, `tests/github.test.ts`); not built: canonical envelope normalization, adapter version, full per-event mapping tests
+**Priority** P0 · **Status** 🟡 every catalogued event maps to the canonical event, with documented examples as fixtures (`src/connectors/sources/github/map.ts`, `tests/fixtures/replay.test.ts`); not built: `rawOutcome`, state transitions (F44), `unmapped:<raw>`
 
 **Acceptance**
 - [ ] Every subscribed event maps to the canonical envelope (F41) with
@@ -373,7 +373,7 @@ it can be diagnosed, and the event appears in the unmapped view.
 
 ## F63 — Payload caps and truncation semantics
 
-**Priority** P0 · **Status** 🟡 named 1 MiB cap checked streaming against header and bytes, 413 (`MAX_BODY_BYTES` in `route.ts`, `tests/pipeline/delivery-path.test.ts`); not built: `truncated` flag with dropped counts, push-cap handling, per-provider policy table · **Fixes** part of D15
+**Priority** P0 · **Status** 🟡 1 MiB cap documented, tested at the boundary, refusal logged with its reason (`tests/github/ingress-contract.test.ts`); 25 MB and the silent GitHub drops documented; `truncated` n/a (no commit arrays carried) · **Fixes** part of D15
 
 **Acceptance**
 - [ ] Documented upstream limits, all of which are **silent drops or partial data**, not
@@ -413,7 +413,7 @@ notice. This is a strong argument for keeping reconciliation in V1 rather than d
 
 ## F64 — Ack discipline
 
-**Priority** P0 · **Status** 🟡 handler is verify, tenant, limit, scope, one D1 batch, 202, with dispatch in `waitUntil` and no outbound I/O (`route.ts`); not built: p99 SLO, tests for the 10 s budget, no-outbound and ack-after-durable-write
+**Priority** P0 · **Status** ✅ 202 only after the durable write, 5xx on D1 failure, no outbound call, dispatcher kick after commit (`tests/github/ingress-contract.test.ts`); not built: a p99 SLO
 
 **Story** As a user, I want a 2xx back within 10 seconds even when a destination is down, so
 that GitHub considers the event delivered and does not hold connections open.
@@ -451,7 +451,7 @@ Returning 5xx to GitHub achieves nothing, since **GitHub will not retry it**.
 
 ## F65 — Delivery-failure detection
 
-**Priority** P0 · **Status** ⛔ blocked by F66 (App JWT), F69 and a real GitHub App; no `GET /app/hook/deliveries` poller or ingress-gap record exists · **New, from research**
+**Priority** P0 · **Status** ⛔ blocked on the GitHub App private key (polling `GET /app/hook/deliveries` needs the App JWT); what is detectable without it is documented and tested: a redelivery is absorbed, ids carry no sequence (`tests/github/ingress-contract.test.ts`) · **New, from research**
 
 **Story** As an operator, I want to know when GitHub could not reach us, so that a silent gap
 in a customer's notifications is caught rather than discovered weeks later.
@@ -613,7 +613,7 @@ customer to reinstall when the installation goes stale.
 
 ## F69 — Reconciliation and backfill
 
-**Priority** P0 · **Status** ⛔ blocked by F65, F66 (no installation tokens) and the envelope (F41); no reconciliation job exists · **New, from research**
+**Priority** P0 · **Status** ⛔ blocked on the GitHub App private key and API access (F65/F66); nothing is implemented or claimed · **New, from research**
 
 **Story** As a customer, I want gaps in my event stream to be filled, so that a transient
 ingress bug does not permanently lose a CI failure notification.
@@ -681,7 +681,7 @@ leaked token stays valid at GitHub.
 
 ## F71 — Connector contract conformance
 
-**Priority** P0 · **Status** 🟡 `SourceConnector` contract with verify-before-map and closed catalog exists for GitLab and Stripe (`src/connectors/sources/types.ts`, `registry.ts`); GitHub bypasses it with its own route, no parse/normalize/health, no shared conformance suite
+**Priority** P0 · **Status** 🟡 `SourceDescriptor` (`tests/conformance/descriptors.ts`) plus one conformance suite run against GitHub, generic, GitLab and Stripe (`tests/conformance/conformance.test.ts`); not built: the full `SourceAdapter` interface (`parse`, `capabilities`, `health`) as one type
 
 **Story** As a maintainer, I want every source to satisfy one interface, so that adding
 GitLab or Stripe does not mean re-learning the architecture.
@@ -723,7 +723,7 @@ enforced interface with a conformance suite is what stops it drifting.
 
 ## F72 — Fixture replay suite
 
-**Priority** P0 · **Status** ⛔ blocked by real GitHub deliveries: fixtures are hand-built in tests (`tests/github/install-flow.test.ts`, `tests/routing/ingress.test.ts`); no captured, sanitized or schema-validated fixtures, no capture procedure · **Fixes** part of D13
+**Priority** P0 · **Status** 🟡 replay suite over documented examples with goldens for canonical event, routing and four destinations (`tests/fixtures/replay.test.ts`, `tests/fixtures/README.md`); fixtures are documented or derived examples, not real captures; not built: octokit payload-schema validation, a real sanitisation run · **Fixes** part of D13
 
 **Story** As a maintainer, I want real captured provider payloads as fixtures, so that an
 upstream change breaks a test rather than a customer's channel.

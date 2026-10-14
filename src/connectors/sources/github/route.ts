@@ -1,5 +1,7 @@
 import type { Context } from 'hono';
 import { SUMMARY_MAX_CHARS, type Bindings, type DeliveryMessage } from '../../../env';
+import { displayOf, routingFactsOf } from '../../../events/canonical';
+import { validateCanonicalEvent } from '../../../events/validate';
 import { readBodyCapped } from '../../../lib/body';
 import { asRecord, str } from '../../../lib/json';
 import { newLeaseToken } from '../../../delivery/claim';
@@ -11,7 +13,8 @@ import { recordAudit } from '../../../audit/audit';
 import { handleLifecycle, LIFECYCLE_EVENTS } from './lifecycle';
 import { repositoryInScope, resolveTenant } from './tenant';
 import { log } from '../../../platform/log';
-import { extractGithubFacts } from './facts';
+import { buildCanonical } from '../build';
+import { boundedEventId } from '../../../events/id';
 import type { RoutingFacts } from '../../../routing/filters';
 import { createRouteDecider } from '../../../routing/ingress';
 import { decisionStatement, type RoutingDecisionRow } from '../../../routing/provenance';
@@ -26,7 +29,14 @@ import { githubNoiseFacts, isWorkflowFailure } from './noise';
 import { ingressLimiter } from '../../../security/rate-limit';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
-const MAX_BODY_BYTES = 1024 * 1024;
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * The refusal is logged at most once a minute per isolate: the request is not authenticated yet, so
+ * a caller must not be able to make the log grow with its own traffic.
+ */
+const TOO_LARGE_LOG_INTERVAL_MS = 60_000;
+let lastTooLargeLogAt = Number.NEGATIVE_INFINITY;
 
 type IntegrationRow = {
   id: string;
@@ -52,54 +62,6 @@ type DisplayFields = Pick<
   'title' | 'url' | 'repo' | 'actor' | 'status' | 'eventType' | 'summary'
 >;
 
-/** Canonical status, derived from the catalog event type only. */
-export function statusOf(eventType: string): 'success' | 'failure' | 'info' {
-  if (eventType === 'workflow_run.failure' || eventType === 'workflow_run.timed_out') return 'failure';
-  if (eventType === 'workflow_run.success' || eventType === 'pull_request.merged') return 'success';
-  return 'info';
-}
-
-function scalar(value: unknown): string | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  return str(value);
-}
-
-/**
- * One short line from a few scalar fields (number, branch names, conclusion). Deliberately
- * not the PR/issue body, a commit message or the payload: a summary is shown in a chat
- * channel the repository's readers may not have access to, and privacy beats richness.
- */
-function summaryOf(event: Record<string, unknown>, subject: Record<string, unknown>): string {
-  const number = scalar(subject.number);
-  const head = scalar(asRecord(subject.head)?.ref) ?? scalar(subject.head_branch);
-  const base = scalar(asRecord(subject.base)?.ref);
-  const parts = [
-    number ? `#${number}` : undefined,
-    head && base ? `${head} → ${base}` : head,
-    scalar(subject.conclusion),
-    scalar(event.action),
-  ].filter((p): p is string => p !== undefined);
-  return parts.join(' · ').slice(0, SUMMARY_MAX_CHARS);
-}
-
-function displayFields(event: Record<string, unknown>, eventType: string): DisplayFields {
-  const repository = asRecord(event.repository);
-  const subject =
-    asRecord(event.issue) ?? asRecord(event.pull_request) ?? asRecord(event.workflow_run) ?? event;
-  const repo = str(repository?.full_name);
-  const actor = str(asRecord(event.sender)?.login);
-  const summary = summaryOf(event, subject);
-  return {
-    title: (str(subject.title) ?? str(subject.name) ?? eventType).slice(0, 300),
-    url: str(subject.html_url) ?? str(repository?.html_url) ?? '',
-    status: statusOf(eventType),
-    eventType,
-    ...(repo ? { repo: repo.slice(0, 200) } : {}),
-    ...(actor ? { actor: actor.slice(0, 100) } : {}),
-    ...(summary ? { summary } : {}),
-  };
-}
-
 /** A success that closes an earlier failure of the same workflow on the same branch. */
 function resolvedDisplay(d: DisplayFields): DisplayFields {
   return {
@@ -118,7 +80,17 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // Size is checked against the declared header AND the encoded body; a header alone is
   // attacker-controlled and may be absent or wrong.
   const read = await readBodyCapped(c.req.raw, MAX_BODY_BYTES);
-  if (!read.ok) return c.text('Too large', 413);
+  if (!read.ok) {
+    // F63: say WHY, honestly. GitHub itself drops payloads over 25 MB and delivers nothing; a
+    // delivery between this cap and that one reaches us and is refused here, which GitHub shows
+    // as a failed delivery. Constants only, sampled: the request is not authenticated yet.
+    const now = Date.now();
+    if (now - lastTooLargeLogAt >= TOO_LARGE_LOG_INTERVAL_MS) {
+      lastTooLargeLogAt = now;
+      log('warn', 'github_event_too_large', { reason: 'over_ingress_cap', limit_bytes: MAX_BODY_BYTES });
+    }
+    return c.text('Too large', 413);
+  }
   const body = new TextDecoder().decode(read.bytes);
 
   const signature = c.req.header('x-hub-signature-256') || '';
@@ -134,7 +106,9 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   const event = asRecord(parsed);
   if (!event) return c.text('Invalid event', 400);
 
+  // F59: the event name is a header, and a delivery without one cannot be classified.
   const kind = c.req.header('x-github-event') || '';
+  if (!kind) return c.text('Invalid event', 400);
   // GitHub pings the App webhook when it is configured. It carries no installation and
   // routes nothing; acknowledging it is what makes "Redeliver" in GitHub's UI go green.
   if (kind === 'ping') return c.json({ accepted: true, ping: true }, 202);
@@ -204,6 +178,22 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // Outside the closed catalog nothing can be subscribed, so nothing is looked up (D16).
   if (!isGithubEventType(eventType)) return c.json({ accepted: true, persisted: 0 }, 202);
 
+  // Normalise before routing: from here on nothing reads the provider payload except the noise
+  // facts below (ADR 0020). A mapper/validator mismatch is OUR fault, not the sender's: GitHub
+  // never retries, so a 4xx would lose the event silently and show it as the customer's failure.
+  // It is logged loudly (field names only) and acknowledged without a notification.
+  const normalised = validateCanonicalEvent(
+    buildCanonical({ provider: 'github', kind, event, eventType, id: await boundedEventId(deliveryId) }),
+  );
+  if (!normalised.ok) {
+    log('error', 'canonical_event_invalid', {
+      source: 'github',
+      fields: normalised.errors.map((e) => `${e.field}:${e.reason}`).slice(0, 10),
+    });
+    return c.json({ accepted: false, ignored: 'schema_invalid' }, 200);
+  }
+  const canonical = normalised.event;
+
   // `repo` only narrows within the tenant. It is not authorization. GitHub owner and
   // repository names are case-insensitive, so the match is too.
   const rows = await c.env.DB.prepare(
@@ -212,7 +202,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     .bind(organizationId, repo)
     .all<IntegrationRow>();
 
-  const display = displayFields(event, eventType);
+  const display: DisplayFields = displayOf(canonical);
   // F170: transport identity, tenant-bound. GitHub keeps X-GitHub-Delivery on a manual
   // redelivery, so the same event maps to the same key and is accepted once.
   const dedup = await dedupKey({
@@ -227,7 +217,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // parsed and compiled at most once per request. They are the only part of the payload routing
   // reads, and are never stored (ADR 0010).
   let facts: RoutingFacts | undefined;
-  const decide = createRouteDecider(eventType, () => (facts ??= extractGithubFacts(kind, event)));
+  const decide = createRouteDecider(eventType, () => (facts ??= routingFactsOf(canonical)));
   // Provenance is best effort and kept OUT of the delivery transaction: a failed record must
   // never block or lose a delivery.
   const provenance: D1PreparedStatement[] = [];

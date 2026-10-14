@@ -1,0 +1,41 @@
+{
+  "fixture": "stripe/customer.subscription.created",
+  "provenance": "composed",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "evt_1Pgc76B7WZ01zgkWwyRHS12y",
+    "source": "urn:lumi:noti:stripe",
+    "type": "io.lumi.noti.stripe.customer.subscription.created",
+    "dataschema": "urn:lumi:noti:schema:stripe:customer.subscription.created:v1",
+    "provider": "stripe",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Subscription created",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Subscription created",
+    "url": "",
+    "status": "info",
+    "eventType": "customer.subscription.created",
+    "summary": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+  },
+  "rendered": null
+}

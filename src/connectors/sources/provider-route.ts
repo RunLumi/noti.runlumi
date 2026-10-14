@@ -4,6 +4,10 @@ import { keyringFromEnv } from '../../crypto/keyring-env';
 import { newLeaseToken } from '../../delivery/claim';
 import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../../env';
+import { displayOf } from '../../events/canonical';
+import { boundedEventId } from '../../events/id';
+import { buildCanonical } from './build';
+import { validateCanonicalEvent } from '../../events/validate';
 import { readBodyCapped } from '../../lib/body';
 import { log } from '../../platform/log';
 import { dispatchOutbox } from '../../pipeline/outbox';
@@ -218,23 +222,6 @@ export function providerWebhook(kind: ProviderKind) {
       return c.json({ accepted: true, ignored: mapped.reason }, 200);
     }
 
-    const rows = await c.env.DB.prepare(
-      'SELECT id,event_types,noise_json FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
-    )
-      .bind(organizationId, source.id)
-      .all<{ id: string; event_types: string; noise_json: string | null }>();
-    const targets = rows.results.filter((row) => {
-      const selection = subscribed(row.event_types);
-      if (selection === 'invalid') {
-        log('warn', 'provider_integration_event_types_unreadable', { integration_id: row.id, kind });
-        return false;
-      }
-      return (
-        selection === null ||
-        (mapped.display.eventType !== undefined && selection.has(mapped.display.eventType))
-      );
-    });
-
     // Identity: the provider's own id. A signature or timestamp is never identity (it changes
     // on every retry). Without any id (GitLab secret-token mode on an older instance) the body
     // hash stands in: a retry re-sends the same bytes.
@@ -249,27 +236,72 @@ export function providerWebhook(kind: ProviderKind) {
       eventId: providerId,
     });
 
+    // Normalise before routing (ADR 0020). A mapper/validator mismatch is OUR fault: a 4xx would
+    // count as a failed delivery (GitLab disables the webhook after repeated ones, Stripe retries for
+    // days), so the event is acknowledged with 2xx, logged loudly with field names only, and counted
+    // on the source (`dropped_events`, the same visible counter a flood drop uses).
+    const normalised = validateCanonicalEvent(
+      buildCanonical({
+        provider: kind,
+        display: mapped.display,
+        id: await boundedEventId(providerId),
+      }),
+    );
+    if (!normalised.ok) {
+      log('error', 'canonical_event_invalid', {
+        source_id: source.id,
+        kind,
+        fields: normalised.errors.map((e) => `${e.field}:${e.reason}`).slice(0, 10),
+      });
+      try {
+        await c.env.DB.prepare(
+          `UPDATE sources SET dropped_events=dropped_events+1,last_dropped_at=CURRENT_TIMESTAMP
+           WHERE id=? AND organization_id=?`,
+        )
+          .bind(source.id, organizationId)
+          .run();
+      } catch {
+        // Display-only counter; the error line above already records it.
+      }
+      return c.json({ accepted: false, ignored: 'schema_invalid' }, 200);
+    }
+    const display = displayOf(normalised.event);
+
+    const rows = await c.env.DB.prepare(
+      'SELECT id,event_types,noise_json FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
+    )
+      .bind(organizationId, source.id)
+      .all<{ id: string; event_types: string; noise_json: string | null }>();
+    const targets = rows.results.filter((row) => {
+      const selection = subscribed(row.event_types);
+      if (selection === 'invalid') {
+        log('warn', 'provider_integration_event_types_unreadable', { integration_id: row.id, kind });
+        return false;
+      }
+      return selection === null || (display.eventType !== undefined && selection.has(display.eventType));
+    });
+
     let queued = 0;
     let held = 0;
     const planner = createNoisePlanner(c.env.DB, organizationId, nowMs);
     for (const row of targets) {
       const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
-      const message = toMessage({ id, integrationId: row.id, organizationId }, mapped.display);
+      const message = toMessage({ id, integrationId: row.id, organizationId }, display);
       // Noise control (ADR 0016): deliver now or hold; never drop.
       const plan = await planner.plan({
         integrationId: row.id,
         noiseJson: row.noise_json,
         deliveryId: id,
-        eventType: mapped.display.eventType ?? 'notification',
+        eventType: display.eventType ?? 'notification',
         subject: '',
-        display: mapped.display,
+        display,
       });
       if (plan.action === 'hold' || plan.reason !== null) {
         await recordNoiseDecision(c.env.DB, {
           id,
           organizationId,
           integrationId: row.id,
-          eventType: mapped.display.eventType ?? 'notification',
+          eventType: display.eventType ?? 'notification',
           reason: plan.action === 'hold' ? plan.reason : (plan.reason ?? 'critical_bypass'),
           decidedAt: nowMs,
         });

@@ -1,0 +1,50 @@
+{
+  "fixture": "gitlab/issue.reopen",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/gitlabhq/gitlab-test",
+    "type": "io.lumi.noti.gitlab.issue.reopened",
+    "dataschema": "urn:lumi:noti:schema:gitlab:issue.reopened:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Issue #23 reopened: New API: create/update/delete file",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "gitlabhq/gitlab-test",
+      "actor": {
+        "login": "root",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "Labels: API"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Issue #23 reopened: New API: create/update/delete file",
+    "url": "",
+    "status": "info",
+    "eventType": "issue.reopened",
+    "summary": "Labels: API",
+    "repo": "gitlabhq/gitlab-test",
+    "actor": "root"
+  },
+  "rendered": null
+}

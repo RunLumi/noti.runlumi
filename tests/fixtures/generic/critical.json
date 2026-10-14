@@ -1,0 +1,6 @@
+{
+  "type": "db.down",
+  "title": "Primary database unreachable",
+  "severity": "critical",
+  "fields": { "region": "eu-west-1", "replicas": 3, "failover": false }
+}

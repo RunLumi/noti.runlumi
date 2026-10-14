@@ -1,0 +1,50 @@
+{
+  "fixture": "gitlab/pipeline",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/gitlab-org/gitlab-test",
+    "type": "io.lumi.noti.gitlab.pipeline.succeeded",
+    "dataschema": "urn:lumi:noti:schema:gitlab:pipeline.succeeded:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Pipeline succeeded on master",
+      "status": "success",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "gitlab-org/gitlab-test",
+      "actor": {
+        "login": "root",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "test · 63s"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Pipeline succeeded on master",
+    "url": "",
+    "status": "success",
+    "eventType": "pipeline.succeeded",
+    "summary": "test · 63s",
+    "repo": "gitlab-org/gitlab-test",
+    "actor": "root"
+  },
+  "rendered": null
+}

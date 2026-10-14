@@ -1,0 +1,41 @@
+{
+  "fixture": "stripe/payment_intent.payment_failed",
+  "provenance": "composed",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "evt_1Pgc76B7WZ01zgkWwyRHS12y",
+    "source": "urn:lumi:noti:stripe",
+    "type": "io.lumi.noti.stripe.payment_intent.payment_failed",
+    "dataschema": "urn:lumi:noti:schema:stripe:payment_intent.payment_failed:v1",
+    "provider": "stripe",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Payment failed",
+      "status": "failure",
+      "severity": "error",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "10.99 USD · pi_1PgafyB7WZ01zgkWSjxsAJo3"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Payment failed",
+    "url": "",
+    "status": "failure",
+    "eventType": "payment_intent.payment_failed",
+    "summary": "10.99 USD · pi_1PgafyB7WZ01zgkWSjxsAJo3"
+  },
+  "rendered": null
+}

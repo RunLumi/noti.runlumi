@@ -1,0 +1,59 @@
+{
+  "fixture": "github/deployment_status.created",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 6
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/Codertocat/Hello-World",
+    "type": "io.lumi.noti.github.deployment_status.created",
+    "dataschema": "urn:lumi:noti:schema:github:deployment_status.created:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "deployment_status.created",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": "master",
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "url": "https://github.com/Codertocat/Hello-World",
+      "repo": "Codertocat/Hello-World",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "created"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "delivered",
+    "humans-only": "delivered",
+    "actor-allow": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 6,
+  "message": {
+    "title": "deployment_status.created",
+    "url": "https://github.com/Codertocat/Hello-World",
+    "status": "info",
+    "eventType": "deployment_status.created",
+    "repo": "Codertocat/Hello-World",
+    "actor": "Codertocat",
+    "summary": "created"
+  },
+  "rendered": null
+}

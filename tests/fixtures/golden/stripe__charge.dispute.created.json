@@ -1,0 +1,41 @@
+{
+  "fixture": "stripe/charge.dispute.created",
+  "provenance": "composed",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "evt_1Pgc76B7WZ01zgkWwyRHS12y",
+    "source": "urn:lumi:noti:stripe",
+    "type": "io.lumi.noti.stripe.charge.dispute.created",
+    "dataschema": "urn:lumi:noti:schema:stripe:charge.dispute.created:v1",
+    "provider": "stripe",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Dispute opened",
+      "status": "failure",
+      "severity": "error",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Dispute opened",
+    "url": "",
+    "status": "failure",
+    "eventType": "charge.dispute.created",
+    "summary": "10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx"
+  },
+  "rendered": null
+}

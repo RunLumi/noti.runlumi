@@ -1,0 +1,895 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "id": "github/issues.opened",
+      "provider": "github",
+      "file": "github/issues.opened.json",
+      "headers": {
+        "x-github-event": "issues"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/issues.reopened",
+      "provider": "github",
+      "file": "github/issues.reopened.json",
+      "headers": {
+        "x-github-event": "issues"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/issues.closed",
+      "provider": "github",
+      "file": "github/issues.reopened.json",
+      "headers": {
+        "x-github-event": "issues"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "action": "closed",
+          "issue.state": "closed"
+        }
+      },
+      "note": "No documented issues.closed example: derived from issues.reopened by setting action and state."
+    },
+    {
+      "id": "github/issues.labeled",
+      "provider": "github",
+      "file": "github/issues.labeled.json",
+      "headers": {
+        "x-github-event": "issues"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "ignored"
+    },
+    {
+      "id": "github/issue_comment.created",
+      "provider": "github",
+      "file": "github/issue_comment.created.json",
+      "headers": {
+        "x-github-event": "issue_comment"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/pull_request.opened",
+      "provider": "github",
+      "file": "github/pull_request.opened.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "render": true
+    },
+    {
+      "id": "github/pull_request.closed",
+      "provider": "github",
+      "file": "github/pull_request.closed.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "The documented closed example has merged=false."
+    },
+    {
+      "id": "github/pull_request.merged",
+      "provider": "github",
+      "file": "github/pull_request.closed.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "pull_request.merged": true
+        }
+      },
+      "note": "Derived from the documented closed example by setting merged=true (documented field)."
+    },
+    {
+      "id": "github/pull_request.ready_for_review",
+      "provider": "github",
+      "file": "github/pull_request.ready_for_review.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/pull_request.converted_to_draft",
+      "provider": "github",
+      "file": "github/pull_request.converted_to_draft.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "ignored"
+    },
+    {
+      "id": "github/pull_request.reopened",
+      "provider": "github",
+      "file": "github/pull_request.reopened.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/pull_request.synchronize",
+      "provider": "github",
+      "file": "github/pull_request.synchronize.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "ignored"
+    },
+    {
+      "id": "github/pull_request.opened_draft",
+      "provider": "github",
+      "file": "github/pull_request.opened.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "pull_request.draft": true
+        }
+      },
+      "note": "Derived: draft=true."
+    },
+    {
+      "id": "github/pull_request.opened_by_bot",
+      "provider": "github",
+      "file": "github/pull_request.opened.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "sender.login": "dependabot[bot]",
+          "sender.type": "Bot"
+        }
+      },
+      "note": "Derived: sender is a Bot (documented sender.type value)."
+    },
+    {
+      "id": "github/pull_request.opened_by_ghost",
+      "provider": "github",
+      "file": "github/pull_request.opened.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "sender.login": "ghost"
+        }
+      },
+      "note": "Derived: documented placeholder login 'ghost'.",
+      "render": true
+    },
+    {
+      "id": "github/pull_request.opened_labeled",
+      "provider": "github",
+      "file": "github/pull_request.opened.json",
+      "headers": {
+        "x-github-event": "pull_request"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "pull_request.labels": [
+            {
+              "name": "bug"
+            }
+          ]
+        }
+      },
+      "note": "Derived: one label named bug."
+    },
+    {
+      "id": "github/pull_request_review.submitted",
+      "provider": "github",
+      "file": "github/pull_request_review.submitted.json",
+      "headers": {
+        "x-github-event": "pull_request_review"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/pull_request_review_comment.created",
+      "provider": "github",
+      "file": "github/pull_request_review_comment.created.json",
+      "headers": {
+        "x-github-event": "pull_request_review_comment"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/push",
+      "provider": "github",
+      "file": "github/push.json",
+      "headers": {
+        "x-github-event": "push"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "The documented example is a tag push with no commits.",
+      "render": true
+    },
+    {
+      "id": "github/push.new_branch",
+      "provider": "github",
+      "file": "github/push.new_branch.json",
+      "headers": {
+        "x-github-event": "push"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/release.published",
+      "provider": "github",
+      "file": "github/release.published.json",
+      "headers": {
+        "x-github-event": "release"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/release.created",
+      "provider": "github",
+      "file": "github/release.created.json",
+      "headers": {
+        "x-github-event": "release"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "ignored"
+    },
+    {
+      "id": "github/workflow_run.completed",
+      "provider": "github",
+      "file": "github/workflow_run.completed.json",
+      "headers": {
+        "x-github-event": "workflow_run"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Documented conclusion: success."
+    },
+    {
+      "id": "github/workflow_run.failure",
+      "provider": "github",
+      "file": "github/workflow_run.completed.json",
+      "headers": {
+        "x-github-event": "workflow_run"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "workflow_run.conclusion": "failure"
+        }
+      },
+      "note": "Derived: conclusion=failure (documented value).",
+      "render": true
+    },
+    {
+      "id": "github/workflow_run.cancelled",
+      "provider": "github",
+      "file": "github/workflow_run.completed.json",
+      "headers": {
+        "x-github-event": "workflow_run"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "workflow_run.conclusion": "cancelled"
+        }
+      },
+      "note": "Derived: conclusion=cancelled (documented value)."
+    },
+    {
+      "id": "github/workflow_run.timed_out",
+      "provider": "github",
+      "file": "github/workflow_run.completed.json",
+      "headers": {
+        "x-github-event": "workflow_run"
+      },
+      "provenance": "derived",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "set": {
+          "workflow_run.conclusion": "timed_out"
+        }
+      },
+      "note": "Derived: conclusion=timed_out (documented value)."
+    },
+    {
+      "id": "github/workflow_run.completed_with_pull_requests",
+      "provider": "github",
+      "file": "github/workflow_run.completed_with_pull_requests.json",
+      "headers": {
+        "x-github-event": "workflow_run"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/workflow_run.requested",
+      "provider": "github",
+      "file": "github/workflow_run.requested.json",
+      "headers": {
+        "x-github-event": "workflow_run"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "ignored"
+    },
+    {
+      "id": "github/deployment_status.created",
+      "provider": "github",
+      "file": "github/deployment_status.created.json",
+      "headers": {
+        "x-github-event": "deployment_status"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "delivered"
+    },
+    {
+      "id": "github/installation.created",
+      "provider": "github",
+      "file": "github/installation.created.json",
+      "headers": {
+        "x-github-event": "installation"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "lifecycle"
+    },
+    {
+      "id": "github/installation.deleted",
+      "provider": "github",
+      "file": "github/installation.deleted.json",
+      "headers": {
+        "x-github-event": "installation"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "lifecycle"
+    },
+    {
+      "id": "github/installation.suspend",
+      "provider": "github",
+      "file": "github/installation.suspend.json",
+      "headers": {
+        "x-github-event": "installation"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "lifecycle"
+    },
+    {
+      "id": "github/installation_repositories.added",
+      "provider": "github",
+      "file": "github/installation_repositories.added.json",
+      "headers": {
+        "x-github-event": "installation_repositories"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "lifecycle"
+    },
+    {
+      "id": "github/ping",
+      "provider": "github",
+      "file": "github/ping.json",
+      "headers": {
+        "x-github-event": "ping"
+      },
+      "provenance": "documented",
+      "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
+      "readOn": "2026-10-14",
+      "expect": "ping"
+    },
+    {
+      "id": "gitlab/push",
+      "provider": "gitlab",
+      "file": "gitlab/push.json",
+      "headers": {
+        "x-gitlab-event": "Push Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "documented",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ]
+    },
+    {
+      "id": "gitlab/tag_push",
+      "provider": "gitlab",
+      "file": "gitlab/tag_push.json",
+      "headers": {
+        "x-gitlab-event": "Tag Push Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "documented",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ]
+    },
+    {
+      "id": "gitlab/issue",
+      "provider": "gitlab",
+      "file": "gitlab/issue.json",
+      "headers": {
+        "x-gitlab-event": "Issue Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "documented",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "note": "Documented action: open."
+    },
+    {
+      "id": "gitlab/issue.close",
+      "provider": "gitlab",
+      "file": "gitlab/issue.json",
+      "headers": {
+        "x-gitlab-event": "Issue Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "derived",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "derive": {
+        "set": {
+          "object_attributes.action": "close"
+        }
+      }
+    },
+    {
+      "id": "gitlab/merge_request.open",
+      "provider": "gitlab",
+      "file": "gitlab/merge_request.open.json",
+      "headers": {
+        "x-gitlab-event": "Merge Request Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "documented",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ]
+    },
+    {
+      "id": "gitlab/merge_request.merge",
+      "provider": "gitlab",
+      "file": "gitlab/merge_request.open.json",
+      "headers": {
+        "x-gitlab-event": "Merge Request Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "derived",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "derive": {
+        "set": {
+          "object_attributes.action": "merge"
+        }
+      }
+    },
+    {
+      "id": "gitlab/merge_request.close",
+      "provider": "gitlab",
+      "file": "gitlab/merge_request.open.json",
+      "headers": {
+        "x-gitlab-event": "Merge Request Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "derived",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "derive": {
+        "set": {
+          "object_attributes.action": "close"
+        }
+      }
+    },
+    {
+      "id": "gitlab/merge_request.reopen",
+      "provider": "gitlab",
+      "file": "gitlab/merge_request.open.json",
+      "headers": {
+        "x-gitlab-event": "Merge Request Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "derived",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "derive": {
+        "set": {
+          "object_attributes.action": "reopen"
+        }
+      }
+    },
+    {
+      "id": "gitlab/issue.reopen",
+      "provider": "gitlab",
+      "file": "gitlab/issue.json",
+      "headers": {
+        "x-gitlab-event": "Issue Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "derived",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "derive": {
+        "set": {
+          "object_attributes.action": "reopen"
+        }
+      }
+    },
+    {
+      "id": "gitlab/merge_request.update",
+      "provider": "gitlab",
+      "file": "gitlab/merge_request.open.json",
+      "headers": {
+        "x-gitlab-event": "Merge Request Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "derived",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "ignored",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "derive": {
+        "set": {
+          "object_attributes.action": "update"
+        }
+      }
+    },
+    {
+      "id": "gitlab/pipeline",
+      "provider": "gitlab",
+      "file": "gitlab/pipeline.json",
+      "headers": {
+        "x-gitlab-event": "Pipeline Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "documented",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "note": "Documented status: success."
+    },
+    {
+      "id": "gitlab/pipeline.failed",
+      "provider": "gitlab",
+      "file": "gitlab/pipeline.json",
+      "headers": {
+        "x-gitlab-event": "Pipeline Hook",
+        "x-gitlab-instance": "gitlab.com"
+      },
+      "provenance": "derived",
+      "source": "https://docs.gitlab.com/user/project/integrations/webhook_events/",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "unverified": [
+        "value of X-Gitlab-Instance sent by GitLab.com"
+      ],
+      "derive": {
+        "set": {
+          "object_attributes.status": "failed"
+        }
+      },
+      "note": "Derived: status=failed. UNVERIFIED: the docs page shows only success for pipelines.",
+      "render": true
+    },
+    {
+      "id": "stripe/invoice.payment_failed",
+      "provider": "stripe",
+      "file": "stripe/invoice.payment_failed.json",
+      "headers": {},
+      "provenance": "composed",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Composed: the documented Event envelope with type set and data.object replaced by the documented resource example. UNVERIFIED that Stripe sends exactly this combination.",
+      "unverified": [
+        "data.previous_attributes for subscription.updated",
+        "type/object pairing"
+      ],
+      "render": true
+    },
+    {
+      "id": "stripe/payment_intent.payment_failed",
+      "provider": "stripe",
+      "file": "stripe/payment_intent.payment_failed.json",
+      "headers": {},
+      "provenance": "composed",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Composed: the documented Event envelope with type set and data.object replaced by the documented resource example. UNVERIFIED that Stripe sends exactly this combination.",
+      "unverified": [
+        "data.previous_attributes for subscription.updated",
+        "type/object pairing"
+      ]
+    },
+    {
+      "id": "stripe/charge.dispute.created",
+      "provider": "stripe",
+      "file": "stripe/charge.dispute.created.json",
+      "headers": {},
+      "provenance": "composed",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Composed: the documented Event envelope with type set and data.object replaced by the documented resource example. UNVERIFIED that Stripe sends exactly this combination.",
+      "unverified": [
+        "data.previous_attributes for subscription.updated",
+        "type/object pairing"
+      ]
+    },
+    {
+      "id": "stripe/charge.dispute.closed",
+      "provider": "stripe",
+      "file": "stripe/charge.dispute.closed.json",
+      "headers": {},
+      "provenance": "composed",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Composed: the documented Event envelope with type set and data.object replaced by the documented resource example. UNVERIFIED that Stripe sends exactly this combination.",
+      "unverified": [
+        "data.previous_attributes for subscription.updated",
+        "type/object pairing"
+      ]
+    },
+    {
+      "id": "stripe/customer.subscription.created",
+      "provider": "stripe",
+      "file": "stripe/customer.subscription.created.json",
+      "headers": {},
+      "provenance": "composed",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Composed: the documented Event envelope with type set and data.object replaced by the documented resource example. UNVERIFIED that Stripe sends exactly this combination.",
+      "unverified": [
+        "data.previous_attributes for subscription.updated",
+        "type/object pairing"
+      ]
+    },
+    {
+      "id": "stripe/customer.subscription.updated",
+      "provider": "stripe",
+      "file": "stripe/customer.subscription.updated.json",
+      "headers": {},
+      "provenance": "composed",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "ignored",
+      "note": "Composed: the documented Event envelope with type set and data.object replaced by the documented resource example. UNVERIFIED that Stripe sends exactly this combination.",
+      "unverified": [
+        "data.previous_attributes for subscription.updated",
+        "type/object pairing"
+      ]
+    },
+    {
+      "id": "stripe/customer.subscription.deleted",
+      "provider": "stripe",
+      "file": "stripe/customer.subscription.deleted.json",
+      "headers": {},
+      "provenance": "composed",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Composed: the documented Event envelope with type set and data.object replaced by the documented resource example. UNVERIFIED that Stripe sends exactly this combination.",
+      "unverified": [
+        "data.previous_attributes for subscription.updated",
+        "type/object pairing"
+      ]
+    },
+    {
+      "id": "stripe/customer.subscription.updated_status_change",
+      "provider": "stripe",
+      "file": "stripe/customer.subscription.updated.json",
+      "headers": {},
+      "provenance": "derived",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "derive": {
+        "add": {
+          "data.previous_attributes": {
+            "status": "trialing"
+          }
+        }
+      },
+      "note": "Derived from the composed subscription.updated fixture by adding previous_attributes.status. UNVERIFIED: previous_attributes shape beyond the documented description.",
+      "unverified": [
+        "data.previous_attributes"
+      ]
+    },
+    {
+      "id": "stripe/plan.created",
+      "provider": "stripe",
+      "file": "stripe/plan.created.json",
+      "headers": {},
+      "provenance": "documented",
+      "source": "https://docs.stripe.com/api/events/object (event envelope) + resource examples from https://github.com/stripe/openapi/blob/master/openapi/fixtures3.json",
+      "readOn": "2026-10-14",
+      "expect": "ignored",
+      "note": "The documented Event object, unchanged. Not in Noti's catalogue."
+    },
+    {
+      "id": "generic/flat",
+      "provider": "generic",
+      "file": "generic/flat.json",
+      "headers": {},
+      "provenance": "contract",
+      "source": "docs/API.md (Sending events: POST /webhooks/generic/:endpointId)",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Written by Noti to the documented generic contract; not a provider capture."
+    },
+    {
+      "id": "generic/minimal",
+      "provider": "generic",
+      "file": "generic/minimal.json",
+      "headers": {},
+      "provenance": "contract",
+      "source": "docs/API.md (Sending events: POST /webhooks/generic/:endpointId)",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Written by Noti to the documented generic contract; not a provider capture."
+    },
+    {
+      "id": "generic/unicode",
+      "provider": "generic",
+      "file": "generic/unicode.json",
+      "headers": {},
+      "provenance": "contract",
+      "source": "docs/API.md (Sending events: POST /webhooks/generic/:endpointId)",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Written by Noti to the documented generic contract; not a provider capture.",
+      "render": true
+    },
+    {
+      "id": "generic/critical",
+      "provider": "generic",
+      "file": "generic/critical.json",
+      "headers": {},
+      "provenance": "contract",
+      "source": "docs/API.md (Sending events: POST /webhooks/generic/:endpointId)",
+      "readOn": "2026-10-14",
+      "expect": "delivered",
+      "note": "Written by Noti to the documented generic contract; not a provider capture.",
+      "render": true
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "fixture": "stripe/customer.subscription.updated",
+  "provenance": "composed",
+  "response": {
+    "status": 200,
+    "body": {
+      "accepted": true,
+      "ignored": "update_not_notable"
+    }
+  },
+  "canonical": null,
+  "delivered": 0,
+  "message": null,
+  "rendered": null
+}
