@@ -66,25 +66,7 @@ export const setupEn = {
   'setup.summary': '{done} of {total} steps done',
   'setup.honest': 'Noti works this out from what has actually happened in your workspace.',
   'setup.listLabel': 'Setup steps',
-  'setup.done': 'Done',
-  'setup.todo': 'Not done yet',
-  'setup.accepted': 'Accepted, not confirmed',
-  'setup.step.destination_verified.accepted':
-    'A destination accepted a message but does not confirm it was shown (Microsoft Teams works this way). Look in the chat to be sure.',
-  'setup.next': 'Next',
   'setup.since': 'Since {when}',
-  'setup.step.source_connected': 'Connect a source',
-  'setup.step.source_connected.body': 'Connect GitHub, or add a source such as a signed webhook.',
-  'setup.step.integration_created': 'Create an integration',
-  'setup.step.integration_created.body': 'Choose what to send and which chat should get it.',
-  'setup.step.destination_verified': 'Check that a destination works',
-  'setup.step.destination_verified.body':
-    'A test or a real notification reached a chat in the last {days} days. Teams counts once it accepts the message.',
-  'setup.step.first_event_received': 'Receive a real event',
-  'setup.step.first_event_received.body':
-    'Something that happened in your source created a notification. Tests do not count.',
-  'setup.action.connect_source': 'Connect GitHub',
-  'setup.action.create_integration': 'Create an integration',
   'setup.action.send_test': 'Send a test',
   'setup.action.trigger_real_event': 'Open Activity',
 } as const;

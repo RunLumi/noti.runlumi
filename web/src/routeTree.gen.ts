@@ -25,6 +25,8 @@ import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsIdRouteImport } from './routes/integrations.$id'
 import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
+import { Route as SetupIndexRouteImport } from './routes/setup.index'
+import { Route as SetupStepRouteImport } from './routes/setup.$step'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -106,6 +108,16 @@ const IntegrationsNewRoute = IntegrationsNewRouteImport.update({
   path: '/integrations/new',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SetupIndexRoute = SetupIndexRouteImport.update({
+  id: '/setup/',
+  path: '/setup/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupStepRoute = SetupStepRouteImport.update({
+  id: '/setup/$step',
+  path: '/setup/$step',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -123,7 +135,9 @@ export interface FileRoutesByFullPath {
   '/verify': typeof VerifyRoute
   '/integrations/$id': typeof IntegrationsIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
+  '/setup/$step': typeof SetupStepRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/setup/': typeof SetupIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -141,7 +155,9 @@ export interface FileRoutesByTo {
   '/verify': typeof VerifyRoute
   '/integrations/$id': typeof IntegrationsIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
+  '/setup/$step': typeof SetupStepRoute
   '/integrations': typeof IntegrationsIndexRoute
+  '/setup': typeof SetupIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -160,7 +176,9 @@ export interface FileRoutesById {
   '/verify': typeof VerifyRoute
   '/integrations/$id': typeof IntegrationsIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
+  '/setup/$step': typeof SetupStepRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/setup/': typeof SetupIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -180,7 +198,9 @@ export interface FileRouteTypes {
     | '/verify'
     | '/integrations/$id'
     | '/integrations/new'
+    | '/setup/$step'
     | '/integrations/'
+    | '/setup/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -198,7 +218,9 @@ export interface FileRouteTypes {
     | '/verify'
     | '/integrations/$id'
     | '/integrations/new'
+    | '/setup/$step'
     | '/integrations'
+    | '/setup'
   id:
     | '__root__'
     | '/'
@@ -216,7 +238,9 @@ export interface FileRouteTypes {
     | '/verify'
     | '/integrations/$id'
     | '/integrations/new'
+    | '/setup/$step'
     | '/integrations/'
+    | '/setup/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -235,7 +259,9 @@ export interface RootRouteChildren {
   VerifyRoute: typeof VerifyRoute
   IntegrationsIdRoute: typeof IntegrationsIdRoute
   IntegrationsNewRoute: typeof IntegrationsNewRoute
+  SetupStepRoute: typeof SetupStepRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
+  SetupIndexRoute: typeof SetupIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -352,6 +378,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/setup/': {
+      id: '/setup/'
+      path: '/setup'
+      fullPath: '/setup/'
+      preLoaderRoute: typeof SetupIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup/$step': {
+      id: '/setup/$step'
+      path: '/setup/$step'
+      fullPath: '/setup/$step'
+      preLoaderRoute: typeof SetupStepRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -371,7 +411,9 @@ const rootRouteChildren: RootRouteChildren = {
   VerifyRoute: VerifyRoute,
   IntegrationsIdRoute: IntegrationsIdRoute,
   IntegrationsNewRoute: IntegrationsNewRoute,
+  SetupStepRoute: SetupStepRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
+  SetupIndexRoute: SetupIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

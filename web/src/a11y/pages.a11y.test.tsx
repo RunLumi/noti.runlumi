@@ -5,7 +5,15 @@ import { join } from 'node:path';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { audit, describeViolations } from './testing/axe';
-import { MEMBER, MULTI, NO_WORKSPACE } from './testing/fixtures';
+import {
+  MEMBER,
+  MULTI,
+  NO_WORKSPACE,
+  SETUP_BLOCKED,
+  SETUP_DONE,
+  SETUP_GITHUB_DONE,
+  SETUP_PROGRESS,
+} from './testing/fixtures';
 import { ROUTE_PATHS, renderApp, unhandled, type RenderOptions } from './testing/render';
 import type { Locale } from '../i18n/locale';
 
@@ -187,6 +195,73 @@ const SCENARIOS: readonly Scenario[] = [
     options: { api: { me: MULTI } },
     ready: () => screen.findByRole('heading', { name: /Create another workspace|Tạo thêm một không gian/ }),
   },
+  {
+    name: 'setup resumes at the step the server names',
+    path: '/setup',
+    ready: () => screen.findByRole('heading', { level: 1, name: /Send a test|Gửi thử/ }),
+  },
+  {
+    name: 'setup: GitHub step, server has no GitHub App (blocked)',
+    path: '/setup/github',
+    options: { api: { setup: SETUP_BLOCKED, githubConfigured: false, installations: [] } },
+    ready: text(/can’t be connected on this server yet|chưa kết nối được GitHub/),
+  },
+  {
+    name: 'setup: GitHub step, connected account shown',
+    path: '/setup/github',
+    options: { api: { setup: SETUP_GITHUB_DONE } },
+    ready: () => screen.findByText(/Connected the wrong account|Kết nối nhầm tài khoản/),
+  },
+  {
+    name: 'setup: repository step',
+    path: '/setup/repository',
+    options: { api: { setup: SETUP_GITHUB_DONE } },
+    ready: () => screen.findByLabelText(/GitHub repository|Repository GitHub/),
+  },
+  {
+    name: 'setup: destination step without a repository chosen (prerequisite)',
+    path: '/setup/destination',
+    options: { api: { setup: SETUP_GITHUB_DONE } },
+    ready: text(/comes after another one|đến sau một bước khác/),
+  },
+  {
+    name: 'setup: destination step, integration already saved',
+    path: '/setup/destination',
+    ready: () => screen.findByText(/What .* can show|có thể hiển thị gì/),
+  },
+  {
+    name: 'setup: events step',
+    path: '/setup/events',
+    ready: () => screen.findByRole('button', { name: /Keep these and continue|Giữ nguyên và tiếp tục/ }),
+  },
+  {
+    name: 'setup: test step',
+    path: '/setup/test',
+    ready: () => screen.findByRole('button', { name: /Send a test notification|Gửi thông báo thử/ }),
+  },
+  {
+    name: 'setup: final step (complete)',
+    path: '/setup/done',
+    options: { api: { setup: SETUP_DONE } },
+    ready: text(/You’re set up|Bạn đã thiết lập xong/),
+  },
+  {
+    name: 'setup: final step (unfinished)',
+    path: '/setup/done',
+    options: { api: { setup: SETUP_PROGRESS } },
+    ready: text(/isn’t finished yet|chưa xong/),
+  },
+  {
+    name: 'setup: progress cannot load',
+    path: '/setup/test',
+    options: { api: { setup: 'error' } },
+    ready: () => screen.findByRole('alert'),
+  },
+  {
+    name: 'page not found, inside the shell',
+    path: '/no-such-page',
+    ready: heading(/We can’t find that page|Không tìm thấy trang này/),
+  },
   { name: 'team (admin)', path: '/team', ready: text('Minh Tran') },
   { name: 'team (member)', path: '/team', options: { api: { me: MEMBER } }, ready: text('Minh Tran') },
   { name: 'settings', path: '/settings', ready: text('Work laptop') },
@@ -235,7 +310,10 @@ describe('route coverage', () => {
   it('scans every route with at least one scenario', () => {
     const scanned = new Set(SCENARIOS.map((s) => s.path.split('?')[0]));
     for (const path of ROUTE_PATHS)
-      expect(scanned.has(path.replace('$id', 'int_1')), `no axe scenario for ${path}`).toBe(true);
+      expect(
+        scanned.has(path.replace('$id', 'int_1').replace('$step', 'github')),
+        `no axe scenario for ${path}`,
+      ).toBe(true);
   });
 });
 

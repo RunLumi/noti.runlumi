@@ -53,7 +53,7 @@ export const appVi = {
   'route.title.forgot': 'Đặt lại mật khẩu',
   'route.title.verify': 'Xác minh email',
   'route.title.reset': 'Chọn mật khẩu mới',
-  'route.title.unknown': 'Lumi Noti',
+  'route.title.unknown': 'Không tìm thấy trang',
 
   // --- Language switcher -------------------------------------------------------------
   'locale.label': 'Ngôn ngữ',
@@ -135,7 +135,7 @@ export const appVi = {
   'auth.backToSignin': 'Quay lại đăng nhập',
   'auth.passkeyNote':
     'Bạn dùng được passkey sau khi đăng ký một passkey trong Cài đặt trên tài khoản đã xác minh.',
-  'auth.error.generic': 'Đã có lỗi xảy ra',
+  'auth.error.generic': 'Noti chưa hoàn tất được thao tác đó. Hãy kiểm tra thông tin rồi thử lại.',
   'auth.error.passkey': 'Đăng nhập bằng passkey không thành công',
   'auth.signup.sent':
     'Hãy kiểm tra email để tìm liên kết xác minh. Sau đó đăng nhập để tạo hoặc tham gia không gian làm việc của bạn.',

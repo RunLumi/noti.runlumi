@@ -63,25 +63,7 @@ export const setupVi = {
   'setup.summary': 'Đã xong {done} trên {total} bước',
   'setup.honest': 'Noti tính điều này từ những gì đã thực sự xảy ra trong không gian làm việc của bạn.',
   'setup.listLabel': 'Các bước thiết lập',
-  'setup.done': 'Đã xong',
-  'setup.todo': 'Chưa xong',
-  'setup.accepted': 'Đã được chấp nhận, chưa được xác nhận',
-  'setup.step.destination_verified.accepted':
-    'Một đích nhận đã chấp nhận tin nhắn nhưng không xác nhận là tin đã hiển thị (Microsoft Teams hoạt động như vậy). Hãy xem trong nhóm chat để chắc chắn.',
-  'setup.next': 'Tiếp theo',
   'setup.since': 'Từ {when}',
-  'setup.step.source_connected': 'Kết nối một nguồn',
-  'setup.step.source_connected.body': 'Kết nối GitHub, hoặc thêm một nguồn như webhook có chữ ký.',
-  'setup.step.integration_created': 'Tạo một tích hợp',
-  'setup.step.integration_created.body': 'Chọn nội dung cần gửi và nhóm chat nào sẽ nhận.',
-  'setup.step.destination_verified': 'Kiểm tra một đích nhận hoạt động',
-  'setup.step.destination_verified.body':
-    'Một thông báo thử hoặc thông báo thật đã đến một nhóm chat trong {days} ngày qua. Teams được tính khi nó chấp nhận tin nhắn.',
-  'setup.step.first_event_received': 'Nhận một sự kiện thật',
-  'setup.step.first_event_received.body':
-    'Một việc xảy ra ở nguồn của bạn đã tạo ra thông báo. Thông báo thử không được tính.',
-  'setup.action.connect_source': 'Kết nối GitHub',
-  'setup.action.create_integration': 'Tạo một tích hợp',
   'setup.action.send_test': 'Gửi thử',
   'setup.action.trigger_real_event': 'Mở Hoạt động',
 } as const satisfies Record<keyof typeof setupEn, string>;

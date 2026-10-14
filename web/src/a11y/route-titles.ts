@@ -1,4 +1,5 @@
 import type { MessageId } from '../i18n';
+import { SETUP_PAGES, isSetupSlug } from '../setup/model';
 
 /**
  * The human name of the page at `pathname`, as a message id. It feeds the document title,
@@ -11,6 +12,11 @@ export function routeTitleId(pathname: string): MessageId {
   if (path === '/integrations') return 'route.title.integrations';
   if (path === '/integrations/new') return 'route.title.integrationNew';
   if (path.startsWith('/integrations/')) return 'route.title.integration';
+  if (path === '/setup') return 'route.title.setup';
+  if (path.startsWith('/setup/')) {
+    const slug = path.slice('/setup/'.length);
+    return isSetupSlug(slug) ? SETUP_PAGES[slug].title : 'route.title.unknown';
+  }
   switch (path) {
     case '/sources':
       return 'sources.title';

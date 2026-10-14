@@ -1,6 +1,7 @@
 import { HeadContent, Scripts, createRootRoute, useHydrated } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { AppShell } from '../pages';
+import { RootNotFound } from '../shell/NotFound';
 import { useLocale } from '../i18n/LocaleProvider';
 import '@fontsource-variable/geist';
 import lumiMark from '../../../brand/lumi-logo.svg?url';
@@ -25,6 +26,7 @@ export const Route = createRootRoute({
   }),
   shellComponent: RootDocument,
   component: RootComponent,
+  notFoundComponent: RootNotFound,
 });
 
 /**

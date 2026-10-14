@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { setupKeys } from '../setup/hooks';
 import { DESTINATION_ORDER, DESTINATIONS } from './destinations';
 import {
   authApi,
@@ -83,7 +84,11 @@ export function useToggleIntegration(orgId: string) {
     },
     onError: (_error, { integration }) => putIntegration(qc, orgId, integration),
     onSuccess: (saved) => putIntegration(qc, orgId, saved),
-    onSettled: () => qc.invalidateQueries({ queryKey: integrationKeys.all(orgId) }),
+    onSettled: async () => {
+      // Pausing or resuming changes what setup reports (a paused integration blocks the test).
+      void qc.invalidateQueries({ queryKey: setupKeys.all(orgId) });
+      await qc.invalidateQueries({ queryKey: integrationKeys.all(orgId) });
+    },
   });
 }
 
@@ -100,6 +105,7 @@ export function useCreateIntegration(orgId: string) {
         (list) => list && { ...list, integrations: [created, ...list.integrations] },
       );
       qc.setQueryData(integrationKeys.detail(orgId, created.id), created);
+      void qc.invalidateQueries({ queryKey: setupKeys.all(orgId) });
       return qc.invalidateQueries({ queryKey: integrationKeys.list(orgId) });
     },
   });
@@ -109,7 +115,10 @@ export function useUpdateIntegration(orgId: string, id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (patch: UpdateIntegrationBody) => integrationsApi.update(orgId, id, patch),
-    onSuccess: (saved) => putIntegration(qc, orgId, saved),
+    onSuccess: (saved) => {
+      putIntegration(qc, orgId, saved);
+      void qc.invalidateQueries({ queryKey: setupKeys.all(orgId) });
+    },
   });
 }
 
@@ -118,7 +127,10 @@ export function useRotateCredentials(orgId: string, id: string) {
   return useMutation({
     mutationFn: (input: RotateCredentialsBody) => integrationsApi.rotateCredentials(orgId, id, input),
     gcTime: 0,
-    onSuccess: ({ integration: saved }) => putIntegration(qc, orgId, saved),
+    onSuccess: ({ integration: saved }) => {
+      putIntegration(qc, orgId, saved);
+      void qc.invalidateQueries({ queryKey: setupKeys.all(orgId) });
+    },
   });
 }
 
@@ -132,6 +144,7 @@ export function useDeleteIntegration(orgId: string, id: string) {
         (list) => list && { ...list, integrations: list.integrations.filter((i) => i.id !== id) },
       );
       qc.removeQueries({ queryKey: integrationKeys.detail(orgId, id) });
+      void qc.invalidateQueries({ queryKey: setupKeys.all(orgId) });
     },
   });
 }

@@ -1,17 +1,23 @@
 import { useEffect, type ReactNode } from 'react';
 import { Link, useParams, useSearch } from '@tanstack/react-router';
-import { IconArrowLeft, IconRefresh } from '@tabler/icons-react';
+import { IconArrowLeft } from '@tabler/icons-react';
 import { PageHeader } from '../../components/PageHeader';
-import { Button, Notice } from '../../components/ui';
+import { ErrorPanel } from '../../components/ErrorPanel';
+import { Skeleton } from '../../components/state';
+import { Notice } from '../../components/ui';
+import { useDeliveryList } from '../../deliveries/hooks';
+import { CapabilitySummary } from '../../setup/CapabilitySummary';
 import { t } from '../../i18n';
 import { DESTINATIONS } from '../destinations';
 import { EnabledSwitch } from '../EnabledSwitch';
-import { HealthNotice } from '../HealthNotice';
-import { describeError, isNotFound } from '../errors';
+import { isNotFound } from '../errors';
 import { useIntegration, useOrgId } from '../hooks';
 import { destinationLabel } from '../IntegrationCard';
 import { CredentialsSection } from './CredentialsSection';
 import { DeleteDialog } from './DeleteDialog';
+import { HealthSection, HistorySection } from './HealthSection';
+import { RepairPanel } from './RepairPanel';
+import { repairsFor } from './repair';
 import { DetailsForm } from './DetailsForm';
 import { FiltersSection } from './FiltersSection';
 import { NoiseSection } from '../noise/NoiseSection';
@@ -54,8 +60,11 @@ function Section({
 }
 
 /**
- * One screen per integration with a stable section order (F217): status, repository and
- * updates, filters, quiet hours and summaries, destination and webhook URL, then delete. Each section saves on its own.
+ * One screen per integration with a stable section order (F217, ADR 0025): status (with the
+ * repair panel when something needs fixing), source and updates, filters, destination (what it
+ * can show, and the test), quiet hours and summaries, credentials, health, history, then delete.
+ * Each section saves on its own. The section ids are anchors that repair links and credential
+ * warnings point at.
  */
 export function IntegrationSettings() {
   useLocale();
@@ -64,6 +73,9 @@ export function IntegrationSettings() {
   const orgId = useOrgId();
   const query = useIntegration(orgId, id);
   const loaded = query.data !== undefined;
+  // The newest deliveries speak for the present: the repair panel and the health section read them.
+  const recent = useDeliveryList(orgId, { integrationId: id });
+  const rows = recent.data?.pages.flatMap((page) => page.deliveries) ?? [];
 
   // `#credentials` links (from a credential warning) target a section rendered after load.
   useEffect(() => {
@@ -76,16 +88,12 @@ export function IntegrationSettings() {
     return (
       <>
         <PageHeader before={<BackLink />} eyebrow={t('settings.eyebrow')} title={t('settings.loading')} />
-        <div className="integration-card skeleton-card" aria-busy="true" aria-label={t('settings.loading')}>
-          <span className="skeleton skeleton-title" aria-hidden="true" />
-          <span className="skeleton skeleton-line" aria-hidden="true" />
-        </div>
+        <Skeleton label={t('settings.loading')} rows={2} />
       </>
     );
 
   if (query.isError && !query.data) {
     const notFound = isNotFound(query.error);
-    const error = describeError(query.error);
     return (
       <>
         <PageHeader
@@ -93,15 +101,17 @@ export function IntegrationSettings() {
           eyebrow={t('settings.eyebrow')}
           title={notFound ? t('settings.notFound.title') : t('integrations.error.title')}
         />
-        <Notice kind="error">
-          <p>{notFound ? t('settings.notFound.body') : error.message}</p>
-          {!notFound && (
-            <Button variant="outline" onClick={() => void query.refetch()}>
-              <IconRefresh size={18} aria-hidden="true" />
-              {t('integrations.retry')}
-            </Button>
-          )}
-        </Notice>
+        {notFound ? (
+          <Notice kind="error">
+            <p>{t('settings.notFound.body')}</p>
+          </Notice>
+        ) : (
+          <ErrorPanel
+            error={query.error}
+            what="errorpanel.what.integration"
+            onRetry={() => void query.refetch()}
+          />
+        )}
       </>
     );
   }
@@ -109,6 +119,7 @@ export function IntegrationSettings() {
   const integration = query.data;
   if (!orgId || !integration) return null;
   const destination = t(DESTINATIONS[integration.destination].name);
+  const repairs = repairsFor(integration, rows);
 
   return (
     <>
@@ -138,10 +149,7 @@ export function IntegrationSettings() {
                 ? t('settings.status.onBlocked')
                 : t('settings.status.on', { destination })}
           </p>
-          <HealthNotice integration={integration} />
-        </Section>
-        <Section id="test" title={t('test.title')}>
-          <TestSend key={integration.id} orgId={orgId} integration={integration} />
+          <RepairPanel repairs={repairs} integrationId={integration.id} />
         </Section>
         <Section id="details" title={t('settings.details.title')}>
           {integration.sourceId ? (
@@ -153,11 +161,32 @@ export function IntegrationSettings() {
         <Section id="filters" title={t('filters.title')}>
           <FiltersSection orgId={orgId} integration={integration} />
         </Section>
+        <Section id="destination" title={t('settings.destination.title')}>
+          <CapabilitySummary kind={integration.destination} />
+        </Section>
+        <Section id="test" title={t('test.title')}>
+          <TestSend key={integration.id} orgId={orgId} integration={integration} />
+        </Section>
         <Section id="noise" title={t('noise.title')}>
           <NoiseSection key={integration.id} orgId={orgId} integration={integration} />
         </Section>
         <Section id="credentials" title={t('settings.credentials.title')}>
           <CredentialsSection orgId={orgId} integration={integration} />
+        </Section>
+        <Section id="health" title={t('settings.health.title')}>
+          <HealthSection
+            integration={integration}
+            deliveries={{
+              isPending: recent.isPending,
+              isError: recent.isError,
+              error: recent.error,
+              refetch: () => void recent.refetch(),
+              rows,
+            }}
+          />
+        </Section>
+        <Section id="history" title={t('settings.history.title')}>
+          <HistorySection integration={integration} />
         </Section>
         <Section id="delete" title={t('settings.danger.title')} tone="danger">
           <p>{t('settings.danger.body')}</p>

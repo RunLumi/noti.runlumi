@@ -1609,3 +1609,45 @@ table {
     transform: none;
   }
 }
+
+/* --- Breadcrumbs and the 404 page (spec 14 F205) ------------------------------------------- */
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.breadcrumbs a {
+  color: var(--color-soft-slate);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.breadcrumbs [aria-current='page'] {
+  color: var(--color-civic-navy);
+  font-weight: 600;
+}
+
+.nav-sublink {
+  min-height: var(--touch-target);
+  margin-left: var(--space-4);
+  font-size: 14px;
+  color: var(--color-risk-red);
+}
+
+.not-found {
+  max-width: 560px;
+  margin: var(--space-16) auto;
+}

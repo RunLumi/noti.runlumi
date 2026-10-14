@@ -330,30 +330,94 @@ export const DELIVERIES: readonly DeliveryItem[] = [
   delivery({ id: 'del_5', state: 'sent', isTest: true }),
 ];
 
-/** What `GET /api/setup/progress` returns for a workspace that has connected and created but not verified. */
+/** What `GET /api/setup/progress` (v2) returns for a workspace that has connected and created but not tested. */
+const step = (id: string, state: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id,
+  state,
+  done: state === 'done',
+  optional: id === 'events_chosen' || id === 'activated',
+  verification: null,
+  since: state === 'done' ? '2026-10-01T09:00:00Z' : null,
+  nextAction: state === 'done' || state === 'skipped' ? 'none' : 'send_test',
+  blockedBy: null,
+  ...over,
+});
+
 export const SETUP_PROGRESS = {
+  version: 2,
   organizationId: ORG_ID,
   steps: [
-    { id: 'source_connected', done: true, status: 'done', since: '2026-10-01T09:00:00Z', nextAction: 'none' },
-    {
-      id: 'integration_created',
-      done: true,
-      status: 'done',
-      since: '2026-10-01T09:30:00Z',
-      nextAction: 'none',
-    },
-    { id: 'destination_verified', done: false, status: 'todo', since: null, nextAction: 'send_test' },
-    {
-      id: 'first_event_received',
-      done: false,
-      status: 'todo',
-      since: null,
-      nextAction: 'trigger_real_event',
-    },
+    step('workspace_created', 'done'),
+    step('github_connected', 'done'),
+    step('repositories_selected', 'done'),
+    step('destination_connected', 'done'),
+    step('events_chosen', 'skipped'),
+    step('test_delivered', 'doing'),
+    step('activated', 'todo', { nextAction: 'trigger_real_event' }),
   ],
   complete: false,
-  next: 'destination_verified',
+  next: 'test_delivered',
+  nextAction: 'send_test',
+  resume: { step: 'test_delivered', integrationId: 'int_1', point: 'v2:test_delivered:int_1' },
   verifiedWindowDays: 30,
+} as const;
+
+/** A brand-new workspace on a server with no GitHub App: the honest blocked state. */
+export const SETUP_BLOCKED = {
+  ...SETUP_PROGRESS,
+  steps: [
+    step('workspace_created', 'done'),
+    step('github_connected', 'blocked', {
+      blockedBy: 'github_app_not_configured',
+      nextAction: 'connect_github',
+    }),
+    step('repositories_selected', 'blocked', {
+      blockedBy: 'github_not_connected',
+      nextAction: 'pick_repository',
+    }),
+    step('destination_connected', 'todo', { nextAction: 'choose_destination' }),
+    step('events_chosen', 'todo', { nextAction: 'refine_events' }),
+    step('test_delivered', 'todo'),
+    step('activated', 'todo', { nextAction: 'trigger_real_event' }),
+  ],
+  next: 'github_connected',
+  nextAction: 'connect_github',
+  resume: { step: 'github_connected', integrationId: null, point: 'v2:github_connected:-' },
+} as const;
+
+/** GitHub connected, nothing created yet: the repository step is next. */
+export const SETUP_GITHUB_DONE = {
+  ...SETUP_PROGRESS,
+  steps: [
+    step('workspace_created', 'done'),
+    step('github_connected', 'done'),
+    step('repositories_selected', 'doing', { nextAction: 'pick_repository' }),
+    step('destination_connected', 'todo', { nextAction: 'choose_destination' }),
+    step('events_chosen', 'todo', { nextAction: 'refine_events' }),
+    step('test_delivered', 'todo'),
+    step('activated', 'todo', { nextAction: 'trigger_real_event' }),
+  ],
+  next: 'repositories_selected',
+  nextAction: 'pick_repository',
+  resume: { step: 'repositories_selected', integrationId: null, point: 'v2:repositories_selected:-' },
+} as const;
+
+/** Everything done: setup is complete and a real event has arrived. */
+export const SETUP_DONE = {
+  ...SETUP_PROGRESS,
+  steps: [
+    step('workspace_created', 'done'),
+    step('github_connected', 'done'),
+    step('repositories_selected', 'done'),
+    step('destination_connected', 'done'),
+    step('events_chosen', 'skipped'),
+    step('test_delivered', 'done', { verification: 'confirmed' }),
+    step('activated', 'done'),
+  ],
+  complete: true,
+  next: null,
+  nextAction: 'none',
+  resume: { step: 'activated', integrationId: 'int_1', point: 'v2:activated:int_1' },
 } as const;
 
 /** The delivery a test send creates; its state is whatever a scenario needs. */

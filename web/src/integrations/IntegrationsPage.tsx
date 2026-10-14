@@ -68,7 +68,7 @@ export function IntegrationsPage() {
         description={t('integrations.description')}
         action={integrations.length > 0 ? <NewIntegrationLink /> : undefined}
       />
-      {orgId && <GithubReturnStatus orgId={orgId} />}
+      {orgId && <GithubReturnStatus orgId={orgId} resumeSetup />}
       {orgId && <GithubPanel orgId={orgId} />}
       {list.isPending ? (
         <ListSkeleton />

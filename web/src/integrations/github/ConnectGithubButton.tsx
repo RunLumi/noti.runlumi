@@ -10,7 +10,14 @@ interface ConnectGithubButtonProps {
   /** "Reconnect" wording for refreshing an existing installation's repository access. */
   readonly reconnect?: boolean;
   readonly variant?: 'primary' | 'outline';
+  /** "Connect another account": the person is already connected and wants a different account. */
+  readonly another?: boolean;
+  /** The trip started from the setup flow, so GitHub's return brings them back to it. */
+  readonly fromSetup?: boolean;
 }
+
+/** Set before leaving for GitHub; read once on return. A hint about where to resume, never state. */
+export const SETUP_RETURN_KEY = 'noti:setup-github-return';
 
 /**
  * Leaves for GitHub to install or reconfigure the Noti App. GitHub returns to
@@ -20,6 +27,8 @@ export function ConnectGithubButton({
   orgId,
   reconnect = false,
   variant = 'primary',
+  another = false,
+  fromSetup = false,
 }: ConnectGithubButtonProps) {
   useLocale();
   const start = useStartInstall(orgId);
@@ -33,7 +42,15 @@ export function ConnectGithubButton({
         variant={variant}
         aria-disabled={busy || undefined}
         onClick={() => {
-          if (!busy) start.mutate();
+          if (busy) return;
+          if (fromSetup) {
+            try {
+              window.sessionStorage.setItem(SETUP_RETURN_KEY, '1');
+            } catch {
+              // Storage can be blocked; GitHub's return then lands on Integrations, which links back.
+            }
+          }
+          start.mutate();
         }}
       >
         {reconnect ? (
@@ -41,7 +58,9 @@ export function ConnectGithubButton({
         ) : (
           <IconBrandGithub size={18} aria-hidden="true" />
         )}
-        {busy ? t('github.connecting') : t(reconnect ? 'github.reconnect' : 'github.connect')}
+        {busy
+          ? t('github.connecting')
+          : t(reconnect ? 'github.reconnect' : another ? 'github.connectAnother' : 'github.connect')}
       </Button>
       {error && (
         <Notice kind="error">
