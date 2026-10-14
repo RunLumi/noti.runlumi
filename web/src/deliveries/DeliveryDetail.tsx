@@ -5,6 +5,7 @@ import { IconX } from '@tabler/icons-react';
 import { Button, Notice } from '../components/ui';
 import { t } from '../i18n';
 import type { DeliveryItem } from './api';
+import { AttemptTimeline } from './AttemptTimeline';
 import { STATE_LABEL, STATE_MEANING, describeDeliveryError, destinationName, failureCopy } from './copy';
 import { useDeliveryDetail } from './hooks';
 import { RedeliverPanel } from './RedeliverPanel';
@@ -31,6 +32,7 @@ function Explanation({ delivery }: { readonly delivery: DeliveryItem }) {
     <section className="detail-section" aria-labelledby="detail-what">
       <h3 id="detail-what">{t('delivery.detail.whatHappened')}</h3>
       <p>{copy ?? t('delivery.detail.noMessage')}</p>
+      {delivery.pausedReason && <p>{t(`delivery.detail.paused.${delivery.pausedReason}`)}</p>}
       {delivery.state === 'retrying' && delivery.nextAttemptAt && (
         <p>{t('delivery.detail.nextRetry', { time: absoluteTime(delivery.nextAttemptAt) })}</p>
       )}
@@ -45,6 +47,50 @@ function Explanation({ delivery }: { readonly delivery: DeliveryItem }) {
             {t('delivery.detail.fixLink')}
           </Link>
         </p>
+      )}
+    </section>
+  );
+}
+
+/** F185: say plainly when a duplicate was detected and not sent, or was possible and undetectable. */
+function Duplicates({
+  delivery,
+  onShowNew,
+}: {
+  readonly delivery: DeliveryItem;
+  readonly onShowNew: (id: string) => void;
+}) {
+  useLocale();
+  const { suppression } = delivery;
+  if (!suppression && !delivery.possibleDuplicate) return null;
+  return (
+    <section className="detail-section" aria-labelledby="detail-duplicates">
+      <h3 id="detail-duplicates">
+        {suppression ? t('delivery.detail.suppressed.title') : t('delivery.detail.possibleDuplicate.title')}
+      </h3>
+      {suppression ? (
+        <>
+          <p>{t(`delivery.detail.suppressed.${suppression.reason}`)}</p>
+          {suppression.originalState === 'dead_lettered' && (
+            <p>{t('delivery.detail.suppressed.originalFailed')}</p>
+          )}
+          {suppression.duplicateOf && (
+            <>
+              <p className="mono-wrap muted">
+                {t('delivery.detail.suppressed.of', { id: suppression.duplicateOf })}
+              </p>
+              <button
+                type="button"
+                className="text-link"
+                onClick={() => onShowNew(suppression.duplicateOf ?? '')}
+              >
+                {t('delivery.detail.suppressed.open')}
+              </button>
+            </>
+          )}
+        </>
+      ) : (
+        <p>{t('delivery.detail.possibleDuplicate.body')}</p>
       )}
     </section>
   );
@@ -135,11 +181,26 @@ export function DeliveryDetail({ orgId, id, initial, returnFocus, onClose, onSho
                 <p>{t(STATE_MEANING[delivery.state])}</p>
               </section>
               <Explanation delivery={delivery} />
+              <Duplicates delivery={delivery} onShowNew={onShowNew} />
               <Facts delivery={delivery} />
               <section className="detail-section" aria-labelledby="detail-timeline">
-                <h3 id="detail-timeline">{t('delivery.detail.timeline')}</h3>
+                <h3 id="detail-timeline">
+                  {query.data?.attemptDetail === 'full' ? t('attempts.title') : t('delivery.detail.timeline')}
+                </h3>
                 {query.isError && <p className="muted">{t('delivery.detail.error')}</p>}
-                {query.data && (
+                {query.data?.attemptDetail === 'full' && (
+                  <>
+                    <AttemptTimeline
+                      attempts={query.data.attempts}
+                      destination={delivery.integration.destination}
+                    />
+                    <p className="muted small">{t('attempts.note')}</p>
+                  </>
+                )}
+                {query.data && query.data.attemptDetail !== 'full' && (
+                  <p className="muted">{t('attempts.empty')}</p>
+                )}
+                {query.data && query.data.attemptDetail !== 'full' && (
                   <ol className="timeline">
                     {query.data.timeline.map((entry) => (
                       <li key={entry.kind}>
@@ -149,7 +210,9 @@ export function DeliveryDetail({ orgId, id, initial, returnFocus, onClose, onSho
                     ))}
                   </ol>
                 )}
-                <p className="muted small">{t('delivery.detail.timeline.note')}</p>
+                {query.data && query.data.attemptDetail !== 'full' && (
+                  <p className="muted small">{t('delivery.detail.timeline.note')}</p>
+                )}
               </section>
               <section className="detail-section" aria-labelledby="detail-replays">
                 <h3 id="detail-replays">{t('delivery.detail.replays')}</h3>

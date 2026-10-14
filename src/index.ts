@@ -23,6 +23,7 @@ import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './p
 import observability from './api/observability';
 import { runCronJobs, writeHeartbeat } from './observability/cron';
 import { detectStalls } from './observability/stall';
+import { purgeEventDedup } from './delivery/dedup';
 import { purgeExpiredRecords } from './pipeline/retention';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { purgeDueWorkspace } from './pipeline/purge';
@@ -235,6 +236,12 @@ async function purgeExpiredAuth(env: Bindings): Promise<void> {
   if (total > 0) log('info', 'expired_auth_records_purged', { ...purged });
 }
 
+/** F171: expired dedup rows, bounded per tick and resumable (the next tick continues). */
+async function purgeDedup(env: Bindings): Promise<void> {
+  const report = await purgeEventDedup(env.DB, Date.now());
+  if (report.purged > 0) log('info', 'dedup_purged', { ...report });
+}
+
 async function purgeRetention(env: Bindings): Promise<void> {
   const retention = await purgeExpiredRecords(env);
   if (retention.deliveries + retention.outbox + retention.audit > 0)
@@ -288,6 +295,7 @@ export default {
       { name: 'routing_decisions_purge', run: () => purgeRouting(env) },
       { name: 'noise_purge', run: () => purgeNoiseState(env) },
       { name: 'expired_auth_purge', run: () => purgeExpiredAuth(env) },
+      { name: 'dedup_purge', run: () => purgeDedup(env) },
     ]);
   },
 

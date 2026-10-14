@@ -139,6 +139,122 @@ describe('delivery detail (dialog)', () => {
   });
 });
 
+describe('attempt history and duplicate disclosure (ADR 0023)', () => {
+  const openRow = async (user: ReturnType<typeof userEvent.setup>, state: RegExp, locale?: 'vi') => {
+    await renderApp('/activity', locale ? { locale } : {});
+    const rows = await screen.findAllByRole('row');
+    const row = rows.find((r) => within(r).queryByText(state));
+    expect(row, 'no matching row in the fixture').toBeDefined();
+    await user.click(
+      within(row as HTMLElement).getByRole('button', { name: locale ? /Chi tiết/ : /Details/ }),
+    );
+    return screen.findByRole('dialog');
+  };
+
+  it('lists every attempt, oldest first, with words for each outcome, and is accessible', async () => {
+    const user = userEvent.setup();
+    const dialog = await openRow(user, /Failed/);
+    await within(dialog).findByText('Every attempt');
+    const list = within(dialog).getByRole('list', { name: 'Attempts, oldest first' });
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    // Outcome is text, never colour alone; a wait is not an attempt.
+    expect(within(items[0]).getByText('Attempt 1')).toBeTruthy();
+    expect(within(items[0]).getByText('Did not work, will retry')).toBeTruthy();
+    expect(within(items[1]).getByText('Waited, and then 41 more times. Nothing was sent.')).toBeTruthy();
+    expect(
+      within(items[1]).getByText('Paused automatically because the destination keeps failing.'),
+    ).toBeTruthy();
+    expect(within(items[2]).getByText('Did not work, stopped')).toBeTruthy();
+    // Nothing the destination answered is shown: a status class and a minted code only.
+    expect(within(items[0]).getByText('The destination had an error · Took 412 ms')).toBeTruthy();
+    expect(within(items[0]).getByText('Code provider_http_503')).toBeTruthy();
+    expect(within(items[0]).getByText('The destination may already have received this one.')).toBeTruthy();
+    await expectClean('delivery attempts');
+  });
+
+  it('says plainly that a retried delivery may have arrived more than once', async () => {
+    const user = userEvent.setup();
+    const dialog = await openRow(user, /Retrying/);
+    await within(dialog).findByText('This may have arrived more than once');
+    expect(within(dialog).getByText(/Noti cannot tell, and does not promise it did not/)).toBeTruthy();
+    expect(
+      within(dialog).getByText(
+        /Paused automatically because the destination keeps failing\. Noti will try again/,
+      ),
+    ).toBeTruthy();
+    await expectClean('possible duplicate');
+  });
+
+  it('records a suppressed repeat with its reason and a way to the first delivery', async () => {
+    const user = userEvent.setup();
+    const dialog = await openRow(user, /Suppressed/);
+    await within(dialog).findByText('Not sent again');
+    expect(within(dialog).getByText(/recorded this repeat instead of sending it again/)).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Show the first delivery' })).toBeTruthy();
+    // The original failed: say so and point at it, rather than implying this repeat could be redelivered.
+    expect(
+      within(dialog).getByText(/The first delivery of this event failed\. Redeliver that one/),
+    ).toBeTruthy();
+    await expectClean('suppressed duplicate');
+  });
+
+  it('is accessible in Vietnamese', async () => {
+    const user = userEvent.setup();
+    const dialog = await openRow(user, /Thất bại|Failed/, 'vi');
+    await within(dialog).findByText('Từng lần thử');
+    await expectClean('delivery attempts (vi)');
+  });
+});
+
+describe('redeliver all failed (F182)', () => {
+  it('counts first, asks for the number above the threshold, then reports what was queued', async () => {
+    const user = userEvent.setup();
+    await renderApp('/activity?state=dead_lettered');
+    const start = await screen.findByRole('button', { name: 'Redeliver all failed' });
+    await user.click(start);
+    await screen.findByText('25 failed deliveries will be sent again as new deliveries.');
+    expect(screen.getByText(/5 more are waiting\. Noti sends at most 200 at a time/)).toBeTruthy();
+    const confirm = screen.getByRole('button', { name: 'Send them again' });
+    // Above the threshold the number must be typed; until then the button does nothing.
+    expect(confirm.getAttribute('aria-disabled')).toBe('true');
+    await user.click(confirm);
+    expect(screen.queryByText(/Queued/)).toBeNull();
+    await expectClean('bulk redeliver preview');
+    await user.type(screen.getByLabelText('Type 25 to confirm'), '25');
+    expect(screen.getByRole('button', { name: 'Send them again' }).getAttribute('aria-disabled')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Send them again' }));
+    const queued = await screen.findByText(/Queued 24 new deliveries/);
+    // The confirm button unmounted: focus moves to the outcome, not to the top of the page.
+    await waitFor(() =>
+      expect(queued.closest('[tabindex="-1"]')?.contains(document.activeElement)).toBe(true),
+    );
+    expect(screen.getByText('1 had already been sent again earlier.')).toBeTruthy();
+    expect(screen.getByText('5 more are waiting for another round.')).toBeTruthy();
+    await expectClean('bulk redeliver result');
+  });
+
+  it('is not offered on other views, and can be cancelled', async () => {
+    const user = userEvent.setup();
+    await renderApp('/activity');
+    await screen.findByRole('table');
+    expect(screen.queryByRole('button', { name: 'Redeliver all failed' })).toBeNull();
+    cleanup();
+    await renderApp('/activity?state=dead_lettered');
+    await user.click(await screen.findByRole('button', { name: 'Redeliver all failed' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await screen.findByRole('button', { name: 'Redeliver all failed' });
+  });
+
+  it('is accessible in Vietnamese', async () => {
+    const user = userEvent.setup();
+    await renderApp('/activity?state=dead_lettered', { locale: 'vi' });
+    await user.click(await screen.findByRole('button', { name: 'Gửi lại tất cả lượt thất bại' }));
+    await screen.findByText('25 lượt gửi thất bại sẽ được gửi lại dưới dạng lượt gửi mới.');
+    await expectClean('bulk redeliver preview (vi)');
+  });
+});
+
 describe('create-integration wizard', () => {
   const next = (user: ReturnType<typeof userEvent.setup>) =>
     user.click(screen.getByRole('button', { name: /Continue/ }));

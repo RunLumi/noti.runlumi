@@ -12,6 +12,7 @@
 import { SCHEDULE_REDISPATCH_SQL, scheduleRedispatchParams } from '../delivery/claim';
 import {
   DELIVERY_CLAIM_LEASE_MS,
+  RECORD_STALE_ATTEMPT_SQL,
   RELEASE_STALE_CLAIM_SQL,
   SELECT_STALE_CLAIMS_SQL,
   SELECT_STALE_CLAIM_WORKSPACES_SQL,
@@ -36,6 +37,8 @@ export async function sweepStaleClaims(env: Bindings, nowMs: number = Date.now()
       // dead-lettered row is never redispatched.
       const [result] = await env.DB.batch([
         env.DB.prepare(RELEASE_STALE_CLAIM_SQL).bind(id, orgId, cutoff, nowMs, maxAttempts()),
+        // Directly after the release: written only when it changed the row (M6).
+        env.DB.prepare(RECORD_STALE_ATTEMPT_SQL).bind(crypto.randomUUID(), id, orgId),
         env.DB.prepare(SCHEDULE_REDISPATCH_SQL).bind(...scheduleRedispatchParams(orgId, id, nowMs)),
       ]);
       released += result?.meta.changes ?? 0;

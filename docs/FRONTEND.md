@@ -120,10 +120,25 @@ Decisions and verification: [ADR 0009](adr/0009-delivery-log-ux.md).
 | --- | --- |
 | `deliveries/DeliveryLogPage.tsx` | `/activity`: filters, table, load more, empty/error/loading states |
 | `deliveries/DeliveryTable.tsx` | TanStack Table; rows stack into labelled cards at narrow widths |
-| `deliveries/DeliveryDetail.tsx`, `RedeliverPanel.tsx` | Detail dialog, plain-language cause, admin-only confirmed redelivery |
+| `deliveries/DeliveryDetail.tsx`, `RedeliverPanel.tsx` | Detail dialog, plain-language cause, admin-only confirmed redelivery, duplicate disclosure |
+| `deliveries/AttemptTimeline.tsx` | Per-attempt history in the detail dialog: one line per try or wait, oldest first, outcome in words, status class and a minted code, never what the destination answered (ADR 0023) |
+| `deliveries/BulkRedeliver.tsx` | "Redeliver all failed" on the Failed view: count from the server first, then confirm; the number is typed above 20; a stale plan is refused and re-counted; not optimistic |
+| `integrations/HealthNotice.tsx` | The circuit breaker and rate-limit hold on an integration card and its settings: shown in words, never enforced (ADR 0023) |
 | `deliveries/DeliveryStats.tsx` | Overview figures from `GET /api/deliveries/summary` (last 24 hours, counted not estimated) |
 | `deliveries/search.ts`, `api.ts`, `copy.ts` | URL-backed filters, strict response parsing, state and error copy |
 | `workspace/` | Settings: credential-free export download and two-phase workspace deletion |
+
+Delivery ledger depth (ADR 0023): the detail dialog says, in this order, what happened, then (when it
+applies) "This may have arrived more than once" for a possible duplicate, or "Not sent again" with the reason
+and a link to the first delivery for a suppressed repeat, then the facts, then "Every attempt". A waiting
+delivery paused by the breaker or by the destination's own rate limit says so and says nothing was lost or
+turned off. The copy lives in `i18n/messages.ledger.en.ts` and `.vi.ts` (`useLocale()` in every component, both
+catalogues in lock-step). Each attempt's outcome is a word as well as a rail colour (WCAG 1.4.1), the list is a
+labelled `<ol>`, and the bulk panel is a labelled group with a labelled number field. Verified by axe in
+`a11y/dialogs.a11y.test.tsx` (attempts, possible duplicate, suppressed, bulk preview and result, each in English
+and the key ones in Vietnamese) and by the integrations and settings page scenarios, which now include an open
+breaker. **Not verified:** a real browser at 320 px and with a screen reader for these new surfaces; the
+Vietnamese copy has not been reviewed by a native speaker. A run of identical waits is one line ("Waited, and then 41 more times"), a delivery held back for more than a day reads "Stopped waiting", a repeat of a failed original says to redeliver the original, and after the bulk confirm button unmounts focus moves to the result or stale notice (the loading line is a status region).
 
 ## Workspace switcher and audit log (`web/src/workspace/`, `web/src/audit/`)
 

@@ -14,9 +14,9 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 35 | 152 | 54 | 4 | 17 | 262 |
-| P0 | 31 | 104 | 12 | 3 | 8 | 158 |
-| P1 | 4 | 42 | 24 | 0 | 2 | 72 |
+| All features | 35 | 156 | 50 | 4 | 17 | 262 |
+| P0 | 31 | 107 | 9 | 3 | 8 | 158 |
+| P1 | 4 | 43 | 23 | 0 | 2 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
 ## Per spec
@@ -33,7 +33,7 @@
 | [09-destinations-extended.md](09-destinations-extended.md) | 0 | 8 | 4 | 0 | 4 | 16 |
 | [10-routing-and-filtering.md](10-routing-and-filtering.md) | 0 | 10 | 10 | 0 | 0 | 20 |
 | [11-grouping-and-noise.md](11-grouping-and-noise.md) | 0 | 14 | 14 | 0 | 0 | 28 |
-| [12-delivery-reliability.md](12-delivery-reliability.md) | 7 | 11 | 4 | 0 | 0 | 22 |
+| [12-delivery-reliability.md](12-delivery-reliability.md) | 7 | 15 | 0 | 0 | 0 | 22 |
 | [13-observability.md](13-observability.md) | 0 | 10 | 4 | 0 | 0 | 14 |
 | [14-dashboard-and-ux.md](14-dashboard-and-ux.md) | 0 | 18 | 3 | 1 | 0 | 22 |
 | [15-security-and-compliance.md](15-security-and-compliance.md) | 2 | 12 | 2 | 0 | 0 | 16 |
@@ -213,7 +213,7 @@
 | F168 | Noise tuning feedback | [11](11-grouping-and-noise.md) | P2 | ❌ | no "too noisy" feedback control or tuning suggestions |
 | F169 | Durable acceptance before acknowledgement | [12](12-delivery-reliability.md) | P0 | 🟡 | Batch-then-202 holds: delivery and outbox rows commit in one `db.batch()` before the 202 (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`); `waitUntil` wraps only the awaited-send dispatcher. Not … |
 | F170 | Deduplication key derivation | [12](12-delivery-reliability.md) | P0 | ✅ | `dedupKey()` in `src/delivery/ids.ts` is SHA-256 over 0x00-separated org, connection, source and id, full digest stored in `deliveries.dedup_key`, used by all source routes; `tests/delivery/ids.test.ts` covers injectivity and … |
-| F171 | Deduplication storage and TTL | [12](12-delivery-reliability.md) | P0 | ❌ | No `event_dedup` or `semantic_dedup` table, no dedup TTL, hit_count or dedup purge job, no per-connection TTL. Duplicate suppression today is the unique delivery id on `deliveries`, so its window is delivery retention … |
+| F171 | Deduplication storage and TTL | [12](12-delivery-reliability.md) | P0 | 🟡 | `event_dedup` (migration 0025) is written in the same batch as the delivery or held row at every ingress route, counts repeats (`hit_count`, `last_seen`), expires after a 7-day TTL asserted to exceed the GitHub and Stripe … |
 | F172 | Atomic outbox claim | [12](12-delivery-reliability.md) | P0 | ✅ | Conditional `UPDATE ... RETURNING` claim with lease token and lease reclaim in `src/delivery/claim.ts` and `src/pipeline/outbox.ts`; `tests/delivery/claim.test.ts` and `tests/pipeline/reliability.test.ts` cover concurrent … |
 | F173 | Outbox pump | [12](12-delivery-reliability.md) | P0 | ✅ | `src/pipeline/outbox.ts` claims then awaits `DELIVERY_QUEUE.send` (never waitUntil-wrapped), marks dispatched or releases the row; ids plus display text only, no credentials (`tests/pipeline/delivery-path.test.ts`). … |
 | F174 | Outbox reconciler | [12](12-delivery-reliability.md) | P0 | 🟡 | Per-workspace reconciler with lease reclaim and scheduled retries runs every minute (`src/index.ts` `reconcileOutbox`, `src/pipeline/sweep.ts`; `tests/pipeline/reliability.test.ts`). Not built: an alert on reconciler failure or … |
@@ -223,16 +223,16 @@
 | F178 | `Retry-After` handling | [12](12-delivery-reliability.md) | P0 | 🟡 | RFC 9110 seconds and HTTP-date parsed, clamped to 1 hour, overrides backoff (`src/connectors/destinations/retry-after.ts`, `tests/delivery/retry.test.ts`); Discord body `retry_after` and Lark 400 with `99991400` and … |
 | F179 | Error classification | [12](12-delivery-reliability.md) | P0 | 🟡 | Table-driven classification for Slack webhook, Lark codes, Discord (404 terminal, 401/403 gated on body code) and Teams (`src/connectors/destinations/*/classify.ts`, `tests/destinations/*.test.ts`). Not built: Slack Web API codes … |
 | F180 | Dead-letter queue | [12](12-delivery-reliability.md) | P0 | 🟡 | Terminal `dead_lettered` state with taxonomy code; `noti-dead-letters` has a consumer that marks stranded rows (`src/pipeline/dead-letter.ts`, asserted in `tests/pipeline/reliability.test.ts`). Not built: runtime health check that … |
-| F181 | Dead-letter inspection | [12](12-delivery-reliability.md) | P0 | 🟡 | Tenant-scoped list/detail API with state, attempts, taxonomy code and user copy, plus the Activity page (`src/api/deliveries.ts`, `web/src/deliveries/`, `tests/api/deliveries.test.ts`). Not built: per-attempt history, … |
+| F181 | Dead-letter inspection | [12](12-delivery-reliability.md) | P0 | 🟡 | Tenant-scoped list/detail API with state, attempts, taxonomy code and user copy, plus the Activity page (`src/api/deliveries.ts`, `web/src/deliveries/`, `tests/api/deliveries.test.ts`). Per-attempt history with time, outcome, … |
 | F182 | Manual replay | [12](12-delivery-reliability.md) | P0 | 🟡 | `POST /api/deliveries/:id/replay` is admin-only (`delivery.replay`), CSRF-checked, rate-limited, audited in the same batch, refused for successful or non-replayable rows, with `replay_of` and fresh attempts … |
-| F183 | Circuit breaker | [12](12-delivery-reliability.md) | P1 | ❌ | No per-destination circuit breaker, half-open probe or user-visible breaker state. Only adjacent: a Discord-only audited auto-pause of one integration on a dead webhook (`src/pipeline/consumer.ts`), which pauses rather than breaks … |
-| F184 | Delivery ledger | [12](12-delivery-reliability.md) | P0 | 🟡 | Hashed `(dedup_key, destination)` delivery id, state machine, attempts, error code and replay columns on `deliveries` (`src/delivery/ids.ts`, migration 0009, `tests/delivery/ids.test.ts`). Not built: `delivery_attempts` table, … |
-| F185 | Honest duplicate surface | [12](12-delivery-reliability.md) | P0 | 🟡 | Delivery log and detail show the at-least-once sentence (`deliveries.model` in `web/src/i18n/`; `web/src/deliveries/deliveries.test.ts` bans exactly-once wording in the en catalogue). Not built: writing `suppressed` rows (ingress … |
-| F186 | Client-side deduplication window | [12](12-delivery-reliability.md) | P0 | ❌ | No client-side dedup window per destination; duplicate suppression exists only at ingress by delivery id (F170). Depends on F188 and the F171 dedup storage. |
-| F187 | Outbound rate limiting per destination | [12](12-delivery-reliability.md) | P0 | ❌ | No outbound token bucket or delay-based shaping per provider account; the consumer only reacts to 429s. `src/security/rate-limit.ts` is inbound API only. The Discord cap on 401/403 retries in `src/pipeline/consumer.ts` is the sole … |
+| F183 | Circuit breaker | [12](12-delivery-reliability.md) | P1 | 🟡 | Per-integration circuit breaker in D1 (`destination_health`): closed, open after 5 consecutive `destination_unavailable` or `destination_timeout` failures, open for 5 minutes, one half-open probe won by a conditional UPDATE; while … |
+| F184 | Delivery ledger | [12](12-delivery-reliability.md) | P0 | 🟡 | Hashed `(dedup_key, destination)` delivery id, state machine, attempts, error code and replay columns on `deliveries` (`src/delivery/ids.ts`, migration 0009, `tests/delivery/ids.test.ts`). `delivery_attempts` (migration 0025): one … |
+| F185 | Honest duplicate surface | [12](12-delivery-reliability.md) | P0 | 🟡 | Delivery log and detail show the at-least-once sentence (`deliveries.model` in `web/src/i18n/`; `web/src/deliveries/deliveries.test.ts` bans exactly-once wording in the en catalogue). A repeat of an event already accepted is … |
+| F186 | Client-side deduplication window | [12](12-delivery-reliability.md) | P0 | 🟡 | Ingress-side window: a repeat of an event within the dedup TTL is suppressed and recorded (`event_dedup`, `src/delivery/dedup.ts`). Not built: the per-destination client-side window (`dedup_key + destination` suppressed for N … |
+| F187 | Outbound rate limiting per destination | [12](12-delivery-reliability.md) | P0 | 🟡 | Per-integration outbound pacing driven by what the destination says: `x-ratelimit-remaining: 0` (with `-reset-after`, `-reset` or `Retry-After`) and a 429's `Retry-After` set `paused_until`, and later deliveries wait without a … |
 | F188 | Provider-native idempotency | [12](12-delivery-reliability.md) | P1 | 🟡 | `larkMessageUuid()` derives a stable 50-char key from the delivery id (`src/delivery/ids.ts`, `tests/delivery/ids.test.ts`) but is not wired: no Lark app-mode adapter exists (only custom bot), so no `uuid` is ever sent. Blocked on … |
 | F189 | Outbound request budget | [12](12-delivery-reliability.md) | P0 | ✅ | 10 s `AbortSignal.timeout`, `redirect: 'manual'` with 3xx permanent, response body read capped at 2 KB, consumer sends serially so no fan-out past 6 connections (`src/connectors/destinations/send.ts`, … |
-| F190 | Scheduled job fleet | [12](12-delivery-reliability.md) | P0 | 🟡 | One cron Worker runs heartbeat, stall detection, outbox reconcile, noise release, credential maintenance, retention purge (hourly gate) and other purges, each isolated (`src/index.ts`, `src/observability/cron.ts`, … |
+| F190 | Scheduled job fleet | [12](12-delivery-reliability.md) | P0 | 🟡 | One cron Worker runs heartbeat, stall detection, outbox reconcile, noise release, credential maintenance, retention purge (hourly gate), `dedup_purge` and other purges, each isolated (`src/index.ts`, `src/observability/cron.ts`, … |
 | F191 | Analytics Engine metrics pipeline | [13](13-observability.md) | P1 | ❌ | No Analytics Engine binding in `wrangler.jsonc`, no typed metric writer, datasets, sampling config or datapoint budget. ADR 0011 defers it; SLIs come from D1 only (`src/observability/slis.ts`). |
 | F192 | Scheduled job runner and job health | [13](13-observability.md) | P0 | 🟡 | Only `runCronJobs` in `src/observability/cron.ts`: per-job isolation, a failure log and a heartbeat row in `ops_state` that nothing reads (`tests/observability/cron.test.ts`). Not built: `runJob` wrapper, `job_runs` and … |
 | F193 | Correlation id propagation | [13](13-observability.md) | P0 | 🟡 | Our UUID is minted at ingress before parsing, `external_request_id` and `cf_ray` captured, `x-request-id` echoed, id on every in-request log line (`src/platform/correlation.ts`, `tests/platform/correlation.test.ts`). Not built: … |

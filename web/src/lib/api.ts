@@ -143,6 +143,34 @@ export interface Integration {
   readonly noiseNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
+  /** The delivery circuit breaker and the destination's rate-limit hold; null when never needed. */
+  readonly health?: IntegrationHealth | null;
+}
+
+/** Shown, never enforced: Noti does not turn an integration off because its destination failed. */
+export interface IntegrationHealth {
+  readonly state: 'closed' | 'open' | 'half_open';
+  readonly paused: boolean;
+  readonly consecutiveFailures: number;
+  /** When the next probe is allowed (ISO); null when closed. */
+  readonly retryAt: string | null;
+  /** The destination asked to be left alone until this instant (ISO). */
+  readonly pacedUntil: string | null;
+  readonly timesOpened: number;
+}
+
+function healthOf(value: unknown): IntegrationHealth | null {
+  if (!isRecord(value)) return null;
+  const state = value.state;
+  if (state !== 'closed' && state !== 'open' && state !== 'half_open') return null;
+  return {
+    state,
+    paused: value.paused === true,
+    consecutiveFailures: typeof value.consecutiveFailures === 'number' ? value.consecutiveFailures : 0,
+    retryAt: typeof value.retryAt === 'string' ? value.retryAt : null,
+    pacedUntil: typeof value.pacedUntil === 'string' ? value.pacedUntil : null,
+    timesOpened: typeof value.timesOpened === 'number' ? value.timesOpened : 0,
+  };
 }
 
 /** `truncated` is true when the workspace has more rows than one response returns (200). */
@@ -248,6 +276,7 @@ export function parseIntegration(value: unknown): Integration {
     ...noiseOf(value),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
+    health: healthOf(value.health),
   };
 }
 

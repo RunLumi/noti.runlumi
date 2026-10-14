@@ -60,7 +60,8 @@ describe('GitLab source with quiet hours', () => {
     const retry = await post(src, 'Push Hook', PUSH, 'msg_1');
     expect(retry.status).toBe(202);
     expect(count('held_events')).toBe(1);
-    expect(count('deliveries')).toBe(1);
+    expect(count('deliveries', "state != 'suppressed'")).toBe(1);
+    expect(count('deliveries', "state = 'suppressed'")).toBe(1);
 
     // The bypass and the hold are both on record, as reason codes only.
     const reasons = h.db.raw.prepare('SELECT reason FROM routing_decisions ORDER BY rowid').all();

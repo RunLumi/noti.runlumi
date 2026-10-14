@@ -127,6 +127,7 @@ describe('every claimed removal mechanism exists', () => {
       outbox_reconcile: 'src/delivery/claim.ts',
       routing_decisions_purge: 'src/routing/provenance.ts',
       noise_purge: 'src/routing/noise-store.ts',
+      dedup_purge: 'src/delivery/dedup.ts',
       rate_limit_prune: 'src/security/rate-limit.ts',
     };
     const claims = deletions('cron_job');
@@ -230,7 +231,7 @@ describe('periods are the ones the code and the configuration use', () => {
       AUDIT_RETENTION_DAYS: AUDIT_RETENTION,
     } as const;
     const configurable = RETENTION_MATRIX.filter((r) => r.retention.kind === 'configurable');
-    expect(configurable.map((r) => r.id).sort()).toEqual(['audit_events', 'deliveries']);
+    expect(configurable.map((r) => r.id).sort()).toEqual(['audit_events', 'deliveries', 'delivery_attempts']);
     for (const row of configurable) {
       if (row.retention.kind !== 'configurable') continue;
       const bounds = expected[row.retention.variable as keyof typeof expected];

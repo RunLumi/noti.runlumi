@@ -265,7 +265,17 @@ async function checkConservation(h: Harness, run: Run, faults: boolean): Promise
   const held = all<HeldRow>(
     'SELECT id,organization_id,integration_id,state,released_in,release_at,released_at,attempts,event_type FROM held_events',
   );
-  const deliveries = all<DeliveryRow>('SELECT id,organization_id,integration_id FROM deliveries');
+  const deliveries = all<DeliveryRow>(
+    "SELECT id,organization_id,integration_id FROM deliveries WHERE state != 'suppressed'",
+  );
+  const suppressed = all<{
+    duplicate_of: string;
+    organization_id: string;
+    integration_id: string;
+    suppressed_reason: string | null;
+  }>(
+    "SELECT duplicate_of,organization_id,integration_id,suppressed_reason FROM deliveries WHERE state = 'suppressed'",
+  );
   const outbox = all<{ id: string; organization_id: string; payload_json: string }>(
     'SELECT id,organization_id,payload_json FROM notification_outbox',
   );
@@ -313,6 +323,36 @@ async function checkConservation(h: Harness, run: Run, faults: boolean): Promise
     }
   }
   expect(accounted).toBeGreaterThan(0);
+
+  // 4b. A redelivery is never dropped silently (F185): it is a `suppressed` row with a reason that
+  //     points at an accounted pair of the same tenant and integration, and the dedup counter equals
+  //     the number of such rows. So every ingested event is delivered, held and released, or
+  //     suppressed with a reason.
+  for (const row of suppressed) {
+    expect(row.suppressed_reason).toBe('duplicate');
+    // Deleting an integration deletes what it held, deliberately; the record of a repeat stays.
+    if (run.deleted.has(row.integration_id)) continue;
+    const original = deliveries.find((d) => d.id === row.duplicate_of) ?? heldById.get(row.duplicate_of);
+    expect(original, 'a suppressed row points at a pair that exists').toBeDefined();
+    expect(original).toMatchObject({
+      organization_id: row.organization_id,
+      integration_id: row.integration_id,
+    });
+  }
+  for (const dedup of all<{ delivery_id: string; hit_count: number }>(
+    'SELECT delivery_id,hit_count FROM event_dedup',
+  )) {
+    expect(dedup.hit_count, `hit count of ${dedup.delivery_id}`).toBe(
+      suppressed.filter((r) => r.duplicate_of === dedup.delivery_id).length,
+    );
+  }
+  expect(
+    suppressed.every(
+      (r) =>
+        all<{ n: number }>(`SELECT 1 AS n FROM event_dedup WHERE delivery_id='${r.duplicate_of}'`).length ===
+        1,
+    ),
+  ).toBe(true);
 
   // 5. Counts conserve: a combined notification stands for exactly the rows pointing at it, and
   //    every outbox message has a delivery row.
@@ -385,6 +425,7 @@ describe('noise control conserves every event', () => {
     let digests = 0;
     let deletions = 0;
     let retried = 0;
+    let suppressed = 0;
     for (const seed of SEEDS.slice(0, 12)) {
       const h = createHarness();
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -396,12 +437,14 @@ describe('noise control conserves every event', () => {
       combined += one('SELECT COUNT(*) AS n FROM notification_outbox WHERE payload_json LIKE \'%"count":%\'');
       digests += one("SELECT COUNT(*) AS n FROM notification_outbox WHERE payload_json LIKE '%noti.digest%'");
       retried += one('SELECT COUNT(*) AS n FROM held_events WHERE attempts > 0');
+      suppressed += one("SELECT COUNT(*) AS n FROM deliveries WHERE state = 'suppressed'");
       deletions += run.deleted.size;
     }
     expect(held).toBeGreaterThan(50);
     expect(combined).toBeGreaterThan(5);
     expect(digests).toBeGreaterThan(0);
     expect(deletions).toBeGreaterThan(0);
+    expect(suppressed).toBeGreaterThan(0);
     // Injected failures really did hit some release (attempts recorded), and conservation held.
     expect(retried).toBeGreaterThan(0);
   });

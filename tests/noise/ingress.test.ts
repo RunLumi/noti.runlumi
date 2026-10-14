@@ -103,7 +103,9 @@ describe('quiet hours', () => {
     expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toMatchObject({ held: 1 });
     expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toEqual({ status: 202, persisted: 0 });
     expect(heldRows(h)).toHaveLength(1);
-    expect(count(h, 'deliveries')).toBe(0);
+    // Not delivered, and the redelivery is recorded rather than dropped (F185).
+    expect(count(h, 'deliveries', "state != 'suppressed'")).toBe(0);
+    expect(count(h, 'deliveries', "state = 'suppressed' AND suppressed_reason = 'duplicate'")).toBe(1);
   });
 
   it('a redelivery of an update that was already delivered is not held afterwards', async () => {
@@ -117,7 +119,8 @@ describe('quiet hours', () => {
       .run(JSON.stringify({ v: 1, ...quiet }));
     await postGithub(h, 'issue_comment', comment(7), 'gh-1');
     expect(count(h, 'held_events')).toBe(0);
-    expect(count(h, 'deliveries')).toBe(1);
+    expect(count(h, 'deliveries', "state != 'suppressed'")).toBe(1);
+    expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(1);
   });
 });
 
@@ -130,7 +133,8 @@ describe('settings changes between an event and its redelivery', () => {
     await postGithub(h, 'issue_comment', comment(7), 'gh-1');
     h.db.raw.prepare("UPDATE integrations SET noise_json=NULL WHERE id='i1'").run();
     expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toEqual({ status: 202, persisted: 0 });
-    expect(count(h, 'deliveries')).toBe(0);
+    expect(count(h, 'deliveries', "state != 'suppressed'")).toBe(0);
+    expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(1);
     expect(heldRows(h)).toHaveLength(1);
   });
 });

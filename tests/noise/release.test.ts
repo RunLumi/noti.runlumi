@@ -93,7 +93,8 @@ describe('release', () => {
     // A provider redelivery after the release must not send it a second time.
     setNow('2026-10-14T10:06:00Z');
     await postGithub(h, 'issue_comment', comment(7), 'gh-1');
-    expect(count(h, 'deliveries')).toBe(1);
+    expect(count(h, 'deliveries', "state != 'suppressed'")).toBe(1);
+    expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(1);
     expect(count(h, 'notification_outbox')).toBe(1);
   });
 

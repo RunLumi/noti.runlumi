@@ -22,6 +22,8 @@ export interface DeliveryRow {
   readonly attempts: number;
   readonly claimed_at: number | null;
   readonly next_attempt_at: number | null;
+  /** A user-requested test (ADR 0018): never read or changed by the circuit breaker (F183). */
+  readonly is_test: number;
 }
 
 /**
@@ -41,7 +43,7 @@ type RawRow = Omit<DeliveryRow, 'state'> & { state: string };
 
 export async function loadDelivery(db: D1Database, ref: DeliveryRef): Promise<DeliveryRow | null> {
   const row = await db
-    .prepare(`SELECT state,attempts,claimed_at,next_attempt_at FROM deliveries ${WHERE_REF}`)
+    .prepare(`SELECT state,attempts,claimed_at,next_attempt_at,is_test FROM deliveries ${WHERE_REF}`)
     .bind(ref.id, ref.organizationId, ref.integrationId)
     .first<RawRow>();
   return row ? { ...row, state: normalizeDeliveryState(row.state) } : null;
@@ -51,6 +53,7 @@ export interface Claim {
   readonly token: string;
   /** Attempts already recorded, read atomically with the claim (never from an earlier read). */
   readonly attempts: number;
+  readonly isTest: boolean;
 }
 
 /**
@@ -73,12 +76,12 @@ export async function claimDelivery(
          AND (state = 'pending'
            OR (state = 'retrying' AND (next_attempt_at IS NULL OR next_attempt_at <= ?4))
            OR (state = 'claimed' AND claimed_at <= ?5))
-       RETURNING attempts`,
+       RETURNING attempts,is_test`,
     )
     .bind(ref.id, ref.organizationId, ref.integrationId, nowMs, nowMs - DELIVERY_CLAIM_LEASE_MS, token)
-    .all<{ attempts: number }>();
+    .all<{ attempts: number; is_test: number }>();
   const row = result.results.length === 1 ? result.results[0] : undefined;
-  return row ? { token, attempts: row.attempts } : null;
+  return row ? { token, attempts: row.attempts, isTest: row.is_test === 1 } : null;
 }
 
 export interface OutcomeRecord {
@@ -89,6 +92,10 @@ export interface OutcomeRecord {
   /** A code we minted (`provider_http_503`); never provider text. */
   readonly diagnostic: string | null;
   readonly nextAttemptAtMs: number | null;
+  /** F185: a retry follows an attempt whose outcome the provider never confirmed. Sticky once set. */
+  readonly possibleDuplicate?: boolean;
+  /** F184: the provider's id for the message, when the response carries one. */
+  readonly providerMessageId?: string | null;
 }
 
 /**
@@ -105,6 +112,7 @@ export function recordOutcomeStatement(
     .prepare(
       `UPDATE deliveries SET state=?4, attempts=?5, last_attempt_at=?6, last_error_code=?7, last_error=?8,
          next_attempt_at=?9, dead_lettered_at=CASE WHEN ?4='dead_lettered' THEN ?6 ELSE dead_lettered_at END,
+         possible_duplicate=MAX(possible_duplicate, ?11), provider_message_id=COALESCE(?12, provider_message_id),
          claimed_at=NULL, claim_token=NULL, updated_at=CURRENT_TIMESTAMP
        ${WHERE_REF} AND state='claimed' AND claim_token=?10`,
     )
@@ -119,8 +127,72 @@ export function recordOutcomeStatement(
       r.diagnostic,
       r.nextAttemptAtMs,
       claimToken,
+      r.possibleDuplicate ? 1 : 0,
+      r.providerMessageId ?? null,
     );
 }
+
+/**
+ * The circuit breaker or a pacing hold sent a claimed delivery back WITHOUT calling the destination
+ * (F183, F187). The attempt budget is not spent and nothing is dead-lettered; the row returns to
+ * `retrying`, due at `untilMs`. `first_attempt_at` is cleared when no real attempt has happened, so
+ * queue-delay figures never count a deferral as a first send. Fenced on the claim token.
+ * ?4 until (epoch ms) · ?5 error code · ?6 diagnostic · ?7 claim token
+ */
+export function deferStatement(
+  db: D1Database,
+  ref: DeliveryRef,
+  claimToken: string,
+  untilMs: number,
+  code: ErrorCode,
+  diagnostic: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE deliveries SET state='retrying', next_attempt_at=?4, last_error_code=?5, last_error=?6,
+         first_attempt_at=CASE WHEN attempts=0 THEN NULL ELSE first_attempt_at END,
+         claimed_at=NULL, claim_token=NULL, updated_at=CURRENT_TIMESTAMP
+       ${WHERE_REF} AND state='claimed' AND claim_token=?7`,
+    )
+    .bind(ref.id, ref.organizationId, ref.integrationId, untilMs, code, diagnostic, claimToken);
+}
+
+/**
+ * F183: a delivery that has only ever been held back (breaker open or paced) for longer than
+ * `MAX_DEFERRED_MS` is dead-lettered instead of waiting for weeks: it stays replayable and visible, with
+ * the reason `circuit_open_timeout` / `destination_paced_timeout`. No attempt is spent. Fenced on the
+ * claim token. ?4 now · ?5 diagnostic · ?6 claim token
+ */
+export function deadLetterDeferredStatement(
+  db: D1Database,
+  ref: DeliveryRef,
+  claimToken: string,
+  nowMs: number,
+  diagnostic: string,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE deliveries SET state='dead_lettered', last_error_code='destination_unavailable', last_error=?5,
+         dead_lettered_at=?4, next_attempt_at=NULL,
+         first_attempt_at=CASE WHEN attempts=0 THEN NULL ELSE first_attempt_at END,
+         claimed_at=NULL, claim_token=NULL, updated_at=CURRENT_TIMESTAMP
+       ${WHERE_REF} AND state='claimed' AND claim_token=?6`,
+    )
+    .bind(ref.id, ref.organizationId, ref.integrationId, nowMs, diagnostic, claimToken);
+}
+
+/**
+ * The attempt row for a claim the stale-claim sweep released (M6): so the attempt log and the ledger
+ * agree. It follows {@link RELEASE_STALE_CLAIM_SQL} directly and is written only when that changed a
+ * row. The abandoned attempt may have reached the provider, so `possible_duplicate` is set; that flag is
+ * an UPPER BOUND on duplicates, never a count. ?1 attempt row id · ?2 id · ?3 organization_id
+ */
+export const RECORD_STALE_ATTEMPT_SQL = `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,
+  started_at,finished_at,outcome,error_code,reason,status_class,possible_duplicate)
+SELECT ?1, organization_id, id, integration_id, attempts, COALESCE(last_attempt_at,0), COALESCE(last_attempt_at,0),
+  CASE WHEN state='dead_lettered' THEN 'dead_lettered' ELSE 'retry_scheduled' END,
+  'internal_error','claim_expired','none',1
+FROM deliveries WHERE id=?2 AND organization_id=?3 AND changes()=1`;
 
 /**
  * Backstop (cron): which workspaces hold claims older than the lease. Oldest first, so no
@@ -145,6 +217,6 @@ export const RELEASE_STALE_CLAIM_SQL = `UPDATE deliveries SET
   next_attempt_at = CASE WHEN attempts + 1 >= ?5 THEN NULL ELSE ?4 END,
   dead_lettered_at = CASE WHEN attempts + 1 >= ?5 THEN ?4 ELSE dead_lettered_at END,
   attempts = attempts + 1, last_attempt_at = ?4,
-  last_error_code = 'internal_error', last_error = 'claim_expired',
+  last_error_code = 'internal_error', last_error = 'claim_expired', possible_duplicate = 1,
   claim_token = NULL, claimed_at = NULL, updated_at = CURRENT_TIMESTAMP
 WHERE id = ?1 AND organization_id = ?2 AND state = 'claimed' AND claimed_at <= ?3`;

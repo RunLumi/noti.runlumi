@@ -318,7 +318,9 @@ describe('released rows keep only what dedupe and the log join need', () => {
     await releaseHeldEvents(h.env, at(Date.parse('2026-10-15T01:05:00Z')));
     setNow('2026-10-15T02:00:00Z');
     await postGithub(h, 'issue_comment', comment(7), 'gh-1');
-    expect(count(h, 'deliveries')).toBe(1);
+    expect(count(h, 'deliveries', "state != 'suppressed'")).toBe(1);
+    // The redelivery is recorded, not dropped (F185).
+    expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(1);
     expect(count(h, 'held_events')).toBe(1);
   });
 });

@@ -1,17 +1,28 @@
 import { Hono, type Context } from 'hono';
-import { requestOrigin } from '../audit/audit';
+import { recordAudit, requestOrigin } from '../audit/audit';
 import { authorize, isFailure, type Resolved } from '../auth/workspace';
 import { can, type Capability } from '../auth/permissions';
+import { listAttempts } from '../delivery/attempts';
+import {
+  BULK_REPLAY_MAX,
+  BULK_TYPED_CONFIRMATION_THRESHOLD,
+  planBulkReplay,
+  runBulkReplay,
+  type BulkFilter,
+} from '../delivery/bulk-replay';
 import { redeliver } from '../delivery/redeliver';
 import { normalizeDeliveryState, type DeliveryState } from '../delivery/state';
 import type { Bindings } from '../env';
+import { log } from '../platform/log';
 import { hit } from '../security/rate-limit';
 import { FROM_VIEW, SELECT_VIEW, SUMMARY_SQL, buildListQuery } from './delivery-queries';
 import {
   deriveTimeline,
   encodeCursor,
+  parseBound,
   parseListFilters,
   sqlTimeToIso,
+  toAttemptView,
   toDeliveryView,
   type DeliveryRowRecord,
 } from './delivery-view';
@@ -129,11 +140,15 @@ deliveries.get('/:id', async (c) => {
   )
     .bind(id, who.orgId)
     .all<{ id: string; state: string; created_at: string | null; updated_at: string }>();
+  // F184: one row per attempt (and per deferral), oldest first. Rows older than migration 0025 have
+  // none, which `attemptDetail: 'summary'` says: the coarse timeline is all there is for them.
+  const attempts = await listAttempts(c.env.DB, who.orgId, id);
+  const hideProviderDetail = row.is_test === 1 && row.integration_destination === 'generic_webhook';
   return c.json({
     delivery: toDeliveryView(row, can(who.role, 'delivery.replay')),
-    // F184 (a per-attempt table) is not built: this is what the row itself records, no more.
     timeline: deriveTimeline(row),
-    attemptDetail: 'summary',
+    attempts: attempts.map((a) => toAttemptView(a, hideProviderDetail)),
+    attemptDetail: attempts.length > 0 ? 'full' : 'summary',
     replays: replays.results.map((r) => ({
       id: r.id,
       state: normalizeDeliveryState(r.state),
@@ -158,6 +173,196 @@ const REFUSALS = {
     error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.',
   },
 } as const;
+
+/** Bulk replay is rare and expensive (up to 200 replays): far below the single-replay rate. */
+const BULK_PER_MINUTE = 6;
+
+interface BulkBody {
+  readonly filter: BulkFilter;
+  readonly token: string | null;
+  readonly expectedCount: number | null;
+}
+
+/** The body is untrusted JSON; every field is optional and bounded. */
+async function parseBulkBody(c: Ctx): Promise<BulkBody | Response> {
+  const raw: unknown = await c.req.json().catch(() => null);
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw))
+    return c.json(
+      { error: 'Validation failed', fields: [{ field: 'body', message: 'Expected an object.' }] },
+      422,
+    );
+  const body = raw as Record<string, unknown>;
+  const fields: { field: string; message: string }[] = [];
+  const text = (name: string, max: number): string | null => {
+    const v = body[name];
+    if (v === undefined || v === null || v === '') return null;
+    if (typeof v === 'string' && v.length <= max) return v;
+    fields.push({ field: name, message: 'Invalid value.' });
+    return null;
+  };
+  const integrationId = text('integrationId', 64);
+  const from = text('from', 40);
+  const to = text('to', 40);
+  const token = text('token', 64);
+  const lower = from ? parseBound(from, 'start') : null;
+  if (from && lower === null) fields.push({ field: 'from', message: 'Use a date like 2026-10-13.' });
+  const upper = to ? parseBound(to, 'end') : null;
+  if (to && upper === null) fields.push({ field: 'to', message: 'Use a date like 2026-10-13.' });
+  const count = body.expectedCount;
+  const expectedCount =
+    typeof count === 'number' && Number.isInteger(count) && count >= 0 && count <= BULK_REPLAY_MAX
+      ? count
+      : null;
+  if (count !== undefined && expectedCount === null)
+    fields.push({ field: 'expectedCount', message: 'Invalid value.' });
+  if (fields.length > 0) return c.json({ error: 'Validation failed', fields }, 422);
+  return { filter: { integrationId, from: lower, to: upper }, token, expectedCount };
+}
+
+async function rateLimitedBulk(c: Ctx, userId: string): Promise<Response | null> {
+  const result = await hit(c.env.DB, `deliveries:bulk:${userId}`, BULK_PER_MINUTE, WINDOW_MS);
+  if (!result.limited) return null;
+  return c.json({ error: 'Too many requests; try again shortly' }, 429, {
+    'retry-after': String(result.retryAfterSeconds),
+  });
+}
+
+/**
+ * Step 1 of a bulk replay (F182): how many dead-lettered deliveries a replay would send, for a
+ * workspace, optionally one integration and a time window. Reads only; returns a token that binds
+ * the exact set shown.
+ */
+deliveries.post('/replay-plan', async (c) => {
+  const rejected = mutationRejected(c);
+  if (rejected) return rejected;
+  const who = await gate(c, 'delivery.replay');
+  if (who instanceof Response) return who;
+  const limited = await rateLimitedBulk(c, who.userId);
+  if (limited) return limited;
+  const body = await parseBulkBody(c);
+  if (body instanceof Response) return body;
+  const plan = await planBulkReplay(c.env.DB, who.orgId, body.filter);
+  return c.json({
+    plan: {
+      eligible: plan.ids.length,
+      total: plan.total,
+      totalCapped: plan.totalCapped,
+      remaining: Math.max(0, plan.total - plan.ids.length),
+      bound: BULK_REPLAY_MAX,
+      token: plan.token,
+      typedConfirmationAbove: BULK_TYPED_CONFIRMATION_THRESHOLD,
+    },
+  });
+});
+
+const BULK_REFUSALS = {
+  plan_stale: {
+    status: 409,
+    error: 'The list of failed deliveries changed since you looked. Review the new count and try again.',
+  },
+  nothing_to_replay: {
+    status: 409,
+    error: 'There are no failed deliveries to send again for this selection.',
+  },
+  count_mismatch: { status: 422, error: 'The number you confirmed does not match. Nothing was sent.' },
+} as const;
+
+/**
+ * Step 2: replay the planned set. Needs the plan's token and the confirmed count; refuses (and writes
+ * nothing) if the eligible set is no longer exactly the one shown, so a double submit or a changed
+ * backlog cannot replay more than was previewed.
+ */
+deliveries.post('/replay', async (c) => {
+  const rejected = mutationRejected(c);
+  if (rejected) return rejected;
+  const who = await gate(c, 'delivery.replay');
+  if (who instanceof Response) return who;
+  if (await isDeletionPending(c.env.DB, who.orgId))
+    return c.json(
+      { error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.' },
+      409,
+    );
+  const limited = await rateLimitedBulk(c, who.userId);
+  if (limited) return limited;
+  const body = await parseBulkBody(c);
+  if (body instanceof Response) return body;
+  if (body.token === null || body.expectedCount === null)
+    return c.json(
+      {
+        error: 'Validation failed',
+        fields: [{ field: body.token === null ? 'token' : 'expectedCount', message: 'Required.' }],
+      },
+      422,
+    );
+  const scope = {
+    ...(body.filter.integrationId ? { integrationId: body.filter.integrationId } : {}),
+    ...(body.filter.from ? { from: body.filter.from } : {}),
+    ...(body.filter.to ? { to: body.filter.to } : {}),
+  };
+  const origin = requestOrigin(c.req.raw.headers);
+  let outcome;
+  try {
+    outcome = await runBulkReplay(c.env.DB, {
+      organizationId: who.orgId,
+      filter: body.filter,
+      token: body.token,
+      expectedCount: body.expectedCount,
+      // Intent first: if this audit write fails, nothing has been replayed and the request fails whole.
+      beforeReplay: (requested) =>
+        recordAudit(c.env.DB, {
+          organizationId: who.orgId,
+          actorId: who.userId,
+          action: 'delivery.bulk_replay',
+          subjectType: 'delivery',
+          subjectId: null,
+          outcome: 'success',
+          ...origin,
+          metadata: { phase: 'started', requested, ...scope },
+        }),
+    });
+  } catch (e) {
+    log('error', 'bulk_replay_not_started', { error: e });
+    return c.json({ error: 'Could not start. Nothing was sent. Try again.' }, 503);
+  }
+  if (!outcome.ok) {
+    const refusal = BULK_REFUSALS[outcome.error];
+    return c.json(
+      { error: refusal.error, reason: outcome.error, eligible: outcome.eligible },
+      refusal.status,
+    );
+  }
+  const r = outcome.result;
+  // The counts, as a second row. Best effort and loud: the replays are already durable and audited as
+  // started, so a failure here must not turn them into an error the person would retry.
+  try {
+    await recordAudit(c.env.DB, {
+      organizationId: who.orgId,
+      actorId: who.userId,
+      action: 'delivery.bulk_replay',
+      subjectType: 'delivery',
+      subjectId: null,
+      outcome: 'success',
+      ...origin,
+      metadata: {
+        phase: 'finished',
+        requested: r.requested,
+        replayed: r.replayed,
+        alreadyInFlight: r.alreadyInFlight,
+        refused: r.refused,
+        remaining: r.remaining,
+        ...scope,
+      },
+    });
+  } catch (e) {
+    log('error', 'bulk_replay_audit_incomplete', { replayed: r.replayed, error: e });
+  }
+  if (r.deletionPending)
+    return c.json(
+      { error: 'This workspace is scheduled for deletion. Cancel the deletion to make changes.', result: r },
+      409,
+    );
+  return c.json({ result: r }, 202);
+});
 
 deliveries.post('/:id/replay', async (c) => {
   const rejected = mutationRejected(c);

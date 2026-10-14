@@ -237,6 +237,40 @@ describe('computeSummary', () => {
     expect(s.successRatio).toMatchObject({ numerator: 1, denominator: 1 });
   });
 
+  it('counts recorded duplicates, possible duplicates and breaker state, tests and other workspaces excluded', async () => {
+    delivery({ state: 'sent' });
+    delivery({ state: 'sent' });
+    delivery({ state: 'suppressed' });
+    delivery({ state: 'sent', org: 'org-b', integration: 'int-b' });
+    delivery({ state: 'suppressed', org: 'org-b', integration: 'int-b' });
+    db.raw.prepare("UPDATE deliveries SET possible_duplicate=1 WHERE id IN ('d1','d4')").run();
+    db.raw.prepare("UPDATE deliveries SET is_test=1, possible_duplicate=1 WHERE id='d2'").run();
+    const health = db.raw.prepare(
+      `INSERT INTO destination_health(organization_id,integration_id,state,consecutive_failures,paused_until,updated_at)
+       VALUES(?,?,?,?,?,?)`,
+    );
+    health.run('org-a', 'int-slack', 'open', 5, null, NOW);
+    health.run('org-a', 'int-teams', 'closed', 0, NOW + MIN, NOW);
+    health.run('org-b', 'int-b', 'half_open', 5, null, NOW);
+    const attempt = db.raw.prepare(
+      `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,started_at,finished_at,outcome)
+       VALUES(?,?,?,?,1,?,?,?)`,
+    );
+    attempt.run('a1', 'org-a', 'd1', 'int-slack', NOW - MIN, NOW - MIN, 'deferred');
+    attempt.run('a2', 'org-a', 'd1', 'int-slack', NOW - MIN, NOW - MIN, 'delivered');
+    attempt.run('a3', 'org-b', 'd4', 'int-b', NOW - MIN, NOW - MIN, 'deferred');
+    const s = await computeSummary(db.d1, 'org-a', DEFAULT_WINDOW_MS, NOW);
+    expect(s.duplicates).toEqual({
+      suppressed: 1,
+      rate: { value: 1 / 2, numerator: 1, denominator: 2 },
+      possibleDuplicates: 1,
+    });
+    expect(s.destinationHealth).toEqual({ open: 1, halfOpen: 0, paced: 1, deferredAttempts: 1 });
+    // A suppressed repeat is not a failure and is not in the success ratio.
+    expect(s.successRatio).toMatchObject({ numerator: 1, denominator: 1 });
+    expect(s.notMeasurable.map((n) => n.sli)).not.toContain('duplicate_rate');
+  });
+
   it('names what it cannot measure rather than inventing it', async () => {
     const s = await computeSummary(db.d1, 'org-a', DEFAULT_WINDOW_MS, NOW);
     const names = s.notMeasurable.map((n) => n.sli);

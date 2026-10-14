@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { CryptoError } from '../../../crypto/envelope';
 import { keyringFromEnv } from '../../../crypto/keyring-env';
 import { newLeaseToken } from '../../../delivery/claim';
+import { dedupStatements } from '../../../delivery/dedup';
 import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../../../env';
 import { readBodyCapped } from '../../../lib/body';
@@ -215,7 +216,16 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
       }
     }
     if (plan.action === 'hold') {
-      const [stored] = await c.env.DB.batch([plan.statement]);
+      const [stored] = await c.env.DB.batch([
+        plan.statement,
+        ...dedupStatements(c.env.DB, {
+          organizationId,
+          integrationId: row.id,
+          deliveryId: id,
+          dedupKey: dedup.hex,
+          nowMs,
+        }),
+      ]);
       if (stored?.meta.changes) held++;
       continue;
     }
@@ -230,9 +240,20 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
       // count). Otherwise a repeat after the outbox row was purged (retention drops dispatched
       // outbox rows after 7 days while the delivery lives on) would send the event again.
       c.env.DB.prepare(
-        `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
-         SELECT ?,?,? WHERE changes() > 0`,
+        `INSERT INTO notification_outbox(id,organization_id,payload_json)
+         SELECT ?,?,? WHERE changes() > 0
+         ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json, state='pending', lease_token=NULL,
+           claimed_at=NULL, lease_expires_at=NULL, not_before=NULL, dispatched_at=NULL
+         WHERE notification_outbox.organization_id=excluded.organization_id`,
       ).bind(id, organizationId, JSON.stringify(message)),
+      // A repeat is recorded as suppressed, not dropped (F171, F185).
+      ...dedupStatements(c.env.DB, {
+        organizationId,
+        integrationId: row.id,
+        deliveryId: id,
+        dedupKey: dedup.hex,
+        nowMs,
+      }),
     ]);
     if (results[1]?.meta.changes) queued++;
   }

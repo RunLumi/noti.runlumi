@@ -17,6 +17,7 @@ export const AUDIT_ACTIONS = [
   'source.secret.rotate',
   'source.credentials.revoke',
   'delivery.replay',
+  'delivery.bulk_replay',
   'access.denied',
   'github.installation.bind',
   'github.installation.bind_refused',

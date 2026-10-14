@@ -8,6 +8,7 @@
 import { auditEn } from './messages.audit.en';
 import { destinationsEn } from './messages.destinations.en';
 import { filtersEn } from './messages.filters.en';
+import { ledgerEn } from './messages.ledger.en';
 import { noiseEn } from './messages.noise.en';
 import { providersEn } from './messages.providers.en';
 import { setupEn } from './messages.setup.en';
@@ -18,6 +19,7 @@ export const en = {
   ...auditEn,
   ...filtersEn,
   ...noiseEn,
+  ...ledgerEn,
   ...setupEn,
   ...providersEn,
   ...destinationsEn,

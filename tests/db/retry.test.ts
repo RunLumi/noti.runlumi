@@ -176,7 +176,7 @@ describe('ingress write retry (the whole batch, never half)', () => {
           if (prop !== 'batch') return Reflect.get(target, prop) as unknown;
           return async (statements: D1PreparedStatement[]) => {
             const isIngress = statements.some((s) =>
-              /INSERT OR IGNORE INTO notification_outbox/.test((s as unknown as { sql: string }).sql),
+              /INSERT INTO notification_outbox/.test((s as unknown as { sql: string }).sql),
             );
             if (!isIngress) return target.batch(statements);
             seen++;
@@ -195,7 +195,11 @@ describe('ingress write retry (the whole batch, never half)', () => {
   const rows = (table: string) =>
     (
       h.db.raw
-        .prepare(`SELECT COUNT(*) AS n FROM ${table === 'deliveries' ? 'deliveries' : 'notification_outbox'}`)
+        // A retry after a commit we did not see looks like a repeat to the ledger and is recorded as one
+        // (`suppressed`, ADR 0023): real deliveries are what must be exactly one.
+        .prepare(
+          `SELECT COUNT(*) AS n FROM ${table === 'deliveries' ? "deliveries WHERE state != 'suppressed'" : 'notification_outbox'}`,
+        )
         .get() as {
         n: number;
       }

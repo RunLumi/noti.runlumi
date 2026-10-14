@@ -136,7 +136,7 @@ would be a **data leak**, hence `orgid` in the derivation and in the primary key
 
 ## F171 — Deduplication storage and TTL
 
-**Priority** P0 · **Status** ❌ No `event_dedup` or `semantic_dedup` table, no dedup TTL, hit_count or dedup purge job, no per-connection TTL. Duplicate suppression today is the unique delivery id on `deliveries`, so its window is delivery retention (`src/pipeline/retention.ts`), not a deliberate 7-day TTL. Needs the F192 job runner.
+**Priority** P0 · **Status** 🟡 `event_dedup` (migration 0025) is written in the same batch as the delivery or held row at every ingress route, counts repeats (`hit_count`, `last_seen`), expires after a 7-day TTL asserted to exceed the GitHub and Stripe redelivery horizons, and a bounded, resumable `dedup_purge` cron job removes expired rows (`src/delivery/dedup.ts`, `tests/delivery/dedup.test.ts`). Not built: a per-connection TTL and showing it in the UI, `semantic_dedup` (Stripe's second event for one change). The delivery row still blocks a redelivery for the whole delivery-retention period, so a repeat after the TTL is recorded again, never processed twice.
 
 **Story** As an operator, I want duplicate suppression to be bounded and self-cleaning, so
 that the dedup table does not grow without limit.
@@ -410,7 +410,7 @@ RNG.
 
 ## F178 — `Retry-After` handling
 
-**Priority** P0 · **Status** 🟡 RFC 9110 seconds and HTTP-date parsed, clamped to 1 hour, overrides backoff (`src/connectors/destinations/retry-after.ts`, `tests/delivery/retry.test.ts`); Discord body `retry_after` and Lark 400 with `99991400` and `x-ogw-ratelimit-reset` are also handled and tested. Not built: `x-ratelimit-remaining: 0` on a 2xx as a throttle signal, per-method Slack cooldown.
+**Priority** P0 · **Status** 🟡 RFC 9110 seconds and HTTP-date parsed, clamped to 1 hour, overrides backoff (`src/connectors/destinations/retry-after.ts`, `tests/delivery/retry.test.ts`); Discord body `retry_after` and Lark 400 with `99991400` and `x-ogw-ratelimit-reset` are also handled and tested. `x-ratelimit-remaining: 0` on any response, and a 429's `Retry-After`, now set a per-integration `paused_until` so the next deliveries wait without a request (`src/delivery/health.ts`, `tests/pipeline/ledger-depth.test.ts`). Not built: per-method Slack cooldown.
 
 **Story** As an operator, I want a rate-limited destination to tell us when to come back, so
 that we stop making a throttle worse.
@@ -533,7 +533,7 @@ how a notification product becomes untrustworthy.
 
 ## F181 — Dead-letter inspection
 
-**Priority** P0 · **Status** 🟡 Tenant-scoped list/detail API with state, attempts, taxonomy code and user copy, plus the Activity page (`src/api/deliveries.ts`, `web/src/deliveries/`, `tests/api/deliveries.test.ts`). Not built: per-attempt history, `Retry-After` display, rendered-payload preview, correlation id, grouped 'N failures' view (needs the F184 attempts table).
+**Priority** P0 · **Status** 🟡 Tenant-scoped list/detail API with state, attempts, taxonomy code and user copy, plus the Activity page (`src/api/deliveries.ts`, `web/src/deliveries/`, `tests/api/deliveries.test.ts`). Per-attempt history with time, outcome, taxonomy code, minted reason and status class, shown in the detail dialog (`delivery_attempts`, `web/src/deliveries/AttemptTimeline.tsx`, `tests/api/delivery-depth.test.ts`). Not built: `Retry-After` display beyond the per-attempt seconds, rendered-payload preview, correlation id, grouped 'N failures' view.
 
 **Story** As a support engineer, I want to see why a notification failed, so that I can tell a
 customer something better than "it didn't work".
@@ -566,7 +566,7 @@ redacted exactly as F98 does for the test preview.
 
 ## F182 — Manual replay
 
-**Priority** P0 · **Status** 🟡 `POST /api/deliveries/:id/replay` is admin-only (`delivery.replay`), CSRF-checked, rate-limited, audited in the same batch, refused for successful or non-replayable rows, with `replay_of` and fresh attempts (`src/delivery/redeliver.ts`, `tests/api/deliveries.test.ts`). Not built: bulk or per-destination replay with dry-run count, replay after outbox purge.
+**Priority** P0 · **Status** 🟡 `POST /api/deliveries/:id/replay` is admin-only (`delivery.replay`), CSRF-checked, rate-limited, audited in the same batch, refused for successful or non-replayable rows, with `replay_of` and fresh attempts (`src/delivery/redeliver.ts`, `tests/api/deliveries.test.ts`). Bulk and scoped replay: `POST /api/deliveries/replay-plan` counts what a replay would send for a workspace, integration and time window, then `POST /api/deliveries/replay` sends exactly that set (at most 200 per request, plan token, typed confirmation above 20, one audit row with counts, rate limited, refused while deletion is pending) (`src/delivery/bulk-replay.ts`, `web/src/deliveries/BulkRedeliver.tsx`, `tests/api/delivery-depth.test.ts`). Not built: replay after outbox purge, a dedicated `noti-redeliver` queue (replays use the normal outbox).
 
 **Story** As a customer, I want to retry a failed notification myself, so that I do not have
 to wait for you to notice.
@@ -602,7 +602,7 @@ explicit capability, not just membership.
 
 ## F183 — Circuit breaker
 
-**Priority** P1 · **Status** ❌ No per-destination circuit breaker, half-open probe or user-visible breaker state. Only adjacent: a Discord-only audited auto-pause of one integration on a dead webhook (`src/pipeline/consumer.ts`), which pauses rather than breaks and conflicts with the spec's never-auto-disable rule.
+**Priority** P1 · **Status** 🟡 Per-integration circuit breaker in D1 (`destination_health`): closed, open after 5 consecutive `destination_unavailable` or `destination_timeout` failures, open for 5 minutes, one half-open probe won by a conditional UPDATE; while open the consumer defers without a request, spends no attempt and dead-letters nothing; shown on the integration (`health`) and on each delivery; never disables an integration; a delivery held back more than 24 hours with no real attempt is dead-lettered as `circuit_open_timeout` (replayable); test notifications bypass it (`src/delivery/health.ts`, `src/pipeline/consumer.ts`, `tests/pipeline/ledger-depth.test.ts`, `tests/api/delivery-depth.test.ts`). Not built: a key on `(connection, host)` shared across integrations (it is per integration, so tenants stay isolated), the Discord global breaker (F108), an alert when a breaker opens.
 
 **Story** As an operator, I want a broken destination to stop being hammered, so that a bad
 webhook cannot trigger punitive limits against our shared IP.
@@ -640,7 +640,7 @@ holding Worker invocations open costs real money.
 
 ## F184 — Delivery ledger
 
-**Priority** P0 · **Status** 🟡 Hashed `(dedup_key, destination)` delivery id, state machine, attempts, error code and replay columns on `deliveries` (`src/delivery/ids.ts`, migration 0009, `tests/delivery/ids.test.ts`). Not built: `delivery_attempts` table, `provider_message_id`, `error_detail_redacted` column (minted diagnostic only); `suppressed` is never written.
+**Priority** P0 · **Status** 🟡 Hashed `(dedup_key, destination)` delivery id, state machine, attempts, error code and replay columns on `deliveries` (`src/delivery/ids.ts`, migration 0009, `tests/delivery/ids.test.ts`). `delivery_attempts` (migration 0025): one row per attempt and per deferral, written in the same batch as the ledger transition and only when it changed the row, with outcome, taxonomy code, minted reason, status class and `retry_after_ms`; deleted with the delivery by retention; included in the workspace export and purge (`src/delivery/attempts.ts`, `tests/pipeline/ledger-depth.test.ts`). Not built: `provider_message_id` is stored when present but no adapter response carries one (UNVERIFIED), no exact `http_status`, `latency_ms`, `event_id`, `provider_ts`.
 
 **Story** As a support engineer, I want one row per notification attempt, so that a customer
 question can be answered from data rather than guesswork.
@@ -679,7 +679,7 @@ every query (F24).
 
 ## F185 — Honest duplicate surface
 
-**Priority** P0 · **Status** 🟡 Delivery log and detail show the at-least-once sentence (`deliveries.model` in `web/src/i18n/`; `web/src/deliveries/deliveries.test.ts` bans exactly-once wording in the en catalogue). Not built: writing `suppressed` rows (ingress duplicates vanish via INSERT OR IGNORE), possible-duplicate flag, customer docs or marketing guard.
+**Priority** P0 · **Status** 🟡 Delivery log and detail show the at-least-once sentence (`deliveries.model` in `web/src/i18n/`; `web/src/deliveries/deliveries.test.ts` bans exactly-once wording in the en catalogue). A repeat of an event already accepted is written as a `suppressed` delivery row with reason `duplicate` and the delivery it repeats, at every ingress route, and shown in the detail dialog; at most 20 suppressed rows are kept per original (`hit_count` keeps counting); a retry after an unconfirmed attempt (timeout, dropped connection, 5xx, expired claim) sets `possible_duplicate`, shown as 'may have arrived more than once' (`src/delivery/dedup.ts`, `tests/delivery/dedup.test.ts`, `tests/noise/conservation.test.ts`, `web/src/a11y/dialogs.a11y.test.tsx`). Not built: `claim_conflict` and `provider_idempotency` suppression is never written, customer docs or marketing guard.
 
 **Story** As a customer, I want to be told when a duplicate was possible, so that I can judge
 the reliability of my channel myself.
@@ -716,7 +716,7 @@ difference between trust and blame.
 
 ## F186 — Client-side deduplication window
 
-**Priority** P0 · **Status** ❌ No client-side dedup window per destination; duplicate suppression exists only at ingress by delivery id (F170). Depends on F188 and the F171 dedup storage.
+**Priority** P0 · **Status** 🟡 Ingress-side window: a repeat of an event within the dedup TTL is suppressed and recorded (`event_dedup`, `src/delivery/dedup.ts`). Not built: the per-destination client-side window (`dedup_key + destination` suppressed for N minutes after a send, for the retry-storm and crash-between-send-and-ack case) and the Lark `uuid` path (needs F188).
 
 **Story** As a customer, I want a retry storm not to become a message flood, so that a
 recovering destination is not buried.
@@ -750,7 +750,7 @@ rather than a guarantee.
 
 ## F187 — Outbound rate limiting per destination
 
-**Priority** P0 · **Status** ❌ No outbound token bucket or delay-based shaping per provider account; the consumer only reacts to 429s. `src/security/rate-limit.ts` is inbound API only. The Discord cap on 401/403 retries in `src/pipeline/consumer.ts` is the sole related guard.
+**Priority** P0 · **Status** 🟡 Per-integration outbound pacing driven by what the destination says: `x-ratelimit-remaining: 0` (with `-reset-after`, `-reset` or `Retry-After`) and a 429's `Retry-After` set `paused_until`, and later deliveries wait without a request and without spending an attempt; no provider limit is hard-coded (`src/delivery/health.ts`, `tests/pipeline/ledger-depth.test.ts`). Not built: a token bucket per provider account (the consumer cannot tell which account a stored webhook belongs to, and a global counter would let one tenant slow another), the Telegram, Slack and Lark per-method limits, Workers Rate Limiting as a coarse guard.
 
 **Story** As an operator, I want to stay inside each destination's real limit, so that we
 are never the reason a customer's other integrations fail.
@@ -871,7 +871,7 @@ redirect into a network `TypeError` that cannot be told apart from a transient f
 
 ## F190 — Scheduled job fleet
 
-**Priority** P0 · **Status** 🟡 One cron Worker runs heartbeat, stall detection, outbox reconcile, noise release, credential maintenance, retention purge (hourly gate) and other purges, each isolated (`src/index.ts`, `src/observability/cron.ts`, `tests/pipeline/retention.test.ts`). Not built: dedup purge, GitHub failure poll, reconciliation, destination health check, token refresh, cursors, staleness alerts.
+**Priority** P0 · **Status** 🟡 One cron Worker runs heartbeat, stall detection, outbox reconcile, noise release, credential maintenance, retention purge (hourly gate), `dedup_purge` and other purges, each isolated (`src/index.ts`, `src/observability/cron.ts`, `tests/pipeline/retention.test.ts`, `tests/delivery/dedup.test.ts`). Not built: GitHub failure poll, reconciliation, destination health check, token refresh, cursors, staleness alerts.
 
 **Story** As an operator, I want our background work to be visible and bounded, so that a
 long-running job cannot quietly exhaust the cron budget.

@@ -9,6 +9,7 @@ import { useIntegrations, useOrgId } from '../integrations/hooks';
 import '../integrations/integrations.css';
 import './deliveries.css';
 import type { DeliveryItem } from './api';
+import { BulkRedeliver } from './BulkRedeliver';
 import { DeliveryDetail } from './DeliveryDetail';
 import { DeliveryFilters } from './DeliveryFilters';
 import { DeliveryTable } from './DeliveryTable';
@@ -76,6 +77,17 @@ export function DeliveryLogPage() {
 
   const rows = list.data?.pages.flatMap((p) => p.deliveries) ?? [];
   const filtered = hasFilters(search);
+  // Offered only on the Failed view, and only to someone who can actually redeliver (the server
+  // sets `canReplay` per row from the role).
+  const bulkScope = {
+    ...(search.integration ? { integrationId: search.integration } : {}),
+    ...(search.from ? { from: search.from } : {}),
+    ...(search.to ? { to: search.to } : {}),
+  };
+  const bulkIntegration = search.integration
+    ? (integrations.data?.integrations.find((i) => i.id === search.integration)?.name ?? null)
+    : null;
+  const showBulk = orgId !== null && search.state === 'dead_lettered' && rows.some((r) => r.canReplay);
 
   return (
     <>
@@ -90,6 +102,7 @@ export function DeliveryLogPage() {
         integrations={integrations.data?.integrations ?? []}
         onChange={setSearch}
       />
+      {showBulk && <BulkRedeliver orgId={orgId} scope={bulkScope} integrationName={bulkIntegration} />}
       {list.isPending ? (
         <ListSkeleton />
       ) : list.isError && rows.length === 0 ? (

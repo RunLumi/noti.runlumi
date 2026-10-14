@@ -80,7 +80,9 @@ async function post(src: { endpointId: string; secret: string }, body: unknown, 
 }
 
 const count = (sql: string, ...args: string[]) => (h.db.raw.prepare(sql).get(...args) as { n: number }).n;
-const deliveries = () => count('SELECT COUNT(*) AS n FROM deliveries');
+/** Real deliveries; a recorded duplicate (`suppressed`, F185) is counted separately. */
+const deliveries = () => count("SELECT COUNT(*) AS n FROM deliveries WHERE state != 'suppressed'");
+const suppressed = () => count("SELECT COUNT(*) AS n FROM deliveries WHERE state = 'suppressed'");
 
 beforeEach(() => {
   h = setup();
@@ -433,6 +435,14 @@ describe('idempotency', () => {
     expect(await again.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
     expect(deliveries()).toBe(1);
     expect(count('SELECT COUNT(*) AS n FROM notification_outbox')).toBe(1);
+    // Not silent: the retry is a suppressed row pointing at the original, and counted.
+    expect(suppressed()).toBe(1);
+    expect(
+      h.db.raw
+        .prepare("SELECT suppressed_reason,duplicate_of FROM deliveries WHERE state='suppressed'")
+        .get(),
+    ).toMatchObject({ suppressed_reason: 'duplicate' });
+    expect(count('SELECT hit_count AS n FROM event_dedup')).toBe(1);
   });
 
   it('keeps the first event when a webhook-id is reused with a different body (the reuse is refused)', async () => {

@@ -1469,3 +1469,62 @@ An independent review (no critical, 3 high, 6 medium, 7 low) is fixed in the sam
   its timer cleared; `key.destroy` reads "authorised" and is exempt from the audit purge; the post-commit retry caveat is
   documented; the bound-parameter guard now catches `+` after any literal, string methods, `String.raw` and aliased `prepare`,
   requires allow-listed identifiers to be declared from literals in the same file, and scans `scripts/*.mjs`.
+
+## Slices 1.5 to 1.8 — delivery ledger depth (ADR 0023, this PR)
+
+Source of truth for scope: `docs/specs/REMAINING.md` (rows 1.5 to 1.8 now say what is built and
+what is left) and `docs/adr/0023-delivery-ledger-depth.md`. Migration `0025_delivery_ledger_depth.sql`
+(expand only; apply before the Worker).
+
+What exists now:
+
+- **Recorded dedup (F171, F185).** `event_dedup` (7-day TTL, hit count) is written in the ingress batch
+  of the GitHub, generic and provider routes; a repeat of an accepted or held event becomes a
+  `suppressed` delivery row with reason `duplicate` and `duplicate_of`, and bumps the counter. A bounded,
+  resumable `dedup_purge` cron job removes expired rows. The TTL is asserted to exceed the GitHub and
+  Stripe redelivery horizons. The conservation property test now accounts for every ingested event as
+  delivered, held and released, or suppressed with a reason, and checks each `hit_count` against the
+  suppressed rows.
+- **Per-attempt ledger (F184, F181, F99).** `delivery_attempts`: one row per attempt and per deferral, in
+  the same batch as the ledger transition and only when it changed the row (a lost claim records
+  nothing, a double-consumed message records one). Closed vocabularies only. Returned as `attempts[]`
+  by `GET /api/deliveries/:id` and shown as a timeline in the detail dialog (English and Vietnamese,
+  axe-checked). Deleted with the delivery by retention, drained by the workspace purge, included in the
+  export. `possible_duplicate` is set on a retry after an unconfirmed attempt (timeout, dropped
+  connection, 5xx, expired claim) and shown as "may have arrived more than once".
+- **Bulk replay (F182).** `POST /api/deliveries/replay-plan` and `POST /api/deliveries/replay`:
+  dry-run count and a plan token first, at most 200 per request, refused when the set changed, typed
+  confirmation above 20, one audit row with counts, 6 a minute, refused while deletion is pending, built on
+  `redeliver()`. "Redeliver all failed" on the Failed view of Activity.
+- **Circuit breaker and pacing (F183, F187, F178).** `destination_health` per integration: opens after 5
+  consecutive `destination_unavailable` or `destination_timeout`, 5 minutes open, one half-open probe; while
+  open or while the destination asked to be left alone (`x-ratelimit-remaining: 0`, 429 `Retry-After`) the
+  consumer defers without a request and without spending an attempt. Shown on the integration and on
+  each waiting delivery; never disables anything; tests bypass it; fails open if the table is
+  unreadable. The observability summary gains `duplicates` and `destinationHealth`.
+
+Tests: `tests/pipeline/ledger-depth.test.ts` (attempts, claim races, double consume, breaker transitions with
+an injected clock, probe race, tenant isolation, pacing, retention), `tests/delivery/dedup.test.ts`,
+`tests/api/delivery-depth.test.ts` (attempt view, flags, bulk plan and run: bounds, idempotency, stale plan,
+capability, CSRF, rate limit, deletion pending), `tests/migration-0025.test.ts`, additions to the noise,
+sources, observability and workspace-lifecycle tests, and web axe scenarios in
+`web/src/a11y/dialogs.a11y.test.tsx`.
+
+**Review follow-up (independent review of this PR):** bulk replay is chain-roots-only (a failed replay can no
+longer be replayed twice in one request); waits are folded into one `deferred` row with `repeat_count` and the
+history returns the newest 50 rows; a delivery held back for more than 24 hours is dead-lettered
+(`circuit_open_timeout`, replayable); suppressed rows are capped at 20 per original; a repeat of a failed
+original is shown as such; the bulk audit is an intent row before the replays plus a counts row after; the
+stale-claim sweep writes an attempt row; deferrals no longer reuse the next real attempt number; the attempts
+purge is driven by age (`delivery_attempts_age`); `delivery_attempts` and `destination_health` have an
+organization foreign key with cascade; the suppression gate cannot be fooled by an orphan outbox row; the
+"~600 D1 calls" figure is corrected to about 400.
+
+**Not done / unverified:** `provider_message_id` is never populated (no adapter response carries one);
+a per-connection dedup TTL; `semantic_dedup`; the per-destination client-side window (F186) and Lark
+`uuid` (F188); `claim_conflict` and `provider_idempotency` suppressions are never written; a budget per
+provider account (the consumer cannot tell which account a stored webhook belongs to), Slack API codes;
+an alert when a breaker opens; the Discord global breaker; replay after outbox purge; the ~400
+D1 calls of a full bulk replay against the real subrequest limit; a real browser at 320 px and a screen
+reader for the new surfaces; Vietnamese copy review. No real provider has seen any of this: every
+provider response in the tests is a fixture.

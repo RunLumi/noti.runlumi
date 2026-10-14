@@ -53,7 +53,7 @@ export interface Rig {
   post(body: string | Uint8Array, options?: PostOptions): Promise<Response>;
   /** Outbox messages written so far, oldest first. */
   messages(): DeliveryMessage[];
-  count(table: string): number;
+  count(table: string, where?: string): number;
 }
 
 let counter = 0;
@@ -104,8 +104,8 @@ export async function createRig(
           payload_json: string;
         }[]
       ).map((r) => JSON.parse(r.payload_json) as DeliveryMessage),
-    count: (table: string): number =>
-      (h.db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n,
+    count: (table: string, where = '1=1'): number =>
+      (h.db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get() as { n: number }).n,
   };
 
   async function send(path: string, body: string | Uint8Array, headers: Headers): Promise<Response> {
