@@ -3,6 +3,7 @@ import { auditStatement, requestOrigin } from '../audit/audit';
 import { newLeaseToken } from '../delivery/claim';
 import { testDeliveryId } from '../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../env';
+import { correlationField, currentCorrelationId } from '../platform/correlation';
 import { dispatchOutbox } from '../pipeline/outbox';
 import { hit } from '../security/rate-limit';
 import { gate, mutationRejected, type Ctx } from './integrations';
@@ -144,6 +145,7 @@ testSend.post('/:id/test', async (c) => {
     status: 'info',
     eventType: 'test',
     summary: TEST_SUMMARY,
+    ...correlationField(),
   };
 
   // One batch. The delivery insert repeats the usability and deletion checks, so a pause,
@@ -152,8 +154,8 @@ testSend.post('/:id/test', async (c) => {
   // statement's count).
   const results = await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO deliveries(id,integration_id,organization_id,state,attempts,created_at,is_test)
-       SELECT ?1,?2,?3,'pending',0,CURRENT_TIMESTAMP,1
+      `INSERT INTO deliveries(id,integration_id,organization_id,state,attempts,created_at,is_test,correlation_id)
+       SELECT ?1,?2,?3,'pending',0,CURRENT_TIMESTAMP,1,?5
        WHERE EXISTS (SELECT 1 FROM integrations i
                      WHERE i.id = ?2 AND i.organization_id = ?3
                        AND i.enabled = 1 AND i.credentials_quarantined_at IS NULL)
@@ -163,11 +165,11 @@ testSend.post('/:id/test', async (c) => {
                          WHERE t.integration_id = ?2 AND t.organization_id = ?3 AND t.is_test = 1
                            AND t.state IN ('pending','claimed','retrying')
                            AND t.created_at >= datetime('now', ?4))`,
-    ).bind(id, integrationId, who.orgId, IN_FLIGHT_WINDOW),
+    ).bind(id, integrationId, who.orgId, IN_FLIGHT_WINDOW, currentCorrelationId()),
     c.env.DB.prepare(
-      `INSERT INTO notification_outbox(id,organization_id,payload_json)
-       SELECT ?1,?2,?3 WHERE changes() > 0`,
-    ).bind(id, who.orgId, JSON.stringify(message)),
+      `INSERT INTO notification_outbox(id,organization_id,payload_json,correlation_id)
+       SELECT ?1,?2,?3,?4 WHERE changes() > 0`,
+    ).bind(id, who.orgId, JSON.stringify(message), currentCorrelationId()),
     auditStatement(
       c.env.DB,
       {

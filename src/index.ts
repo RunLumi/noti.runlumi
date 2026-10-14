@@ -21,7 +21,10 @@ import { consumeDeliveries } from './pipeline/consumer';
 import { DEAD_LETTER_QUEUE, consumeDeadLetters } from './pipeline/dead-letter';
 import { credentialStatus, migrateLegacyCredentials, rewrapStaleKeys } from './pipeline/credentials';
 import observability from './api/observability';
-import { runCronJobs, writeHeartbeat } from './observability/cron';
+import { evaluateAlerts } from './observability/alerts/engine';
+import type { JobName } from './observability/cadence';
+import { runCronJobs, writeHeartbeat, type CronJob } from './observability/cron';
+import { createJobRecorder, type JobReport } from './observability/job-runs';
 import { detectStalls } from './observability/stall';
 import { purgeEventDedup } from './delivery/dedup';
 import { purgeExpiredRecords } from './pipeline/retention';
@@ -211,7 +214,7 @@ for (const kind of PROVIDER_KINDS) app.post(`/webhooks/${kind}/:endpointId`, pro
  * Logs counts only — the runbook's zero-check reads `remaining`. An aborted batch throws,
  * so the cron invocation fails visibly instead of quarantining healthy rows.
  */
-async function maintainCredentials(env: Bindings): Promise<void> {
+async function maintainCredentials(env: Bindings): Promise<JobReport> {
   const keyring = keyringFromEnv(env);
   // A malformed optional legacy key stands down only this step (`/health` warns), never the Worker.
   const migrated =
@@ -223,76 +226,134 @@ async function maintainCredentials(env: Bindings): Promise<void> {
   const sourcesRewrapped = await rewrapStaleSourceKeys(env.DB, keyring);
   const remaining = await credentialStatus(env.DB, keyring.activeVersion);
   log('info', 'credential_maintenance', { migrated, rewrapped, sourcesRewrapped, remaining });
+  return {
+    counters: {
+      migrated: migrated?.processed ?? 0,
+      rewrapped: rewrapped.processed,
+      quarantined: (migrated?.quarantined ?? 0) + rewrapped.quarantined,
+      sources_rewrapped: sourcesRewrapped,
+    },
+  };
 }
 
 /** Backstop first, so a released claim is redispatched in the same tick (H1), then F174. */
-async function reconcileOutbox(env: Bindings): Promise<void> {
+async function reconcileOutbox(env: Bindings): Promise<JobReport> {
   const releasedClaims = await sweepStaleClaims(env);
   const dispatch = await dispatchOutbox(env);
   const purged = await purgeOutbox(env);
   log('info', 'outbox_reconcile', { ...dispatch, released_claims: releasedClaims, purged });
+  return {
+    counters: {
+      dispatched: dispatch.dispatched,
+      reclaimed: dispatch.reclaimed,
+      released_claims: releasedClaims,
+      purged,
+    },
+  };
 }
 
 /** Fixed-window counters older than an hour are dead weight; drain them in bounded rounds. */
-async function pruneRateLimitWindows(env: Bindings): Promise<void> {
+async function pruneRateLimitWindows(env: Bindings): Promise<JobReport> {
+  let pruned = 0;
   for (let i = 0; i < 5; i++) {
-    if ((await pruneRateLimits(env.DB, Date.now() - RATE_LIMIT_RETENTION_MS, 1000)) < 1000) break;
+    const n = await pruneRateLimits(env.DB, Date.now() - RATE_LIMIT_RETENTION_MS, 1000);
+    pruned += n;
+    if (n < 1000) break;
   }
+  return { counters: { pruned } };
 }
 
-async function purgeWorkspace(env: Bindings): Promise<void> {
+async function purgeWorkspace(env: Bindings): Promise<JobReport> {
   const purge = await purgeDueWorkspace(env.DB, Date.now());
   if (purge.organizationId) log('info', 'workspace_purge', { ...purge });
+  return { counters: { deleted: purge.deleted } };
 }
 
 /** Routing provenance retention (ADR 0010): bounded rounds, isolated like every other job. */
-async function purgeRouting(env: Bindings): Promise<void> {
+async function purgeRouting(env: Bindings): Promise<JobReport> {
   const deleted = await purgeRoutingDecisions(env.DB, Date.now());
   if (deleted > 0) log('info', 'routing_decisions_purged', { deleted });
+  return { counters: { deleted } };
 }
 
 /** Noise control (ADR 0016): release due held events through the outbox, bounded and leased. */
-async function releaseNoise(env: Bindings): Promise<void> {
+async function releaseNoise(env: Bindings): Promise<JobReport> {
   const report = await releaseHeldEvents(env);
   if (report.events > 0 || report.reclaimed > 0) log('info', 'noise_release', { ...report });
+  return { counters: { events: report.events, reclaimed: report.reclaimed } };
 }
 
-async function purgeNoiseState(env: Bindings): Promise<void> {
+async function purgeNoiseState(env: Bindings): Promise<JobReport> {
   const purged = await purgeNoiseRecords(env);
   if (purged.held + purged.openFailures > 0) log('info', 'noise_purged', { ...purged });
+  return { counters: { held: purged.held, open_failures: purged.openFailures } };
 }
 
 /** Expired sessions, one-time tokens, install states and auth rate-limit rows (F237); hourly, bounded. */
-async function purgeExpiredAuth(env: Bindings): Promise<void> {
+async function purgeExpiredAuth(env: Bindings): Promise<JobReport> {
   const purged = await purgeExpiredAuthRecords(env.DB, Date.now());
   const total = purged.sessions + purged.verifications + purged.authStates + purged.authRateLimits;
   if (total > 0) log('info', 'expired_auth_records_purged', { ...purged });
+  return { counters: { purged: total } };
 }
 
 /** F171: expired dedup rows, bounded per tick and resumable (the next tick continues). */
-async function purgeDedup(env: Bindings): Promise<void> {
+async function purgeDedup(env: Bindings): Promise<JobReport> {
   const report = await purgeEventDedup(env.DB, Date.now());
   if (report.purged > 0) log('info', 'dedup_purged', { ...report });
+  return { counters: { purged: report.purged } };
 }
 
-async function purgeRetention(env: Bindings): Promise<void> {
+/** The hourly throttle makes most ticks a no-op: those record `skipped`, so "ran" and "worked" differ. */
+async function purgeRetention(env: Bindings): Promise<JobReport> {
   const retention = await purgeExpiredRecords(env);
-  if (retention.deliveries + retention.outbox + retention.audit > 0)
+  if (retention.deliveries + retention.outbox + retention.audit + retention.jobRuns > 0)
     log('info', 'retention_purge', { ...retention });
+  return {
+    skipped: retention.skipped,
+    counters: {
+      deliveries: retention.deliveries,
+      attempts: retention.attempts,
+      outbox: retention.outbox,
+      audit: retention.audit,
+      job_runs: retention.jobRuns,
+    },
+  };
+}
+
+/** Evaluate the alert registry and notify the sinks (docs/specs/13-observability.md F200). */
+async function evaluateAlertRegistry(env: Bindings): Promise<JobReport> {
+  const report = await evaluateAlerts(env);
+  return {
+    counters: {
+      fired: report.fired,
+      renotified: report.renotified,
+      resolved: report.resolved,
+      firing: report.firing,
+      unknown: report.unknown,
+      notify_failures: report.notifyFailures,
+    },
+  };
 }
 
 /**
  * A misconfigured Worker still records its heartbeat and runs stall detection (so the outage is
  * visible and the silence is measurable), then fails the invocation naming the bindings.
  */
+function bootFailureJobs(env: Bindings): CronJob<JobName>[] {
+  return [
+    { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
+    { name: 'stall_detection', run: () => detectStalls(env) },
+    { name: 'alerts', flushBefore: true, run: () => evaluateAlertRegistry(env) },
+  ];
+}
+
 async function assertBootable(env: Bindings): Promise<void> {
   const report = await bootReport(env);
   if (report.names.length === 0) return;
   log('error', 'config_invalid', { misconfigured: report.names, code: report.code });
-  await runCronJobs([
-    { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
-    { name: 'stall_detection', run: () => detectStalls(env) },
-  ]).catch(() => undefined);
+  // `alerts` is the one that matters here: `key_config_fault` fires from this very state.
+  await runCronJobs(bootFailureJobs(env), { recorder: createJobRecorder(env.DB) }).catch(() => undefined);
   throw new Error(`config_invalid: ${report.names.join(',')}`);
 }
 
@@ -317,9 +378,12 @@ export default {
       return;
     }
     await assertBootable(env);
-    await runCronJobs([
+    // Every execution is recorded in `job_runs` (F192); the alert job runs second so detection survives
+    // a later job's failure, and flushes first so it sees this tick's heartbeat.
+    const jobs: CronJob<JobName>[] = [
       { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
       { name: 'stall_detection', run: () => detectStalls(env) },
+      { name: 'alerts', flushBefore: true, run: () => evaluateAlertRegistry(env) },
       { name: 'outbox_reconcile', run: () => reconcileOutbox(env) },
       // After the reconcile, with its own bounded budget (100 notifications per tick), so a large
       // backlog can never starve the reconcile or the jobs after it; what it releases is
@@ -333,7 +397,8 @@ export default {
       { name: 'noise_purge', run: () => purgeNoiseState(env) },
       { name: 'expired_auth_purge', run: () => purgeExpiredAuth(env) },
       { name: 'dedup_purge', run: () => purgeDedup(env) },
-    ]);
+    ];
+    await runCronJobs(jobs, { recorder: createJobRecorder(env.DB) });
   },
 
   // One Worker consumes both queues. Wrapped so the runtime's third argument

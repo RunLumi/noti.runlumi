@@ -8,6 +8,7 @@
  */
 import type { AttemptRecord } from '../delivery/attempt-types';
 import { normalizeDeliveryState, type DeliveryState } from '../delivery/state';
+import { sanitiseCorrelationId } from '../platform/correlation';
 import { errorSpec, toErrorCode, type ErrorCode } from '../platform/errors';
 
 export const DEFAULT_PAGE_SIZE = 25;
@@ -17,6 +18,8 @@ const MAX_ID_LENGTH = 64;
 export interface ListFilters {
   readonly state: DeliveryState | null;
   readonly integrationId: string | null;
+  /** Exact match on the correlation id minted at ingress (F193), or null. */
+  readonly correlationId: string | null;
   /** Inclusive lower bound on `updated_at`, in SQLite `YYYY-MM-DD HH:MM:SS` UTC. */
   readonly from: string | null;
   readonly to: string | null;
@@ -81,6 +84,7 @@ export function parseListFilters(query: (name: string) => string | undefined): F
   const fields: { field: string; message: string }[] = [];
   const state = query('state');
   const integrationId = query('integrationId');
+  const correlationId = query('correlationId');
   const from = query('from');
   const to = query('to');
   const cursor = query('cursor');
@@ -94,6 +98,9 @@ export function parseListFilters(query: (name: string) => string | undefined): F
   }
   if (integrationId && integrationId.length > MAX_ID_LENGTH)
     fields.push({ field: 'integrationId', message: 'Unknown integration.' });
+  const parsedCorrelation = correlationId ? sanitiseCorrelationId(correlationId) : null;
+  if (correlationId && parsedCorrelation === null)
+    fields.push({ field: 'correlationId', message: 'Use the id from the x-request-id header.' });
   const lower = from ? parseBound(from, 'start') : null;
   if (from && lower === null) fields.push({ field: 'from', message: 'Use a date like 2026-10-13.' });
   const upper = to ? parseBound(to, 'end') : null;
@@ -110,6 +117,7 @@ export function parseListFilters(query: (name: string) => string | undefined): F
     value: {
       state: parsedState,
       integrationId: integrationId || null,
+      correlationId: parsedCorrelation,
       from: lower,
       to: upper,
       cursor: parsedCursor,
@@ -137,6 +145,8 @@ export interface DeliveryRowRecord {
   possible_duplicate: number | null;
   suppressed_reason: string | null;
   duplicate_of: string | null;
+  /** Minted at ingress (F193); null for rows older than migration 0027 and for rows no request created. */
+  correlation_id: string | null;
   /** State of the delivery a suppressed row repeats. */
   original_state: string | null;
   integration_name: string | null;
@@ -219,6 +229,11 @@ export interface DeliveryView {
    * breaker is open because the destination kept failing, or the destination asked to be left alone.
    */
   readonly pausedReason: 'circuit_open' | 'destination_paced' | null;
+  /**
+   * The id minted when the request that created this delivery arrived (the `x-request-id` the sender
+   * got back), so a support question starts from one id. Null when the row has none.
+   */
+  readonly correlationId: string | null;
 }
 
 /** SQLite `CURRENT_TIMESTAMP` (`YYYY-MM-DD HH:MM:SS`, UTC) to an ISO instant. */
@@ -323,6 +338,7 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
       state === 'retrying' && (row.last_error === 'circuit_open' || row.last_error === 'destination_paced')
         ? row.last_error
         : null,
+    correlationId: row.correlation_id,
   };
 }
 

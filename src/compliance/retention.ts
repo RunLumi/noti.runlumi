@@ -22,6 +22,7 @@ import { AUDIT_RETENTION, DELIVERY_RETENTION } from '../pipeline/retention';
 import { LEGACY_OLD_TABLES } from '../pipeline/purge';
 import { FAILED_RETENTION_MS, HELD_RETENTION_MS, OPEN_FAILURE_RETENTION_MS } from '../routing/noise-store';
 import { ROUTING_RETENTION_MS } from '../routing/provenance';
+import { JOB_RUNS_RETENTION_MS } from '../observability/job-runs';
 import { RATE_LIMIT_RETENTION_MS } from '../security/rate-limit';
 
 export const OPERATOR_TO_DECIDE = 'to be decided by the operator';
@@ -746,6 +747,41 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     deletion: [{ kind: 'cron_job', job: 'rate_limit_prune' }],
     inWorkspaceExport: false,
     inAccountExport: false,
+    ...placeholders,
+  },
+  {
+    id: 'job_runs',
+    table: 'job_runs',
+    category: 'platform_state',
+    personalData: 'none',
+    dataHeld:
+      'One row per cron job execution: job name, start and finish, outcome, a few integer counters (rows processed) and a closed error class. Platform-wide: no workspace id, no event content, no error text.',
+    purpose: 'Proves each background job ran, and how recently, so a stopped job is detected (F192).',
+    retention: {
+      kind: 'fixed',
+      ms: JOB_RUNS_RETENTION_MS,
+      basis: 'JOB_RUNS_RETENTION_MS (src/observability/job-runs.ts)',
+    },
+    deletion: [{ kind: 'cron_job', job: 'retention_purge' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Excluded on purpose: platform operations data that belongs to no workspace.',
+    ...placeholders,
+  },
+  {
+    id: 'alert_state',
+    table: 'alert_state',
+    category: 'platform_state',
+    personalData: 'none',
+    dataHeld:
+      'One row per alert in the registry: firing or resolved, since when, when it was last notified, the incident key and the last value (a count or a duration).',
+    purpose:
+      'Lets the alert engine notify once per incident, re-notify on a cadence and announce recovery (F200).',
+    retention: { kind: 'indefinite', reason: 'A fixed set of rows (one per alert) overwritten in place.' },
+    deletion: [{ kind: 'none', reason: 'Fixed keys, no personal or tenant data.' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Excluded on purpose: platform operations data that belongs to no workspace.',
     ...placeholders,
   },
   {

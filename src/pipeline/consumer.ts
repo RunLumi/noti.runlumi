@@ -52,6 +52,7 @@ import {
 } from '../delivery/retry';
 import { isTerminal, transition, type DeliveryEvent } from '../delivery/state';
 import type { Bindings, DeliveryMessage } from '../env';
+import { withMessageCorrelation } from '../platform/correlation';
 import { log } from '../platform/log';
 import type { DestinationKind } from './allowlist';
 import { CREDENTIAL_COLUMNS, blob, openCredentials, type CredentialRow } from './credentials';
@@ -711,14 +712,18 @@ export async function consumeDeliveries(
     return;
   }
   for (const msg of batch.messages) {
-    try {
-      await handleMessage(msg, env, keyring, deps);
-    } catch (e) {
-      // A ledger or platform failure (D1 down). Retried per message (F176). If the claim
-      // was taken, the cron backstop releases it after the lease, and once queue retries
-      // run out the DLQ consumer dead-letters the row (H1).
-      log('error', 'delivery_consumer_failed', { error: e });
-      msg.retry();
-    }
+    // The consumer has no request to inherit a correlation id from: bind the one the message carries,
+    // so every log line of this delivery (including the failure line below) names it (F193).
+    await withMessageCorrelation(parseDeliveryMessage(msg.body)?.correlationId, async () => {
+      try {
+        await handleMessage(msg, env, keyring, deps);
+      } catch (e) {
+        // A ledger or platform failure (D1 down). Retried per message (F176). If the claim
+        // was taken, the cron backstop releases it after the lease, and once queue retries
+        // run out the DLQ consumer dead-letters the row (H1).
+        log('error', 'delivery_consumer_failed', { error: e });
+        msg.retry();
+      }
+    });
   }
 }

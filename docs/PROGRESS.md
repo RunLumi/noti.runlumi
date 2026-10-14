@@ -1472,6 +1472,21 @@ An independent review (no critical, 3 high, 6 medium, 7 low) is fixed in the sam
   documented; the bound-parameter guard now catches `+` after any literal, string methods, `String.raw` and aliased `prepare`,
   requires allow-listed identifiers to be declared from literals in the same file, and scans `scripts/*.mjs`.
 
+## Slices 1.9 to 1.11 — job runner, correlation and alerting (ADR 0024, this PR)
+
+Scope: `docs/specs/REMAINING.md` rows 1.9 to 1.11 and `docs/adr/0024-job-runner-alerting.md`. Migration
+`0027_job_runner_alerting.sql` (expand only; apply before the Worker).
+
+- `job_runs` records every cron execution (ok, failed, skipped, counters, closed error class), written in one
+  batch per tick; one cadence table; staleness at 3x cadence in the summary (`jobs`) and as `job_stale`.
+- DLQ consumer writes an `ops_state` run record; `dlq_consumer_no_progress` is a ledger-side proxy, not queue depth.
+- Correlation id on `deliveries`, outbox, attempts, queue message, consumer logs, delivery view;
+  `GET /api/deliveries?correlationId=`.
+- `alert_state` plus a ten-alert engine; sinks: log (always) and `ALERT_WEBHOOK_URL` (Slack, Discord, Lark,
+  Teams only, URL policy, 10 s, one attempt). Runbook section per alert, enforced by a test.
+- Not done: paging a human, leases/cursors/`cpu_ms`, real DLQ depth, threshold tuning, dashboard row for the
+  correlation id, an external dead-man's-switch. Nothing verified against real Cloudflare or a real chat endpoint.
+
 ## Slices 1.5 to 1.8 — delivery ledger depth (ADR 0023, this PR)
 
 Source of truth for scope: `docs/specs/REMAINING.md` (rows 1.5 to 1.8 now say what is built and

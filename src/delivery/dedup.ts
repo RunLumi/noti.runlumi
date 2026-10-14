@@ -20,6 +20,7 @@
  *   migration is still suppressed and recorded; its `hit_count` starts at 1.
  * - The TTL is a constant, not a per-connection setting (F171 asks for one; not built).
  */
+import { currentCorrelationId } from '../platform/correlation';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -91,8 +92,8 @@ export function dedupStatements(db: D1Database, input: DedupInput): D1PreparedSt
       ),
     db
       .prepare(
-        `INSERT INTO deliveries(id,integration_id,organization_id,state,duplicate_of,suppressed_reason,created_at)
-         SELECT ?1,?2,?3,'suppressed',?4,'duplicate',CURRENT_TIMESTAMP
+        `INSERT INTO deliveries(id,integration_id,organization_id,state,duplicate_of,suppressed_reason,created_at,correlation_id)
+         SELECT ?1,?2,?3,'suppressed',?4,'duplicate',CURRENT_TIMESTAMP,?6
          WHERE changes() = 1
            AND (SELECT hit_count FROM event_dedup WHERE organization_id=?3 AND delivery_id=?4) <= ?5`,
       )
@@ -102,6 +103,7 @@ export function dedupStatements(db: D1Database, input: DedupInput): D1PreparedSt
         input.organizationId,
         input.deliveryId,
         SUPPRESSED_ROWS_PER_ORIGINAL,
+        currentCorrelationId(),
       ),
     db
       .prepare(

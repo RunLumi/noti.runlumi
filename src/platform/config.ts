@@ -2,6 +2,7 @@ import { keyringProblem } from '../crypto/keyring-env';
 import { parseKeyHex } from '../crypto/envelope';
 import { isEnvironmentName, isFingerprintKey, kekCheckValue } from '../crypto/fingerprint';
 import type { Bindings } from '../env';
+import { resolveWebhookTarget } from '../observability/alerts/sinks';
 
 /**
  * Boot-time configuration validation (F04, F10, F34), run at every entrypoint.
@@ -16,7 +17,7 @@ import type { Bindings } from '../env';
  *  | storage     | `DB`                                                               | every request except the probes; the queue consumer and `scheduled` |
  *  | credentials | `KEK_V1/2`, `KMS_ACTIVE_VERSION`, `ENVIRONMENT_NAME`, `KEK_CHECK_V<n>`, and a KEK that does not match its check value | writes under `/api/integrations` and `/api/sources` (they seal credentials), the queue consumer and `scheduled`. NOT webhook ingress, auth or any read |
  *  | queue       | `DELIVERY_QUEUE`                                                   | the queue consumer and `scheduled` (dispatch). Ingress already persists to the outbox without it |
- *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), a second KEK without a check value | nothing; `/health` lists them and only the job that needs the binding stands down |
+ *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), `ALERT_WEBHOOK_URL` (optional, set but not a Slack, Discord, Lark or Teams webhook URL), a second KEK without a check value | nothing; `/health` lists them and only the job that needs the binding stands down |
  */
 
 type ConfigEnv = Partial<
@@ -29,6 +30,7 @@ type ConfigEnv = Partial<
     | 'KMS_ACTIVE_VERSION'
     | 'ENCRYPTION_KEY'
     | 'FINGERPRINT_KEY'
+    | 'ALERT_WEBHOOK_URL'
     | 'ENVIRONMENT_NAME'
     | 'KEK_CHECK_V1'
     | 'KEK_CHECK_V2'
@@ -114,6 +116,9 @@ export function assessConfig(env: ConfigEnv): ConfigAssessment {
 
   if (env.ENCRYPTION_KEY && !HEX_64.test(env.ENCRYPTION_KEY)) warnings.push('ENCRYPTION_KEY');
   if (env.FINGERPRINT_KEY && !isFingerprintKey(env.FINGERPRINT_KEY)) warnings.push('FINGERPRINT_KEY');
+  // Optional: unset is fine (the log sink still runs); set but unusable means alerts reach the log only.
+  if (env.ALERT_WEBHOOK_URL && resolveWebhookTarget(env.ALERT_WEBHOOK_URL, env.APP_ORIGIN) === null)
+    warnings.push('ALERT_WEBHOOK_URL');
   return { storage, credentials: [...new Set(credentials)], queue, warnings };
 }
 

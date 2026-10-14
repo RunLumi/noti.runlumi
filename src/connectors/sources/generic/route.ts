@@ -6,6 +6,7 @@ import { dedupStatements } from '../../../delivery/dedup';
 import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../../../env';
 import { readBodyCapped } from '../../../lib/body';
+import { correlationField, currentCorrelationId } from '../../../platform/correlation';
 import { log } from '../../../platform/log';
 import { ingressBatch } from '../../../db/retry';
 import { dispatchOutbox } from '../../../pipeline/outbox';
@@ -183,7 +184,13 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
   const planner = createNoisePlanner(c.env.DB, organizationId, nowMs);
   for (const row of rows.results) {
     const id = (await deriveDeliveryId(dedup.hex, row.id)).hex;
-    const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...display };
+    const message: DeliveryMessage = {
+      id,
+      integrationId: row.id,
+      organizationId,
+      ...display,
+      ...correlationField(),
+    };
     // Noise control (ADR 0016): deliver now or hold; never drop. A failure-class event
     // (severity error or critical) bypasses every hold.
     const plan = await planner.plan({
@@ -232,20 +239,21 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
     const results = await ingressBatch(c.env.DB, [
       // Not when this event is already waiting in `held_events` (ADR 0016).
       c.env.DB.prepare(
-        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,body_hash,created_at)
-         SELECT ?,?,?,'pending',?,?,CURRENT_TIMESTAMP
+        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,body_hash,created_at,correlation_id)
+         SELECT ?,?,?,'pending',?,?,CURRENT_TIMESTAMP,?
          WHERE NOT EXISTS (SELECT 1 FROM held_events WHERE id=? AND organization_id=?)`,
-      ).bind(id, row.id, organizationId, dedup.hex, bodyHash, id, organizationId),
+      ).bind(id, row.id, organizationId, dedup.hex, bodyHash, currentCorrelationId(), id, organizationId),
       // Only if the delivery row above was NEW (`changes()` is the previous statement's row
       // count). Otherwise a repeat after the outbox row was purged (retention drops dispatched
       // outbox rows after 7 days while the delivery lives on) would send the event again.
       c.env.DB.prepare(
-        `INSERT INTO notification_outbox(id,organization_id,payload_json)
-         SELECT ?,?,? WHERE changes() > 0
+        `INSERT INTO notification_outbox(id,organization_id,payload_json,correlation_id)
+         SELECT ?,?,?,? WHERE changes() > 0
          ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json, state='pending', lease_token=NULL,
-           claimed_at=NULL, lease_expires_at=NULL, not_before=NULL, dispatched_at=NULL
+           claimed_at=NULL, lease_expires_at=NULL, not_before=NULL, dispatched_at=NULL,
+           correlation_id=excluded.correlation_id
          WHERE notification_outbox.organization_id=excluded.organization_id`,
-      ).bind(id, organizationId, JSON.stringify(message)),
+      ).bind(id, organizationId, JSON.stringify(message), currentCorrelationId()),
       // A repeat is recorded as suppressed, not dropped (F171, F185).
       ...dedupStatements(c.env.DB, {
         organizationId,

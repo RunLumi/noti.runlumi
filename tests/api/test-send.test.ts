@@ -475,6 +475,7 @@ describe('what is written', () => {
       status: 'info',
       eventType: 'test',
       summary: TEST_SUMMARY,
+      correlationId: expect.any(String),
     });
     expect(rows('SELECT state FROM notification_outbox WHERE id=?', id)).toEqual([{ state: 'dispatched' }]);
   });

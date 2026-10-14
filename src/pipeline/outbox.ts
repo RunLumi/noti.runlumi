@@ -30,6 +30,7 @@ import {
   type DeliveryMessage,
 } from '../env';
 import { asRecord, str } from '../lib/json';
+import { sanitiseCorrelationId } from '../platform/correlation';
 import { log } from '../platform/log';
 
 /**
@@ -65,6 +66,7 @@ function optionalDisplayFields(r: Record<string, unknown>): Partial<DeliveryMess
       ? r.count
       : undefined;
   const summary = bounded(r.summary, count ? COMBINED_SUMMARY_MAX_CHARS : SUMMARY_MAX_CHARS);
+  const correlationId = sanitiseCorrelationId(r.correlationId);
   const status = STATUSES.has(r.status) ? (r.status as DeliveryMessage['status']) : undefined;
   return {
     ...(repo ? { repo } : {}),
@@ -73,6 +75,7 @@ function optionalDisplayFields(r: Record<string, unknown>): Partial<DeliveryMess
     ...(summary ? { summary } : {}),
     ...(status ? { status } : {}),
     ...(count ? { count } : {}),
+    ...(correlationId ? { correlationId } : {}),
   };
 }
 

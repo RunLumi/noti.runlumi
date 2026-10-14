@@ -22,6 +22,7 @@
  * `POST /api/deliveries/:id/replay` in `src/api/deliveries.ts`.
  */
 import { auditStatement } from '../audit/audit';
+import { currentCorrelationId } from '../platform/correlation';
 import { replayDeliveryId } from './ids';
 import { normalizeDeliveryState, planReplay } from './state';
 
@@ -91,7 +92,10 @@ function replayPayload(
   if (typeof parsed !== 'object' || parsed === null) return null;
   const message = parsed as Record<string, unknown>;
   if (message.organizationId !== orgId || message.integrationId !== source.integration_id) return null;
-  return JSON.stringify({ ...message, id: newId });
+  // The replay is a new request: it carries THIS request's id, never the original ingress id.
+  const kept = Object.fromEntries(Object.entries(message).filter(([key]) => key !== 'correlationId'));
+  const cid = currentCorrelationId();
+  return JSON.stringify({ ...kept, id: newId, ...(cid ? { correlationId: cid } : {}) });
 }
 
 function writeStatements(
@@ -108,16 +112,16 @@ function writeStatements(
     // delete or deletion request in between wins.
     db
       .prepare(
-        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,attempts,dedup_key,replay_of,created_at,is_test)
+        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,attempts,dedup_key,replay_of,created_at,is_test,correlation_id)
          SELECT ?1,?2,?3,'pending',0,?4,?5,CURRENT_TIMESTAMP,
-                COALESCE((SELECT is_test FROM deliveries WHERE id = ?5 AND organization_id = ?3), 0)
+                COALESCE((SELECT is_test FROM deliveries WHERE id = ?5 AND organization_id = ?3), 0),?6
          WHERE EXISTS (SELECT 1 FROM integrations i
                        WHERE i.id = ?2 AND i.organization_id = ?3
                          AND i.enabled = 1 AND i.credentials_quarantined_at IS NULL)
            AND NOT EXISTS (SELECT 1 FROM workspace_deletions w
                            WHERE w.organization_id = ?3 AND w.cancelled_at IS NULL AND w.purged_at IS NULL)`,
       )
-      .bind(newId, source.integration_id, org, source.dedup_key, source.id),
+      .bind(newId, source.integration_id, org, source.dedup_key, source.id, currentCorrelationId()),
   ];
   if (req.audit) {
     // Directly after the insert, so `changes()` is that insert's row count.
@@ -143,11 +147,11 @@ function writeStatements(
   statements.push(
     db
       .prepare(
-        `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
-         SELECT ?1,?2,?3
+        `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json,correlation_id)
+         SELECT ?1,?2,?3,?5
          WHERE EXISTS (SELECT 1 FROM deliveries WHERE id = ?1 AND organization_id = ?2 AND replay_of = ?4)`,
       )
-      .bind(newId, org, payload, source.id),
+      .bind(newId, org, payload, source.id, currentCorrelationId()),
     // Guarded on the count we read, so a concurrent request cannot advance it twice. It does
     // not touch the source's `updated_at`: that would reorder the log under a reader's cursor.
     db

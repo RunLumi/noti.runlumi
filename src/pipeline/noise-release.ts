@@ -1,5 +1,6 @@
 import { dedupKey, deliveryId as deriveDeliveryId } from '../delivery/ids';
 import { COMBINED_COUNT_MAX, type Bindings, type DeliveryMessage } from '../env';
+import { mintCorrelationId } from '../platform/correlation';
 import { log } from '../platform/log';
 import { HELD_CAPACITY } from '../routing/noise';
 import { DIGEST_MAX_PARTS, renderDigestParts, renderGroup, type HeldItem } from '../routing/noise-render';
@@ -256,22 +257,34 @@ function releaseStatements(
   const statements: D1PreparedStatement[] = [];
   for (const p of planned) {
     const { sql, params } = scopeSql(p.scope);
-    const message = p.message;
+    // A release runs in the cron with no request. Held events do not store their ingress id, so a
+    // released notification gets a fresh one: traceable from here on, not linked back to ingress.
+    const correlationId = mintCorrelationId();
+    const message = { ...p.message, correlationId };
     // Created only while the claim is still ours; `changes()` then gates the outbox row, so a
     // delivery that already exists (a redelivered single event) is not sent twice.
     statements.push(
       db
         .prepare(
-          `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)
-           SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP
+          `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at,correlation_id)
+           SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP,?
            WHERE EXISTS (SELECT 1 FROM held_events WHERE organization_id=? AND claim_token=? AND ${sql})`,
         )
-        .bind(message.id, integrationId, orgId, `noise:${message.id}`, orgId, token, ...params),
+        .bind(
+          message.id,
+          integrationId,
+          orgId,
+          `noise:${message.id}`,
+          correlationId,
+          orgId,
+          token,
+          ...params,
+        ),
       db
         .prepare(
-          `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json) SELECT ?,?,? WHERE changes() > 0`,
+          `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json,correlation_id) SELECT ?,?,?,? WHERE changes() > 0`,
         )
-        .bind(message.id, orgId, JSON.stringify(message)),
+        .bind(message.id, orgId, JSON.stringify(message), correlationId),
       // The display text has done its job: blank it, keep only what dedupe and the log join need.
       db
         .prepare(
