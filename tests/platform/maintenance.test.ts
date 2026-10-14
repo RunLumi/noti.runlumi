@@ -1,0 +1,89 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { Bindings } from '../../src/env';
+import { createFakeD1 } from '../support/d1';
+
+/** MAINTENANCE_MODE is the write freeze for the 0026 migration window (docs/RUNBOOK.md). */
+vi.mock('../../src/auth/better-auth', () => ({
+  createAuth: () => ({
+    api: { getSession: () => Promise.resolve(null) },
+    handler: () => new Response('auth'),
+  }),
+}));
+const { default: worker } = await import('../../src/index');
+
+const ctx = {
+  waitUntil: () => undefined,
+  passThroughOnException: () => undefined,
+} as unknown as ExecutionContext;
+function envWith(mode: string | undefined): { env: Bindings; touched: () => number } {
+  const { d1 } = createFakeD1();
+  let touched = 0;
+  const DB = new Proxy(d1, {
+    get(target, prop, receiver) {
+      if (prop === 'prepare' || prop === 'batch') touched++;
+      return Reflect.get(target, prop, receiver) as unknown;
+    },
+  });
+  const env = {
+    DB,
+    APP_ORIGIN: 'https://noti.test',
+    KEK_V1: '11'.repeat(32),
+    KEK_V2: '',
+    KMS_ACTIVE_VERSION: '1',
+    ENCRYPTION_KEY: '',
+    GITHUB_APP_ID: '1',
+    GITHUB_WEBHOOK_SECRET: 'x',
+    ...(mode === undefined ? {} : { MAINTENANCE_MODE: mode }),
+  } as unknown as Bindings;
+  return { env, touched: () => touched };
+}
+
+describe('maintenance mode', () => {
+  it.each([
+    ['POST', '/webhooks/github'],
+    ['POST', '/webhooks/generic/ep-aaaaaaaaaaaaaaaaaaaaaaaa'],
+    ['GET', '/api/integrations'],
+    ['POST', '/api/integrations'],
+    ['GET', '/api/auth/get-session'],
+  ])('answers %s %s with 503 and Retry-After, and never touches the database', async (method, path) => {
+    const { env, touched } = envWith('true');
+    const res = await worker.fetch(
+      new Request(`https://noti.test${path}`, { method, headers: { origin: 'https://noti.test' } }),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(503);
+    expect(res.headers.get('retry-after')).toBe('300');
+    expect(touched()).toBe(0);
+  });
+
+  it('keeps /health answering', async () => {
+    const { env } = envWith('true');
+    const res = await worker.fetch(new Request('https://noti.test/health'), env, ctx);
+    expect([200, 503]).toContain(res.status);
+    expect(await res.text()).toContain('lumi-noti');
+  });
+
+  it.each([undefined, 'false', '', 'TRUE', '1', 'yes'])('does nothing for %j', async (mode) => {
+    const { env } = envWith(mode);
+    const res = await worker.fetch(new Request('https://noti.test/api/integrations'), env, ctx);
+    expect(res.status).toBe(401);
+  });
+
+  it('skips every cron job', async () => {
+    const { env, touched } = envWith('true');
+    await worker.scheduled({} as ScheduledEvent, env);
+    expect(touched()).toBe(0);
+  });
+
+  it('hands queue messages back for later without consuming them', async () => {
+    const { env, touched } = envWith('true');
+    const retryAll = vi.fn();
+    await worker.queue(
+      { queue: 'lumi-noti-deliveries', messages: [], retryAll } as unknown as MessageBatch<unknown>,
+      env,
+    );
+    expect(retryAll).toHaveBeenCalledWith({ delaySeconds: 300 });
+    expect(touched()).toBe(0);
+  });
+});

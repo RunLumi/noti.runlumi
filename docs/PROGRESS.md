@@ -41,6 +41,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
 | S3 | Compliance: retention matrix (code-checked, generated `docs/DATA_RETENTION.md`), hourly purge of expired auth records, account data export and erasure, `security.txt`, subprocessor inventory, incident response skeleton | F237, F238, F242 (each in part) | — | 🟡 | this PR |
 | C | Credential lifecycle and boot hygiene (ADR 0022): credential fingerprint, revoke for integrations and sources, shredding proof, guarded KEK destruction with an audited event, per-environment KEK check value, `assertConfig` at every entrypoint, `/health/ready`, `withD1Retry`, bound-parameter guard (migration 0024) | F34, F37, F39, F40, F04, F09, F10 (each in part) | D1 | 🟡 | this PR |
+| 1.1 | Tenant contract closed in the schema (migration 0026: NOT NULL + foreign key on six tables, derive-or-quarantine backfill, row-count check), static every-query-has-an-org-predicate test with a reviewed allowlist, route registry and route-to-capability test, `docs/AUTHORIZATION.md`, tenant-isolation drill over every route on a fake D1 plus an unrun staging runner (ADR 0021) | F25 (contract), F26 (static half), F232, F233 (static and fake-D1 half) | D2 (at rest) | 🟡 | this PR |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
@@ -1528,3 +1529,58 @@ an alert when a breaker opens; the Discord global breaker; replay after outbox p
 D1 calls of a full bulk replay against the real subrequest limit; a real browser at 320 px and a screen
 reader for the new surfaces; Vietnamese copy review. No real provider has seen any of this: every
 provider response in the tests is a fixture.
+## Slice 1.1 / 1.20 / 1.23 — tenant contract closure (ADR 0021, this PR)
+
+Closes the tenant contract in the schema and proves it statically. Nothing here has run on a real D1 or a
+deployment.
+
+- **Audit (over the full migration chain, via the fake D1).** `integrations`, `deliveries` and
+  `notification_outbox` had a nullable `organization_id` and no foreign key; `held_events`,
+  `routing_decisions` and `noise_open_failures` were NOT NULL with no foreign key. `audit_events`
+  (nullable by design) and `workspace_deletions` (a ledger with no foreign key by design) stay as the only
+  exceptions, and a test names them.
+- **Migration 0026.** Rebuilds those six tables with `organization_id TEXT NOT NULL REFERENCES
+  organization(id) ON DELETE CASCADE`. Backfills only what is derivable from our own rows (integration
+  from its source, delivery from its integration, outbox row from its delivery or payload integration);
+  quarantines the rest into `legacy_orphaned_rows` with metadata only (credentials and payloads leave the live tables, recoverable only through Time Travel; never guessed into a tenant); verifies the copy against the live original and swaps by RENAME, dropping the old table only behind a foreign-key guard released by a recount (safe whether or not D1 aborts a failed file). Renumbered 0023 -> 0026 so it follows 0024 (#51) and 0025 (#53); it carries 0024's `integrations.credential_fingerprint`. `tests/migration-0026.test.ts` (21 tests, incl. runners that abort and runners that carry on, a late writer, a re-run, and upgrades from 0012/0015/0017/0020/0021) diffs the schema before and after, runs the backfill over
+  legacy-shaped rows, proves nothing secret reaches the quarantine, and proves an unbalanced copy aborts
+  with the old schema intact. Six existing test files gained `seedOrganization` calls; one expectation
+  changed to "the schema refuses a tenant-less outbox row".
+- **Static query scope (F26, F233).** `tests/support/sql-scope.ts` + `tests/security/tenant-query-scope.test.ts`
+  (43 tests). Tenant tables are derived from the schema. **Real violations found: none.** Everything flagged
+  was tenant-agnostic by design and is one of 42 reviewed allowlist entries (credential-keyed ingress
+  lookups, cron sweeps, retention, one primary-key-correlated subquery); an entry that stops matching fails.
+  Proven against 42 fixtures (a top-level OR, the tenant inside an OR group, NOT, <> and !=, and predicates that exist only in a comment are all refused) and against real files with their predicates stripped.
+- **Route registry (F232).** `src/auth/route-policy.ts` (39 routes), `tests/security/route-capability.test.ts`
+  (46 tests: runtime `app.routes` vs registry vs source parse vs handler guard), `docs/AUTHORIZATION.md` with
+  two generated tables and `npm run docs:authorization`. `app` is now a named export of `src/index.ts`;
+  `DOMAIN_CAPABILITIES` is exported from `permissions.ts` and the permissions table test asserts it covers all.
+- **Drill.** `scripts/lib/drill-plan.mjs` (shared plan), `tests/drill/tenant-isolation.test.ts` (113 tests; A to
+  B, member of A to B, B to A; reads, writes, actions; control run; ingress; denials), and
+  `scripts/tenant-isolation-drill.mjs` for a deployed URL (**UNVERIFIED**, never run). Result on the fake D1:
+  every attempt 404, no leak, no row changed, nothing sent to the victim's destination.
+- **Observation for a decision, not a bug fixed here:** F233 says every cross-tenant attempt is audited; ADR 0019
+  caps recording at 20 a minute per user so a scan cannot flood a workspace's log. Left as is (REMAINING 1.23).
+
+Not done: chunked backfill (one statement per table), 0026 on a real D1 and its rollback rehearsal, the
+staging drill and Time Travel re-drill, audit of unknown-installation 403s, typed repository functions.
+
+### Slice 1.1 review fixes (independent database review of #52)
+
+- **H1 atomicity.** D1's per-file transaction and abort-on-error behaviour is not documented (UNVERIFIED), so the
+  migration no longer relies on either: original renamed aside, copy takes its name, `DROP <t>_old` guarded by a
+  foreign key released only by a recount. Tests run it under three runners, with a sabotaged copy and a late writer.
+  `MAINTENANCE_MODE=true` (503 + Retry-After on all but the probes, cron skipped, queue retried) is the mandatory
+  write freeze; `scripts/migration-0026-preflight.sql` / `.mjs` is the mandatory preflight; the runbook has the
+  window, bookmark, recount and verification queries. Rehearsal on a real D1 is a blocking gate.
+- **H2** quarantine fields are cut to 200 characters (a 2,400-character legacy repo overflowed the CHECK).
+- **M1** re-runnable (`IF EXISTS` scratch, idempotent quarantine); **M2** wording corrected, preflight acknowledges the
+  exact quarantine count; **M3** scanner refuses top-level OR, OR groups, NOT, `<>`/`!=` and comment-only predicates;
+  allowlist `includes` tightened; **M4** the route guard must be an unconditional top-level statement before any
+  database use, and a webhook verification must be a real call; **M5** tests without a wrapper transaction.
+- **L1** copies in rowid order; **L2/L3** preflight reports delivery/integration/source organization mismatches and
+  case-different ids (decision: kept / quarantined, never guessed); **L4** 100,000-row ceiling; **L5** upgrades from
+  0012/0015/0017/0020/0021 are tested.
+- Rebased over #47 and #51: renumbered 0023 to 0026; carries 0024's `integrations.credential_fingerprint`;
+  `route-policy` gained the two revoke routes and `/health/ready`; the retention matrix has a row for the quarantine.
+  Rebased again over #53 (0025): the rebuild also carries `deliveries.duplicate_of`, `suppressed_reason`, `possible_duplicate` and `provider_message_id`; the three new ledger tables need no rebuild; the routes `/api/deliveries/replay-plan` and `/replay` are in the registry and the drill; three retention statements (`PURGE_EVENT_DEDUP_SQL`, `PURGE_ATTEMPTS_SQL`, `PURGE_DESTINATION_HEALTH_SQL`) are allowlisted with reasons; the scanner accepts an outer row picked by equality with a scoped subquery. The legacy seed now holds rows with the new columns.

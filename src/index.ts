@@ -38,11 +38,13 @@ import { bootReport } from './platform/config';
 import { log } from './platform/log';
 import { requireSameOrigin } from './security/csrf';
 import { securityHeaders } from './security/headers';
+import { RETRY_AFTER_SECONDS, inMaintenance, maintenance } from './platform/maintenance';
 
-const app = new Hono<{ Bindings: Bindings }>();
+export const app = new Hono<{ Bindings: Bindings }>();
 
 app.use('*', correlation);
 app.use('*', securityHeaders);
+app.use('*', maintenance);
 app.use('/api/*', requireSameOrigin);
 
 const PROBE_PATHS: ReadonlySet<string> = new Set(['/health', '/health/ready']);
@@ -279,6 +281,10 @@ export default {
   // job is isolated (src/observability/cron.ts) so one failure never skips the others; the
   // invocation still rejects at the end. Detection runs first so it survives any later failure.
   async scheduled(_event: ScheduledEvent, env: Bindings) {
+    if (inMaintenance(env)) {
+      log('warn', 'maintenance_mode_cron_skipped', {});
+      return;
+    }
     await assertBootable(env);
     await runCronJobs([
       { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
@@ -307,6 +313,11 @@ export default {
   // consumer marks the deliveries `dead_lettered` for replay (docs/RUNBOOK.md). The dead-letter consumer
   // only needs D1 and is never gated here.
   queue: async (batch: MessageBatch<unknown>, env: Bindings) => {
+    if (inMaintenance(env)) {
+      // The migration write freeze: nothing is read or written; the messages come back after the window.
+      batch.retryAll({ delaySeconds: RETRY_AFTER_SECONDS });
+      return;
+    }
     if (batch.queue === DEAD_LETTER_QUEUE) return consumeDeadLetters(batch, env);
     const report = await bootReport(env);
     if (report.storage.length > 0 || report.credentials.length > 0) {

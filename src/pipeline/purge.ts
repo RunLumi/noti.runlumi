@@ -10,7 +10,11 @@
  */
 export const PURGE_ROWS_PER_TICK = 500;
 
-/** Tenant tables purged explicitly in bounded batches (most have no foreign key to organization). */
+/**
+ * Tenant tables drained explicitly in bounded batches. Since migration 0026 every one of them also
+ * has `organization_id ... REFERENCES organization(id) ON DELETE CASCADE`, so the final
+ * organization delete would remove stragglers anyway; draining first keeps each statement small.
+ */
 export const TENANT_TABLES = [
   'notification_outbox',
   'deliveries',

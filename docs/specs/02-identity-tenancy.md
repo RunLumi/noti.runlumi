@@ -314,7 +314,7 @@ missing argument, not a missing `if`.
 
 ## F25 — Domain tenancy bridge
 
-**Priority** P0 · **Status** 🟡 expand + indexes (0006), contract-by-trigger blocking new NULL/changed org ids (0008), later tables created NOT NULL. Not built: legacy-row backfill, final NOT NULL + FK on `integrations`/`deliveries`/`notification_outbox`, static every-table test, rollback rehearsal
+**Priority** P0 · **Status** 🟡 contract done in schema: `organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE` on `integrations`, `deliveries`, `notification_outbox`, `held_events`, `routing_decisions`, `noise_open_failures` (`migrations/0026_tenant_contract.sql`: backfill only where derivable, quarantine of the rest, per-table row-count check, ADR 0021; `tests/migration-0026.test.ts`); every-tenant-table schema test (`tests/security/tenant-query-scope.test.ts`). Not built: chunked backfill (one statement per table, fine only while tables are small), rollback rehearsal on a real D1, dropping `integrations.repo` as a routing key
 
 **Story** As a security reviewer, I want every tenant-owned record to carry an organization
 id, so that isolation is representable in the schema and not merely intended in application
@@ -356,7 +356,7 @@ authorization layer to enforce.
 
 ## F26 — Tenant-scoped authorization
 
-**Priority** P0 · **Status** 🟡 `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9). Not built: static test that every query has an org predicate, repository-function scope enforcement
+**Priority** P0 · **Status** 🟡 `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9); static every-query test with a reviewed, no-dead-entry allowlist (42 entries) (`tests/security/tenant-query-scope.test.ts`, scanner `tests/support/sql-scope.ts`, ADR 0021). Not built: repository functions that take the organization as a parameter (queries are inline literals checked by the scanner, not typed functions); the scanner cannot see dynamically assembled SQL
 
 **Story** As a security reviewer, I want every data access to require an explicit
 organization scope, so that a missing filter is a type error rather than a breach.

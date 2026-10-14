@@ -55,3 +55,11 @@ export function can(role: unknown, capability: Capability): boolean {
   const [resource, action] = capability.split('.') as [keyof Statements, string];
   return roles[role].authorize({ [resource]: [action] }).success;
 }
+
+/** The resources this product defines itself (the rest of `statements` is Better Auth's own). */
+export const DOMAIN_RESOURCES = ['integration', 'source', 'delivery', 'audit', 'workspace'] as const;
+
+/** Every domain capability, derived from the one definition above so a new one cannot be missed. */
+export const DOMAIN_CAPABILITIES: readonly Capability[] = DOMAIN_RESOURCES.flatMap((resource) =>
+  statements[resource].map((action) => `${resource}.${action}` as Capability),
+);

@@ -365,7 +365,7 @@ which is single-threaded and therefore at least globally consistent (F06).
 
 ## F232 — Authentication and authorization: what is decided elsewhere
 
-**Priority** P0 · **Status** ❌ pointer table with release evidence and the static every-mutating-route-maps-to-a-capability check are not written; underlying controls exist: role-by-capability table test (`tests/auth/permissions.test.ts`), static Origin guard on mutating routes (`tests/security/static-guards.test.ts`), 404 for other workspaces (`tests/api/integrations.test.ts`)
+**Priority** P0 · **Status** ✅ `docs/AUTHORIZATION.md` (pointer table, the four rules, generated roles-by-capability and route-by-guard tables); route registry `src/auth/route-policy.ts`; `tests/security/route-capability.test.ts` compares the routes the app registers and the handler sources with it, and `tests/security/authorization-doc.test.ts` fails on drift; role table `tests/auth/permissions.test.ts`. The evidence column is honest about controls that are only partly built (session revocation, F20)
 
 **Story** As a security reviewer, I want one page that says where the authentication and
 authorization decisions live and what evidence each one needs, so that I review the right file
@@ -409,7 +409,7 @@ the highest-value cheap check in the whole file.
 
 ## F233 — Tenant isolation is the release gate
 
-**Priority** P0 · **Status** 🟡 tenant comes only from the verified installation, queries are scoped, tenant columns and immutability triggers in migrations, cross-workspace 404 tests (`tests/tenant-resolution.test.ts`, `tests/api/integrations.test.ts`, `tests/api/deliveries.test.ts`, PRs #6 #9 #11); not built: static every-query-filters-by-org test, staging drill, Time Travel re-drill, audit rows for unknown-installation 403s · **Fixes** D2, D3 · **Contributes to** N6
+**Priority** P0 · **Status** 🟡 tenant comes only from the verified installation, tenant columns NOT NULL with foreign keys (`migrations/0026_tenant_contract.sql`), static every-query-filters-by-org test (`tests/security/tenant-query-scope.test.ts`), cross-workspace drill over every route on a fake D1 (`tests/drill/tenant-isolation.test.ts`, 113 tests), cross-workspace 404 tests (`tests/tenant-resolution.test.ts`, `tests/api/integrations.test.ts`, `tests/api/deliveries.test.ts`, PRs #6 #9 #11). Not built: the staging drill (runner `scripts/tenant-isolation-drill.mjs` exists and has never been run), Time Travel re-drill, audit rows for unknown-installation 403s, an audit row for EVERY probe (recording is capped at 20 a minute per user by design) · **Fixes** D2, D3 · **Contributes to** N6
 
 **Story** As a customer, I want my events and my credentials to be unreachable from another
 customer's account, so that I can trust the product with private repository activity.

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { applyMigration, createFakeD1 } from '../support/d1';
+import { applyMigration, createFakeD1, seedOrganization } from '../support/d1';
 
 describe('migration 0021', () => {
   const names = (raw: DatabaseSync, type: 'index' | 'trigger', table = 'integrations'): string[] =>
@@ -43,6 +43,7 @@ describe('migration 0021', () => {
 
   it('only admits valid, bounded JSON in noise_json', () => {
     const { raw } = createFakeD1();
+    for (const org of ['org-a', 'org-b']) seedOrganization(raw, org);
     seed(raw);
     const set = (value: string | null) =>
       raw.prepare("UPDATE integrations SET noise_json=? WHERE id='a'").run(value);
@@ -83,6 +84,7 @@ describe('migration 0021', () => {
 
     it('admits a well-formed row', () => {
       const { raw } = createFakeD1();
+      seedOrganization(raw, 'org-a');
       expect(() => insert(raw)).not.toThrow();
     });
 
@@ -130,6 +132,7 @@ describe('migration 0021', () => {
 
   it('keeps one open failure per integration and workflow key', () => {
     const { raw } = createFakeD1();
+    for (const org of ['org-a', 'org-b']) seedOrganization(raw, org);
     const insert = raw.prepare(
       'INSERT INTO noise_open_failures(organization_id,integration_id,key_hash,opened_at) VALUES(?,?,?,?)',
     );

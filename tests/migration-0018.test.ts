@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { applyMigration, createFakeD1 } from './support/d1';
+import { applyMigration, createFakeD1, seedOrganization } from './support/d1';
 
 /**
  * Migration 0018 rebuilds `integrations` to widen one CHECK. The rebuild is only safe if it
@@ -200,6 +200,7 @@ describe('migration 0018', () => {
 
   it('accepts discord and generic_webhook, and still rejects any other destination', () => {
     const { raw } = createFakeD1();
+    seedOrganization(raw, 'org-a');
     const insert = (id: string, destination: string) =>
       raw
         .prepare(
