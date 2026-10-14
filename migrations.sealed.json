@@ -23,5 +23,6 @@
   "0022_test_deliveries.sql": "100b3e8944ff35649159fd75d7cbcd6ee67f8a40dfdcc3af2b6cd65bffb855b9",
   "0024_credential_lifecycle.sql": "67ce9c35707ed062b362a4a0833aace260075be560f03c39f5d1e0a214a829a4",
   "0025_delivery_ledger_depth.sql": "aa7bac773b711cb05913e04cd86860c9c83de74e847a1bf2258d6d7443a0031d",
-  "0026_tenant_contract.sql": "43450ae844e09af5d46c3e8fa9433081e7db6ed0c2237f4ec339243c8e71bcf4"
+  "0026_tenant_contract.sql": "43450ae844e09af5d46c3e8fa9433081e7db6ed0c2237f4ec339243c8e71bcf4",
+  "0027_job_runner_alerting.sql": "9ea0bd97cc8a7e6d45882fb76a647795cdd6afb662e78a05cfd425df83238ca2"
 }
