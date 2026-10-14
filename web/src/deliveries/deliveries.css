@@ -293,6 +293,78 @@
   color: var(--color-soft-slate);
 }
 
+/* --- Attempt history (ADR 0023) ------------------------------------------ */
+.attempt-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attempt {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-white);
+  border: var(--border-hairline);
+  border-radius: var(--radius-control);
+}
+
+.attempt-retry_scheduled,
+.attempt-deferred {
+  border-left: 3px solid var(--color-signal-amber);
+}
+
+.attempt-dead_lettered {
+  border-left: 3px solid var(--color-risk-red);
+}
+
+.attempt-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.attempt-title {
+  font-weight: 600;
+  color: var(--color-civic-navy);
+}
+
+.attempt-time {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--color-soft-slate);
+}
+
+.attempt-line,
+.attempt-code {
+  margin: 0;
+}
+
+.attempt-code {
+  font-size: 14px;
+  color: var(--color-soft-slate);
+}
+
+/* --- Redeliver all failed -------------------------------------------------- */
+.bulk-redeliver {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.bulk-redeliver p {
+  margin: 0;
+}
+
+.bulk-typed {
+  display: grid;
+  gap: var(--space-2);
+  max-width: 16rem;
+}
+
 /* --- Overview stat link ---------------------------------------------------- */
 .stat-link {
   display: inline-block;
@@ -344,7 +416,8 @@
 @media (forced-colors: active) {
   .drawer,
   .drawer-model,
-  .confirm-box {
+  .confirm-box,
+  .attempt {
     border: 1px solid CanvasText;
   }
 }

@@ -6,6 +6,7 @@
  * copy itself lives in the dashboard's catalogue, looked up by that id; provider text is
  * never shown.
  */
+import type { AttemptRecord } from '../delivery/attempt-types';
 import { normalizeDeliveryState, type DeliveryState } from '../delivery/state';
 import { errorSpec, toErrorCode, type ErrorCode } from '../platform/errors';
 
@@ -131,6 +132,11 @@ export interface DeliveryRowRecord {
   next_attempt_at: number | null;
   dead_lettered_at: number | null;
   is_test: number | null;
+  /** The diagnostic we minted for the last attempt; only `circuit_open` / `destination_paced` are shown. */
+  last_error: string | null;
+  possible_duplicate: number | null;
+  suppressed_reason: string | null;
+  duplicate_of: string | null;
   integration_name: string | null;
   integration_repo: string | null;
   integration_destination: string | null;
@@ -194,6 +200,21 @@ export interface DeliveryView {
    */
   readonly heldReason: 'quiet_hours' | 'digest' | 'grouped' | null;
   readonly groupedCount: number;
+  /**
+   * F185: an earlier attempt ended without the provider confirming it, then the send was retried, so
+   * the destination MAY show this message more than once. Not "was duplicated": we cannot know.
+   */
+  readonly possibleDuplicate: boolean;
+  /** A detected repeat that was not sent again (F185): why, and which delivery it repeats. */
+  readonly suppression: {
+    readonly reason: 'duplicate' | 'claim_conflict' | 'provider_idempotency';
+    readonly duplicateOf: string | null;
+  } | null;
+  /**
+   * Why a waiting delivery has not been sent yet although nothing failed this time (F183, F187): the
+   * breaker is open because the destination kept failing, or the destination asked to be left alone.
+   */
+  readonly pausedReason: 'circuit_open' | 'destination_paced' | null;
 }
 
 /** SQLite `CURRENT_TIMESTAMP` (`YYYY-MM-DD HH:MM:SS`, UTC) to an ISO instant. */
@@ -283,6 +304,67 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
         ? (row.held_reason as 'quiet_hours' | 'digest' | 'grouped')
         : null,
     groupedCount: row.held_count ?? 0,
+    possibleDuplicate: row.possible_duplicate === 1,
+    suppression:
+      state === 'suppressed' &&
+      row.suppressed_reason !== null &&
+      SUPPRESSION_REASONS.has(row.suppressed_reason)
+        ? {
+            reason: row.suppressed_reason as 'duplicate' | 'claim_conflict' | 'provider_idempotency',
+            duplicateOf: row.duplicate_of,
+          }
+        : null,
+    pausedReason:
+      state === 'retrying' && (row.last_error === 'circuit_open' || row.last_error === 'destination_paced')
+        ? row.last_error
+        : null,
+  };
+}
+
+const SUPPRESSION_REASONS: ReadonlySet<string> = new Set([
+  'duplicate',
+  'claim_conflict',
+  'provider_idempotency',
+]);
+
+export interface AttemptView {
+  readonly attempt: number;
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  /** Wall time of the attempt, ms; 0 for a deferral. */
+  readonly durationMs: number;
+  readonly outcome: AttemptRecord['outcome'];
+  readonly error: DeliveryErrorView | null;
+  /** A code we minted for this attempt (`provider_http_503`); never provider text. Null where hidden. */
+  readonly detail: string | null;
+  /** The status CLASS only (never the status code, a body or a header). `none` where hidden. */
+  readonly statusClass: AttemptRecord['statusClass'];
+  readonly retryAfterSeconds: number | null;
+  readonly providerMessageId: string | null;
+  readonly possibleDuplicate: boolean;
+}
+
+const DETAIL_PATTERN = /^[a-z0-9_]{1,80}$/;
+
+/**
+ * One attempt as the dashboard sees it. For a TEST sent to a customer-chosen endpoint the status
+ * class and detail are hidden and the error is coarse, for the same reason `toDeliveryView` coarsens
+ * it: the class of a tenant-chosen host's answer is an oracle for probing what answers where
+ * (ADR 0014, 0018).
+ */
+export function toAttemptView(a: AttemptRecord, hideProviderDetail: boolean): AttemptView {
+  return {
+    attempt: a.attempt,
+    startedAt: new Date(a.startedAtMs).toISOString(),
+    finishedAt: new Date(a.finishedAtMs).toISOString(),
+    durationMs: Math.max(0, a.finishedAtMs - a.startedAtMs),
+    outcome: a.outcome,
+    error: hideProviderDetail ? coarseTestError(a.errorCode) : errorView(a.errorCode),
+    detail: !hideProviderDetail && a.reason !== null && DETAIL_PATTERN.test(a.reason) ? a.reason : null,
+    statusClass: hideProviderDetail ? 'none' : a.statusClass,
+    retryAfterSeconds: a.retryAfterMs === null ? null : Math.ceil(a.retryAfterMs / 1000),
+    providerMessageId: a.providerMessageId,
+    possibleDuplicate: a.possibleDuplicate,
   };
 }
 
@@ -292,9 +374,9 @@ export interface TimelineEntry {
 }
 
 /**
- * There is no per-attempt table yet (F184), so the "timeline" is what the delivery row
- * itself records: when it was created, the first and latest attempt, the scheduled next
- * attempt and the dead-letter time. It does not list every attempt, and says so.
+ * The coarse timeline from the delivery row itself: created, first and latest attempt, the scheduled
+ * next attempt and the dead-letter time. The per-attempt history (`delivery_attempts`, F184) is
+ * returned beside it; rows written before migration 0025 have only this.
  */
 export function deriveTimeline(row: DeliveryRowRecord): TimelineEntry[] {
   const state = normalizeDeliveryState(row.state);

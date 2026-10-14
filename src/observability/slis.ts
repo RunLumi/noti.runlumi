@@ -112,6 +112,27 @@ export interface ObservabilitySummary {
    */
   readonly ingressDropped: { readonly total: number; readonly sourcesInWindow: number };
   readonly byDestination: readonly DestinationSli[];
+  /**
+   * F185/F171: repeats we recorded instead of dropping (`suppressed` rows: provider redeliveries) and
+   * deliveries that were retried after an unconfirmed attempt and so MAY have reached the destination
+   * twice. `possibleDuplicates` is an upper bound on duplicates we cannot detect, not a count of them.
+   * Test notifications are excluded.
+   */
+  readonly duplicates: {
+    readonly suppressed: number;
+    readonly rate: Ratio;
+    readonly possibleDuplicates: number;
+  };
+  /**
+   * F183/F187, current (not windowed): integrations whose breaker is open or half-open and integrations
+   * the destination asked to be left alone, plus attempts deferred in the window. Tests never count.
+   */
+  readonly destinationHealth: {
+    readonly open: number;
+    readonly halfOpen: number;
+    readonly paced: number;
+    readonly deferredAttempts: number;
+  };
   readonly notMeasurable: readonly NotMeasurable[];
 }
 
@@ -127,20 +148,16 @@ export const NOT_MEASURABLE: readonly NotMeasurable[] = [
   },
   {
     sli: 'ack_latency',
-    reason: 'Request received to 202 sent is not timestamped; there is no delivery_attempts table (F198).',
+    reason: 'Request received to 202 sent is not timestamped at ingress (F198).',
   },
   {
     sli: 'attempt_latency',
-    reason: 'Outbound fetch duration is not recorded; only the attempt completion time is stored.',
+    reason:
+      'Each attempt records its start and end in delivery_attempts, but no aggregate is computed from them yet; the claim-to-outcome span also includes the lookup of the stored destination.',
   },
   {
     sli: 'unmapped_provider_errors',
     reason: 'The adapters flag unmapped responses per attempt but the flag is not persisted in the ledger.',
-  },
-  {
-    sli: 'duplicate_rate',
-    reason:
-      'Only rows in state suppressed are visible; duplicates dropped at ingress (INSERT OR IGNORE) are not counted.',
   },
   { sli: 'end_user_received', reason: 'Not observable: the destination is not ours to instrument (F197).' },
 ];
@@ -251,6 +268,56 @@ async function destinationBreakdown(db: Db, org: string, since: string): Promise
     });
 }
 
+async function duplicates(
+  db: Db,
+  org: string,
+  since: string,
+  byState: Readonly<Record<DeliveryState, number>>,
+): Promise<ObservabilitySummary['duplicates']> {
+  const possible = await db
+    .prepare(
+      'SELECT COUNT(*) AS n FROM deliveries WHERE organization_id=?1 AND created_at>=?2 AND is_test=0 AND possible_duplicate=1',
+    )
+    .bind(org, since)
+    .first<{ n: number }>();
+  const total = Object.values(byState).reduce((a, b) => a + b, 0);
+  return {
+    suppressed: byState.suppressed,
+    rate: ratio(byState.suppressed, total),
+    possibleDuplicates: possible?.n ?? 0,
+  };
+}
+
+async function destinationHealth(
+  db: Db,
+  org: string,
+  sinceMs: number,
+  nowMs: number,
+): Promise<ObservabilitySummary['destinationHealth']> {
+  const [health, deferred] = await Promise.all([
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(state='open'),0) AS open, COALESCE(SUM(state='half_open'),0) AS half_open,
+                COALESCE(SUM(COALESCE(paused_until,0) > ?2),0) AS paced
+         FROM destination_health WHERE organization_id=?1`,
+      )
+      .bind(org, nowMs)
+      .first<{ open: number; half_open: number; paced: number }>(),
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM delivery_attempts WHERE organization_id=?1 AND started_at>=?2 AND outcome='deferred'",
+      )
+      .bind(org, sinceMs)
+      .first<{ n: number }>(),
+  ]);
+  return {
+    open: health?.open ?? 0,
+    halfOpen: health?.half_open ?? 0,
+    paced: health?.paced ?? 0,
+    deferredAttempts: deferred?.n ?? 0,
+  };
+}
+
 async function backlog(db: Db, org: string, nowMs: number): Promise<ObservabilitySummary['backlog']> {
   const d = await db
     .prepare(
@@ -345,6 +412,8 @@ export async function computeSummary(
     backlog: pending,
     ingressDropped: { total: dropped?.total ?? 0, sourcesInWindow: dropped?.recent ?? 0 },
     byDestination,
+    duplicates: await duplicates(db, organizationId, since, byState),
+    destinationHealth: await destinationHealth(db, organizationId, nowMs - windowMs, nowMs),
     notMeasurable: NOT_MEASURABLE,
   };
 }

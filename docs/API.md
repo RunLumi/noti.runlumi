@@ -119,8 +119,24 @@ type Integration = {
   noiseNewer: boolean;                // saved by a newer release (rollback): ignored, delivered normally
   createdAt: string | null;
   updatedAt: string | null;
+  health: DestinationHealth | null;   // circuit breaker and rate-limit hold (ADR 0023); null until one is needed
+};
+type DestinationHealth = {
+  state: 'closed' | 'open' | 'half_open';
+  paused: boolean;                    // open or half-open: deliveries are waiting, not failing
+  consecutiveFailures: number;
+  retryAt: string | null;             // ISO; when the next probe is allowed, null when closed
+  pacedUntil: string | null;          // ISO; the destination asked to be left alone until then
+  lastFailureCode: string | null;
+  lastFailureAt: string | null;
+  timesOpened: number;
 };
 ```
+
+`health` is shown, never enforced: Noti stops sending to a destination that keeps failing (5 consecutive
+`destination_unavailable` or `destination_timeout` failures open it for 5 minutes, then one probe decides)
+and never turns the integration off. Deliveries wait as `retrying` with `pausedReason`, spend no attempt and
+are not dead-lettered.
 
 | Method and path | Body | Success |
 | --- | --- | --- |
@@ -574,16 +590,47 @@ responses carry `guarantee: "at_least_once"` and the dashboard says so.
 | --- | --- | --- |
 | `GET /api/deliveries` | `delivery.read` | `{deliveries, nextCursor, guarantee}`. Query: `state`, `integrationId`, `from`, `to` (ISO dates), `limit` (1–100, default 25), `cursor` (opaque, ordered by `(updated_at, id)` descending). Filter `state=dead_lettered` also matches legacy `failed` rows. `422` on a bad filter. |
 | `GET /api/deliveries/summary` | `delivery.read` | `{windowHours: 24, counts}` by state for deliveries created in the last 24 hours. |
-| `GET /api/deliveries/:id` | `delivery.read` | `{delivery, timeline, attemptDetail: "summary", replays, guarantee}`. The timeline is what the single ledger row records, not a per-attempt history. |
+| `GET /api/deliveries/:id` | `delivery.read` | `{delivery, timeline, attempts, attemptDetail: "full" \| "summary", replays, guarantee}`. `attempts` is the per-attempt history, oldest first (see below); `attemptDetail` is `summary` for a delivery from before migration 0025, which has only the coarse `timeline`. |
+| `POST /api/deliveries/replay-plan` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. Body `{integrationId?, from?, to?}` (`from`/`to` are `YYYY-MM-DD` or ISO). Writes nothing. `200 {plan: {eligible, total, totalCapped, remaining, bound: 200, token, typedConfirmationAbove: 20}}`. `422` on a bad filter, `429` past 6 a minute. |
+| `POST /api/deliveries/replay` | `delivery.replay` (admin) | Body `{integrationId?, from?, to?, token, expectedCount}` from the plan. `202 {result: {requested, replayed, alreadyInFlight, refused, remaining}}`. `409 {reason: "plan_stale", eligible}` when the eligible set is no longer exactly the one the token names (nothing written), `409 nothing_to_replay`, `409` while workspace deletion is pending, `422 count_mismatch` when `expectedCount` is not the planned count, `429` past 6 a minute. At most 200 deliveries per request. One `delivery.bulk_replay` audit row with the counts and the filter. |
 | `POST /api/deliveries/:id/replay` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. `202 {replay: {deliveryId, replayOf, created: true}}`; `200` with `created: false` while an earlier replay of the same delivery is queued or succeeded (idempotent). `409` if the delivery is not dead-lettered, already delivered, its original message is gone, its integration is deleted, paused or quarantined (`reason: "integration_unavailable"`), or workspace deletion is pending. `429` when rate limited. Audited as `delivery.replay`; the audit row commits in the same batch as the replay and exists only if a new replay row was created. |
 
 Each delivery carries `isTest` (a test notification, ADR 0018); tests stay in the log, labelled, but are left out of `/summary`.
+
+Each delivery also carries, from [ADR 0023](adr/0023-delivery-ledger-depth.md):
+
+- `possibleDuplicate`: an earlier attempt ended without the provider confirming it (a timeout, a dropped
+  connection, a 5xx, an expired claim) and the send was retried, so the destination MAY have shown the
+  message twice. It is a possibility, never a count: Noti cannot know.
+- `suppression`: `{reason: "duplicate" | "claim_conflict" | "provider_idempotency", duplicateOf}` on a
+  `suppressed` row, the record of a repeat that was detected and not sent again. Today only `duplicate`
+  is written, for a provider redelivery within the dedup window (7 days, `event_dedup`); the repeat is a
+  row of its own, pointing at the original.
+- `pausedReason`: `"circuit_open"` or `"destination_paced"` on a `retrying` delivery that has not been
+  sent again yet because the destination keeps failing or asked to be left alone. No attempt is spent
+  and nothing is dead-lettered.
+
+`attempts[]` entries: `{attempt, startedAt, durationMs, outcome: "delivered" | "accepted" |
+"retry_scheduled" | "dead_lettered" | "deferred", error, detail, statusClass: "2xx" | "3xx" | "4xx" | "5xx" |
+"timeout" | "network" | "none", retryAfterSeconds, providerMessageId, possibleDuplicate}`. `error` is the
+usual taxonomy object, `detail` a code Noti minted (`provider_http_503`, `circuit_open`), never provider
+text, a URL or a header. For a test sent to a custom webhook `statusClass` is `none` and `detail` null
+(the class of a customer-chosen host's answer is a probing oracle). `deferred` rows are waits, not
+attempts: the attempt number is the one that was about to run. `providerMessageId` is always null today:
+no adapter response carries one.
 
 A replay never edits the original row (not even `updated_at`): it writes a new delivery with
 `replayOf` set, so the log shows both. Each delivery carries `integrationStatus`
 (`available`, `missing`, `disabled`, `quarantined`); `canReplay` is true only for
 `available`. Reads are limited to 300 per minute per user and mutations to 30, both `429`
 with `Retry-After`.
+
+**Bulk replay.** The plan lists what a replay would send: dead-lettered, non-test deliveries of this
+workspace whose integration is enabled and not quarantined, whose original message is still stored, and
+whose latest replay (if any) is itself dead-lettered. `eligible` is at most `bound` (200); `total` is the
+full count up to 10,000 (`totalCapped` says it stopped there). The `token` is a SHA-256 over the tenant,
+the filter and the sorted ids: it proves which set was shown and does not authorise anything. A second
+run of the same plan finds nothing eligible and replays nothing.
 
 ## Setup progress
 
@@ -616,7 +663,7 @@ are limited to 120 per minute per user (`429` with `Retry-After`).
 
 | Method and path | Capability | Result |
 | --- | --- | --- |
-| `GET /api/workspace/export` | `workspace.export` | `200` JSON attachment, `format: "lumi-noti-export/v1"`, `credentialsIncluded: false`, at most the 2,000 most recent deliveries and audit events (`truncated` says if older rows were left out). The export is audited. |
+| `GET /api/workspace/export` | `workspace.export` | `200` JSON attachment, `format: "lumi-noti-export/v1"`, `credentialsIncluded: false`, at most the 2,000 most recent deliveries, delivery attempts and audit events (`truncated` says if older rows were left out). The export is audited. |
 | `GET /api/workspace/deletion` | `workspace.delete` | `{scheduled: false}` or `{scheduled: true, requestedAt, purgeAfter, purgeStarted}` |
 | `POST /api/workspace/deletion` | `workspace.delete` | Body `{confirm: "<workspace name>"}`. Returns `202`. Integrations are disabled immediately and the purge runs after 7 days. Returns `422` on a wrong confirmation and `409` if a deletion is already scheduled. |
 | `DELETE /api/workspace/deletion` | `workspace.delete` | Cancels and restores the integrations that were enabled. Returns `409` once the purge has started. |
@@ -693,6 +740,8 @@ type Summary = {
   latency: { endToEnd: Latency; queueDelay: Latency };   // exact nearest-rank p50/p95, no averages
   backlog: { oldestPendingAgeMs; oldestClaimedAgeMs; oldestRetryOverdueMs; oldestOutboxPendingAgeMs }; // current, not windowed
   byDestination: { destination: string; outcomeKind: 'delivered' | 'accepted'; total; sent; accepted; deadLettered; successRatio: Ratio }[];
+  duplicates: { suppressed: number; rate: Ratio; possibleDuplicates: number }; // repeats recorded; retries after an unconfirmed attempt (an upper bound, not a count). Tests excluded.
+  destinationHealth: { open: number; halfOpen: number; paced: number; deferredAttempts: number }; // current breaker and pacing state; deferrals in the window
   notMeasurable: { sli: string; reason: string }[];       // SLIs the ledger cannot support yet
 };
 type Latency = { samples: number; excluded: number; p50Ms: number | null; p95Ms: number | null; resolutionMs: 1000 };

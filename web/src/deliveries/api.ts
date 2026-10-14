@@ -50,6 +50,15 @@ export interface DeliveryItem {
   readonly isTest: boolean;
   readonly latestReplayState: DeliveryState | null;
   readonly canReplay: boolean;
+  /** An earlier attempt got no clear answer and the send was retried: the destination MAY have it twice. */
+  readonly possibleDuplicate?: boolean;
+  /** A detected repeat that was not sent again, and the delivery it repeats. */
+  readonly suppression?: {
+    readonly reason: 'duplicate' | 'claim_conflict' | 'provider_idempotency';
+    readonly duplicateOf: string | null;
+  } | null;
+  /** Why a waiting delivery has not been sent although nothing failed this time. */
+  readonly pausedReason?: 'circuit_open' | 'destination_paced' | null;
 }
 
 export interface DeliveryPage {
@@ -62,9 +71,37 @@ export interface TimelineEntry {
   readonly at: string;
 }
 
+export const ATTEMPT_OUTCOMES = [
+  'delivered',
+  'accepted',
+  'retry_scheduled',
+  'dead_lettered',
+  'deferred',
+] as const;
+export type AttemptOutcome = (typeof ATTEMPT_OUTCOMES)[number];
+export const STATUS_CLASSES = ['2xx', '3xx', '4xx', '5xx', 'timeout', 'network', 'none'] as const;
+export type StatusClass = (typeof STATUS_CLASSES)[number];
+
+/** One try (or one wait). Codes and classes only: the server never sends what the destination said. */
+export interface AttemptItem {
+  readonly attempt: number;
+  readonly startedAt: string;
+  readonly durationMs: number;
+  readonly outcome: AttemptOutcome;
+  readonly error: DeliveryError | null;
+  /** A code Noti minted (`provider_http_503`, `circuit_open`); null where hidden. */
+  readonly detail: string | null;
+  readonly statusClass: StatusClass;
+  readonly retryAfterSeconds: number | null;
+  readonly possibleDuplicate: boolean;
+}
+
 export interface DeliveryDetail {
   readonly delivery: DeliveryItem;
   readonly timeline: readonly TimelineEntry[];
+  /** `full` once per-attempt rows exist; `summary` for a delivery from before they were kept. */
+  readonly attemptDetail: 'full' | 'summary';
+  readonly attempts: readonly AttemptItem[];
   readonly replays: readonly {
     readonly id: string;
     readonly state: DeliveryState;
@@ -76,6 +113,32 @@ export type DeliverySummary = Readonly<Record<DeliveryState, number>>;
 
 export interface DeliveryFilters {
   readonly state?: DeliveryState;
+  readonly integrationId?: string;
+  readonly from?: string;
+  readonly to?: string;
+}
+
+export interface BulkPlan {
+  /** Deliveries a run would send again now: at most `bound`. */
+  readonly eligible: number;
+  readonly total: number;
+  readonly totalCapped: boolean;
+  readonly remaining: number;
+  readonly bound: number;
+  /** Binds the exact set the person saw; the run refuses if it changed. */
+  readonly token: string;
+  readonly typedConfirmationAbove: number;
+}
+
+export interface BulkResult {
+  readonly requested: number;
+  readonly replayed: number;
+  readonly alreadyInFlight: number;
+  readonly refused: number;
+  readonly remaining: number;
+}
+
+export interface BulkScope {
   readonly integrationId?: string;
   readonly from?: string;
   readonly to?: string;
@@ -160,6 +223,97 @@ export function parseDelivery(value: unknown): DeliveryItem {
     isTest: value.isTest === true,
     latestReplayState: value.latestReplayState,
     canReplay: value.canReplay,
+    possibleDuplicate: value.possibleDuplicate === true,
+    suppression: parseSuppression(value.suppression),
+    pausedReason:
+      value.pausedReason === 'circuit_open' || value.pausedReason === 'destination_paced'
+        ? value.pausedReason
+        : null,
+  };
+}
+
+function parseSuppression(value: unknown): DeliveryItem['suppression'] {
+  if (!isRecord(value)) return null;
+  const reason = value.reason;
+  if (reason !== 'duplicate' && reason !== 'claim_conflict' && reason !== 'provider_idempotency') return null;
+  return { reason, duplicateOf: typeof value.duplicateOf === 'string' ? value.duplicateOf : null };
+}
+
+/** An attempt we cannot read is dropped from the list rather than failing the whole dialog. */
+function parseAttempt(value: unknown): AttemptItem[] {
+  if (
+    !isRecord(value) ||
+    typeof value.attempt !== 'number' ||
+    typeof value.startedAt !== 'string' ||
+    typeof value.durationMs !== 'number' ||
+    !ATTEMPT_OUTCOMES.some((o) => o === value.outcome) ||
+    !STATUS_CLASSES.some((c) => c === value.statusClass)
+  )
+    return [];
+  return [
+    {
+      attempt: value.attempt,
+      startedAt: value.startedAt,
+      durationMs: value.durationMs,
+      outcome: value.outcome as AttemptOutcome,
+      error: value.error === null || value.error === undefined ? null : safeError(value.error),
+      detail: typeof value.detail === 'string' ? value.detail : null,
+      statusClass: value.statusClass as StatusClass,
+      retryAfterSeconds: typeof value.retryAfterSeconds === 'number' ? value.retryAfterSeconds : null,
+      possibleDuplicate: value.possibleDuplicate === true,
+    },
+  ];
+}
+
+function safeError(value: unknown): DeliveryError | null {
+  try {
+    return parseError(value);
+  } catch {
+    return null;
+  }
+}
+
+function parsePlan(body: unknown): BulkPlan {
+  const plan = isRecord(body) ? body.plan : null;
+  if (
+    !isRecord(plan) ||
+    typeof plan.eligible !== 'number' ||
+    typeof plan.total !== 'number' ||
+    typeof plan.totalCapped !== 'boolean' ||
+    typeof plan.remaining !== 'number' ||
+    typeof plan.bound !== 'number' ||
+    typeof plan.token !== 'string' ||
+    typeof plan.typedConfirmationAbove !== 'number'
+  )
+    throw bad('replay plan');
+  return {
+    eligible: plan.eligible,
+    total: plan.total,
+    totalCapped: plan.totalCapped,
+    remaining: plan.remaining,
+    bound: plan.bound,
+    token: plan.token,
+    typedConfirmationAbove: plan.typedConfirmationAbove,
+  };
+}
+
+function parseBulkResult(body: unknown): BulkResult {
+  const r = isRecord(body) ? body.result : null;
+  if (
+    !isRecord(r) ||
+    typeof r.requested !== 'number' ||
+    typeof r.replayed !== 'number' ||
+    typeof r.alreadyInFlight !== 'number' ||
+    typeof r.refused !== 'number' ||
+    typeof r.remaining !== 'number'
+  )
+    throw bad('bulk replay result');
+  return {
+    requested: r.requested,
+    replayed: r.replayed,
+    alreadyInFlight: r.alreadyInFlight,
+    refused: r.refused,
+    remaining: r.remaining,
   };
 }
 
@@ -189,6 +343,8 @@ export const deliveriesApi = {
       throw bad('delivery detail');
     return {
       delivery: parseDelivery(body.delivery),
+      attemptDetail: body.attemptDetail === 'full' ? 'full' : 'summary',
+      attempts: Array.isArray(body.attempts) ? body.attempts.flatMap(parseAttempt) : [],
       timeline: body.timeline.flatMap((e: unknown) =>
         isRecord(e) && typeof e.kind === 'string' && typeof e.at === 'string'
           ? [{ kind: e.kind as TimelineEntry['kind'], at: e.at }]
@@ -208,6 +364,26 @@ export const deliveriesApi = {
     const entries = DELIVERY_STATES.map((s) => [s, typeof counts[s] === 'number' ? counts[s] : 0]);
     return Object.fromEntries(entries) as DeliverySummary;
   },
+  /** Step 1 of "redeliver all failed": count what would be sent. Writes nothing. */
+  replayPlan: async (orgId: string, scope: BulkScope): Promise<BulkPlan> =>
+    parsePlan(
+      await api<unknown>(withOrg('/api/deliveries/replay-plan', orgId), {
+        method: 'POST',
+        body: JSON.stringify(scope),
+      }),
+    ),
+  /** Step 2: send the planned set again. The server refuses if it is no longer exactly what was shown. */
+  replayBulk: async (
+    orgId: string,
+    scope: BulkScope,
+    plan: Pick<BulkPlan, 'token' | 'eligible'>,
+  ): Promise<BulkResult> =>
+    parseBulkResult(
+      await api<unknown>(withOrg('/api/deliveries/replay', orgId), {
+        method: 'POST',
+        body: JSON.stringify({ ...scope, token: plan.token, expectedCount: plan.eligible }),
+      }),
+    ),
   replay: async (orgId: string, id: string): Promise<ReplayResult> => {
     const body = await api<unknown>(withOrg(`${item(id)}/replay`, orgId), { method: 'POST', body: '{}' });
     const replay = isRecord(body) ? body.replay : null;

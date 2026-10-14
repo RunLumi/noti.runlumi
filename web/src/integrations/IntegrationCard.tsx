@@ -4,6 +4,7 @@ import type { Integration } from '../lib/api';
 import { t } from '../i18n';
 import { CredentialsNotice } from './CredentialsNotice';
 import { DESTINATIONS } from './destinations';
+import { HealthNotice } from './HealthNotice';
 import { EnabledSwitch } from './EnabledSwitch';
 import { EventList } from './EventList';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -83,6 +84,7 @@ export function IntegrationCard({ orgId, integration }: IntegrationCardProps) {
         </div>
       </dl>
       <CredentialsNotice integration={integration} />
+      <HealthNotice integration={integration} />
       <footer className="integration-card-foot">
         <EnabledSwitch orgId={orgId} integration={integration} />
         <TestSend orgId={orgId} integration={integration} variant="compact" />

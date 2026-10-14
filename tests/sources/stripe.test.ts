@@ -300,8 +300,8 @@ describe('ingress end to end', () => {
     expect(res.status).toBe(201);
     return (await res.json<{ integration: { id: string } }>()).integration.id;
   }
-  const count = (table: string) =>
-    (h.db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  const count = (table: string, where = '1=1') =>
+    (h.db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get() as { n: number }).n;
   const outbox = () =>
     (
       h.db.raw.prepare('SELECT payload_json FROM notification_outbox').all() as { payload_json: string }[]
@@ -350,7 +350,8 @@ describe('ingress end to end', () => {
     const retry = await send(src, INVOICE_PAYMENT_FAILED, { ts: now });
     expect(retry.status).toBe(202);
     expect(await retry.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
-    expect(count('deliveries')).toBe(1);
+    expect(count('deliveries', "state != 'suppressed'")).toBe(1);
+    expect(count('deliveries', "state = 'suppressed'")).toBe(1);
     expect(count('notification_outbox')).toBe(1);
   });
 

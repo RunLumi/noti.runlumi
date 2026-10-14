@@ -17,6 +17,9 @@
  *    than the cutoff, so a late failure of an old row is never purged on arrival;
  *  - deletes are age-based and tenant-agnostic, bounded per statement and per tick, and
  *    resumable (the next tick continues). Ciphertext is never read.
+ *  - a delivery's attempt rows (`delivery_attempts`) are deleted first, and a delivery is only
+ *    deleted once none remain, so an attempt row never outlives its delivery and a purge that is
+ *    interrupted between the two statements loses nothing the next tick cannot finish;
  *  - outbox rows are only removed once no delivery row with the same id remains, so manual
  *    redelivery (which re-reads the outbox message) keeps working for every retained row.
  *
@@ -31,6 +34,7 @@
  * semantics for DELETE were exercised only through the Node SQLite fake, not real D1.
  */
 import { sqliteTimestamp } from '../delivery/claim';
+import { HEALTH_RETENTION_MS, PURGE_DESTINATION_HEALTH_SQL } from '../delivery/health';
 import type { Bindings } from '../env';
 import { log } from '../platform/log';
 
@@ -71,10 +75,15 @@ export function invalidRetentionVars(
     .map(([name]) => name);
 }
 
+/** `destination_health` rows of closed, quiet destinations (and deleted integrations) go after this. */
+const HEALTH_PURGE_AGE_MS = HEALTH_RETENTION_MS;
+
 export interface RetentionReport {
   /** True when the hourly throttle skipped this tick. */
   readonly skipped: boolean;
   readonly deliveries: number;
+  /** Attempt rows removed with their deliveries. */
+  readonly attempts: number;
   readonly outbox: number;
   readonly audit: number;
   /** True when a table hit the per-tick cap, so the next tick continues. */
@@ -92,6 +101,21 @@ export const PURGE_DELIVERIES_SQL = `DELETE FROM deliveries WHERE rowid IN (
   WHERE state IN ('sent','accepted','suppressed','dead_lettered','failed')
     AND created_at < ?1
     AND (state NOT IN ('dead_lettered','failed') OR dead_lettered_at IS NULL OR dead_lettered_at < ?2)
+    AND NOT EXISTS (SELECT 1 FROM delivery_attempts a
+                    WHERE a.organization_id = deliveries.organization_id AND a.delivery_id = deliveries.id)
+  LIMIT ?3)`;
+
+/**
+ * Attempt rows of the deliveries the statements above would delete (same predicate), so the two
+ * move together. ?1 text cutoff · ?2 epoch-ms cutoff · ?3 limit. Joins from the `deliveries` range
+ * seek to `delivery_attempts_delivery`.
+ */
+export const PURGE_ATTEMPTS_SQL = `DELETE FROM delivery_attempts WHERE rowid IN (
+  SELECT a.rowid FROM deliveries d
+  JOIN delivery_attempts a ON a.organization_id = d.organization_id AND a.delivery_id = d.id
+  WHERE d.state IN ('sent','accepted','suppressed','dead_lettered','failed')
+    AND d.created_at < ?1
+    AND (d.state NOT IN ('dead_lettered','failed') OR d.dead_lettered_at IS NULL OR d.dead_lettered_at < ?2)
   LIMIT ?3)`;
 
 /** Rare: rows written before 0009 have no `created_at`; fall back to `updated_at`. ?1 text cutoff · ?2 epoch-ms cutoff · ?3 limit */
@@ -100,6 +124,8 @@ export const PURGE_DELIVERIES_NO_CREATED_SQL = `DELETE FROM deliveries WHERE row
   WHERE state IN ('sent','accepted','suppressed','dead_lettered','failed')
     AND created_at IS NULL AND updated_at < ?1
     AND (state NOT IN ('dead_lettered','failed') OR dead_lettered_at IS NULL OR dead_lettered_at < ?2)
+    AND NOT EXISTS (SELECT 1 FROM delivery_attempts a
+                    WHERE a.organization_id = deliveries.organization_id AND a.delivery_id = deliveries.id)
   LIMIT ?3)`;
 
 /** ?1 text cutoff · ?2 limit. Orphans only: a retained delivery keeps its outbox message. */
@@ -164,16 +190,26 @@ export async function purgeExpiredRecords(
   for (const name of invalidRetentionVars(env)) log('warn', 'retention_config_invalid', { var: name });
   const previous = await lastRun(env.DB);
   if (previous !== null && nowMs - previous >= 0 && nowMs - previous < RETENTION_INTERVAL_MS) {
-    return { skipped: true, deliveries: 0, outbox: 0, audit: 0, more: false };
+    return { skipped: true, deliveries: 0, attempts: 0, outbox: 0, audit: 0, more: false };
   }
   const deliveryCutoff = nowMs - parseRetentionDays(env.DELIVERY_RETENTION_DAYS, DELIVERY_RETENTION) * DAY_MS;
   const auditCutoff = nowMs - parseRetentionDays(env.AUDIT_RETENTION_DAYS, AUDIT_RETENTION) * DAY_MS;
   const text = sqliteTimestamp(deliveryCutoff);
+  const attempts = await drain(env.DB, PURGE_ATTEMPTS_SQL, [text, deliveryCutoff]);
   const deliveries = await drain(env.DB, PURGE_DELIVERIES_SQL, [text, deliveryCutoff]);
   const legacy = await drain(env.DB, PURGE_DELIVERIES_NO_CREATED_SQL, [text, deliveryCutoff]);
   const outbox = await drain(env.DB, PURGE_ORPHAN_OUTBOX_SQL, [text]);
   const audit = await drain(env.DB, PURGE_AUDIT_SQL, [sqliteTimestamp(auditCutoff)]);
-  const more = deliveries.more || legacy.more || outbox.more || audit.more;
+  // Closed, quiet destinations only: an open breaker is state, not garbage.
+  const health = await drain(env.DB, PURGE_DESTINATION_HEALTH_SQL, [nowMs - HEALTH_PURGE_AGE_MS]);
+  const more = attempts.more || deliveries.more || legacy.more || outbox.more || audit.more || health.more;
   if (!more) await markRun(env.DB, nowMs);
-  return { skipped: false, deliveries: deliveries.n + legacy.n, outbox: outbox.n, audit: audit.n, more };
+  return {
+    skipped: false,
+    deliveries: deliveries.n + legacy.n,
+    attempts: attempts.n,
+    outbox: outbox.n,
+    audit: audit.n,
+    more,
+  };
 }

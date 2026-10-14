@@ -366,7 +366,7 @@ Lark/Slack webhook URL is a bearer secret that appears inside some card payloads
 
 ## F99 — Delivery result normalisation
 
-**Priority** P0 · **Status** 🟡 classifiers return outcome, reason and `retryAfterMs` (RFC 9110 `Retry-After` both forms), wired to retry and ledger via `src/delivery/classify.ts`, `tests/delivery/classify.test.ts`, `tests/destinations/*.test.ts`; Teams 202 is accepted. Not built: `providerMessageId`/`providerTs` capture, persisted adapter `reason` or redacted `detail` (only F13 code stored) · **Fixes** part of D11
+**Priority** P0 · **Status** 🟡 classifiers return outcome, reason and `retryAfterMs` (RFC 9110 `Retry-After` both forms), wired to retry and ledger via `src/delivery/classify.ts`, `tests/delivery/classify.test.ts`, `tests/destinations/*.test.ts`; Teams 202 is accepted. Each attempt persists the F13 code, the minted reason, the status class and `retry_after_ms` in `delivery_attempts` (`src/delivery/attempts.ts`, `tests/pipeline/ledger-depth.test.ts`). Not built: `providerMessageId`/`providerTs` capture (the column exists and stays empty: no current adapter response carries an id, UNVERIFIED against real providers). · **Fixes** part of D11
 
 **Story** As an operator, I want every provider's response normalised into one result shape,
 so that the dashboard and retry policy do not special-case Slack forever.

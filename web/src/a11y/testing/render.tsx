@@ -22,6 +22,7 @@ import { LocaleProvider } from '../../i18n/LocaleProvider';
 import { setLocale, type Locale } from '../../i18n/locale';
 import {
   ADMIN,
+  ATTEMPTS,
   AUDIT_EVENTS,
   DELIVERIES,
   INSTALLATIONS,
@@ -322,6 +323,8 @@ export function installFetch(state: ApiState): void {
               ...state.testDelivery,
             },
             timeline: [],
+            attemptDetail: 'summary',
+            attempts: [],
             replays: [],
           }),
         );
@@ -338,6 +341,8 @@ export function installFetch(state: ApiState): void {
                   { kind: 'created', at: '2026-10-13T08:00:00Z' },
                   { kind: 'last_attempt', at: '2026-10-13T08:01:00Z' },
                 ],
+                attemptDetail: 'full',
+                attempts: ATTEMPTS,
                 replays: [],
               })
             : json({ error: 'Not found' }, 404),
@@ -347,6 +352,24 @@ export function installFetch(state: ApiState): void {
       if (path === '/api/workspace/deletion') return Promise.resolve(json(state.deletion));
       if (path.endsWith('/passkey/list-user-passkeys')) return Promise.resolve(json(state.passkeys));
     }
+    if (method === 'POST' && path === '/api/deliveries/replay-plan')
+      return Promise.resolve(
+        json({
+          plan: {
+            eligible: 25,
+            total: 30,
+            totalCapped: false,
+            remaining: 5,
+            bound: 200,
+            token: 'a'.repeat(64),
+            typedConfirmationAbove: 20,
+          },
+        }),
+      );
+    if (method === 'POST' && path === '/api/deliveries/replay')
+      return Promise.resolve(
+        json({ result: { requested: 25, replayed: 24, alreadyInFlight: 1, refused: 0, remaining: 5 } }, 202),
+      );
     if (method === 'POST' && /^\/api\/integrations\/[^/]+\/test$/.test(path)) {
       if (state.testSend === 'ok') return Promise.resolve(json({ deliveryId: TEST_DELIVERY_ID }, 202));
       if (state.testSend === 'in_flight')

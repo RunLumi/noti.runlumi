@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { deliveriesApi, type DeliveryFilters } from './api';
+import { deliveriesApi, type BulkPlan, type BulkScope, type DeliveryFilters } from './api';
 
 /** Query keys carry the workspace, so switching workspace can never show another's rows. */
 export const deliveryKeys = {
@@ -47,6 +47,21 @@ export function useReplay(orgId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => deliveriesApi.replay(orgId, id),
+    onSettled: () => qc.invalidateQueries({ queryKey: deliveryKeys.all(orgId) }),
+  });
+}
+
+/** Step 1 of "redeliver all failed": a count, nothing sent. It is a POST, so a mutation, never cached. */
+export function useBulkPlan(orgId: string) {
+  return useMutation({ mutationFn: (scope: BulkScope) => deliveriesApi.replayPlan(orgId, scope) });
+}
+
+/** Step 2. Not optimistic: the counts shown are the server's. */
+export function useBulkReplay(orgId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { scope: BulkScope; plan: Pick<BulkPlan, 'token' | 'eligible'> }) =>
+      deliveriesApi.replayBulk(orgId, input.scope, input.plan),
     onSettled: () => qc.invalidateQueries({ queryKey: deliveryKeys.all(orgId) }),
   });
 }

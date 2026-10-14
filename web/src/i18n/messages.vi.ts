@@ -2,6 +2,7 @@ import type { en, PluralMessage } from './messages.en';
 import { auditVi } from './messages.audit.vi';
 import { destinationsVi } from './messages.destinations.vi';
 import { filtersVi } from './messages.filters.vi';
+import { ledgerVi } from './messages.ledger.vi';
 import { noiseVi } from './messages.noise.vi';
 import { providersVi } from './messages.providers.vi';
 import { setupVi } from './messages.setup.vi';
@@ -24,6 +25,7 @@ export const vi = {
   ...auditVi,
   ...filtersVi,
   ...noiseVi,
+  ...ledgerVi,
   ...setupVi,
   ...sourcesVi,
   ...providersVi,

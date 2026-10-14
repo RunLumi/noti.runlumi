@@ -10,7 +10,7 @@
  */
 export const PURGE_ROWS_PER_TICK = 500;
 
-/** Tenant tables without a foreign key to organization, purged explicitly. */
+/** Tenant tables purged explicitly in bounded batches (most have no foreign key to organization). */
 export const TENANT_TABLES = [
   'notification_outbox',
   'deliveries',
@@ -19,6 +19,11 @@ export const TENANT_TABLES = [
   'held_events',
   'noise_open_failures',
   'sources',
+  // Delivery ledger depth (0025). `event_dedup` also cascades from the organization; draining it
+  // here keeps that final cascade small.
+  'delivery_attempts',
+  'event_dedup',
+  'destination_health',
 ] as const;
 
 /** Tables that cascade from organization but are drained in bounded rounds first (see boundedDeletes). */

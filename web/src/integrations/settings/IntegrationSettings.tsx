@@ -6,6 +6,7 @@ import { Button, Notice } from '../../components/ui';
 import { t } from '../../i18n';
 import { DESTINATIONS } from '../destinations';
 import { EnabledSwitch } from '../EnabledSwitch';
+import { HealthNotice } from '../HealthNotice';
 import { describeError, isNotFound } from '../errors';
 import { useIntegration, useOrgId } from '../hooks';
 import { destinationLabel } from '../IntegrationCard';
@@ -137,6 +138,7 @@ export function IntegrationSettings() {
                 ? t('settings.status.onBlocked')
                 : t('settings.status.on', { destination })}
           </p>
+          <HealthNotice integration={integration} />
         </Section>
         <Section id="test" title={t('test.title')}>
           <TestSend key={integration.id} orgId={orgId} integration={integration} />

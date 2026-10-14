@@ -305,8 +305,8 @@ describe('ingress end to end', () => {
         payload_json: string;
       }[]
     ).map((r) => JSON.parse(r.payload_json) as DeliveryMessage);
-  const count = (table: string) =>
-    (h.db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  const count = (table: string, where = '1=1') =>
+    (h.db.raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get() as { n: number }).n;
 
   const signedPost = (
     src: ProviderSource,
@@ -399,7 +399,8 @@ describe('ingress end to end', () => {
     const again = await signedPost(src, 'Push Hook', PUSH, { id: 'msg_retry' });
     expect(again.status).toBe(202);
     expect(await again.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
-    expect(count('deliveries')).toBe(1);
+    expect(count('deliveries', "state != 'suppressed'")).toBe(1);
+    expect(count('deliveries', "state = 'suppressed'")).toBe(1);
     expect(count('notification_outbox')).toBe(1);
   });
 

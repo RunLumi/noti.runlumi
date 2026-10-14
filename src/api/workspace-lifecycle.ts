@@ -186,7 +186,7 @@ lifecycle.get('/export', async (c) => {
   const who = await gate(c, 'workspace.export');
   if (who instanceof Response) return who;
   const db = c.env.DB;
-  const [members, integrations, sources, installations, deliveries, audit] = await db.batch([
+  const [members, integrations, sources, installations, deliveries, attempts, audit] = await db.batch([
     db
       .prepare(
         `SELECT u.name AS name, u.email AS email, m.role AS role, m.created_at AS joined_at
@@ -215,8 +215,16 @@ lifecycle.get('/export', async (c) => {
       .bind(who.orgId),
     db
       .prepare(
-        `SELECT id,integration_id,state,attempts,updated_at FROM deliveries WHERE organization_id=?
-         ORDER BY updated_at DESC LIMIT ?`,
+        `SELECT id,integration_id,state,attempts,updated_at,possible_duplicate,suppressed_reason,duplicate_of
+         FROM deliveries WHERE organization_id=? ORDER BY updated_at DESC LIMIT ?`,
+      )
+      .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
+    // The attempt history (F184): closed vocabularies and numbers only, no payload or URL.
+    db
+      .prepare(
+        `SELECT delivery_id,attempt,started_at,finished_at,outcome,error_code,reason,status_class,retry_after_ms,
+           possible_duplicate
+         FROM delivery_attempts WHERE organization_id=? ORDER BY started_at DESC LIMIT ?`,
       )
       .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
     db
@@ -248,10 +256,12 @@ lifecycle.get('/export', async (c) => {
     sources: sources?.results ?? [],
     githubInstallations: installations?.results ?? [],
     deliveries: (deliveries?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
+    deliveryAttempts: (attempts?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
     auditEvents: (audit?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
     // The most recent rows are exported; `true` means older rows exist and were left out.
     truncated: {
       deliveries: (deliveries?.results.length ?? 0) > EXPORT_ROW_LIMIT,
+      deliveryAttempts: (attempts?.results.length ?? 0) > EXPORT_ROW_LIMIT,
       auditEvents: (audit?.results.length ?? 0) > EXPORT_ROW_LIMIT,
     },
   };

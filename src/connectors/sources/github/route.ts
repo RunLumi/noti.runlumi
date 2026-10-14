@@ -5,6 +5,7 @@ import { validateCanonicalEvent } from '../../../events/validate';
 import { readBodyCapped } from '../../../lib/body';
 import { asRecord, str } from '../../../lib/json';
 import { newLeaseToken } from '../../../delivery/claim';
+import { dedupStatements } from '../../../delivery/dedup';
 import { dedupKey, deliveryId as deriveDeliveryId } from '../../../delivery/ids';
 import { dispatchOutbox } from '../../../pipeline/outbox';
 import { isGithubEventType } from './catalog';
@@ -329,7 +330,19 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     }
     if (plan.action === 'hold') {
       // Durable before the 2xx, exactly like a delivery. Nothing is dropped: it has a release time.
-      const results = await c.env.DB.batch([...opening, plan.statement, ...closing]);
+      const results = await c.env.DB.batch([
+        ...opening,
+        plan.statement,
+        // A redelivery of an event already held or delivered is recorded as suppressed (F185).
+        ...dedupStatements(c.env.DB, {
+          organizationId,
+          integrationId: row.id,
+          deliveryId: id,
+          dedupKey: dedup.hex,
+          nowMs: decidedAt,
+        }),
+        ...closing,
+      ]);
       if (batchResult(results, opening.length).meta.changes) held++;
       continue;
     }
@@ -354,6 +367,14 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
         `INSERT OR IGNORE INTO notification_outbox(id,organization_id,payload_json)
          SELECT ?,?,? ${notLegacy} AND changes() > 0`,
       ).bind(id, organizationId, JSON.stringify(message), legacyId, organizationId),
+      // Directly after the outbox insert, whose `changes()` is 0 exactly for a duplicate (F171, F185).
+      ...dedupStatements(c.env.DB, {
+        organizationId,
+        integrationId: row.id,
+        deliveryId: id,
+        dedupKey: dedup.hex,
+        nowMs: decidedAt,
+      }),
       ...closing,
     ]);
     if (batchResult(results, opening.length + 1).meta.changes) queued++;

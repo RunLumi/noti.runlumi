@@ -60,7 +60,19 @@ const integration = (over: Partial<Integration> & Pick<Integration, 'id' | 'name
 });
 
 export const INTEGRATIONS: readonly Integration[] = [
-  integration({ id: 'int_1', name: 'Website builds' }),
+  integration({
+    id: 'int_1',
+    name: 'Website builds',
+    // The delivery circuit breaker is open: shown, never enforced (ADR 0023).
+    health: {
+      state: 'open',
+      paused: true,
+      consecutiveFailures: 5,
+      retryAt: '2026-10-14T09:05:00Z',
+      pacedUntil: null,
+      timesOpened: 1,
+    },
+  }),
   integration({
     id: 'int_4',
     name: 'Deploy alerts',
@@ -229,6 +241,53 @@ const delivery = (over: Partial<DeliveryItem> & Pick<DeliveryItem, 'id' | 'state
   ...over,
 });
 
+/** The attempt history `GET /api/deliveries/:id` returns once per-attempt rows exist (F184). */
+export const ATTEMPTS = [
+  {
+    attempt: 1,
+    startedAt: '2026-10-13T08:00:00Z',
+    durationMs: 412,
+    outcome: 'retry_scheduled',
+    error: {
+      code: 'destination_unavailable',
+      messageKey: 'errors.destination_unavailable',
+      retryable: true,
+      userActionable: false,
+    },
+    detail: 'provider_http_503',
+    statusClass: '5xx',
+    retryAfterSeconds: null,
+    possibleDuplicate: true,
+  },
+  {
+    attempt: 1,
+    startedAt: '2026-10-13T08:00:30Z',
+    durationMs: 0,
+    outcome: 'deferred',
+    error: null,
+    detail: 'circuit_open',
+    statusClass: 'none',
+    retryAfterSeconds: 270,
+    possibleDuplicate: false,
+  },
+  {
+    attempt: 2,
+    startedAt: '2026-10-13T08:05:00Z',
+    durationMs: 188,
+    outcome: 'dead_lettered',
+    error: {
+      code: 'destination_revoked',
+      messageKey: 'errors.destination_revoked',
+      retryable: false,
+      userActionable: true,
+    },
+    detail: 'provider_http_404',
+    statusClass: '4xx',
+    retryAfterSeconds: null,
+    possibleDuplicate: false,
+  },
+] as const;
+
 export const DELIVERIES: readonly DeliveryItem[] = [
   delivery({ id: 'del_1', state: 'sent' }),
   delivery({
@@ -254,7 +313,19 @@ export const DELIVERIES: readonly DeliveryItem[] = [
       userActionable: true,
     },
   }),
-  delivery({ id: 'del_4', state: 'retrying', attempts: 2, nextAttemptAt: '2026-10-13T08:30:00Z' }),
+  delivery({
+    id: 'del_4',
+    state: 'retrying',
+    attempts: 2,
+    nextAttemptAt: '2026-10-13T08:30:00Z',
+    possibleDuplicate: true,
+    pausedReason: 'circuit_open',
+  }),
+  delivery({
+    id: 'del_6',
+    state: 'suppressed',
+    suppression: { reason: 'duplicate', duplicateOf: 'del_1' },
+  }),
   delivery({ id: 'del_5', state: 'sent', isTest: true }),
 ];
 

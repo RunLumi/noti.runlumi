@@ -15,10 +15,19 @@ import {
 import { CryptoError, toBytes, type Keyring } from '../crypto/envelope';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import { SCHEDULE_REDISPATCH_SQL, scheduleRedispatchParams } from '../delivery/claim';
+import {
+  attemptStatement,
+  isUnconfirmed,
+  statusClassOf,
+  type AttemptReport,
+  type AttemptRowOutcome,
+} from '../delivery/attempts';
+import { effectOf, gateAttempt, healthStatement, paceFromResponse, type Gate } from '../delivery/health';
 import { attemptFromClassification, failed, type AttemptResult } from '../delivery/classify';
 import {
   DELIVERY_CLAIM_LEASE_MS,
   claimDelivery,
+  deferStatement,
   loadDelivery,
   recordOutcomeStatement,
   type Claim,
@@ -144,9 +153,9 @@ async function attemptDelivery(
   d: DeliveryMessage,
   deps: ConsumerDeps,
   attempt: number,
-): Promise<AttemptResult> {
+): Promise<AttemptReport> {
   const target = await resolveTarget(env, keyring, d);
-  if ('outcome' in target) return target;
+  if ('outcome' in target) return reportOf(target, null, null);
   const { config, credential } = target;
   const prepared = await prepareDelivery(config, toNotification(d), {
     now: deps.now(),
@@ -154,9 +163,13 @@ async function attemptDelivery(
   });
   if (!prepared.ok) {
     // Permanent by construction: the same text re-renders to the same failure.
-    return prepared.reason === 'payload_too_large'
-      ? failed('payload_too_large', 'render_payload_too_large')
-      : failed('render_failed', 'render_failed');
+    return reportOf(
+      prepared.reason === 'payload_too_large'
+        ? failed('payload_too_large', 'render_payload_too_large')
+        : failed('render_failed', 'render_failed'),
+      null,
+      null,
+    );
   }
   const seen: { res: ProviderResponse | null } = { res: null };
   const sent = await sendRequest(
@@ -178,7 +191,34 @@ async function attemptDelivery(
     }
   }
   const result = attemptFromClassification(classification, config.kind, seen.res);
-  return config.kind === 'generic_webhook' ? coarsenUnreachable(result) : result;
+  const shown = config.kind === 'generic_webhook' ? coarsenUnreachable(result) : result;
+  return reportOf(shown, seen.res, classification, deps.now());
+}
+
+/**
+ * Everything an attempt tells the ledger beyond the retry policy's inputs: the status CLASS (never
+ * the status), and how long the destination asked to be left alone (rate-limit headers, a 429's
+ * `Retry-After`). `provider_message_id` is always null today: no adapter response carries one.
+ */
+function reportOf(
+  result: AttemptResult,
+  res: ProviderResponse | null,
+  classification: ClassifiedResponse | null,
+  nowMs: number = Date.now(),
+): AttemptReport {
+  return {
+    result,
+    statusClass: statusClassOf(res, result.diagnostic),
+    paceMs: classification
+      ? paceFromResponse(
+          res?.headers ?? null,
+          classification.retryAfterMs,
+          classification.reason === 'destination_rate_limited',
+          nowMs,
+        )
+      : null,
+    providerMessageId: null,
+  };
 }
 
 /**
@@ -307,10 +347,11 @@ function outcomeEvent(decision: RetryDecision, outcome: AttemptOutcome): Deliver
 
 function outcomeRecord(
   decision: RetryDecision,
-  result: AttemptResult,
+  report: AttemptReport,
   attempt: number,
   nowMs: number,
 ): OutcomeRecord {
+  const result = report.result;
   const code = result.outcome.kind === 'failed' ? result.outcome.code : null;
   const moved = transition('claimed', outcomeEvent(decision, result.outcome));
   if (!moved.ok) throw new Error(`illegal ledger transition ${moved.from} → ${moved.event}`);
@@ -321,8 +362,18 @@ function outcomeRecord(
     code,
     diagnostic: result.diagnostic,
     nextAttemptAtMs: decision.action === 'retry' ? nowMs + decision.delaySeconds * 1000 : null,
+    // F185: a retry after an attempt whose outcome we could not observe may show the message twice.
+    possibleDuplicate: decision.action === 'retry' && isUnconfirmed(report),
+    providerMessageId: report.providerMessageId,
   };
 }
+
+const ROW_OUTCOME: Readonly<Record<OutcomeRecord['state'], AttemptRowOutcome>> = {
+  sent: 'delivered',
+  accepted: 'accepted',
+  retrying: 'retry_scheduled',
+  dead_lettered: 'dead_lettered',
+};
 
 function scheduleStatement(env: Bindings, d: DeliveryMessage, notBeforeMs: number): D1PreparedStatement {
   return env.DB.prepare(SCHEDULE_REDISPATCH_SQL).bind(
@@ -334,27 +385,84 @@ function scheduleStatement(env: Bindings, d: DeliveryMessage, notBeforeMs: numbe
  * Persist the outcome, then act on the message. Nothing downstream happens unless the
  * fenced write changed exactly our row (H2): a consumer that lost its claim acks and leaves
  * the delivery to the new holder.
+ *
+ * One batch, one transaction: the ledger transition, then the statements gated on it
+ * (`changes() = 1`: the attempt row, the destination-health update), then, for a wait the queue
+ * cannot hold, the outbox park. The park statement is itself guarded on the ledger row being
+ * `retrying` at exactly this time, so it is a no-op if the write changed nothing.
  */
 async function applyDecision(
   env: Bindings,
   msg: QueueMessage,
   d: DeliveryMessage,
-  claim: Claim,
   decision: RetryDecision,
   record: OutcomeRecord,
+  gated: readonly D1PreparedStatement[],
+  claim: Claim,
 ): Promise<boolean> {
   const write = recordOutcomeStatement(env.DB, d, claim.token, record);
   if (decision.action === 'retry' && decision.transport === 'schedule' && record.nextAttemptAtMs !== null) {
-    // One transaction. The park statement is itself guarded on the ledger row being
-    // `retrying` at exactly this time, so it is a no-op if the write changed nothing.
-    const [written] = await env.DB.batch([write, scheduleStatement(env, d, record.nextAttemptAtMs)]);
+    const [written] = await env.DB.batch([
+      write,
+      ...gated,
+      scheduleStatement(env, d, record.nextAttemptAtMs),
+    ]);
     msg.ack();
     return written?.meta.changes === 1;
   }
-  const recorded = (await write.run()).meta.changes === 1;
+  const [written] = await env.DB.batch([write, ...gated]);
+  const recorded = written?.meta.changes === 1;
   if (recorded && decision.action === 'retry') msg.retry({ delaySeconds: decision.delaySeconds });
   else msg.ack();
   return recorded;
+}
+
+/**
+ * The statements that record an attempt beside its ledger transition. The attempt row must come
+ * DIRECTLY after the ledger write and the health update directly after the attempt row: each is
+ * gated on `changes() = 1` of the statement before it.
+ */
+function gatedStatements(
+  env: Bindings,
+  d: DeliveryMessage,
+  claim: Claim,
+  gate: Gate,
+  report: AttemptReport,
+  record: OutcomeRecord,
+  startedAtMs: number,
+): D1PreparedStatement[] {
+  const outcome = report.result.outcome;
+  const statements = [
+    attemptStatement(env.DB, d, {
+      attempt: record.attempt,
+      startedAtMs,
+      finishedAtMs: record.nowMs,
+      outcome: ROW_OUTCOME[record.state],
+      errorCode: record.code,
+      reason: record.diagnostic,
+      statusClass: report.statusClass,
+      retryAfterMs:
+        outcome.kind === 'failed' && outcome.retryAfterSeconds ? outcome.retryAfterSeconds * 1000 : null,
+      providerMessageId: report.providerMessageId,
+      possibleDuplicate: record.possibleDuplicate === true,
+    }),
+  ];
+  // A test notification is not evidence about the destination (ADR 0018) and is never paced or broken.
+  if (!claim.isTest) {
+    const health = healthStatement(
+      env.DB,
+      d,
+      {
+        effect: effectOf(outcome, report.statusClass),
+        nowMs: record.nowMs,
+        code: record.code,
+        paceMs: report.paceMs,
+      },
+      gate.action === 'proceed' && gate.known,
+    );
+    if (health) statements.push(health);
+  }
+  return statements;
 }
 
 /** Seconds until `atMs`, at least 1. */
@@ -400,15 +508,74 @@ async function attemptSafely(
   d: DeliveryMessage,
   deps: ConsumerDeps,
   attempt: number,
-): Promise<AttemptResult> {
+): Promise<AttemptReport> {
   try {
     return await attemptDelivery(env, keyring, d, deps, attempt);
   } catch (e) {
     // Anything unexpected after the claim still produces an outcome, so the claim is
     // released through the normal (bounded) retry path rather than held forever (H1).
     log('error', 'delivery_attempt_failed', { delivery_id: d.id, error: e });
-    return failed('internal_error', 'consumer_error');
+    return reportOf(failed('internal_error', 'consumer_error'), null, null);
   }
+}
+
+/**
+ * F183/F187: may this claimed delivery call its destination now? A health-table fault must never
+ * stop deliveries, so it fails OPEN (proceed) and is logged; the breaker is a safeguard, not a gate
+ * the product depends on.
+ */
+async function gateOrProceed(env: Bindings, d: DeliveryMessage, claim: Claim, nowMs: number): Promise<Gate> {
+  if (claim.isTest) return { action: 'proceed', probe: false, known: false };
+  try {
+    return await gateAttempt(env.DB, d, nowMs);
+  } catch (e) {
+    log('error', 'destination_health_unreadable', { delivery_id: d.id, error: e });
+    return { action: 'proceed', probe: false, known: false };
+  }
+}
+
+/**
+ * Send the delivery back without calling the destination (breaker open, or the destination asked to
+ * be left alone). No attempt is spent and nothing is dead-lettered; the attempt log gets a `deferred`
+ * row so "why has this not been sent" has an answer.
+ */
+async function deferDelivery(
+  env: Bindings,
+  msg: QueueMessage,
+  d: DeliveryMessage,
+  claim: Claim,
+  gate: Extract<Gate, { action: 'defer' }>,
+  nowMs: number,
+): Promise<void> {
+  const code = gate.reason === 'circuit_open' ? 'destination_unavailable' : 'destination_rate_limited';
+  const wait = secondsUntil(gate.untilMs, nowMs);
+  const viaQueue = queueRetriesLeft(msg) && wait <= QUEUE_MAX_DELAY_SECONDS;
+  const untilMs = nowMs + wait * 1000;
+  const [written] = await env.DB.batch([
+    deferStatement(env.DB, d, claim.token, untilMs, code, gate.reason),
+    attemptStatement(env.DB, d, {
+      attempt: claim.attempts + 1,
+      startedAtMs: nowMs,
+      finishedAtMs: nowMs,
+      outcome: 'deferred',
+      errorCode: code,
+      reason: gate.reason,
+      statusClass: 'none',
+      retryAfterMs: wait * 1000,
+      providerMessageId: null,
+      possibleDuplicate: false,
+    }),
+    ...(viaQueue ? [] : [scheduleStatement(env, d, untilMs)]),
+  ]);
+  if (viaQueue && written?.meta.changes === 1) msg.retry({ delaySeconds: wait });
+  else msg.ack();
+  log('info', 'delivery_deferred', {
+    delivery_id: d.id,
+    workspace_id: d.organizationId,
+    integration_id: d.integrationId,
+    reason: gate.reason,
+    recorded: written?.meta.changes === 1,
+  });
 }
 
 async function handleMessage(
@@ -445,13 +612,20 @@ async function handleMessage(
   }
   // The attempt number comes from the claim's RETURNING row, not the earlier read (M2).
   const attempt = claim.attempts + 1;
-  const result = await attemptSafely(env, keyring, d, deps, attempt);
+  const gate = await gateOrProceed(env, d, claim, claimedAt);
+  if (gate.action === 'defer') {
+    await deferDelivery(env, msg, d, claim, gate, claimedAt);
+    return;
+  }
+  const report = await attemptSafely(env, keyring, d, deps, attempt);
+  const result = report.result;
   const decision = effectiveDecision(
     decideRetry({ attempt, outcome: result.outcome, random: deps.random }),
     msg,
   );
-  const record = outcomeRecord(decision, result, attempt, deps.now());
-  const recorded = await applyDecision(env, msg, d, claim, decision, record);
+  const record = outcomeRecord(decision, report, attempt, deps.now());
+  const gated = gatedStatements(env, d, claim, gate, report, record, claimedAt);
+  const recorded = await applyDecision(env, msg, d, decision, record, gated, claim);
   log(decision.action === 'dead_letter' ? 'warn' : 'info', 'delivery_attempt', {
     delivery_id: d.id,
     workspace_id: d.organizationId,
@@ -460,6 +634,8 @@ async function handleMessage(
     outcome: recorded ? record.state : 'claim_lost',
     error_code: record.code,
     unmapped_provider_error: result.unmapped,
+    status_class: report.statusClass,
+    probe: gate.probe,
   });
 }
 

@@ -7,7 +7,7 @@ import type { ListFilters } from './delivery-view';
 export const SELECT_VIEW = `
   d.id, d.integration_id, d.state, d.attempts, d.last_error_code, d.replay_of,
   d.created_at, d.updated_at, d.first_attempt_at, d.last_attempt_at, d.next_attempt_at,
-  d.dead_lettered_at, d.is_test,
+  d.dead_lettered_at, d.is_test, d.last_error, d.possible_duplicate, d.suppressed_reason, d.duplicate_of,
   i.name AS integration_name, i.repo AS integration_repo,
   i.destination AS integration_destination, i.destination_host AS integration_destination_host,
   i.enabled AS integration_enabled, i.credentials_quarantined_at AS integration_quarantined_at,

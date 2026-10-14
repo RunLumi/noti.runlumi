@@ -319,10 +319,10 @@ describe('workspace export', () => {
       await call('GET', '/api/workspace/export', 'alice')
     ).json<{
       deliveries: unknown[];
-      truncated: { deliveries: boolean; auditEvents: boolean };
+      truncated: { deliveries: boolean; deliveryAttempts: boolean; auditEvents: boolean };
     }>();
     expect(body.deliveries).toHaveLength(2000);
-    expect(body.truncated).toEqual({ deliveries: true, auditEvents: false });
+    expect(body.truncated).toEqual({ deliveries: true, deliveryAttempts: false, auditEvents: false });
   });
 
   it('exports only the caller’s workspace', async () => {

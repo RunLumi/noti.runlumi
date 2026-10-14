@@ -4,6 +4,7 @@ import { authorize, isFailure, type Resolved } from '../auth/workspace';
 import type { Capability } from '../auth/permissions';
 import { eventCatalogFor } from '../connectors/sources/registry';
 import { keyringFromEnv } from '../crypto/keyring-env';
+import { loadHealth, type DestinationHealthView } from '../delivery/health';
 import type { Bindings } from '../env';
 import {
   sealCredentials,
@@ -146,6 +147,12 @@ export interface IntegrationView {
   readonly noiseNewer: boolean;
   readonly createdAt: string | null;
   readonly updatedAt: string | null;
+  /**
+   * The delivery circuit breaker and pacing state (F183, F187). `null` until the destination has
+   * failed or asked to be left alone. Never disables the integration: it is shown, not enforced on
+   * the person.
+   */
+  readonly health: DestinationHealthView | null;
 }
 
 function eventTypesOf(json: string): string[] {
@@ -157,7 +164,7 @@ function eventTypesOf(json: string): string[] {
   }
 }
 
-export function toView(row: IntegrationRow): IntegrationView {
+export function toView(row: IntegrationRow, health: DestinationHealthView | null = null): IntegrationView {
   const stored = readStoredFilters(row.filters_json);
   const noise = readStoredNoise(row.noise_json);
   return {
@@ -180,6 +187,7 @@ export function toView(row: IntegrationRow): IntegrationView {
     noiseNewer: noise.kind === 'newer',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    health,
   };
 }
 
@@ -332,9 +340,10 @@ integrations.get('/', async (c) => {
     .bind(who.orgId, LIST_LIMIT + 1)
     .all<IntegrationRow>();
   const truncated = rows.results.length > LIST_LIMIT;
+  const health = await loadHealth(c.env.DB, who.orgId, Date.now());
   return c.json({
     organizationId: who.orgId,
-    integrations: rows.results.slice(0, LIST_LIMIT).map(toView),
+    integrations: rows.results.slice(0, LIST_LIMIT).map((row) => toView(row, health.get(row.id) ?? null)),
     truncated,
     // Which gated destination kinds this deployment offers; the dashboard hides the rest.
     capabilities: { genericWebhook: genericWebhookEnabled(c.env) },
@@ -345,7 +354,9 @@ integrations.get('/:id', async (c) => {
   const who = await gate(c, 'integration.read');
   if (who instanceof Response) return who;
   const row = await loadRow(c, who.orgId, c.req.param('id'));
-  return row ? c.json({ integration: toView(row) }) : c.json({ error: 'Not found' }, 404);
+  if (!row) return c.json({ error: 'Not found' }, 404);
+  const health = await loadHealth(c.env.DB, who.orgId, Date.now(), row.id);
+  return c.json({ integration: toView(row, health.get(row.id) ?? null) });
 });
 
 integrations.post('/', async (c) => {

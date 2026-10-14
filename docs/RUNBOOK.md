@@ -187,10 +187,10 @@ Error codes are the closed taxonomy in src/platform/errors.ts. Common ones:
 `destination_rate_limited`, `destination_url_rejected` (outside the allowlist).
 
 Replay: `src/delivery/redeliver.ts` implements a manual replay that creates a **new** delivery
-(`replay_of` points at the original) and never mutates the original row. At the time of
-writing, **no HTTP route exposes it** (the deliveries API is a parallel slice, docs/API.md).
-Until it ships there is no operator-facing replay. Do not hand-insert rows. Replay re-reads
-the original outbox message. Only the outbox rows of **dead-lettered** deliveries are kept
+(`replay_of` points at the original) and never mutates the original row. Admins use it from the
+Activity page (one delivery, or "Redeliver all failed" for a filtered view: a count first, at most
+200 per request, one `delivery.bulk_replay` audit row with the counts; see docs/API.md). Do not
+hand-insert rows. Replay re-reads the original outbox message. Only the outbox rows of **dead-lettered** deliveries are kept
 (and, once their delivery row is purged by retention, removed as orphans). Outbox rows of
 delivered deliveries are purged after 7 days (`PURGE_OUTBOX_SQL`, `OUTBOX_RETENTION_MS` in
 src/delivery/claim.ts), so an old delivered notification cannot be replayed.
@@ -203,6 +203,46 @@ Customer message: "Some notifications failed to send to <destination>. The cause
 <plain-language cause from the error code>. Fix the connection and tell us; we can resend
 failed notifications once replay is available. A resent notification may duplicate one you
 already received."
+
+## Per-attempt history, duplicates and the circuit breaker (ADR 0023)
+
+**What happened on each try.** `delivery_attempts` has one row per attempt and per deferral; the
+Activity detail dialog shows it. All columns are closed codes or numbers (outcome, taxonomy code, minted
+reason such as `provider_http_503`, status class, `retry_after_ms`); there is no URL, body or header to
+leak and nothing to redact. Rows older than migration 0025 have none.
+
+```sql
+SELECT attempt, outcome, error_code, reason, status_class, retry_after_ms, possible_duplicate,
+       datetime(started_at/1000,'unixepoch') AS started
+FROM delivery_attempts WHERE organization_id='<org>' AND delivery_id='<id>' ORDER BY started_at, rowid;
+```
+
+**A customer asks "did I get this twice?"** `deliveries.possible_duplicate = 1` means an earlier attempt
+ended without the provider confirming it (timeout, dropped connection, 5xx, expired claim) and the send
+was retried. It is a possibility: Noti cannot tell. A `suppressed` row (`duplicate_of`, reason
+`duplicate`) is a provider redelivery that was recognised and NOT sent again; `event_dedup.hit_count` is
+how many times that event came back. Neither means exactly-once, and nothing should say so.
+
+**"Why is nothing arriving at X?"** Check the breaker before anything else:
+
+```sql
+SELECT integration_id, state, consecutive_failures, opened_count, last_failure_code,
+       datetime(open_until/1000,'unixepoch') AS open_until, datetime(paused_until/1000,'unixepoch') AS paced_until
+FROM destination_health WHERE organization_id='<org>' AND (state <> 'closed' OR paused_until > strftime('%s','now')*1000);
+```
+
+`open` means the destination failed 5 times in a row; deliveries wait (`retrying`, `last_error =
+circuit_open`) and spend no attempt. After `open_until` one probe goes out; success closes it. The integration
+page and the delivery say so in plain words. **Noti never disables an integration because of the breaker**, so
+there is nothing to re-enable. To clear a breaker by hand (the destination was fixed and waiting is the
+problem): `UPDATE destination_health SET state='closed', consecutive_failures=0, open_until=NULL,
+probe_until=NULL WHERE organization_id=? AND integration_id=?`; the waiting deliveries then run at their
+next scheduled time. `paused_until` is the destination's own rate-limit request; it expires by itself.
+No alert fires when a breaker opens yet (see Gaps).
+
+**The dedup table** is purged by the `dedup_purge` cron job (7-day TTL, 500 rows per statement, 5 rounds per
+tick, resumable). A backlog after an outage drains over the next ticks; check `SELECT COUNT(*) FROM
+event_dedup WHERE expires_at < strftime('%s','now')*1000`.
 
 ## Queue backlog
 
@@ -493,6 +533,7 @@ What the files themselves say:
 | 0014 rate-limit index | Harmless | `DROP INDEX api_rate_limits_window` |
 | 0021 noise control | Old Worker ignores the column and both tables, but it **stops releasing**: rows in `held`/`claimed` wait until a Worker that knows about them runs again (nothing is lost). Turn noise settings off and let `held_events` drain before rolling back if updates must not be delayed | `DROP TABLE held_events; DROP TABLE noise_open_failures;` is safe only once nothing is waiting; the column stays (dropping it needs a rebuild) |
 | 0024 credential lifecycle | Old Worker ignores the three columns. **Apply before** the new Worker (its queries name them). A rollback past the Worker leaves revoked integrations quarantined (still stopped) but a revoked **source** is only `enabled=0`, which the old Worker also honours; it would let someone re-enable it | Expand-only: the columns stay (dropping them needs `ALTER TABLE ... DROP COLUMN`, SQLite 3.35+) |
+| 0025 delivery ledger depth | Old Worker ignores the four new `deliveries` columns and the tables `event_dedup`, `delivery_attempts`, `destination_health`: it stops recording attempts and suppressed repeats and stops honouring the breaker and pacing, nothing else. Waiting deliveries (`last_error` `circuit_open` or `destination_paced`) are retried by their next scheduled time | Expand-only. `DROP TABLE` the three tables is safe; the columns stay (dropping them needs a rebuild) |
 | 0016 observability | Old Worker ignores `ops_state` and the two indexes | `DROP TABLE ops_state; DROP INDEX deliveries_state_created; DROP INDEX audit_events_created;` |
 
 A rollback rehearsal has **not** been performed (docs/RELEASE_GATES.md). A restore from D1
@@ -556,6 +597,6 @@ Follow-ups filed (every gap this runbook papered over):
 
 - Nobody is paged. Stall detection logs only.
 - No `job_runs`: a cron that stopped is noticed by absence of log lines, not by an alert.
-- No replay route yet; no per-delivery lookup by correlation id; no support evidence bundle.
+- No per-delivery lookup by correlation id; no support evidence bundle; no alert when a circuit breaker opens (it is visible on the integration and in the observability summary only).
 - No ingress counter, so a silent source cannot be detected (`ingress_gap`).
 - Everything above is unrehearsed.
