@@ -4,7 +4,9 @@ import { keyringFromEnv } from '../../crypto/keyring-env';
 import { newLeaseToken } from '../../delivery/claim';
 import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../../env';
-import { canonicalFromDisplay, displayOf } from '../../events/canonical';
+import { displayOf } from '../../events/canonical';
+import { boundedEventId } from '../../events/id';
+import { buildCanonical } from './build';
 import { validateCanonicalEvent } from '../../events/validate';
 import { readBodyCapped } from '../../lib/body';
 import { log } from '../../platform/log';
@@ -234,15 +236,15 @@ export function providerWebhook(kind: ProviderKind) {
       eventId: providerId,
     });
 
-    // Normalise before routing (ADR 0020): everything below reads the canonical event, not the
-    // connector's display output. An invalid event is a connector bug: 400, nothing written.
+    // Normalise before routing (ADR 0020). A mapper/validator mismatch is OUR fault: a 4xx would
+    // count as a failed delivery (GitLab disables the webhook after repeated ones, Stripe retries for
+    // days), so the event is acknowledged with 2xx, logged loudly with field names only, and counted
+    // on the source (`dropped_events`, the same visible counter a flood drop uses).
     const normalised = validateCanonicalEvent(
-      canonicalFromDisplay({
+      buildCanonical({
         provider: kind,
-        adapterVersion: connector.adapterVersion,
-        id: providerId,
-        source: connector.canonicalSource(mapped.display),
         display: mapped.display,
+        id: await boundedEventId(providerId),
       }),
     );
     if (!normalised.ok) {
@@ -251,7 +253,17 @@ export function providerWebhook(kind: ProviderKind) {
         kind,
         fields: normalised.errors.map((e) => `${e.field}:${e.reason}`).slice(0, 10),
       });
-      return c.json({ error: 'schema_invalid' }, 400);
+      try {
+        await c.env.DB.prepare(
+          `UPDATE sources SET dropped_events=dropped_events+1,last_dropped_at=CURRENT_TIMESTAMP
+           WHERE id=? AND organization_id=?`,
+        )
+          .bind(source.id, organizationId)
+          .run();
+      } catch {
+        // Display-only counter; the error line above already records it.
+      }
+      return c.json({ accepted: false, ignored: 'schema_invalid' }, 200);
     }
     const display = displayOf(normalised.event);
 

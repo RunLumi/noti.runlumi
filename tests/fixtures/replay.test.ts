@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { displayOf } from '../../src/events/canonical';
 import { validateCanonicalEvent } from '../../src/events/validate';
-import { normalize, renderAll } from '../conformance/normalize';
+import { FIXED_ID, normalize, renderAll } from '../conformance/normalize';
 import { createRig } from '../conformance/rig';
 import { FIXTURE_DIR, GOLDEN_DIR, goldenPath, loadFixtureJson, loadManifest, type FixtureEntry } from './load';
 
@@ -18,6 +18,8 @@ const { default: worker } = await import('../../src/index');
  * the review.
  */
 const UPDATE = process.env.UPDATE_GOLDEN === '1';
+// A golden is a reviewed artefact: CI never rewrites one.
+if (UPDATE && process.env.CI) throw new Error('UPDATE_GOLDEN is refused when CI is set.');
 const manifest = loadManifest();
 
 afterEach(() => vi.unstubAllGlobals());
@@ -47,7 +49,7 @@ async function replay(entry: FixtureEntry): Promise<Record<string, unknown>> {
   const json = loadFixtureJson(entry);
   const repo = (json.repository as { full_name?: string } | undefined)?.full_name;
   const rig = await createRig(entry.provider, worker, repo ? { repo } : {});
-  const res = await rig.post(rig.encode(json), { headers: entry.headers });
+  const res = await rig.post(rig.encode(json), { headers: entry.headers, deliveryId: FIXED_ID });
   const body = await res.json().catch(() => null);
   const canonical = normalize(entry.provider, entry.headers, json);
   const messages = rig.messages();
@@ -67,7 +69,7 @@ async function replay(entry: FixtureEntry): Promise<Record<string, unknown>> {
     routing: entry.provider === 'github' ? routingOf(rig) : undefined,
     delivered: messages.length,
     message: first ? strip(first) : null,
-    rendered: first ? await renderAll(first) : null,
+    rendered: first && entry.render ? await renderAll(first) : null,
   };
 }
 

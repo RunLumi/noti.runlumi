@@ -1,5 +1,6 @@
 import { SUMMARY_MAX_CHARS, type DeliveryMessage } from '../../../env';
 import { canonicalFromDisplay, type CanonicalEvent } from '../../../events/canonical';
+import { cutAt } from '../../../events/text';
 import { asRecord } from '../../../lib/json';
 
 /**
@@ -189,7 +190,7 @@ export function toDisplayFields(event: GenericEvent): Display {
   const fieldsLine = event.fields.map(([k, v]) => `${k}: ${v}`).join(' · ');
   const joined = [event.summary, fieldsLine].filter((p): p is string => !!p).join('\n');
   const summary =
-    joined.length > SUMMARY_MAX_CHARS ? `${joined.slice(0, SUMMARY_MAX_CHARS - 1).trimEnd()}…` : joined;
+    joined.length > SUMMARY_MAX_CHARS ? `${cutAt(joined, SUMMARY_MAX_CHARS - 1).trimEnd()}…` : joined;
   return {
     title: event.title,
     url: event.url ?? '',

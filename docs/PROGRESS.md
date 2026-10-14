@@ -1299,7 +1299,7 @@ test (timers and promises stay real). A test that needs time to move calls `vi.s
   (`GITHUB_/GITLAB_/STRIPE_EVENT_TYPES` are derived from it) and shared text hygiene.
 - GitHub, generic, GitLab and Stripe map to a canonical event and validate it before routing;
   `DeliveryMessage` and the GitHub routing facts are derived from it. Behaviour is unchanged for the
-  existing 2935 tests (3194 now, with the new suites). The one intended change: control characters and bidirectional marks in provider
+  existing 2935 tests (3230 now, with the new suites). The one intended change: control characters and bidirectional marks in provider
   text become spaces, and a non-https GitHub link is dropped.
 - `SourceDescriptor` plus `tests/conformance/conformance.test.ts`: one suite, run against all four
   sources (verify before parse, size cap including chunked, replay window or idempotency, identical
@@ -1311,6 +1311,13 @@ test (timers and promises stay real). A test that needs time to move calls `vi.s
 - GitHub: a delivery without `X-GitHub-Event` is now 400; ghost senders are not shown as people;
   `[bot]` logins set `isBot`; an oversize body is logged with its reason; ack discipline (5xx on D1
   failure, dispatcher kick after the commit) is pinned by tests.
+
+**Review follow-up** (independent review of PR #49): a validator rejection for our own mismatch is a
+logged, counted 2xx (never a provider-visible 4xx); one `buildCanonical` for routes and harness; a
+generic summary cut inside an emoji no longer leaves half a pair (H1); unknown facts instead of
+truncated ones; zero-width and tag characters are unsafe text; the oversize log is sampled; render
+goldens only for eight representative fixtures and no golden update in CI; wider secret scan; the
+source-text verify-order check was dropped in favour of the behavioural tests.
 
 **Not done / unverified**: F65 polling and F69 reconciliation are **blocked on the GitHub App private
 key and API access** and are not implemented; fixtures are documented examples, some derived by a

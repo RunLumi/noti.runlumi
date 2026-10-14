@@ -37,11 +37,22 @@ GitHub inside its route, generic through `toDisplayFields`, GitLab and Stripe th
    its shape and is derived with `displayOf(event)`. GitHub routing facts are `routingFactsOf(event)`
    (a test proves they equal `extractGithubFacts` for every fixture). Noise facts
    (`githubNoiseFacts`) still read the payload: moving them is follow-up work.
-3. **A bounded validator (`src/events/validate.ts`).** Hand-written; rejects unknown keys (top level
+3. **A bounded validator (`src/events/validate.ts`) and one builder (`sources/build.ts`).** Hand-written; rejects unknown keys (top level
    and in `data`), wrong types, over-long fields, control characters, bidirectional controls,
    noncharacters, unpaired surrogates, a non-https link, a bad `time` or `source`, an event type
-   outside its source's closed catalogue, and anything over the size budget. An invalid event is
-   `schema_invalid` (400) before any write; errors name the field and a fixed reason, never the value.
+   outside its source's closed catalogue, and anything over the size budget. An invalid event never reaches a renderer, and errors name the field and a fixed reason, never the value. What the
+   caller sees depends on whose fault it is:
+   - **Our mapper/validator mismatch** (GitHub, GitLab, Stripe): a 4xx would be counted by GitLab
+     toward disabling the hook, retried for days by Stripe, and never retried by GitHub (a silent
+     loss). So the event is acknowledged with 2xx `{accepted:false, ignored:'schema_invalid'}`, logged
+     at error level (`canonical_event_invalid`, field names only) and, for GitLab and Stripe, counted
+     on the source (`dropped_events`, the counter a flood drop already uses). Where safe the field is
+     degraded instead: a link that is not plain https is dropped and the event is still delivered.
+   - **A sender's own malformed event** (generic): 400, because the sender's contract is ours.
+   - A provider id that is too long or unprintable is hashed to `sha256:<hex>` (deterministic), never
+     refused.
+   `buildCanonical` is the single builder the routes and the test harness both call, so a golden
+   covers exactly what the route builds.
 4. **Size budget (F45).** The serialised event may not exceed 64 KiB (`CANONICAL_BUDGET_BYTES`), the
    CloudEvents "consumers SHOULD accept" threshold. Over it is `payload_too_large`, never a
    truncation. Field bounds keep the worst case under half of that (a test asserts it). Mappers cut
@@ -60,8 +71,8 @@ GitHub inside its route, generic through `toDisplayFields`, GitLab and Stripe th
    mappers and the validator; cuts never split a surrogate pair. GitHub text now goes through it
    (before, a title was only length-cut), so a title with a control character is cleaned rather than
    passed through. GitHub links must be `https:` without credentials; anything else is dropped.
-8. **Connector contract and conformance (F71).** `SourceDescriptor` (`sources/descriptors.ts`) states
-   the cross-cutting contract as data for all four sources, including the two with their own routes.
+8. **Connector contract and conformance (F71).** `SourceDescriptor` (`tests/conformance/descriptors.ts`, test-side data so no route code is
+   imported by `src/`) states the cross-cutting contract for all four sources, including the two with their own routes.
    `tests/conformance/conformance.test.ts` runs one suite against every descriptor: verify before
    parse (and a source-order guard), the size cap including a chunked body, the replay window where
    the protocol has one and idempotency where it does not, one identical response for unknown,
@@ -73,7 +84,9 @@ GitHub inside its route, generic through `toDisplayFields`, GitLab and Stripe th
    rules in its README); `replay.test.ts` pushes each through the real route over the fake D1, signed
    with a run-time secret, and compares outcome, canonical event, per-integration routing and the
    rendered Slack, Lark, Teams and Discord payloads with `golden/*.json`, updated only by
-   `UPDATE_GOLDEN=1`. A fixture that stops parsing fails; none is skipped. `hygiene.test.ts` scans
+   `UPDATE_GOLDEN=1` (refused when `CI` is set). Canonical event, routing and message goldens exist for
+   every fixture; the four rendered destination payloads only for a representative eight (the
+   destination suites own rendering). A fixture that stops parsing fails; none is skipped. `hygiene.test.ts` scans
    the tree for secret shapes, bidi controls and emails.
 
 ## GitHub specifics settled here
@@ -91,8 +104,8 @@ GitHub inside its route, generic through `toDisplayFields`, GitLab and Stripe th
 - **F63.** The ingress cap stays 1 MiB (`MAX_BODY_BYTES`), checked against the declared length and
   the bytes read. GitHub drops payloads over 25 MB and delivers nothing; a delivery between the two
   limits reaches us and is refused with 413, which GitHub shows as a failed delivery. The refusal is
-  logged with its reason (`github_event_too_large`, constants only, because the request is not yet
-  authenticated). We never read commits, so `push.commits` capping and `truncated` do not arise; a
+  logged with its reason (`github_event_too_large`, constants only), at most once a minute per
+  isolate, because the request is not yet authenticated and must not be able to grow the log. We never read commits, so `push.commits` capping and `truncated` do not arise; a
   push with no commits is normal. The silent GitHub drops (more than 5000 branches or 3 tags at
   once) cannot be seen from the webhook stream.
 - **F64.** 202 only after the delivery and outbox rows commit; a D1 failure is a 5xx so the failure
@@ -119,5 +132,19 @@ event; real (captured) fixtures, and fixtures for GitLab `Note Hook` and the Str
 - Titles of `push`, `release`, `workflow_run` and `deployment_status` messages are still the event
   type string (the previous behaviour, now visible in the goldens). Richer titles are a mapping
   change and a golden update, not a refactor.
-- Text that used to pass through unchanged is cleaned: control characters and bidirectional marks
-  become spaces. This is the one intended behaviour change in the mapping.
+Intended behaviour changes in the mapping (none broke an existing test):
+
+- Text that used to pass through unchanged is cleaned: control characters, bidirectional marks and
+  zero-width or tag characters become spaces. ZWJ and ZWNJ stay allowed: emoji sequences and
+  Persian or Indic text need them.
+- A GitHub link that is not plain https is dropped.
+- A GitHub delivery with no `X-GitHub-Event` is 400 (it was acknowledged and ignored).
+- A ghost sender is not shown as the actor.
+- A `[bot]` login with no `sender.type` is now a bot, so `actor.bots: exclude` excludes it where it
+  used to be unknown and pass. A ghost still reaches `bots: exclude` and actor allow-list
+  integrations as `ghost_exempt` (tested).
+- A branch longer than 255 characters, or a label list holding a label that cannot be carried, is an
+  unknown fact (`null`) rather than a truncated or shortened one: an allow-list holds it back.
+- An absent status still renders without the status label and `info` with it. This predates the
+  slice and only affects queue messages written before slice 5; every message built now has a
+  status (tested).

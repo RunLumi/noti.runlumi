@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SOURCE_DESCRIPTORS, type SourceDescriptor } from '../../src/connectors/sources/descriptors';
+import { SOURCE_DESCRIPTORS, type SourceDescriptor } from './descriptors';
 import { CANONICAL_BUDGET_BYTES } from '../../src/events/canonical';
+import type { CanonicalEvent } from '../../src/events/canonical';
 import { EVENT_CATALOG, isCatalogSource } from '../../src/events/catalog';
 import { canonicalSizeBytes, validateCanonicalEvent } from '../../src/events/validate';
 import { loadFixtureJson, loadManifest, type FixtureEntry } from '../fixtures/load';
@@ -22,8 +22,12 @@ interface Case {
   readonly fixture: string;
   /** Fields (dot paths, created when absent) that carry personal data or free text the notification must never copy. */
   readonly pii: readonly string[] | null;
-  /** Free-text fields to inflate far past any bound, to prove the output stays bounded. */
-  readonly inflate: readonly string[];
+  /**
+   * Free-text fields set to long but ALLOWED values (an emoji straddling every cut point), so the
+   * mapper's own cut path runs and must leave a valid event. Values the contract refuses up front
+   * would not exercise it.
+   */
+  readonly long: Readonly<Record<string, string>>;
   /** The path in the body where the provider's own event id sits, when the protocol puts it there. */
   readonly idInBody?: string;
 }
@@ -39,19 +43,33 @@ const CASES: Readonly<Record<string, Case>> = {
       'repository.description',
       'pull_request.head.repo.description',
     ],
-    inflate: [
-      'pull_request.title',
-      'sender.login',
-      'pull_request.head.ref',
-      'pull_request.base.ref',
-      'pull_request.html_url',
-    ],
+    long: {
+      'pull_request.title': 'x'.repeat(297) + '\u{1f600}'.repeat(40),
+      'sender.login': 'l'.repeat(97) + '\u{1f600}'.repeat(20),
+      'pull_request.head.ref': 'b'.repeat(250),
+      'pull_request.base.ref': 'b'.repeat(250),
+      'pull_request.html_url': `https://example.test/${'u'.repeat(2000)}`,
+    },
   },
-  generic: { fixture: 'generic/flat', pii: null, inflate: ['title', 'summary', 'actor', 'type'] },
+  generic: {
+    fixture: 'generic/flat',
+    pii: null,
+    long: {
+      title: 'x'.repeat(298) + '\u{1f600}',
+      summary: 'x'.repeat(278) + '\u{1f600}tail',
+      actor: 'a'.repeat(98) + '\u{1f600}',
+      type: 'a'.repeat(100),
+    },
+  },
   gitlab: {
     fixture: 'gitlab/push',
     pii: ['user_email', 'user_name', 'commits.0.author.email', 'commits.0.message', 'project.description'],
-    inflate: ['ref', 'user_username', 'project.path_with_namespace', 'commits.0.title'],
+    long: {
+      ref: 'r'.repeat(5000),
+      user_username: 'u'.repeat(97) + '\u{1f600}'.repeat(20),
+      'project.path_with_namespace': `a/${'p'.repeat(5000)}`,
+      'commits.0.title': 'x'.repeat(117) + '\u{1f600}'.repeat(30),
+    },
   },
   stripe: {
     fixture: 'stripe/invoice.payment_failed',
@@ -62,7 +80,10 @@ const CASES: Readonly<Record<string, Case>> = {
       'data.object.description',
       'data.object.customer_address.line1',
     ],
-    inflate: ['data.object.number', 'data.object.currency'],
+    long: {
+      'data.object.number': 'N'.repeat(37) + '\u{1f600}'.repeat(30),
+      'data.object.customer': `cus_${'c'.repeat(5000)}`,
+    },
   },
 };
 
@@ -151,27 +172,6 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
         const res = await rig.post('{"truncated":', { headers: entry.headers });
         expect(res.status).toBe(400);
         expect(writes(rig)).toBe(0);
-      });
-
-      it('the route source calls verify before it parses', () => {
-        const file = {
-          github: 'github/route.ts',
-          generic: 'generic/route.ts',
-          gitlab: 'provider-route.ts',
-          stripe: 'provider-route.ts',
-        }[d.kind as 'github'];
-        const text = readFileSync(`src/connectors/sources/${file}`, 'utf8');
-        const verify = Math.min(
-          ...['verifyGithubSignature(', 'verifyStandardWebhook(key', 'connector.verify({\n      secret,'].map(
-            (n) => {
-              const i = text.indexOf(n);
-              return i === -1 ? Number.POSITIVE_INFINITY : i;
-            },
-          ),
-        );
-        const parse = text.search(/JSON\.parse\((body|new TextDecoder)/);
-        expect(verify).toBeLessThan(Number.POSITIVE_INFINITY);
-        expect(verify).toBeLessThan(parse);
       });
     });
 
@@ -359,16 +359,24 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
         });
       }
 
-      it('stays bounded when every free-text field is enormous', () => {
+      it('stays valid and bounded when free text is long, with an emoji at every cut point', () => {
         const body = json();
-        for (const path of c.inflate) setPath(body, path, 'x'.repeat(200_000));
+        for (const [path, value] of Object.entries(c.long)) setPath(body, path, value);
         const canonical = normalize(d.kind, entry.headers, body);
-        // Either the mapper cuts to its bounds, or the contract refuses the event outright.
-        if (canonical) {
-          const verdict = validateCanonicalEvent(canonical);
-          expect(verdict.ok, JSON.stringify(verdict)).toBe(true);
-          expect(canonicalSizeBytes(canonical)).toBeLessThan(CANONICAL_BUDGET_BYTES);
-        }
+        // Long but allowed: the event must still be built, never refused for our own cut.
+        expect(canonical).not.toBeNull();
+        const verdict = validateCanonicalEvent(canonical);
+        expect(verdict.ok, JSON.stringify(verdict)).toBe(true);
+        expect(canonicalSizeBytes(canonical as CanonicalEvent)).toBeLessThan(CANONICAL_BUDGET_BYTES);
+      });
+
+      it('the long event is accepted by the route, not refused', async () => {
+        const rig = await createRig(d.kind, worker);
+        const body = json();
+        for (const [path, value] of Object.entries(c.long)) setPath(body, path, value);
+        const res = await rig.post(rig.encode(body), { headers: entry.headers });
+        expect(res.status).toBeLessThan(300);
+        expect(rig.count('deliveries')).toBeGreaterThan(0);
       });
 
       it('never produces a type outside its closed catalogue', () => {

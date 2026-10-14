@@ -5,7 +5,7 @@
     "status": 202,
     "body": {
       "accepted": true,
-      "persisted": 4
+      "persisted": 5
     }
   },
   "canonical": {
@@ -44,10 +44,11 @@
     "all": "delivered",
     "master-only": "filtered:not_in_allow_list",
     "humans-only": "delivered",
+    "actor-allow": "delivered",
     "ready-only": "delivered",
     "bug-label": "delivered"
   },
-  "delivered": 4,
+  "delivered": 5,
   "message": {
     "title": "Update the README with new information.",
     "url": "https://github.com/Codertocat/Hello-World/pull/2",
@@ -57,148 +58,5 @@
     "actor": "Codertocat",
     "summary": "#2 · changes → master · opened"
   },
-  "rendered": {
-    "slack": {
-      "format": "card",
-      "payload": {
-        "text": "*Info: Update the README with new information.*\nCodertocat/Hello-World · by Codertocat\n<https://github.com/Codertocat/Hello-World/pull/2|Open in source>\n\n#2 · changes → master · opened",
-        "blocks": [
-          {
-            "type": "header",
-            "text": {
-              "type": "plain_text",
-              "text": "Info: Update the README with new information."
-            }
-          },
-          {
-            "type": "context",
-            "elements": [
-              {
-                "type": "plain_text",
-                "text": "Codertocat/Hello-World · by Codertocat"
-              }
-            ]
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "plain_text",
-              "text": "#2 · changes → master · opened"
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": "<https://github.com/Codertocat/Hello-World/pull/2|Open in source>"
-            }
-          }
-        ]
-      }
-    },
-    "lark": {
-      "format": "card",
-      "payload": {
-        "msg_type": "interactive",
-        "card": {
-          "schema": "2.0",
-          "config": {
-            "enable_forward": true,
-            "summary": {
-              "content": "Info: Update the README with new information."
-            }
-          },
-          "header": {
-            "title": {
-              "tag": "plain_text",
-              "content": "Info: Update the README with new information."
-            },
-            "template": "blue"
-          },
-          "body": {
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "Codertocat/Hello-World · by Codertocat"
-              },
-              {
-                "tag": "markdown",
-                "content": "#2 · changes → master · opened"
-              },
-              {
-                "tag": "markdown",
-                "content": "[Open in source](https://github.com/Codertocat/Hello-World/pull/2)"
-              }
-            ]
-          }
-        }
-      }
-    },
-    "teams": {
-      "format": "card",
-      "payload": {
-        "type": "message",
-        "attachments": [
-          {
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "contentUrl": null,
-            "content": {
-              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-              "type": "AdaptiveCard",
-              "version": "1.2",
-              "body": [
-                {
-                  "type": "TextBlock",
-                  "text": "Info: Update the README with new information.",
-                  "wrap": true,
-                  "weight": "Bolder",
-                  "size": "Medium",
-                  "color": "Default"
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "Codertocat/Hello-World · by Codertocat",
-                  "wrap": true,
-                  "isSubtle": true,
-                  "spacing": "None"
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "#2 · changes → master · opened",
-                  "wrap": true
-                }
-              ],
-              "actions": [
-                {
-                  "type": "Action.OpenUrl",
-                  "title": "Open in source",
-                  "url": "https://github.com/Codertocat/Hello-World/pull/2"
-                }
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "discord": {
-      "format": "card",
-      "payload": {
-        "content": "Info: Update the README with new information.",
-        "embeds": [
-          {
-            "title": "Info: Update the README with new information.",
-            "url": "https://github.com/Codertocat/Hello-World/pull/2",
-            "description": "#2 · changes → master · opened",
-            "color": 5793192,
-            "footer": {
-              "text": "Codertocat/Hello-World · by Codertocat"
-            }
-          }
-        ],
-        "allowed_mentions": {
-          "parse": []
-        }
-      }
-    }
-  }
+  "rendered": null
 }

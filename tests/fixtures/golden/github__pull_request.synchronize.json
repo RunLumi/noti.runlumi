@@ -13,6 +13,7 @@
     "all": "not_considered",
     "master-only": "not_considered",
     "humans-only": "not_considered",
+    "actor-allow": "not_considered",
     "ready-only": "not_considered",
     "bug-label": "not_considered"
   },

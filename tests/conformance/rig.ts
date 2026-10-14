@@ -83,6 +83,7 @@ export const GITHUB_FILTERS: Readonly<Record<string, unknown>> = {
   all: null,
   'master-only': { branch: { allow: ['master'] } },
   'humans-only': { actor: { bots: 'exclude' } },
+  'actor-allow': { actor: { allow: ['Codertocat'] } },
   'ready-only': { draft: 'exclude' },
   'bug-label': { labels: { include: ['bug'] } },
 };

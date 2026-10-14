@@ -78,7 +78,8 @@
       "provenance": "documented",
       "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
       "readOn": "2026-10-14",
-      "expect": "delivered"
+      "expect": "delivered",
+      "render": true
     },
     {
       "id": "github/pull_request.closed",
@@ -212,7 +213,8 @@
           "sender.login": "ghost"
         }
       },
-      "note": "Derived: documented placeholder login 'ghost'."
+      "note": "Derived: documented placeholder login 'ghost'.",
+      "render": true
     },
     {
       "id": "github/pull_request.opened_labeled",
@@ -271,7 +273,8 @@
       "source": "https://github.com/octokit/webhooks/tree/aa80c24a3f55354465b8b1438d33dd5602956d0d/payload-examples/api.github.com",
       "readOn": "2026-10-14",
       "expect": "delivered",
-      "note": "The documented example is a tag push with no commits."
+      "note": "The documented example is a tag push with no commits.",
+      "render": true
     },
     {
       "id": "github/push.new_branch",
@@ -338,7 +341,8 @@
           "workflow_run.conclusion": "failure"
         }
       },
-      "note": "Derived: conclusion=failure (documented value)."
+      "note": "Derived: conclusion=failure (documented value).",
+      "render": true
     },
     {
       "id": "github/workflow_run.cancelled",
@@ -700,7 +704,8 @@
           "object_attributes.status": "failed"
         }
       },
-      "note": "Derived: status=failed. UNVERIFIED: the docs page shows only success for pipelines."
+      "note": "Derived: status=failed. UNVERIFIED: the docs page shows only success for pipelines.",
+      "render": true
     },
     {
       "id": "stripe/invoice.payment_failed",
@@ -715,7 +720,8 @@
       "unverified": [
         "data.previous_attributes for subscription.updated",
         "type/object pairing"
-      ]
+      ],
+      "render": true
     },
     {
       "id": "stripe/payment_intent.payment_failed",
@@ -870,7 +876,8 @@
       "source": "docs/API.md (Sending events: POST /webhooks/generic/:endpointId)",
       "readOn": "2026-10-14",
       "expect": "delivered",
-      "note": "Written by Noti to the documented generic contract; not a provider capture."
+      "note": "Written by Noti to the documented generic contract; not a provider capture.",
+      "render": true
     },
     {
       "id": "generic/critical",
@@ -881,7 +888,8 @@
       "source": "docs/API.md (Sending events: POST /webhooks/generic/:endpointId)",
       "readOn": "2026-10-14",
       "expect": "delivered",
-      "note": "Written by Noti to the documented generic contract; not a provider capture."
+      "note": "Written by Noti to the documented generic contract; not a provider capture.",
+      "render": true
     }
   ]
 }

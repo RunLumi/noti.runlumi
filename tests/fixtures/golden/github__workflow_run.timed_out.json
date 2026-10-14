@@ -5,7 +5,7 @@
     "status": 202,
     "body": {
       "accepted": true,
-      "persisted": 5
+      "persisted": 6
     }
   },
   "canonical": {
@@ -41,10 +41,11 @@
     "all": "delivered",
     "master-only": "delivered",
     "humans-only": "delivered",
+    "actor-allow": "delivered",
     "ready-only": "delivered",
     "bug-label": "delivered"
   },
-  "delivered": 5,
+  "delivered": 6,
   "message": {
     "title": "workflow_run.timed_out",
     "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
@@ -54,148 +55,5 @@
     "actor": "Codertocat",
     "summary": "master · timed_out · completed"
   },
-  "rendered": {
-    "slack": {
-      "format": "card",
-      "payload": {
-        "text": "*Failed: workflow_run.timed_out*\nocto-org/octo-repo · by Codertocat\n<https://github.com/octo-org/octo-repo/actions/runs/289782451|Open in source>\n\nmaster · timed_out · completed",
-        "blocks": [
-          {
-            "type": "header",
-            "text": {
-              "type": "plain_text",
-              "text": "Failed: workflow_run.timed_out"
-            }
-          },
-          {
-            "type": "context",
-            "elements": [
-              {
-                "type": "plain_text",
-                "text": "octo-org/octo-repo · by Codertocat"
-              }
-            ]
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "plain_text",
-              "text": "master · timed_out · completed"
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": "<https://github.com/octo-org/octo-repo/actions/runs/289782451|Open in source>"
-            }
-          }
-        ]
-      }
-    },
-    "lark": {
-      "format": "card",
-      "payload": {
-        "msg_type": "interactive",
-        "card": {
-          "schema": "2.0",
-          "config": {
-            "enable_forward": true,
-            "summary": {
-              "content": "Failed: workflow_run.timed_out"
-            }
-          },
-          "header": {
-            "title": {
-              "tag": "plain_text",
-              "content": "Failed: workflow_run.timed_out"
-            },
-            "template": "red"
-          },
-          "body": {
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "octo-org/octo-repo · by Codertocat"
-              },
-              {
-                "tag": "markdown",
-                "content": "master · timed_out · completed"
-              },
-              {
-                "tag": "markdown",
-                "content": "[Open in source](https://github.com/octo-org/octo-repo/actions/runs/289782451)"
-              }
-            ]
-          }
-        }
-      }
-    },
-    "teams": {
-      "format": "card",
-      "payload": {
-        "type": "message",
-        "attachments": [
-          {
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "contentUrl": null,
-            "content": {
-              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-              "type": "AdaptiveCard",
-              "version": "1.2",
-              "body": [
-                {
-                  "type": "TextBlock",
-                  "text": "Failed: workflow_run.timed_out",
-                  "wrap": true,
-                  "weight": "Bolder",
-                  "size": "Medium",
-                  "color": "Attention"
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "octo-org/octo-repo · by Codertocat",
-                  "wrap": true,
-                  "isSubtle": true,
-                  "spacing": "None"
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "master · timed_out · completed",
-                  "wrap": true
-                }
-              ],
-              "actions": [
-                {
-                  "type": "Action.OpenUrl",
-                  "title": "Open in source",
-                  "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451"
-                }
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "discord": {
-      "format": "card",
-      "payload": {
-        "content": "Failed: workflow\\_run.timed\\_out",
-        "embeds": [
-          {
-            "title": "Failed: workflow_run.timed_out",
-            "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
-            "description": "master · timed\\_out · completed",
-            "color": 14042437,
-            "footer": {
-              "text": "octo-org/octo-repo · by Codertocat"
-            }
-          }
-        ],
-        "allowed_mentions": {
-          "parse": []
-        }
-      }
-    }
-  }
+  "rendered": null
 }

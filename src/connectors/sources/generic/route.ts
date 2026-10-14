@@ -12,7 +12,9 @@ import { decisionStatement } from '../../../routing/provenance';
 import { sourceIngressLimiter } from '../../../security/rate-limit';
 import { displayOf } from '../../../events/canonical';
 import { validateCanonicalEvent } from '../../../events/validate';
-import { parseGenericEvent, toCanonicalEvent } from './event';
+import { boundedEventId } from '../../../events/id';
+import { buildCanonical } from '../build';
+import { parseGenericEvent } from './event';
 import { openSourceSecret, type SourceCredentialRow } from './secret';
 import { verifyStandardWebhook } from './signature';
 
@@ -113,8 +115,16 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
 
   // Normalise before routing (ADR 0020). The sender's own text passed the generic parser; the
   // canonical validator additionally refuses what no renderer should ever see (unpaired
-  // surrogates, noncharacters, an oversized id), so such an event is a 400 and nothing is written.
-  const normalised = validateCanonicalEvent(toCanonicalEvent(parsed.event, headers.id ?? ''));
+  // surrogates, noncharacters, invisible formatting), so such a SENDER-supplied event is a 400 and
+  // nothing is written. Unlike the provider routes this is the sender's own contract, and our mappers
+  // cut to their bounds, so a refusal here is never our mismatch.
+  const normalised = validateCanonicalEvent(
+    buildCanonical({
+      provider: 'generic',
+      event: parsed.event,
+      id: await boundedEventId(headers.id ?? ''),
+    }),
+  );
   if (!normalised.ok)
     return c.json(
       {

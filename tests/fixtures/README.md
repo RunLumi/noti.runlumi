@@ -24,9 +24,10 @@ For every manifest entry, in a fresh fake D1, signed with a secret generated at 
 
 - the outcome (`delivered`, `ignored`, `lifecycle`, `ping`) matches the manifest and the golden;
 - the canonical event equals the golden, validates, and is what the queue message was derived from;
-- for GitHub, each of five integrations (no filter; branch allow-list; bots excluded; drafts
-  excluded; label include) delivered or recorded a filter reason;
-- the Slack, Lark, Teams and Discord payloads equal the golden.
+- for GitHub, each of six integrations (no filter; branch allow-list; bots excluded; actor allow-list;
+  drafts excluded; label include) delivered or recorded a filter reason;
+- for the entries marked `render` in the manifest (a representative eight), the Slack, Lark, Teams
+  and Discord payloads equal the golden; the destination suites own rendering for the rest.
 
 Negative cases (truncated body, forged or missing signature, wrong content type, oversize, unsupported
 event, unknown or disabled endpoint, a reused id, a stale timestamp) are in
@@ -42,7 +43,8 @@ UPDATE_GOLDEN=1 npm test -- tests/fixtures/replay.test.ts
 git diff tests/fixtures/golden
 ```
 
-A missing golden fails the suite; it is never created implicitly.
+A missing golden fails the suite; it is never created implicitly, and the update is refused when
+`CI` is set.
 
 ## Adding a fixture
 

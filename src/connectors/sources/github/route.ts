@@ -13,7 +13,8 @@ import { recordAudit } from '../../../audit/audit';
 import { handleLifecycle, LIFECYCLE_EVENTS } from './lifecycle';
 import { repositoryInScope, resolveTenant } from './tenant';
 import { log } from '../../../platform/log';
-import { mapGithubEvent } from './map';
+import { buildCanonical } from '../build';
+import { boundedEventId } from '../../../events/id';
 import type { RoutingFacts } from '../../../routing/filters';
 import { createRouteDecider } from '../../../routing/ingress';
 import { decisionStatement, type RoutingDecisionRow } from '../../../routing/provenance';
@@ -29,6 +30,13 @@ import { ingressLimiter } from '../../../security/rate-limit';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
 export const MAX_BODY_BYTES = 1024 * 1024;
+
+/**
+ * The refusal is logged at most once a minute per isolate: the request is not authenticated yet, so
+ * a caller must not be able to make the log grow with its own traffic.
+ */
+const TOO_LARGE_LOG_INTERVAL_MS = 60_000;
+let lastTooLargeLogAt = Number.NEGATIVE_INFINITY;
 
 type IntegrationRow = {
   id: string;
@@ -75,8 +83,12 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   if (!read.ok) {
     // F63: say WHY, honestly. GitHub itself drops payloads over 25 MB and delivers nothing; a
     // delivery between this cap and that one reaches us and is refused here, which GitHub shows
-    // as a failed delivery. Constants only: the request is not authenticated yet.
-    log('warn', 'github_event_too_large', { reason: 'over_ingress_cap', limit_bytes: MAX_BODY_BYTES });
+    // as a failed delivery. Constants only, sampled: the request is not authenticated yet.
+    const now = Date.now();
+    if (now - lastTooLargeLogAt >= TOO_LARGE_LOG_INTERVAL_MS) {
+      lastTooLargeLogAt = now;
+      log('warn', 'github_event_too_large', { reason: 'over_ingress_cap', limit_bytes: MAX_BODY_BYTES });
+    }
     return c.text('Too large', 413);
   }
   const body = new TextDecoder().decode(read.bytes);
@@ -167,15 +179,18 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   if (!isGithubEventType(eventType)) return c.json({ accepted: true, persisted: 0 }, 202);
 
   // Normalise before routing: from here on nothing reads the provider payload except the noise
-  // facts below (ADR 0020). A mapper that produces an invalid event is a bug and answers 400
-  // before any write, so an invalid event can never reach a renderer.
-  const normalised = validateCanonicalEvent(mapGithubEvent({ kind, event, eventType, deliveryId }));
+  // facts below (ADR 0020). A mapper/validator mismatch is OUR fault, not the sender's: GitHub
+  // never retries, so a 4xx would lose the event silently and show it as the customer's failure.
+  // It is logged loudly (field names only) and acknowledged without a notification.
+  const normalised = validateCanonicalEvent(
+    buildCanonical({ provider: 'github', kind, event, eventType, id: await boundedEventId(deliveryId) }),
+  );
   if (!normalised.ok) {
     log('error', 'canonical_event_invalid', {
       source: 'github',
       fields: normalised.errors.map((e) => `${e.field}:${e.reason}`).slice(0, 10),
     });
-    return c.json({ error: 'schema_invalid' }, 400);
+    return c.json({ accepted: false, ignored: 'schema_invalid' }, 200);
   }
   const canonical = normalised.event;
 

@@ -116,23 +116,75 @@ describe('F60 actor trust through the route', () => {
   });
 });
 
+describe('actor filters through the route', () => {
+  const delivered = (rig: Rig, name: string): number =>
+    (
+      rig.h.db.raw
+        .prepare('SELECT COUNT(*) AS n FROM deliveries WHERE integration_id=?')
+        .get(rig.integrations[name] as string) as { n: number }
+    ).n;
+  const reasonOf = (rig: Rig, name: string): string | undefined =>
+    (
+      rig.h.db.raw
+        .prepare('SELECT reason FROM routing_decisions WHERE integration_id=?')
+        .get(rig.integrations[name] as string) as { reason: string } | undefined
+    )?.reason;
+
+  it('a [bot] login with no sender.type is a bot: it is excluded by bots:exclude (it used to be unknown and pass)', async () => {
+    const rig = await createRig('github', worker);
+    const json = loadFixtureJson(pr) as { sender: Record<string, unknown> };
+    const sender: Record<string, unknown> = { ...json.sender, login: 'renovate[bot]' };
+    delete sender.type;
+    await rig.post(rig.encode({ ...json, sender }), { headers: pr.headers });
+    expect(delivered(rig, 'humans-only')).toBe(0);
+    expect(delivered(rig, 'all')).toBe(1);
+    expect(reasonOf(rig, 'humans-only')).toBe('bot_excluded');
+    expect(rig.messages()[0]?.actor).toBe('renovate[bot]');
+  });
+
+  it('a ghost PR reaches humans-only and actor allow-list integrations as ghost_exempt', async () => {
+    const rig = await createRig('github', worker);
+    await rig.post(body(rig, entry('github/pull_request.opened_by_ghost')), { headers: pr.headers });
+    for (const name of ['humans-only', 'actor-allow']) {
+      expect(delivered(rig, name), name).toBe(1);
+      expect(reasonOf(rig, name), name).toBe('ghost_exempt');
+    }
+    // And is shown to neither as a person.
+    for (const m of rig.messages()) expect(m.actor).toBeUndefined();
+  });
+});
+
 describe('F63 payload caps', () => {
   it('documents the cap and refuses over it with 413, naming the reason in the log (constants only)', async () => {
     expect(MAX_BODY_BYTES).toBe(1024 * 1024);
     const rig = await createRig('github', worker);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const res = await rig.post(new Uint8Array(MAX_BODY_BYTES + 1).fill(0x20), {
-      headers: pr.headers,
-      signature: 'none',
-    });
+    const now = vi.spyOn(Date, 'now');
+    const oversize = (at: number) => {
+      now.mockReturnValue(at);
+      return rig.post(new Uint8Array(MAX_BODY_BYTES + 1).fill(0x20), {
+        headers: pr.headers,
+        signature: 'none',
+      });
+    };
+    const lines = () =>
+      warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('github_event_too_large'));
+    const base = 9_000_000_000_000;
+    const res = await oversize(base);
     expect(res.status).toBe(413);
-    const line = warn.mock.calls.map((c) => String(c[0])).find((l) => l.includes('github_event_too_large'));
-    warn.mockRestore();
-    expect(line).toBeDefined();
-    expect(JSON.parse(line as string)).toMatchObject({
+    expect(lines()).toHaveLength(1);
+    expect(JSON.parse(lines()[0] as string)).toMatchObject({
       reason: 'over_ingress_cap',
       limit_bytes: MAX_BODY_BYTES,
     });
+    // Unauthenticated traffic cannot grow the log: the next refusals inside the minute are silent,
+    // and one a minute later is logged again.
+    for (let i = 1; i <= 5; i++) expect((await oversize(base + i * 1000)).status).toBe(413);
+    expect(lines()).toHaveLength(1);
+    expect((await oversize(base + 61_000)).status).toBe(413);
+    expect(lines()).toHaveLength(2);
+    now.mockRestore();
+    warn.mockRestore();
     expect(rig.count('deliveries')).toBe(0);
   });
 

@@ -306,3 +306,53 @@ describe('GitHub classification feeds the closed catalogue only', () => {
       );
   });
 });
+
+describe('invisible formatting and bounded work (L1, L2)', () => {
+  it('rejects zero-width and tag characters, and allows ZWJ and ZWNJ that real text needs', () => {
+    for (const bad of ['a\u200bb', 'a\u2060b', 'a\ufeffb', 'a\u061cb', 'a\u{e0041}b', 'a\u{e007f}b'])
+      expect(hasUnsafeText(bad), JSON.stringify(bad)).toBe(true);
+    // A family emoji is joined with ZWJ; Persian uses ZWNJ.
+    expect(hasUnsafeText('\u{1f468}\u200d\u{1f469}\u200d\u{1f467}')).toBe(false);
+    expect(hasUnsafeText('\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645')).toBe(false);
+    expect(reasons(withData({ title: 'a\u200bb' }))).toContain('data.title:unsafe_text');
+  });
+
+  it('cleanLine turns invisible formatting into spaces and does bounded work on huge input', () => {
+    expect(cleanLine('a\u200bb\ufeffc', 20)).toBe('a b c');
+    const started = performance.now();
+    const out = cleanLine('x\u200b'.repeat(5_000_000), 50);
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(out.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe('facts are verbatim or unknown (L3, L4)', () => {
+  const map = (event: Record<string, unknown>) =>
+    mapGithubEvent({
+      kind: 'pull_request',
+      event: {
+        action: 'opened',
+        sender: { login: 'a', type: 'User' },
+        repository: { full_name: 'a/b' },
+        ...event,
+      },
+      eventType: 'pull_request.opened',
+      deliveryId: 'd',
+    });
+  const pull = (over: Record<string, unknown>) => ({
+    pull_request: { title: 't', number: 1, labels: [], ...over },
+  });
+
+  it('a branch over the bound is unknown, never a truncated name', () => {
+    const long = 'b'.repeat(CANONICAL_LIMITS.branch + 1);
+    expect(map(pull({ head: { ref: long }, base: { ref: 'main' } })).data.facts.branch).toBeNull();
+    const fits = 'b'.repeat(CANONICAL_LIMITS.branch);
+    expect(map(pull({ head: { ref: fits }, base: { ref: 'main' } })).data.facts.branch).toBe(fits);
+  });
+
+  it('one label that cannot be carried makes the whole list unknown', () => {
+    const labels = [{ name: 'bug' }, { name: 'bad\u200blabel' }];
+    expect(map(pull({ labels })).data.facts.labels).toBeNull();
+    expect(map(pull({ labels: [{ name: 'bug' }] })).data.facts.labels).toEqual(['bug']);
+  });
+});

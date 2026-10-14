@@ -5,7 +5,7 @@
     "status": 202,
     "body": {
       "accepted": true,
-      "persisted": 5
+      "persisted": 6
     }
   },
   "canonical": {
@@ -40,10 +40,11 @@
     "all": "delivered",
     "master-only": "delivered",
     "humans-only": "delivered",
+    "actor-allow": "delivered",
     "ready-only": "delivered",
     "bug-label": "delivered"
   },
-  "delivered": 5,
+  "delivered": 6,
   "message": {
     "title": "push",
     "url": "https://github.com/Codertocat/Hello-World",
@@ -52,131 +53,5 @@
     "repo": "Codertocat/Hello-World",
     "actor": "Codertocat"
   },
-  "rendered": {
-    "slack": {
-      "format": "card",
-      "payload": {
-        "text": "*Info: push*\nCodertocat/Hello-World · by Codertocat\n<https://github.com/Codertocat/Hello-World|Open in source>",
-        "blocks": [
-          {
-            "type": "header",
-            "text": {
-              "type": "plain_text",
-              "text": "Info: push"
-            }
-          },
-          {
-            "type": "context",
-            "elements": [
-              {
-                "type": "plain_text",
-                "text": "Codertocat/Hello-World · by Codertocat"
-              }
-            ]
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": "<https://github.com/Codertocat/Hello-World|Open in source>"
-            }
-          }
-        ]
-      }
-    },
-    "lark": {
-      "format": "card",
-      "payload": {
-        "msg_type": "interactive",
-        "card": {
-          "schema": "2.0",
-          "config": {
-            "enable_forward": true,
-            "summary": {
-              "content": "Info: push"
-            }
-          },
-          "header": {
-            "title": {
-              "tag": "plain_text",
-              "content": "Info: push"
-            },
-            "template": "blue"
-          },
-          "body": {
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "Codertocat/Hello-World · by Codertocat"
-              },
-              {
-                "tag": "markdown",
-                "content": "[Open in source](https://github.com/Codertocat/Hello-World)"
-              }
-            ]
-          }
-        }
-      }
-    },
-    "teams": {
-      "format": "card",
-      "payload": {
-        "type": "message",
-        "attachments": [
-          {
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "contentUrl": null,
-            "content": {
-              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-              "type": "AdaptiveCard",
-              "version": "1.2",
-              "body": [
-                {
-                  "type": "TextBlock",
-                  "text": "Info: push",
-                  "wrap": true,
-                  "weight": "Bolder",
-                  "size": "Medium",
-                  "color": "Default"
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "Codertocat/Hello-World · by Codertocat",
-                  "wrap": true,
-                  "isSubtle": true,
-                  "spacing": "None"
-                }
-              ],
-              "actions": [
-                {
-                  "type": "Action.OpenUrl",
-                  "title": "Open in source",
-                  "url": "https://github.com/Codertocat/Hello-World"
-                }
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "discord": {
-      "format": "card",
-      "payload": {
-        "content": "Info: push",
-        "embeds": [
-          {
-            "title": "Info: push",
-            "url": "https://github.com/Codertocat/Hello-World",
-            "color": 5793192,
-            "footer": {
-              "text": "Codertocat/Hello-World · by Codertocat"
-            }
-          }
-        ],
-        "allowed_mentions": {
-          "parse": []
-        }
-      }
-    }
-  }
+  "rendered": null
 }

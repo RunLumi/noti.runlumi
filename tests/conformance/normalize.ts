@@ -1,14 +1,14 @@
 import { classifyGithubEvent } from '../../src/connectors/sources/github/events';
 import { isGithubEventType } from '../../src/connectors/sources/github/catalog';
-import { mapGithubEvent } from '../../src/connectors/sources/github/map';
-import { parseGenericEvent, toCanonicalEvent } from '../../src/connectors/sources/generic/event';
+import { buildCanonical } from '../../src/connectors/sources/build';
+import { parseGenericEvent } from '../../src/connectors/sources/generic/event';
 import { connectorFor } from '../../src/connectors/sources/registry';
 import {
   prepareDelivery,
   validateDestinationConfig,
   type DestinationKind,
 } from '../../src/connectors/destinations';
-import { canonicalFromDisplay, type CanonicalEvent } from '../../src/events/canonical';
+import type { CanonicalEvent } from '../../src/events/canonical';
 import type { SourceId } from '../../src/events/catalog';
 import type { DeliveryMessage } from '../../src/env';
 import { toNotification } from '../../src/pipeline/consumer';
@@ -31,27 +31,20 @@ export function normalize(
     const kind = headers['x-github-event'] ?? '';
     const eventType = classifyGithubEvent(kind, json);
     return isGithubEventType(eventType)
-      ? mapGithubEvent({ kind, event: json, eventType, deliveryId: id })
+      ? buildCanonical({ provider, kind, event: json, eventType, id })
       : null;
   }
   if (provider === 'generic') {
     const parsed = parseGenericEvent(json);
-    return parsed.ok ? toCanonicalEvent(parsed.event, id) : null;
+    return parsed.ok ? buildCanonical({ provider, event: parsed.event, id }) : null;
   }
-  const connector = connectorFor(provider);
-  const mapped = connector.map({
+  const mapped = connectorFor(provider).map({
     headers: new Headers(headers),
     body: json,
     source: { livemode: provider === 'stripe' ? false : null },
   });
   if (mapped.outcome !== 'deliver') return null;
-  return canonicalFromDisplay({
-    provider,
-    adapterVersion: connector.adapterVersion,
-    id: mapped.eventId ?? id,
-    source: connector.canonicalSource(mapped.display),
-    display: mapped.display,
-  });
+  return buildCanonical({ provider, display: mapped.display, id: mapped.eventId ?? id });
 }
 
 const URLS: Partial<Record<DestinationKind, string>> = {

@@ -17,6 +17,14 @@ export function isUnsafeCodePoint(cp: number, allowNewlines = false): boolean {
     cp === 0x200f ||
     (cp >= 0x202a && cp <= 0x202e) ||
     (cp >= 0x2066 && cp <= 0x2069) ||
+    // Invisible formatting: zero-width space, word joiner, byte-order mark, Arabic letter mark and
+    // the Unicode tag block. ZWJ and ZWNJ (U+200C/D) stay allowed: emoji sequences and Persian or
+    // Indic text need them.
+    cp === 0x200b ||
+    cp === 0x2060 ||
+    cp === 0xfeff ||
+    cp === 0x061c ||
+    (cp >= 0xe0000 && cp <= 0xe007f) ||
     // Unpaired surrogates (a well-formed pair is one code point above 0xffff when iterated).
     (cp >= 0xd800 && cp <= 0xdfff) ||
     // Noncharacters: U+FDD0..U+FDEF and the last two code points of every plane.
@@ -46,8 +54,11 @@ export function cutAt(text: string, max: number): string {
 /** One line of display text: unsafe code points become spaces, whitespace collapses, cut with an ellipsis. */
 export function cleanLine(value: unknown, max: number): string {
   if (typeof value !== 'string') return '';
+  // Bound the work before iterating: at most `max` characters survive, and a few UTF-16 units per
+  // character is generous headroom for whitespace that collapses.
+  const input = cutAt(value, Math.max(max, 1) * 4);
   let out = '';
-  for (const ch of value) {
+  for (const ch of input) {
     const cp = ch.codePointAt(0);
     out += cp !== undefined && isUnsafeCodePoint(cp) ? ' ' : ch;
   }

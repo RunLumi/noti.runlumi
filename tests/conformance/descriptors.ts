@@ -1,13 +1,13 @@
-import { GITHUB_EVENT_TYPES } from './github/catalog';
-import { GITHUB_ADAPTER_VERSION } from './github/map';
-import { MAX_BODY_BYTES as GITHUB_MAX_BODY_BYTES } from './github/route';
-import { GENERIC_ADAPTER_VERSION } from './generic/event';
-import { MAX_BODY_BYTES as GENERIC_MAX_BODY_BYTES } from './generic/route';
-import { TIMESTAMP_TOLERANCE_SECONDS } from './generic/signature';
-import { connectorFor } from './registry';
-import { STRIPE_TOLERANCE_SECONDS } from './stripe/verify';
-import { PROVIDER_KINDS } from './types';
-import type { SourceId } from '../../events/catalog';
+import { GITHUB_EVENT_TYPES } from '../../src/connectors/sources/github/catalog';
+import { GITHUB_ADAPTER_VERSION } from '../../src/connectors/sources/github/map';
+import { MAX_BODY_BYTES as GITHUB_MAX_BODY_BYTES } from '../../src/connectors/sources/github/route';
+import { GENERIC_ADAPTER_VERSION } from '../../src/connectors/sources/generic/event';
+import { MAX_BODY_BYTES as GENERIC_MAX_BODY_BYTES } from '../../src/connectors/sources/generic/route';
+import { TIMESTAMP_TOLERANCE_SECONDS } from '../../src/connectors/sources/generic/signature';
+import { connectorFor } from '../../src/connectors/sources/registry';
+import { STRIPE_TOLERANCE_SECONDS } from '../../src/connectors/sources/stripe/verify';
+import { PROVIDER_KINDS } from '../../src/connectors/sources/types';
+import type { SourceId } from '../../src/events/catalog';
 
 /**
  * The connector contract every source satisfies (spec 05 F71, spec 06 F8x), stated as data so one

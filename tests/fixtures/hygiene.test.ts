@@ -14,24 +14,43 @@ function files(dir: string): string[] {
     return statSync(full).isDirectory() ? files(full) : [full];
   });
 }
-const all = files(FIXTURE_DIR).filter((f) => f.endsWith('.json'));
+const all = files(FIXTURE_DIR).filter((f) => /\.(json|md)$/.test(f));
 
 // Built from pieces so this file itself holds no secret-shaped literal.
 const DENY: readonly [string, RegExp][] = [
   ['OpenAI-style key', new RegExp('sk-' + '[A-Za-z0-9]{20,}')],
   ['GitHub token', new RegExp('gh[pousr]_' + '[A-Za-z0-9]{36}')],
   ['GitHub fine-grained token', new RegExp('github_pat_' + '[A-Za-z0-9_]{20,}')],
+  ['GitLab token', new RegExp('glpat-' + '[A-Za-z0-9_-]{16,}')],
+  ['Slack token', new RegExp('xox[abprs]-' + '[A-Za-z0-9-]{10,}')],
   ['AWS access key', new RegExp('AKIA' + '[0-9A-Z]{16}')],
-  ['Stripe live or restricted key', new RegExp('[sr]k_live_' + '[A-Za-z0-9]{10,}')],
+  ['Stripe key', new RegExp('[sr]k_(live|test)_' + '[A-Za-z0-9]{10,}')],
   ['Stripe signing secret', new RegExp('whsec' + '_[A-Za-z0-9+/=_-]{16,}')],
+  ['JWT', new RegExp('eyJ' + '[A-Za-z0-9_-]{8,}\\.eyJ' + '[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}')],
   ['private key block', new RegExp('-----BEGIN [A-Z ]*' + 'PRIVATE KEY-----')],
   ['bearer credential', /Bearer\s+[A-Za-z0-9._-]{16,}/],
   ['Slack webhook URL', new RegExp('hooks\\.slack\\.com/' + 'services/')],
-  ['bidirectional control', /[‎‏‪-‮⁦-⁩]/],
+  ['Discord webhook URL', new RegExp('discord(app)?\\.com/api/' + 'webhooks/\\d')],
+  ['Teams or Power Automate webhook URL', new RegExp('(logic\\.azure\\.com/' + 'workflows|webhook\\.office\\.com/' + 'webhookb2)')],
+  ['Lark or Feishu bot webhook URL', new RegExp('open\\.(larksuite\\.com|feishu\\.cn)/open-apis/bot/' + 'v2/hook')],
+  ['invisible text control', /[\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff\u061c]|[\u{e0000}-\u{e007f}]/u],
 ];
 
-/** Addresses that appear in the providers' published examples or are reserved for examples. */
-const EMAIL_OK = /@(example\.com|gitlab\.example\.com|github\.com|users\.noreply\.github\.com|gitlab\.com|softcatala\.org)$/;
+/**
+ * The only addresses allowed: the ones that appear verbatim in the providers' published examples,
+ * listed exactly, and the reserved example domain. A new address has to be added here on purpose.
+ */
+const EMAIL_OK = new Set([
+  'git@github.com',
+  'noreply@github.com',
+  '21031067+Codertocat@users.noreply.github.com',
+  'matfax@users.noreply.github.com',
+  'git@gitlab.example.com',
+  'user@gitlab.com',
+  'user_email@gitlab.com',
+  'jordi@softcatala.org',
+]);
+const emailAllowed = (email: string): boolean => EMAIL_OK.has(email) || /@example\.com$/.test(email);
 
 describe('fixtures contain no secrets, no invisible controls and no real personal data', () => {
   it('finds fixtures to scan', () => {
@@ -45,12 +64,12 @@ describe('fixtures contain no secrets, no invisible controls and no real persona
     });
   }
 
-  it('every email address is one the provider published or an example domain', () => {
+  it('every email address is one the provider published, listed exactly, or on example.com', () => {
     const bad: string[] = [];
     for (const f of all) {
       const text = readFileSync(f, 'utf8');
       for (const m of text.matchAll(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/g))
-        if (!EMAIL_OK.test(m[0])) bad.push(`${f.slice(FIXTURE_DIR.length)}: ${m[0]}`);
+        if (!emailAllowed(m[0])) bad.push(`${f.slice(FIXTURE_DIR.length)}: ${m[0]}`);
     }
     expect(bad).toEqual([]);
   });

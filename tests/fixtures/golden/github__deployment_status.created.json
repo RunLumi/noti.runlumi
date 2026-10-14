@@ -5,7 +5,7 @@
     "status": 202,
     "body": {
       "accepted": true,
-      "persisted": 5
+      "persisted": 6
     }
   },
   "canonical": {
@@ -41,10 +41,11 @@
     "all": "delivered",
     "master-only": "delivered",
     "humans-only": "delivered",
+    "actor-allow": "delivered",
     "ready-only": "delivered",
     "bug-label": "delivered"
   },
-  "delivered": 5,
+  "delivered": 6,
   "message": {
     "title": "deployment_status.created",
     "url": "https://github.com/Codertocat/Hello-World",
@@ -54,148 +55,5 @@
     "actor": "Codertocat",
     "summary": "created"
   },
-  "rendered": {
-    "slack": {
-      "format": "card",
-      "payload": {
-        "text": "*Info: deployment_status.created*\nCodertocat/Hello-World · by Codertocat\n<https://github.com/Codertocat/Hello-World|Open in source>\n\ncreated",
-        "blocks": [
-          {
-            "type": "header",
-            "text": {
-              "type": "plain_text",
-              "text": "Info: deployment_status.created"
-            }
-          },
-          {
-            "type": "context",
-            "elements": [
-              {
-                "type": "plain_text",
-                "text": "Codertocat/Hello-World · by Codertocat"
-              }
-            ]
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "plain_text",
-              "text": "created"
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": "<https://github.com/Codertocat/Hello-World|Open in source>"
-            }
-          }
-        ]
-      }
-    },
-    "lark": {
-      "format": "card",
-      "payload": {
-        "msg_type": "interactive",
-        "card": {
-          "schema": "2.0",
-          "config": {
-            "enable_forward": true,
-            "summary": {
-              "content": "Info: deployment_status.created"
-            }
-          },
-          "header": {
-            "title": {
-              "tag": "plain_text",
-              "content": "Info: deployment_status.created"
-            },
-            "template": "blue"
-          },
-          "body": {
-            "elements": [
-              {
-                "tag": "markdown",
-                "content": "Codertocat/Hello-World · by Codertocat"
-              },
-              {
-                "tag": "markdown",
-                "content": "created"
-              },
-              {
-                "tag": "markdown",
-                "content": "[Open in source](https://github.com/Codertocat/Hello-World)"
-              }
-            ]
-          }
-        }
-      }
-    },
-    "teams": {
-      "format": "card",
-      "payload": {
-        "type": "message",
-        "attachments": [
-          {
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "contentUrl": null,
-            "content": {
-              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-              "type": "AdaptiveCard",
-              "version": "1.2",
-              "body": [
-                {
-                  "type": "TextBlock",
-                  "text": "Info: deployment_status.created",
-                  "wrap": true,
-                  "weight": "Bolder",
-                  "size": "Medium",
-                  "color": "Default"
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "Codertocat/Hello-World · by Codertocat",
-                  "wrap": true,
-                  "isSubtle": true,
-                  "spacing": "None"
-                },
-                {
-                  "type": "TextBlock",
-                  "text": "created",
-                  "wrap": true
-                }
-              ],
-              "actions": [
-                {
-                  "type": "Action.OpenUrl",
-                  "title": "Open in source",
-                  "url": "https://github.com/Codertocat/Hello-World"
-                }
-              ]
-            }
-          }
-        ]
-      }
-    },
-    "discord": {
-      "format": "card",
-      "payload": {
-        "content": "Info: deployment\\_status.created",
-        "embeds": [
-          {
-            "title": "Info: deployment_status.created",
-            "url": "https://github.com/Codertocat/Hello-World",
-            "description": "created",
-            "color": 5793192,
-            "footer": {
-              "text": "Codertocat/Hello-World · by Codertocat"
-            }
-          }
-        ],
-        "allowed_mentions": {
-          "parse": []
-        }
-      }
-    }
-  }
+  "rendered": null
 }

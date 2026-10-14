@@ -29,6 +29,8 @@ export interface FixtureEntry {
     /** Add a field that the documented example does not have (its parent must exist). */
     readonly add?: Readonly<Record<string, unknown>>;
   };
+  /** Also render the Slack, Lark, Teams and Discord payloads into the golden (a representative subset). */
+  readonly render?: boolean;
   readonly note?: string;
   readonly unverified?: readonly string[];
 }

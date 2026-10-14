@@ -5,7 +5,7 @@
     "status": 202,
     "body": {
       "accepted": true,
-      "persisted": 4
+      "persisted": 5
     }
   },
   "canonical": {
@@ -40,10 +40,11 @@
     "all": "delivered",
     "master-only": "filtered:unknown_fact",
     "humans-only": "delivered",
+    "actor-allow": "delivered",
     "ready-only": "delivered",
     "bug-label": "delivered"
   },
-  "delivered": 4,
+  "delivered": 5,
   "message": {
     "title": "push",
     "url": "https://github.com/Codertocat/Hello-World",

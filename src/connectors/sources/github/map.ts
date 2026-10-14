@@ -9,7 +9,7 @@ import {
   type CanonicalEvent,
   type CanonicalFacts,
 } from '../../../events/canonical';
-import { cleanLine, cutAt, hasUnsafeText } from '../../../events/text';
+import { cleanLine, hasUnsafeText } from '../../../events/text';
 import { asRecord, str } from '../../../lib/json';
 import { safeHttpsUrl } from '../text';
 import type { GithubEventType } from './catalog';
@@ -63,10 +63,14 @@ function actorOf(event: Record<string, unknown>): CanonicalActor | undefined {
   };
 }
 
-/** A fact is kept verbatim or not at all: it is compared against filters, so it is never rewritten. */
+/**
+ * A fact is kept verbatim or reported unknown (`null`): it is compared against filters, so it is
+ * never rewritten, truncated or partly dropped. Unknown holds an allow-list back (F43), which is
+ * the safe direction.
+ */
 function fact(value: string | null): string | null {
-  if (value === null || value.length === 0 || hasUnsafeText(value)) return null;
-  return cutAt(value, L.branch);
+  if (value === null || value.length === 0 || value.length > L.branch || hasUnsafeText(value)) return null;
+  return value;
 }
 
 function factsOf(kind: string, event: Record<string, unknown>): CanonicalFacts {
@@ -75,8 +79,8 @@ function factsOf(kind: string, event: Record<string, unknown>): CanonicalFacts {
     branch: fact(raw.branch),
     baseBranch: fact(raw.baseBranch),
     draft: raw.draft,
-    labels:
-      raw.labels === null ? null : raw.labels.filter((l) => !hasUnsafeText(l)).map((l) => cutAt(l, L.label)),
+    // One label that cannot be carried makes the whole list unknown, never a shorter list.
+    labels: raw.labels === null || raw.labels.some((l) => hasUnsafeText(l)) ? null : [...raw.labels],
   };
 }
 

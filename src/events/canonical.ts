@@ -1,4 +1,5 @@
 import type { RoutingFacts } from '../routing/filters';
+import { hasUnsafeText } from './text';
 import { severityOfStatus, type EventStatus, type Severity, type SourceId } from './catalog';
 
 /**
@@ -176,6 +177,9 @@ export function canonicalFromDisplay(input: {
   const { display } = input;
   const eventType = display.eventType ?? 'notification';
   const status = display.status ?? 'info';
+  // Degrade rather than refuse: a link that is not a plain https URL is dropped, and the event is
+  // still delivered without it.
+  const url = display.url && isPlainHttpsUrl(display.url) ? display.url : '';
   return {
     specversion: CANONICAL_SPECVERSION,
     id: input.id,
@@ -189,12 +193,22 @@ export function canonicalFromDisplay(input: {
       status,
       severity: severityOfStatus(status),
       facts: NO_FACTS,
-      ...(display.url ? { url: display.url } : {}),
+      ...(url ? { url } : {}),
       ...(display.repo ? { repo: display.repo } : {}),
       ...(display.actor ? { actor: plainActor(display.actor) } : {}),
       ...(display.summary ? { summary: display.summary } : {}),
     },
   };
+}
+
+function isPlainHttpsUrl(value: string): boolean {
+  if (value.length > CANONICAL_LIMITS.url || hasUnsafeText(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && url.hostname !== '';
+  } catch {
+    return false;
+  }
 }
 
 /** The URI-reference of a repository-scoped source, or the bare host when the path is unusable. */
