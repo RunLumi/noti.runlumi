@@ -1,7 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
-import { AUDIT_TOTAL_CAP, changesOf, parseAuditFilters, buildAuditQuery } from '../../src/api/audit-view';
+import {
+  AUDIT_TOTAL_CAP,
+  buildAuditCountQuery,
+  changesOf,
+  parseAuditFilters,
+  buildAuditQuery,
+} from '../../src/api/audit-view';
 import { diffMetadata } from '../../src/audit/diff';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
@@ -88,6 +94,8 @@ function event(e: Seed): void {
 }
 
 beforeEach(() => {
+  // A fixed clock: the count's default window and the seeded dates must not drift with the real date.
+  vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 14, 12));
   db = createFakeD1();
   for (const id of ['alice', 'bob', 'carol', 'dave']) {
     db.raw
@@ -146,7 +154,9 @@ describe('actor, target and request filters', () => {
   it('filters by a current member, and by the system for events no person took', async () => {
     expect(await ids('?actor=alice')).toEqual(['e4', 'e1']);
     expect(await ids('?actor=bob')).toEqual(['e2']);
-    expect(await ids('?actor=system')).toEqual(['e3']);
+    expect(await ids('?actor=~system')).toEqual(['e3']);
+    // A plain `system` is just a user id: it is not the sentinel, and no member has it.
+    expect(await ids('?actor=system')).toEqual([]);
   });
 
   it('matches nothing for someone who is not a member here, so it cannot probe other workspaces', async () => {
@@ -248,7 +258,7 @@ describe('total', () => {
     );
     db.raw.exec('BEGIN');
     for (let i = 0; i < AUDIT_TOTAL_CAP + 5; i++)
-      insert.run(`bulk${i}`, 'org-a', 'integration.update', 'integration', 'success', '2026-09-01 00:00:00');
+      insert.run(`bulk${i}`, 'org-a', 'integration.update', 'integration', 'success', '2026-10-10 00:00:00');
     db.raw.exec('COMMIT');
     const body = await (await get('/api/audit?limit=1')).json<{ total: number; totalCapped: boolean }>();
     expect(body.total).toBe(AUDIT_TOTAL_CAP);
@@ -383,23 +393,76 @@ describe('fails closed', () => {
     error.mockRestore();
   });
 
-  it('answers 503, not a smaller page, when the count cannot be produced', async () => {
+  it('still lists, with total null and totalCapped true, when the count fails or overruns', async () => {
     event({ id: 'a1', org: 'org-a', actor: 'alice', at: '2026-10-01 10:00:00' });
-    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const real = db.d1;
-    const failingCount = new Proxy(real, {
-      get: (target, prop, receiver) =>
-        prop === 'prepare'
-          ? (sql: string) =>
-              /SELECT COUNT\(\*\) AS n FROM \(SELECT 1 FROM audit_events/.test(sql)
-                ? { bind: () => ({ first: () => Promise.reject(new Error('D1 down')) }) }
-                : target.prepare(sql)
-          : (Reflect.get(target, prop, receiver) as unknown),
+    const withCount = (first: () => Promise<unknown>) =>
+      new Proxy(real, {
+        get: (target, prop, receiver) =>
+          prop === 'prepare'
+            ? (sql: string) =>
+                /SELECT COUNT\(\*\) AS n FROM \(SELECT 1 FROM audit_events/.test(sql)
+                  ? { bind: () => ({ first }) }
+                  : target.prepare(sql)
+            : (Reflect.get(target, prop, receiver) as unknown),
+      });
+    const failed = await get('/api/audit', 'alice', {
+      DB: withCount(() => Promise.reject(new Error('D1 down'))),
     });
-    const res = await get('/api/audit', 'alice', { DB: failingCount });
-    error.mockRestore();
-    expect(res.status).toBe(503);
-    expect(await res.json()).not.toHaveProperty('events');
+    expect(failed.status).toBe(200);
+    const body = await failed.json<{
+      events: { id: string }[];
+      total: number | null;
+      totalCapped: boolean;
+    }>();
+    expect(body.events.map((e) => e.id)).toEqual(['a1']);
+    expect(body.total).toBeNull();
+    expect(body.totalCapped).toBe(true);
+    // A count that never answers is cut off by its budget and the page still comes back.
+    const slow = await get('/api/audit', 'alice', { DB: withCount(() => new Promise(() => undefined)) });
+    expect(slow.status).toBe(200);
+    expect((await slow.json<{ total: number | null }>()).total).toBeNull();
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('audit_total_unavailable'))).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('bounds the count by a default window and says so; a from filter is the caller’s own window', async () => {
+    event({ id: 'old', org: 'org-a', actor: 'alice', at: '2026-05-01 10:00:00' });
+    event({ id: 'new', org: 'org-a', actor: 'alice', at: '2026-10-01 10:00:00' });
+    const plain = await (await get('/api/audit')).json<{ total: number; totalSince: string | null }>();
+    expect(plain.total).toBe(1);
+    expect(plain.totalSince).toMatch(/^2026-07-1\d \d\d:\d\d:\d\d$/);
+    const wide = await (
+      await get('/api/audit?from=2026-01-01')
+    ).json<{ total: number; totalSince: string | null }>();
+    expect(wide.total).toBe(2);
+    expect(wide.totalSince).toBeNull();
+  });
+
+  it('plans every count as an index range inside the workspace, never a scan of the log', () => {
+    for (const q of [
+      '',
+      '?actor=alice',
+      '?target=int-1',
+      '?correlationId=req-abc-1234',
+      '?action=source.update&outcome=denied',
+      '?from=2026-10-01',
+    ]) {
+      const parsed = parseAuditFilters((n) => new URLSearchParams(q).get(n) ?? undefined);
+      if (!parsed.ok) throw new Error(q);
+      const built = buildAuditCountQuery('org-a', parsed.value);
+      const plan = (
+        db.raw.prepare(`EXPLAIN QUERY PLAN ${built.sql}`).all(...(built.values as (string | number)[])) as {
+          detail: string;
+        }[]
+      )
+        .map((r) => r.detail)
+        .join(' | ');
+      expect(plan, q).toMatch(/USING (COVERING )?INDEX audit_events_org_/);
+      expect(plan, q).toMatch(/organization_id=\?/);
+      expect(plan, q).not.toMatch(/SCAN e\b|SCAN audit_events/);
+    }
   });
 
   it('refuses the whole page when a row is not this workspace’s, however it got there', async () => {
@@ -441,3 +504,5 @@ describe('fails closed', () => {
     expect(last).toBe(429);
   });
 });
+
+afterEach(() => vi.restoreAllMocks());

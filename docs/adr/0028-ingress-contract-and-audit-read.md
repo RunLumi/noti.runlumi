@@ -102,13 +102,16 @@ records about a refusal, and how an admin reads that record back.
    the request in `auditStatement`. Rows from before the migration, and from a cron job or queue consumer, have none. No CHECK on the
    column on purpose (a CHECK makes SQLite scan the table once during `ADD COLUMN`); the writer bounds it. The append-only trigger
    refuses UPDATE only, so adding a column is allowed.
-2. **Filters** (all bound parameters, all inside `e.organization_id = ?`): `actor` (a current member's user id, or `system`),
+2. **Filters** (all bound parameters, all inside `e.organization_id = ?`): `actor` (a current member's user id, or the sentinel `~system`, which no user id can equal),
    `target` and `targetType`, `correlationId`. **`actor` matches only current members**: an outsider whose probe was recorded here or a
    former member matches nothing, so the filter cannot be used to ask whether a user id ever touched this workspace. The member list for
    the dashboard comes from the existing `GET /api/workspace/team` (names and ids; the page keeps names only). Three indexes lead with
    `organization_id` so each filter is a seek inside one workspace.
-3. **`total`**, on the first page only, counted up to 10,000 (`totalCapped` says "more than"); the inner `LIMIT` bounds the work, so a
-   workspace with a long log cannot make page one scan it.
+3. **`total`**, on the first page only, counted up to 10,000 (`totalCapped` says "more than"). It is a convenience and **never fails the
+   list** (review M2): with no `from` filter the count covers the last 90 days (`totalSince` says so), so it is always a range seek on
+   `(organization_id, created_at)` or on the actor, target or request-id index; `EXPLAIN QUERY PLAN` is asserted for each filter
+   (`tests/api/audit-read.test.ts`), so no new composite index was needed. A count that errors or overruns its 1.5 s budget leaves the page
+   intact with `total: null, totalCapped: true` and a `audit_total_unavailable` warning.
 4. **Field diff** for the few non-secret fields an update changes: `enabled`, `repo`, and the subscribed updates (added and removed).
    The writer (`src/audit/diff.ts`) stores `previousEnabled`, `previousRepo`, `eventTypesAdded`, `eventTypesRemoved` for the fields the
    request set and that really changed; the reader (`changesOf`) rebuilds `{field, kind, before, after}` from the same keys and shows a
@@ -116,7 +119,7 @@ records about a refusal, and how an admin reads that record back.
    never diffed** (F222: "secrets are represented by their occurrence, never their value"): those rows say only that the field changed.
    Rows written before this have no diff. Lists are stored as deltas because metadata holds only primitives and string arrays, and the
    4 KiB limit must not drop a whole row.
-5. **Fail closed.** The route is wrapped: a failed query, a failed limiter write, a failed count, or any returned row whose
+5. **Fail closed.** The route is wrapped: a failed query, a failed limiter write, or any returned row whose
    `organization_id` is not the caller's workspace answers `503 {error, correlation_id}` with `Retry-After: 5` and no events: never an
    empty list, never a partial page. The tenant check is defence in depth (the query already filters); it logs
    `audit_read_failed` with `code: tenant_mismatch` or `read_failed`, never SQL or a row. The dashboard already shows a failed query as
@@ -133,6 +136,17 @@ every keystroke, and an id that cannot be valid is flagged (`aria-invalid`, text
 about this", "Show events from this request"), a "What changed" block with "from X to Y" lines (words, not an arrow: the bundled
 Geist subset has no U+2192, which the Vietnamese glyph test caught) and the request id. The CSV gains the request id and the diff.
 Everything is in English and Vietnamese (`messages.audit.en.ts` / `.vi.ts`; Vietnamese not reviewed by a native speaker).
+
+## Accepted trade-offs (security review of PR #59)
+
+- **410 before any signature check.** Anyone holding an old or leaked endpoint URL can tell enabled from disabled (200/401/202 versus
+  410), and the identical-404 property for disabled endpoints is intentionally dropped. The URL is the capability (144 bits), so this tells
+  its holder nothing they could not learn by sending a signed event, and it is what tells a sender to stop. Also in `docs/THREAT_MODEL.md`.
+- **`ingress_usage` is write-only** (nothing reads it yet) and every accepted event does one UPSERT on a per-workspace, per-day, per-source
+  row, a hot row for a busy source; D1 serialises writes, and a failure only under-counts. Revisit with batching if it shows in latency.
+- **Probe dedupe race.** Two concurrent first events for one installation can both pass the dedupe check and write two rows; bounded by the
+  caps, harmless to read. The probe caps are per installation (3 a minute) and platform-wide (30 a minute), dedupe runs first so repeats
+  spend nothing, and over the ceiling one `probe_audit_capped` marker and a warning are written (review M1).
 
 ## Consequences
 

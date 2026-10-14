@@ -5,6 +5,7 @@ import { IconDownload, IconInbox, IconLock, IconRefresh } from '@tabler/icons-re
 import { Button, Notice } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
 import { t, tp } from '../i18n';
+import { formatDate } from '../i18n/format';
 import { useLocale } from '../i18n/LocaleProvider';
 import { authApi } from '../lib/api';
 import { describeError } from '../integrations/errors';
@@ -174,11 +175,16 @@ export function AuditPage() {
             <section aria-labelledby="audit-count">
               {list.isError && <Notice kind="warning">{t('audit.error.stale')}</Notice>}
               <p id="audit-count" className="list-count" aria-live="polite">
+                {firstPage && firstPage.total === null && firstPage.totalCapped && (
+                  <>{t('audit.total.unknown')} </>
+                )}
                 {total !== null && (
                   <>
                     {firstPage?.totalCapped
                       ? t('audit.total.capped', { count: total })
-                      : tp('audit.total', total)}{' '}
+                      : firstPage?.totalSince
+                        ? tp('audit.total.since', total, { date: formatDate(firstPage.totalSince) })
+                        : tp('audit.total', total)}{' '}
                   </>
                 )}
                 {tp('audit.count', rows.length)}{' '}

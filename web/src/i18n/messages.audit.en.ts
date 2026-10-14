@@ -38,6 +38,11 @@ export const auditEn = {
   'audit.filter.apply': 'Press Enter or leave the field to apply.',
 
   'audit.total': { one: '{count} event matches.', other: '{count} events match.' },
+  'audit.total.since': {
+    one: '{count} event matches since {date}.',
+    other: '{count} events match since {date}.',
+  },
+  'audit.total.unknown': 'The number of matches could not be counted.',
   'audit.total.capped': 'More than {count} events match.',
   'audit.showAbout': 'Show events about this',
   'audit.showAbout.label': 'Show events about {subject}',

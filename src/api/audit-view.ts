@@ -15,6 +15,8 @@ export const AUDIT_DEFAULT_PAGE = 25;
 export const AUDIT_MAX_PAGE = 100;
 /** The total is counted up to this many matches; past it the answer is "at least this many". */
 export const AUDIT_TOTAL_CAP = 10_000;
+/** With no `from` filter the total covers this many recent days (a bounded range seek, never a scan). */
+export const AUDIT_TOTAL_WINDOW_DAYS = 90;
 
 export type SummaryValue = string | number | boolean | readonly string[];
 export interface SummaryItem {
@@ -341,7 +343,11 @@ const validTarget = (value: string): boolean =>
     const code = ch.codePointAt(0) ?? 0;
     return code > 0x1f && code !== 0x7f;
   });
-export const SYSTEM_ACTOR = 'system';
+/**
+ * The filter value for "events no person took". It starts with `~`, which no user id can (ids are letters,
+ * numbers, `_` and `-`), so it can never collide with a member whose id happens to be `system`.
+ */
+export const SYSTEM_ACTOR = '~system';
 
 const isSubjectType = (v: string): v is (typeof AUDIT_SUBJECT_TYPES)[number] =>
   (AUDIT_SUBJECT_TYPES as readonly string[]).includes(v);
@@ -362,7 +368,8 @@ export function parseAuditFilters(query: (name: string) => string | undefined): 
   if (action && !isAuditAction(action)) fields.push({ field: 'action', message: 'Unknown action.' });
   if (outcome && outcome !== 'success' && outcome !== 'denied')
     fields.push({ field: 'outcome', message: 'Use success or denied.' });
-  if (actor && !ACTOR_ID.test(actor)) fields.push({ field: 'actor', message: 'Not a valid member id.' });
+  if (actor && actor !== SYSTEM_ACTOR && !ACTOR_ID.test(actor))
+    fields.push({ field: 'actor', message: 'Not a valid member id.' });
   if (target && !validTarget(target)) fields.push({ field: 'target', message: 'Not a valid id.' });
   if (targetType && !isSubjectType(targetType))
     fields.push({ field: 'targetType', message: 'Unknown kind of thing.' });
@@ -472,11 +479,24 @@ export function buildAuditQuery(orgId: string, f: AuditFilters): Built {
  * How many events match, ignoring the page cursor, counted up to {@link AUDIT_TOTAL_CAP} so a workspace
  * with a long log cannot make the first page scan it all. The inner `LIMIT` is what bounds the work.
  */
-export function buildAuditCountQuery(orgId: string, f: AuditFilters): Built {
-  const { terms, values } = whereOf(orgId, f, false);
+export function buildAuditCountQuery(
+  orgId: string,
+  f: AuditFilters,
+  nowMs: number = Date.now(),
+): Built & { readonly since: string | null } {
+  // Without a `from`, only the last AUDIT_TOTAL_WINDOW_DAYS days are counted, so the count is always a
+  // range seek on (organization_id, created_at) and never a scan of the whole log. `since` says so.
+  const since = f.from ? null : sqliteTime(nowMs - AUDIT_TOTAL_WINDOW_DAYS * 86_400_000);
+  const { terms, values } = whereOf(orgId, since ? { ...f, from: since } : f, false);
   const filters = terms.map((t) => ` AND ${t}`).join('');
   return {
     sql: `SELECT COUNT(*) AS n FROM (SELECT 1 FROM audit_events e WHERE e.organization_id = ?${filters} LIMIT ?)`,
     values: [...values, AUDIT_TOTAL_CAP + 1],
+    since,
   };
+}
+
+/** `YYYY-MM-DD HH:MM:SS` UTC, the format `created_at` is stored in. */
+function sqliteTime(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
 }

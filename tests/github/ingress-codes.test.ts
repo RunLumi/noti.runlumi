@@ -163,9 +163,31 @@ describe('1.23 refused tenants are audited, boundedly, and the answer does not c
 
   it('caps the platform-wide rate, so many installation ids cannot flood the log', async () => {
     const rig = await createRig('github', worker);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     for (let i = 0; i < WEBHOOK_PROBES_RECORDED_PER_MINUTE + 10; i++)
       expect((await rig.post(asInstallation(rig, 5000 + i), { headers: pr.headers })).status).toBe(403);
-    expect(refusals(rig)).toHaveLength(WEBHOOK_PROBES_RECORDED_PER_MINUTE);
+    const rows = refusals(rig) as { s: string | null; m: string }[];
+    // 30 recorded, then ONE marker that the rest were not (never silent).
+    expect(rows.filter((r) => r.s !== null)).toHaveLength(WEBHOOK_PROBES_RECORDED_PER_MINUTE);
+    expect(rows.filter((r) => r.s === null)).toEqual([
+      expect.objectContaining({ m: JSON.stringify({ reason: 'probe_audit_capped' }) }),
+    ]);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('webhook_probe_audit_capped'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('a chatty installation never spends another tenant’s budget', async () => {
+    const rig = await createRig('github', worker);
+    for (let i = 0; i < 100; i++)
+      await rig.post(asInstallation(rig, 900), { headers: pr.headers, deliveryId: `c${i}` });
+    const used = rig.h.db.raw
+      .prepare("SELECT count FROM api_rate_limits WHERE key='probe-audit:github-webhook'")
+      .get() as { count: number };
+    // Dedupe runs first: 99 repeats spent nothing from the platform budget.
+    expect(used.count).toBe(1);
+    expect((await rig.post(asInstallation(rig, 901), { headers: pr.headers })).status).toBe(403);
+    expect(refusals(rig)).toHaveLength(2);
   });
 
   it('records a suspended installation against ITS workspace', async () => {

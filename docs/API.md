@@ -723,7 +723,7 @@ Query: `limit` (1 to 100, default 25), `cursor` (the opaque `nextCursor` of the 
 (`success` or `denied`), `from` and `to` (`YYYY-MM-DD`, the whole UTC day, or an ISO instant), and, since
 ADR 0028:
 
-- `actor`: a CURRENT member's user id, or `system` for events no person took. Anyone who is not a member of
+- `actor`: a CURRENT member's user id, or `~system` for events no person took (no user id can start with `~`). Anyone who is not a member of
   this workspace (an outsider whose probe was recorded here, a former member) matches nothing, so the filter
   cannot be used to ask whether a user id ever touched the workspace. Ids come from `GET /api/workspace/team`.
 - `target` and `targetType`: the id and kind (`integration`, `source`, `delivery`, `organization`,
@@ -733,7 +733,9 @@ ADR 0028:
 
 Anything invalid is `422 {"error":"Validation failed","fields":[...]}`. The first page (no `cursor`) also
 carries `total`, the number of events the filters match in this workspace, counted up to 10,000
-(`totalCapped: true` means "more than that"); later pages carry `total: null`.
+(`totalCapped: true` means "more than that"); later pages carry `total: null`. With no `from`, the count covers the last 90
+days and `totalSince` (a UTC time) says so, otherwise `totalSince` is null. The count never fails the list: if it errors or
+overruns 1.5 s the page still answers with `total: null, totalCapped: true`.
 
 ```ts
 type AuditPage = {
@@ -760,6 +762,7 @@ type AuditPage = {
   nextCursor: string | null;
   total: number | null;                // first page only; capped at 10,000
   totalCapped: boolean;
+  totalSince: string | null;           // UTC start of the default 90-day count window, or null
   retentionDays: number;               // AUDIT_RETENTION_DAYS in force
 };
 ```
@@ -770,7 +773,7 @@ What is **not** returned, deliberately: the actor's email or id, `ip`, `user_age
 characters are removed. A webhook URL, a signing secret, a filter body or a name is never diffed: those
 rows say only that the field changed. See ADR 0019 and ADR 0028.
 
-**Fails closed.** A failed read, a failed limiter write, a failed count or a row that is not this
+**Fails closed.** A failed read, a failed limiter write or a row that is not this
 workspace's answers `503 {error, correlation_id}` with no events and `Retry-After: 5`: never an empty or
 partial list. The dashboard shows that as an error, not as "no events".
 

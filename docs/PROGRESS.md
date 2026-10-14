@@ -1699,7 +1699,7 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
 - **Migration:** `0028_ingress_usage_audit_read.sql` plus its seal, the next contiguous number on `main`; a parallel slice that merges first
   forces a renumber here on rebase.
 - Tests changed on purpose (202 to 200, 404 to 410, text to JSON bodies, 415 where a GitHub request had no content type): listed in the ADR.
-- **Verified (locally, after the renumber):** `npm run format && npm run check` (168 files, 4288 tests, typecheck, web typecheck,
+- **Verified (locally, after the renumber):** `npm run format && npm run check` (168 files, 4291 tests, typecheck, web typecheck,
   lint, build, worker bundle), `npm run test:coverage` (floor held), `npm run test:integration` (the real `wrangler d1 migrations apply
   --local` chain including 0028, 34 tests), `npm run docs:spec-status`, `npm run docs:retention`.
 - **Not verified:** any real GitHub, GitLab or Stripe reaction to 200, 410 or 415; 0028 on a real D1; the CI jobs on the CI host; a screen reader,

@@ -84,7 +84,9 @@ export function AuditFilters({ search, members, onChange }: AuditFiltersProps) {
     onChange(value ? { ...search, [key]: value } : without(search, key));
   // A member who left is still the actor of old rows, but cannot be chosen: only current members.
   const knownActor =
-    search.actor === undefined || search.actor === 'system' || members.some((m) => m.userId === search.actor);
+    search.actor === undefined ||
+    search.actor === '~system' ||
+    members.some((m) => m.userId === search.actor);
   return (
     <form
       className="filters card audit-filters"
@@ -122,7 +124,7 @@ export function AuditFilters({ search, members, onChange }: AuditFiltersProps) {
           onChange={(e) => set('actor', e.target.value)}
         >
           <option value="">{t('audit.filter.actor.all')}</option>
-          <option value="system">{t('audit.actor.system')}</option>
+          <option value="~system">{t('audit.actor.system')}</option>
           {members.map((m) => (
             <option key={m.userId} value={m.userId}>
               {m.name}

@@ -36,6 +36,8 @@ export const auditVi = {
   'audit.filter.apply': 'Nhấn Enter hoặc rời khỏi ô để áp dụng.',
 
   'audit.total': { other: 'Có {count} sự kiện khớp.' },
+  'audit.total.since': { other: 'Có {count} sự kiện khớp kể từ {date}.' },
+  'audit.total.unknown': 'Không đếm được số sự kiện khớp.',
   'audit.total.capped': 'Có hơn {count} sự kiện khớp.',
   'audit.showAbout': 'Xem các sự kiện về mục này',
   'audit.showAbout.label': 'Xem các sự kiện về {subject}',

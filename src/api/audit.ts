@@ -36,6 +36,9 @@ const WINDOW_MS = 60_000;
 /** An admin paging through history; well above a person, well below a script. */
 export const AUDIT_READS_PER_MINUTE = 120;
 
+/** The most the first page waits for the count before answering without it. */
+export const AUDIT_COUNT_BUDGET_MS = 1500;
+
 class TenantMismatch extends Error {}
 
 const audit = new Hono<{ Bindings: Bindings }>();
@@ -68,14 +71,30 @@ audit.get('/', async (c) => {
     // The total belongs to the filter, not the page: counted once, on the first page.
     let total: number | null = null;
     let totalCapped = false;
+    let totalSince: string | null = null;
     if (!filters.cursor) {
+      // The count is a convenience: the LIST never fails because of it. If it errors or overruns its
+      // budget the page still answers, with `total: null` and `totalCapped: true` ("unknown, many").
       const count = buildAuditCountQuery(who.orgId, filters);
-      const row = await c.env.DB.prepare(count.sql)
-        .bind(...count.values)
-        .first<{ n: number }>();
-      if (!row || typeof row.n !== 'number') throw new Error('count unavailable');
-      total = Math.min(row.n, AUDIT_TOTAL_CAP);
-      totalCapped = row.n > AUDIT_TOTAL_CAP;
+      totalSince = count.since;
+      try {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const row = await Promise.race([
+          c.env.DB.prepare(count.sql)
+            .bind(...count.values)
+            .first<{ n: number }>(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('count over budget')), AUDIT_COUNT_BUDGET_MS);
+          }),
+        ]).finally(() => clearTimeout(timer));
+        if (!row || typeof row.n !== 'number') throw new Error('count unavailable');
+        total = Math.min(row.n, AUDIT_TOTAL_CAP);
+        totalCapped = row.n > AUDIT_TOTAL_CAP;
+      } catch {
+        log('warn', 'audit_total_unavailable', {});
+        total = null;
+        totalCapped = true;
+      }
     }
     return c.json(
       {
@@ -85,6 +104,7 @@ audit.get('/', async (c) => {
           rows.results.length > filters.limit && last ? encodeCursor(last.created_at, last.id) : null,
         total,
         totalCapped,
+        totalSince,
         retentionDays: parseRetentionDays(c.env.AUDIT_RETENTION_DAYS, AUDIT_RETENTION),
       },
       200,

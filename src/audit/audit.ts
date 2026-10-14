@@ -89,6 +89,11 @@ const DENIAL_DEDUPE_SECONDS = 60;
 export interface DenialOptions {
   /** How long an identical denial (same action, actor, workspace and subject) collapses into one row. */
   readonly dedupeSeconds?: number;
+  /**
+   * Asked only when no identical denial exists yet, so a repeat never spends a budget. Return false to
+   * skip the write (a cap). A throwing gate skips it too; the response is never affected.
+   */
+  readonly gate?: () => Promise<boolean>;
 }
 
 /**
@@ -116,7 +121,7 @@ export async function recordDenial(
         `-${options.dedupeSeconds ?? DENIAL_DEDUPE_SECONDS} seconds`,
       )
       .first();
-    if (!recent) await recordAudit(db, entry);
+    if (!recent && (options.gate ? await options.gate() : true)) await recordAudit(db, entry);
   } catch {
     console.error(JSON.stringify({ event: 'audit_write_failed', action: entry.action }));
   }

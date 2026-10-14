@@ -56,6 +56,8 @@ export interface AuditPage {
   /** How many events match the filters (first page only), counted up to a cap. */
   readonly total: number | null;
   readonly totalCapped: boolean;
+  /** ISO start of the window the total covers when no `from` filter was set; null otherwise. */
+  readonly totalSince: string | null;
 }
 
 export interface AuditFilters {
@@ -186,6 +188,7 @@ export const auditApi = {
       retentionDays: body.retentionDays,
       total: typeof body.total === 'number' ? body.total : null,
       totalCapped: body.totalCapped === true,
+      totalSince: typeof body.totalSince === 'string' ? `${body.totalSince.replace(' ', 'T')}Z` : null,
     };
   },
 };

@@ -52,7 +52,7 @@ export function validateAuditSearch(search: Record<string, unknown>): AuditSearc
   const outcome = search.outcome === 'success' || search.outcome === 'denied' ? search.outcome : undefined;
   const from = validDate(search.from);
   const to = validDate(search.to);
-  const actor = matching(search.actor, ACTOR_ID);
+  const actor = search.actor === '~system' ? '~system' : matching(search.actor, ACTOR_ID);
   const target =
     typeof search.target === 'string' && validTargetText(search.target) ? search.target : undefined;
   const targetType = AUDIT_SUBJECT_TYPES.find((t) => t === search.targetType);
