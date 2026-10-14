@@ -98,7 +98,8 @@ describe('scheduled()', () => {
     };
     expect(Number(first.value)).toBeGreaterThan(0);
     expect(first.updated_at).toBe(Number(first.value));
-    await new Promise((r) => setTimeout(r, 5));
+    // The suite pins Date (tests/setup/pin-clock.ts); move it forward explicitly.
+    vi.setSystemTime(Date.now() + 1_000);
     await expect(tick()).rejects.toThrow();
     const second = db.raw.prepare("SELECT value FROM ops_state WHERE key='cron_heartbeat'").get() as {
       value: string;
