@@ -1,7 +1,7 @@
 # ADR 0027: Platform gates: exactOptionalPropertyTypes, a coverage floor, an integration job, migration immutability
 
 Status: Accepted · Date: 2026-10-14 · Implements most of slice 1.15 of
-[`docs/specs/REMAINING.md`](../specs/REMAINING.md): F01, F02, F05 (in part). No migration, no runtime change.
+[`docs/specs/REMAINING.md`](../specs/REMAINING.md): F01, F02, F05 (in part). No migration. Behaviour-preserving source edits only, forced by the stricter compiler flag: `parseUpdateIntegration` no longer assigns a failed parse (already an error response) into its output object, and the Stripe mapper omits an absent status through `statusField` instead of writing `undefined`.
 
 ## Context
 
@@ -19,20 +19,32 @@ should be visible, not a habit).
    `null` instead of `undefined` as a request body. `web/tsconfig.json` is unchanged; it also checks clean with the flag, but
    the flag is not enabled there.
 2. **A coverage floor** in `vitest.config.ts` (`v8`, `src/` and `web/src/`, generated route tree excluded): statements 89,
-   branches 84, functions 85, lines 91, set a little under the measured 89.99, 84.11, 85.38, 91.58. It is a floor, not a
-   target; lowering a number is a reviewed change. CI runs `npm run test:coverage` in place of `npm test`.
+   branches 83.5, functions 85, lines 91, set under the measured 89.99, 84.11, 85.38, 91.58. Branches has half a point of margin
+   (the first draft had 0.11, which a harmless refactor would trip). It is a floor, not a target; lowering a number is a
+   reviewed change. **The floor is enforced in CI only** (`npm run test:coverage`); `npm run check` does not run coverage, to
+   keep the local loop fast.
 3. **A separate `integration` job** runs `npm run test:integration`, which is `tests/migration-0026-d1.test.ts`: the real
    `wrangler d1 migrations apply --local` over the whole chain from an empty database, then the 0026 finalize and recover
    scripts. No secrets, no network, no account. The file also still runs in `verify` (the coverage run needs every test);
    the job exists so the migration proof has its own red/green signal and can be required separately.
-4. **Migration immutability** (`migrations.sealed.json`, `scripts/migration-seal.mjs`, `scripts/lib/migration-seal.mjs`).
-   The manifest holds the SHA-256 of every migration (CRLF-insensitive). `npm run migrations:check` fails on an edited,
-   deleted or unsealed migration and on non-increasing numbering (gaps are allowed: 0023 is intentionally absent). On a pull
-   request CI also passes `--base origin/<base>`, which reads the base branch's manifest and fails if any entry was removed or
-   its hash changed, so editing a file and its hash together does not pass. `npm run migrations:seal` adds hashes for new
-   files only and refuses to re-hash an edited one. The manifest is one entry per line, sorted, so two PRs that add
-   migrations conflict only on adjacent lines.
+4. **Migration seal, one sidecar per migration** (`migrations/NNNN_name.sql.sha256`, `scripts/migration-seal.mjs`,
+   `scripts/lib/migration-seal.mjs`). `npm run migrations:seal` writes the SHA-256 (CRLF-insensitive) of each migration that
+   has no sidecar and never rewrites one; if any sealed file was edited or the chain is malformed it writes nothing and exits 1.
+   `npm run migrations:check` fails on an edited, deleted, unsealed or duplicate-numbered migration, a bad sidecar, and any
+   numbering gap not on the explicit allow-list (`ALLOWED_GAPS`: 0023, reserved and never used). Sidecars are disjoint files, so
+   two PRs adding migrations cannot conflict; two that pick the same number fail after the merge.
+   - **Base comparison** (`--base <ref>`, CI on pull requests): every migration the base has must be present with identical
+     content (so it works even where the base has no sidecars), every base sidecar must be unchanged, and a new migration must
+     be numbered above the base's highest. An unresolvable ref or any git failure exits 2, never "no base";
+     `--require-base` also fails when the base has no sidecars (to be added to CI once main carries them).
+   - The checker is tested as a real process in a throwaway git repository: missing ref, edit plus forged sidecar, add,
+     delete, duplicate number, disjoint merge, seal refusing without writing.
    - 0026 is sealed at its current (non-destructive) content. That content has never run on a real D1.
+5. **What this is and is not.** It is a check. It blocks a merge only if branch protection requires the `verify` and
+   `integration` jobs, and a change to the workflow, the script or the sidecars can switch it off in the same PR. Nothing in the
+   repository can enforce that, so `.github/CODEOWNERS` names the owners of `.github/`, `migrations/`, the seal scripts,
+   `vitest.config.ts` and `tsconfig.json`, and the operator actions (required checks, required code-owner review) are listed as
+   OPEN in [`RELEASE_GATES.md`](../RELEASE_GATES.md). They have not been done.
 
 ## Not done
 

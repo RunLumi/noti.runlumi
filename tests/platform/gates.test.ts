@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,15 +35,33 @@ describe('platform gates', () => {
     expect(ci).toContain('npm run test:integration');
     const scripts = (JSON.parse(read('package.json')) as { scripts: Record<string, string> }).scripts;
     expect(scripts['test:integration']).toContain('migration-0026-d1');
-    // That file is what runs `wrangler d1 migrations apply --local` from an empty database.
-    expect(read('tests/migration-0026-d1.test.ts')).toContain('migrations');
   });
 
-  it('checks migration immutability in CI, against the base branch on pull requests (F05)', () => {
+  it('the real migration chain is sealed and unedited (F05)', () => {
+    const result = spawnSync(process.execPath, [join(root, 'scripts', 'migration-seal.mjs'), '--check'], {
+      encoding: 'utf8',
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
+  it('CI runs the seal check against the base branch on pull requests (F05)', () => {
     const ci = code(CI);
     expect(ci).toContain('npm run migrations:check');
-    expect(ci).toContain('migration-seal.mjs --check --base "origin/$BASE_REF"');
+    expect(ci).toMatch(/migration-seal\.mjs --check --base "origin\/\$BASE_REF"/);
     // The base ref reaches the shell as an environment variable, never interpolated into the script.
     expect(ci).not.toMatch(/run:[^\n]*\$\{\{\s*[a-z]+\.base_ref/);
+  });
+
+  it('protects the gate files with CODEOWNERS (the check is only as strong as who can change it)', () => {
+    const owners = read('.github/CODEOWNERS');
+    for (const path of [
+      '/.github/workflows/',
+      '/scripts/migration-seal.mjs',
+      '/scripts/lib/migration-seal.mjs',
+      '/migrations/',
+      '/vitest.config.ts',
+    ])
+      expect(owners, path).toContain(path);
   });
 });

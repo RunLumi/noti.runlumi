@@ -178,7 +178,7 @@ material, which is a cheap regression guard against redaction rotting (F12).
 
 ## F05 — Migration discipline
 
-**Priority** P0 · **Status** 🟡 22 numbered forward-only migrations applied from zero on every test run (`tests/support/d1.ts`, `tests/migrations.test.ts`, `tests/migration-00*.test.ts`); additive/expand-contract practice and per-migration reversibility table in `docs/RUNBOOK.md` (PR #7, ADR 0004); `wrangler d1 migrations apply --local` from zero in the CI `integration` job and a SHA-256 immutability seal (`migrations.sealed.json`, compared with the base branch on PRs; ADR 0027); not built: rollback never rehearsed
+**Priority** P0 · **Status** 🟡 22 numbered forward-only migrations applied from zero on every test run (`tests/support/d1.ts`, `tests/migrations.test.ts`, `tests/migration-00*.test.ts`); additive/expand-contract practice and per-migration reversibility table in `docs/RUNBOOK.md` (PR #7, ADR 0004); `wrangler d1 migrations apply --local` from zero in the CI `integration` job and a per-migration SHA-256 sidecar seal (`migrations/*.sql.sha256`, compared with the base branch on PRs; ADR 0027; a check only, blocking once branch protection requires it, which is an open operator action); not built: rollback never rehearsed
 
 **Story** As an operator, I want every schema change to be a reviewed, reversible,
 forward-only file, so that migrations are deploys rather than incidents.
