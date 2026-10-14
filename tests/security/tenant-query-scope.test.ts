@@ -37,6 +37,10 @@ const NOT_TENANT_TABLES: Readonly<Record<string, string>> = {
   rate_limit: 'Better Auth rate limiter counters, keyed by IP and path',
   api_rate_limits: 'fixed-window counters keyed by actor and window; no tenant data',
   ops_state: 'cron heartbeat key/value; no tenant data',
+  job_runs:
+    'history of cron job failures and outcome changes (F192): job name, times, outcome, counters; platform-wide',
+  job_state: 'one row per cron job, upserted each run (F192): times, outcome, counters; platform-wide',
+  alert_state: 'one row per alert in the fixed registry (F200); counts and times only; platform-wide',
   github_installation_tombstones: 'installation ids that were deleted, so a replay cannot rebind them',
   github_installation_repositories: 'child of github_installations; scoped through installation_row_id',
   legacy_orphaned_rows:
@@ -326,10 +330,48 @@ const ALLOWLIST: readonly Allowed[] = [
   },
   {
     file: 'src/observability/stall.ts',
-    includes: "SELECT (SELECT COUNT(*) FROM notification_outbox WHERE state='pending'",
+    includes: "SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM notification_outbox WHERE state='pending'",
     category: 'cron sweep',
     reason:
       'Operator stall detector: counts of stuck work across all tenants. Numbers only; never row content.',
+  },
+  {
+    file: 'src/observability/alerts/signals.ts',
+    includes: "FROM delivery_attempts WHERE started_at >= ?1 AND outcome = 'dead_lettered'",
+    category: 'cron sweep',
+    reason: 'Alert signal: a platform-wide COUNT of recent dead-lettering attempts. A number, never a row.',
+  },
+  {
+    file: 'src/observability/alerts/signals.ts',
+    includes: "FROM destination_health WHERE state IN ('open','half_open')",
+    category: 'cron sweep',
+    reason: 'Alert signal: a platform-wide COUNT of open breakers. A number, never a row.',
+  },
+  {
+    file: 'src/observability/alerts/signals.ts',
+    includes: 'FROM integrations WHERE credentials_quarantined_at IS NOT NULL',
+    category: 'cron sweep',
+    reason: 'Alert signal: a platform-wide COUNT of quarantined integrations. A number, never a row.',
+  },
+  {
+    file: 'src/observability/alerts/signals.ts',
+    includes: "SELECT created_at AS at FROM deliveries WHERE state = 'pending'",
+    category: 'cron sweep',
+    reason: 'Alert signal: the age of the oldest pending delivery anywhere. A timestamp, never a row.',
+  },
+  {
+    file: 'src/observability/alerts/signals.ts',
+    includes: 'FROM sources WHERE last_dropped_at IS NOT NULL',
+    category: 'cron sweep',
+    reason: 'Alert signal: a platform-wide COUNT of sources that recently dropped events. A number only.',
+  },
+  {
+    file: 'src/observability/alerts/signals.ts',
+    includes:
+      "SELECT (SELECT COUNT(*) FROM (SELECT 1 FROM deliveries WHERE state = 'pending' AND is_test = 0",
+    category: 'cron sweep',
+    reason:
+      'Alert signal (dead-letter proxy): counts of ledger rows stuck for hours across tenants. Numbers only.',
   },
   // --- retention: age-based deletion across tenants ---
   {

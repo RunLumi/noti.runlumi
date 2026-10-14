@@ -158,10 +158,13 @@ export const hasTable = (raw: DatabaseSync, name: string): boolean => tableNames
 export const countRows = (raw: DatabaseSync, table: string): number =>
   (raw.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number }).n;
 
-/** Rows as JSON strings in rowid order, with organization_id left out (the backfill legitimately fills it). */
+/**
+ * Rows as JSON strings in rowid order, with organization_id left out (the backfill legitimately fills it) and
+ * `correlation_id` left out (migration 0027 adds it to live tables, and recovery re-adds it empty).
+ */
 export function rowsWithoutOrg(raw: DatabaseSync, table: string): string[] {
   return (raw.prepare(`SELECT * FROM "${table}" ORDER BY rowid`).all() as Record<string, unknown>[]).map(
-    ({ organization_id: _o, ...rest }) => json(rest),
+    ({ organization_id: _o, correlation_id: _c, ...rest }) => json(rest),
   );
 }
 

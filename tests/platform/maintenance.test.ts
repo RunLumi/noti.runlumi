@@ -70,10 +70,25 @@ describe('maintenance mode', () => {
     expect(res.status).toBe(401);
   });
 
-  it('skips every cron job', async () => {
-    const { env, touched } = envWith('true');
-    await worker.scheduled({} as ScheduledEvent, env);
-    expect(touched()).toBe(0);
+  it('skips every cron job; the only statements are the ops_state maintenance marker (ADR 0024)', async () => {
+    const { d1 } = createFakeD1();
+    const sql: string[] = [];
+    const DB = new Proxy(d1, {
+      get(target, prop, receiver) {
+        if (prop === 'batch') throw new Error('no batch writes during the freeze');
+        if (prop === 'prepare')
+          return (text: string) => {
+            sql.push(text);
+            return target.prepare(text);
+          };
+        return Reflect.get(target, prop, receiver) as unknown;
+      },
+    });
+    const { env } = envWith('true');
+    await worker.scheduled({} as ScheduledEvent, { ...env, DB });
+    expect(sql.length).toBeGreaterThan(0);
+    for (const text of sql) expect(text).toMatch(/ops_state/);
+    expect(sql.filter((t) => /^\s*(INSERT|UPDATE|DELETE)/i.test(t))).toHaveLength(1);
   });
 
   it('hands queue messages back for later without consuming them', async () => {

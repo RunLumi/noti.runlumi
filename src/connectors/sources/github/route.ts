@@ -17,6 +17,7 @@ import { log } from '../../../platform/log';
 import { buildCanonical } from '../build';
 import { boundedEventId } from '../../../events/id';
 import { ingressBatch } from '../../../db/retry';
+import { correlationField, currentCorrelationId } from '../../../platform/correlation';
 import type { RoutingFacts } from '../../../routing/filters';
 import { createRouteDecider } from '../../../routing/ingress';
 import { decisionStatement, type RoutingDecisionRow } from '../../../routing/provenance';
@@ -348,7 +349,13 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     }
 
     // Identifiers and display text only. Credentials stay in D1 (D5).
-    const message: DeliveryMessage = { id, integrationId: row.id, organizationId, ...itemDisplay };
+    const message: DeliveryMessage = {
+      id,
+      integrationId: row.id,
+      organizationId,
+      ...itemDisplay,
+      ...correlationField(),
+    };
 
     // One batch, one transaction: the delivery row and the outbox row commit together.
     const notLegacy = 'WHERE NOT EXISTS (SELECT 1 FROM deliveries WHERE id=? AND organization_id=?)';
@@ -357,19 +364,30 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
       // Not when this very event is already waiting in `held_events` (it was held, then the
       // settings changed and GitHub redelivered it): it is released on schedule, once.
       c.env.DB.prepare(
-        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)
-         SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP ${notLegacy}
+        `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at,correlation_id)
+         SELECT ?,?,?,'pending',?,CURRENT_TIMESTAMP,? ${notLegacy}
            AND NOT EXISTS (SELECT 1 FROM held_events WHERE id=? AND organization_id=?)`,
-      ).bind(id, row.id, organizationId, dedup.hex, legacyId, organizationId, id, organizationId),
+      ).bind(
+        id,
+        row.id,
+        organizationId,
+        dedup.hex,
+        currentCorrelationId(),
+        legacyId,
+        organizationId,
+        id,
+        organizationId,
+      ),
       // Only when the delivery row above was new (`changes()` is the previous statement's row
       // count): a redelivery after the outbox row was purged must not be sent again.
       c.env.DB.prepare(
-        `INSERT INTO notification_outbox(id,organization_id,payload_json)
-         SELECT ?,?,? ${notLegacy} AND changes() > 0
+        `INSERT INTO notification_outbox(id,organization_id,payload_json,correlation_id)
+         SELECT ?,?,?,? ${notLegacy} AND changes() > 0
          ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json, state='pending', lease_token=NULL,
-           claimed_at=NULL, lease_expires_at=NULL, not_before=NULL, dispatched_at=NULL
+           claimed_at=NULL, lease_expires_at=NULL, not_before=NULL, dispatched_at=NULL,
+           correlation_id=excluded.correlation_id
          WHERE notification_outbox.organization_id=excluded.organization_id`,
-      ).bind(id, organizationId, JSON.stringify(message), legacyId, organizationId),
+      ).bind(id, organizationId, JSON.stringify(message), currentCorrelationId(), legacyId, organizationId),
       // Directly after the outbox insert, whose `changes()` is 0 exactly for a duplicate (F171, F185).
       ...dedupStatements(c.env.DB, {
         organizationId,

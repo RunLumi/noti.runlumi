@@ -7,8 +7,11 @@
  * log line, so a persistent stall warns on entry and then once per re-notify interval,
  * and recovery logs once. State lives in `ops_state` (migration 0016).
  *
- * Counts are platform-wide and carry no tenant ids, payloads or URLs. This is DETECTION
- * written to logs: it does not page anyone. Routing a page is not done (spec F200).
+ * Counts are platform-wide and carry no tenant ids, payloads or URLs. This is DETECTION written to logs.
+ * The `outbox_stall` alert (src/observability/alerts) reads the same counts and announces to the sinks.
+ * The two state machines are NOT merged on purpose (ADR 0024): this one logs a `warn` line that existing
+ * runbooks and log searches key on, with its own state key in `ops_state`; the engine adds confirm and
+ * clear hysteresis, sinks and retries. Merging would change the log contract for no new signal.
  */
 import { DELIVERY_CLAIM_LEASE_MS } from '../delivery/ledger';
 import { sqliteTimestamp } from '../delivery/claim';
@@ -66,21 +69,27 @@ export function decideStall(counts: StallCounts, prev: StallState, nowMs: number
 
 type Db = Pick<D1Database, 'prepare'>;
 
+/** Each count is capped (a stall of thousands reads the same as one of a thousand) so the query stays cheap in an outage. */
+export const STALL_COUNT_CAP = 1000;
+
+/** ?1 outbox cutoff (text) · ?2 claim cutoff · ?3 due cutoff · ?4 retry cutoff · ?5 cap. */
+export const STALL_SQL = `SELECT
+  (SELECT COUNT(*) FROM (SELECT 1 FROM notification_outbox
+     WHERE state='pending' AND created_at<=?1 AND (not_before IS NULL OR not_before<=?3)
+       AND NOT EXISTS (SELECT 1 FROM deliveries t WHERE t.id=notification_outbox.id AND t.is_test=1)
+     LIMIT ?5)) AS outbox_pending,
+  (SELECT COUNT(*) FROM (SELECT 1 FROM deliveries WHERE state='claimed' AND is_test=0 AND claimed_at<=?2 LIMIT ?5)) AS claimed_stale,
+  (SELECT COUNT(*) FROM (SELECT 1 FROM deliveries WHERE state='retrying' AND is_test=0 AND next_attempt_at<=?4 LIMIT ?5)) AS retry_overdue`;
+
 export async function countStalls(db: Db, nowMs: number): Promise<StallCounts> {
   const row = await db
-    .prepare(
-      `SELECT
-         (SELECT COUNT(*) FROM notification_outbox
-            WHERE state='pending' AND created_at<=?1 AND (not_before IS NULL OR not_before<=?3)
-              AND NOT EXISTS (SELECT 1 FROM deliveries t WHERE t.id=notification_outbox.id AND t.is_test=1)) AS outbox_pending,
-         (SELECT COUNT(*) FROM deliveries WHERE state='claimed' AND is_test=0 AND claimed_at<=?2) AS claimed_stale,
-         (SELECT COUNT(*) FROM deliveries WHERE state='retrying' AND is_test=0 AND next_attempt_at<=?4) AS retry_overdue`,
-    )
+    .prepare(STALL_SQL)
     .bind(
       sqliteTimestamp(nowMs - OUTBOX_STALL_MS),
       nowMs - CLAIM_STALL_MS,
       nowMs - OUTBOX_STALL_MS,
       nowMs - RETRY_OVERDUE_MS,
+      STALL_COUNT_CAP,
     )
     .first<{ outbox_pending: number; claimed_stale: number; retry_overdue: number }>();
   return {
@@ -122,8 +131,10 @@ async function saveState(db: Db, state: StallState, nowMs: number): Promise<void
 export async function detectStalls(
   env: Pick<Bindings, 'DB'>,
   nowMs: number = Date.now(),
+  shared?: Promise<StallCounts>,
 ): Promise<StallAction> {
-  const counts = await countStalls(env.DB, nowMs);
+  // `shared` is the tick's one read, also handed to the alert engine (src/index.ts).
+  const counts = await (shared ?? countStalls(env.DB, nowMs));
   const prev = await loadState(env.DB);
   const { action, next } = decideStall(counts, prev, nowMs);
   if (action === 'raise' || action === 'renotify') {

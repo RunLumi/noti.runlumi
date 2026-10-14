@@ -110,8 +110,9 @@ export function deferralStatements(
     db
       .prepare(
         `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,started_at,finished_at,
-           outcome,error_code,reason,status_class,retry_after_ms)
-         SELECT ?4,?1,?2,?5,?6,?7,?7,'deferred',?8,?3,'none',?9
+           outcome,error_code,reason,status_class,retry_after_ms,correlation_id)
+         SELECT ?4,?1,?2,?5,?6,?7,?7,'deferred',?8,?3,'none',?9,
+           (SELECT correlation_id FROM deliveries WHERE id=?2 AND organization_id=?1)
          WHERE EXISTS (SELECT 1 FROM deliveries WHERE id=?2 AND organization_id=?1 AND state='retrying'
                          AND next_attempt_at=?10 AND claim_token IS NULL)
            AND NOT ${LAST_IS_SAME_WAIT}`,
@@ -169,8 +170,9 @@ export function attemptStatement(db: D1Database, ref: DeliveryRef, row: AttemptR
   return db
     .prepare(
       `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,started_at,finished_at,
-         outcome,error_code,reason,status_class,retry_after_ms,provider_message_id,possible_duplicate)
-       SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14 WHERE changes() = 1`,
+         outcome,error_code,reason,status_class,retry_after_ms,provider_message_id,possible_duplicate,correlation_id)
+       SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,
+         (SELECT correlation_id FROM deliveries WHERE id=?3 AND organization_id=?2) WHERE changes() = 1`,
     )
     .bind(
       crypto.randomUUID(),

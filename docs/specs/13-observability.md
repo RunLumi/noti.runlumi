@@ -204,7 +204,7 @@ tenants, analytics, AI providers or error trackers"*).
 
 ## F192 — Scheduled job runner and job health
 
-**Priority** P0 · **Status** 🟡 Only `runCronJobs` in `src/observability/cron.ts`: per-job isolation, a failure log and a heartbeat row in `ops_state` that nothing reads (`tests/observability/cron.test.ts`). Not built: `runJob` wrapper, `job_runs` and `job_cursors` tables, leases, cursors, cpu_ms, `job_stale` or `job_never_ran` alerts, cadence table. · **Referenced by F51, F171, F174, F190**
+**Priority** P0 · **Status** 🟡 `runCronJobs` records every execution in `job_state` (one upserted row per job) and `job_runs` (failures and outcome changes; migration 0027: ok, failed, skipped, integer counters, closed error class; 14-day retention), one typed cadence table (`src/observability/cadence.ts`), staleness at 3x cadence from D1 (`job-health.ts`) shown in the summary and as the `job_stale` alert, a DLQ consumer run record (ADR 0024; `tests/observability/job-runner.test.ts`). Not built: `job_cursors`, leases, resumable cursors, `cpu_ms`, `partial`, `job_failing`, a separate `job_never_ran` (a never-run job goes stale after 3 cadences of tracking). · **Referenced by F51, F171, F174, F190**
 
 **Story** As an operator, I want every background job to report whether it ran, how much it did
 and how fresh it is, so that a job which quietly stopped is indistinguishable from a job with
@@ -337,7 +337,7 @@ deletes ciphertext without decrypting it.
 
 ## F193 — Correlation id propagation
 
-**Priority** P0 · **Status** 🟡 Our UUID is minted at ingress before parsing, `external_request_id` and `cf_ray` captured, `x-request-id` echoed, id on every in-request log line (`src/platform/correlation.ts`, `tests/platform/correlation.test.ts`). Not built: propagation to the queue message, `deliveries` or outbox rows and consumer logs, `X-Noti-Correlation-Id` storage, lookup by id. · **Extends F11 — does not redefine it**
+**Priority** P0 · **Status** 🟡 Our UUID is minted at ingress before parsing, `external_request_id` and `cf_ray` captured, `x-request-id` echoed, id on every in-request log line, and (ADR 0024) stored on `deliveries`, `notification_outbox` and `delivery_attempts`, carried in the queue message, bound in the consumers' log lines, shown in the delivery view and found by `GET /api/deliveries?correlationId=` (`tests/sources/correlation.test.ts`). Not built: `X-Noti-Correlation-Id` storage, Analytics Engine blobs, the support bundle, ids on held events, error bodies carrying the id. · **Extends F11 — does not redefine it**
 
 **Story** As a support engineer, I want one identifier that survives the whole path from webhook
 receipt to rendered message, so that a customer can quote it and I can find the exact event.
@@ -1168,7 +1168,7 @@ D1 under the tenant predicate, not from a shared dataset.
 
 ## F200 — Alerting on our own failure modes
 
-**Priority** P0 · **Status** 🟡 Stall detection from D1 (`outbox_stalled`, stale claims, overdue retries) with transition-based logging via `ops_state` (`src/observability/stall.ts`, `tests/observability/stall.test.ts`). It logs and does not page. Not built: `alert_state`, `job_runs`, any destination for pages, and the other 13 alerts (`dlq_growth`, `d1_overloaded`, `ingress_gap`, `job_stale`, and so on).
+**Priority** P0 · **Status** 🟡 Stall detection (`stall.ts`) plus, from ADR 0024, `alert_state` and an engine over a ten-alert registry built from D1 and boot-report signals (`job_stale`, `outbox_stall`, `dead_letter_spike`, `breaker_open_many`, `key_config_fault`, `credentials_quarantined_nonzero`, `queue_backlog`, `ingress_drop_rate`, `cron_heartbeat_missing`, `dlq_consumer_no_progress`): fire, dedupe, re-notify, resolve; sinks are the log and an optional chat webhook (`ALERT_WEBHOOK_URL`, URL policy, 10 s, no retry loop). Not built: any page-a-human integration (PagerDuty and the like), `dlq_growth` from real queue depth (needs the Queues API), `d1_overloaded`, `ingress_gap` and the other alerts that need data we do not collect. Thresholds are unmeasured.
 
 **Story** As an on-call engineer, I want to be told when the system is losing notifications
 before a customer tells me, so that the first report is our apology rather than our discovery.
@@ -1303,7 +1303,7 @@ Thresholds and suppression policy are configuration changes and are audited (F28
 
 ## F201 — Incident response runbook
 
-**Priority** P1 · **Status** 🟡 `docs/RUNBOOK.md` states the delivery model and no-audit caveat, with severity table and procedures tied to real tables, plus an incident template. Not built: entry per F200 alert, customer-message and capability fields, a test tying alerts to entries, any rehearsal (the runbook lists itself as unrehearsed).
+**Priority** P1 · **Status** 🟡 `docs/RUNBOOK.md` states the delivery model and no-audit caveat, with severity table and procedures tied to real tables, an incident template, an entry per built alert, a cron job table and a correlation lookup, and `tests/observability/alert-runbook.test.ts` ties every alert to its entry and runs the new SQL. Not built: customer-message and capability fields per alert, any rehearsal (the runbook lists itself as unrehearsed).
 
 **Story** As an on-call engineer at 3am, I want the runbook to tell me what to check first, so
 that I act on evidence rather than on hunches while a customer's alerts are missing.

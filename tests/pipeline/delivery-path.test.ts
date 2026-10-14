@@ -210,6 +210,7 @@ describe('ingress tenant isolation', () => {
 
     expect(sent).toHaveLength(1);
     expect(Object.keys(sent[0] ?? {}).sort()).toEqual([
+      'correlationId',
       'eventType',
       'id',
       'integrationId',

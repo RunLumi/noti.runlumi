@@ -37,6 +37,7 @@ const ALLOWED_FRAGMENTS: Readonly<Record<string, string>> = {
   keyset: 'a fixed cursor clause chosen by whether a cursor exists (provenance.ts)',
   notLegacy: 'a fixed NOT EXISTS clause (github route)',
   suspended: "either 'CURRENT_TIMESTAMP' or 'NULL' (lifecycle.ts)",
+  from: 'FROM_VIEW, or FROM_VIEW with the fixed INDEXED BY deliveries_org_correlation, chosen by whether a correlation filter exists (delivery-queries.ts)',
   table:
     'iterated from the TENANT_TABLES constant list (purge.ts) or passed as a literal (expired-records.ts)',
   column: 'passed as a literal by the boundedDelete callers (expired-records.ts)',
@@ -71,6 +72,9 @@ const SCRIPT_FRAGMENTS: Readonly<Record<string, string>> = {
   hex: 'an 8-character upper-case hex of assertVersion()',
   table: 'one of two string literals passed by the same file',
   old: 'ident(oldName(t.table)) over the fixed list of six tables, in scripts/migration-0026-finalize.mjs',
+  'compareColumns(t.table)':
+    'a fixed column list or * chosen by a table name from the fixed list of six tables (scripts/lib/migration-0026.mjs)',
+  'compareColumns(table)': 'same: the table is from the fixed list of six tables',
   't.table': 'a name from the fixed list of six tables in scripts/lib/migration-0026.mjs',
   list: 'a join of fixed table names from scripts/lib/migration-0026.mjs, each quoted by the same file',
   'ident(table)':

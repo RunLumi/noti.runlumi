@@ -564,6 +564,7 @@ describe('delivery log indexes (M3)', () => {
     const q = buildListQuery('org-a', {
       state: null,
       integrationId: null,
+      correlationId: null,
       from: null,
       to: null,
       cursor: null,

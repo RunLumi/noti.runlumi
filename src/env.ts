@@ -31,6 +31,12 @@ export interface DeliveryMessage {
    * summary then lists the items. 1..500.
    */
   readonly count?: number;
+  /**
+   * The correlation id minted at ingress (src/platform/correlation.ts): 4-64 characters from a restricted
+   * set, dropped when malformed. Optional: messages written before it existed still deliver. It is an
+   * opaque handle, never derived from tenant data, and changes no idempotency or dedup key.
+   */
+  readonly correlationId?: string;
 }
 
 export const SUMMARY_MAX_CHARS = 280;
@@ -89,4 +95,16 @@ export type Bindings = AuthBindings & {
   MAINTENANCE_MODE?: string;
   /** Audit event retention in days (30..3650, default 365). */
   AUDIT_RETENTION_DAYS?: string;
+  /**
+   * Optional secret. A Slack, Discord, Lark or Microsoft Teams Workflows webhook URL that receives alert
+   * state changes (src/observability/alerts/sinks.ts). A bearer secret: set it with `wrangler secret put`,
+   * never as a var. Validated by the destination URL policy; an unusable value is a boot warning and the
+   * webhook sink stands down (the log sink always runs).
+   */
+  ALERT_WEBHOOK_URL?: string;
+  /**
+   * Optional secret: comma-separated user ids of platform operators, the only people who see per-job state
+   * and the alert webhook's health in `GET /api/observability/summary`. Unset or empty: nobody (src/observability/operator.ts).
+   */
+  PLATFORM_OPERATOR_USER_IDS?: string;
 };

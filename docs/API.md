@@ -588,7 +588,7 @@ responses carry `guarantee: "at_least_once"` and the dashboard says so.
 
 | Method and path | Capability | Result |
 | --- | --- | --- |
-| `GET /api/deliveries` | `delivery.read` | `{deliveries, nextCursor, guarantee}`. Query: `state`, `integrationId`, `from`, `to` (ISO dates), `limit` (1–100, default 25), `cursor` (opaque, ordered by `(updated_at, id)` descending). Filter `state=dead_lettered` also matches legacy `failed` rows. `422` on a bad filter. |
+| `GET /api/deliveries` | `delivery.read` | `{deliveries, nextCursor, guarantee}`. Query: `state`, `integrationId`, `correlationId` (exact match on the id minted at ingress, the `x-request-id` the sender got back; 4 to 64 characters of `A-Za-z0-9._:-`, `422` otherwise; workspace-scoped, readable by admins and members), `from`, `to` (ISO dates), `limit` (1–100, default 25), `cursor` (opaque, ordered by `(updated_at, id)` descending). Filter `state=dead_lettered` also matches legacy `failed` rows. `422` on a bad filter. |
 | `GET /api/deliveries/summary` | `delivery.read` | `{windowHours: 24, counts}` by state for deliveries created in the last 24 hours. |
 | `GET /api/deliveries/:id` | `delivery.read` | `{delivery, timeline, attempts, attemptDetail: "full" \| "summary", replays, guarantee}`. `attempts` is the per-attempt history, oldest first (see below); `attemptDetail` is `summary` for a delivery from before migration 0025, which has only the coarse `timeline`. |
 | `POST /api/deliveries/replay-plan` | `delivery.replay` (admin) | Requires our `Origin` and `application/json`. Body `{integrationId?, from?, to?}` (`from`/`to` are `YYYY-MM-DD` or ISO). Writes nothing. `200 {plan: {eligible, total, totalCapped, remaining, bound: 200, token, typedConfirmationAbove: 20}}`. `422` on a bad filter, `429` past 6 a minute. |
@@ -749,6 +749,8 @@ characters are removed. See ADR 0019.
 | Method and path | Capability | Result |
 | --- | --- | --- |
 | `GET /api/observability/summary?window=24h` | `delivery.read` | `200` JSON, workspace-scoped, `Cache-Control: no-store`. `window` is `<n>h` or `<n>d` from `1h` to `30d` (default `24h`); anything else is `400`. Limited to 30 requests a minute per user (`429` with `Retry-After`). |
+
+Each delivery view and the detail carry `correlationId` (string or `null` for rows older than migration 0027 and rows no request created). Every caller gets `jobsStatus` (`ok`, `degraded` or `unknown`). Platform operators only (user ids on the secret `PLATFORM_OPERATOR_USER_IDS`, comma separated, checked server-side; unset or empty means nobody, and a workspace admin is not an operator) also get `jobs: {name, lastOk, lastFailed, stale}[]` (epoch ms or `null`; `lastOk` is the last `ok` or `skipped` run; `stale` means more than three cadences overdue; platform-wide, names and times only; `null` if job state could not be read) and `alerting: {webhookConfigured, lastSuccessAt, lastFailureAt, consecutiveFailures}` (times and a count; never the URL).
 
 The body is exact, computed from the delivery ledger on request. Ratios are a **cohort by creation time**: rows created inside the window, counted by their current state. `oldestOutboxPendingAgeMs` covers due outbox rows only (a retry parked for later does not count). Shape (abridged):
 

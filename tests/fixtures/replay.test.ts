@@ -53,7 +53,7 @@ async function replay(entry: FixtureEntry): Promise<Record<string, unknown>> {
   const body = await res.json().catch(() => null);
   const canonical = normalize(entry.provider, entry.headers, json);
   const messages = rig.messages();
-  const strip = ({ id: _i, integrationId: _g, organizationId: _o, ...rest }: (typeof messages)[number]) => rest;
+  const strip = ({ id: _i, integrationId: _g, organizationId: _o, correlationId: _c, ...rest }: (typeof messages)[number]) => rest;
 
   if (canonical) {
     // The route validated this event and derived the queue message from it.

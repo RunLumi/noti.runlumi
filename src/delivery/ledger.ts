@@ -188,10 +188,10 @@ export function deadLetterDeferredStatement(
  * an UPPER BOUND on duplicates, never a count. ?1 attempt row id · ?2 id · ?3 organization_id
  */
 export const RECORD_STALE_ATTEMPT_SQL = `INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,
-  started_at,finished_at,outcome,error_code,reason,status_class,possible_duplicate)
+  started_at,finished_at,outcome,error_code,reason,status_class,possible_duplicate,correlation_id)
 SELECT ?1, organization_id, id, integration_id, attempts, COALESCE(last_attempt_at,0), COALESCE(last_attempt_at,0),
   CASE WHEN state='dead_lettered' THEN 'dead_lettered' ELSE 'retry_scheduled' END,
-  'internal_error','claim_expired','none',1
+  'internal_error','claim_expired','none',1,correlation_id
 FROM deliveries WHERE id=?2 AND organization_id=?3 AND changes()=1`;
 
 /**

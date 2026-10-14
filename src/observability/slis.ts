@@ -28,6 +28,8 @@
  */
 import { sqliteTimestamp } from '../delivery/claim';
 import { normalizeDeliveryState, type DeliveryState } from '../delivery/state';
+import { log } from '../platform/log';
+import { readJobHealth, type JobHealth } from './job-health';
 
 type Db = Pick<D1Database, 'prepare'>;
 
@@ -133,6 +135,13 @@ export interface ObservabilitySummary {
     readonly paced: number;
     readonly deferredAttempts: number;
   };
+  /**
+   * F192, current (not windowed, platform-wide): per background job, the last healthy run (`ok` or
+   * `skipped`, epoch ms), the last failed run, and whether it is overdue by more than three cadences.
+   * Names and times only: no tenant data, no counts of anyone's rows. `null` when job runs could not
+   * be read, never an empty list standing for "all fine".
+   */
+  readonly jobs: readonly JobHealth[] | null;
   readonly notMeasurable: readonly NotMeasurable[];
 }
 
@@ -415,6 +424,10 @@ export async function computeSummary(
     byDestination,
     duplicates: await duplicates(db, organizationId, since, byState),
     destinationHealth: await destinationHealth(db, organizationId, nowMs - windowMs, nowMs),
+    jobs: await readJobHealth(db, nowMs).catch((error: unknown) => {
+      log('warn', 'summary_jobs_unreadable', { error });
+      return null;
+    }),
     notMeasurable: NOT_MEASURABLE,
   };
 }

@@ -58,6 +58,16 @@ GITHUB_APP_ID=000000
 # until the release criteria in the ADR are met.
 GENERIC_WEBHOOK_ENABLED=false
 
+# Optional secret. A Slack, Discord, Lark or Microsoft Teams Workflows webhook URL that receives alert
+# state changes (firing, still firing, resolved; docs/RUNBOOK.md). A bearer secret, so set it with
+# `wrangler secret put ALERT_WEBHOOK_URL`, never as a var. Validated by the destination URL policy; an
+# unusable value is a /health warning and alerts then go to the log only (which always runs). Empty: log only.
+ALERT_WEBHOOK_URL=
+
+# Optional secret. Comma-separated user ids of platform operators: the only people who see per-job state
+# and alert-webhook health in GET /api/observability/summary (a workspace admin does not). Empty: nobody.
+PLATFORM_OPERATOR_USER_IDS=
+
 # --- Notes -----------------------------------------------------------------
 # `AUTH_EMAIL` is a Cloudflare Email Sending binding declared in wrangler.jsonc,
 # not an environment variable, so it does not belong in this file. Local email

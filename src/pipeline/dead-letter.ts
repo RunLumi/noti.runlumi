@@ -6,11 +6,17 @@
  * ledger row to the terminal `dead_lettered` state, so the delivery shows up as failed (and
  * can be replayed, F182) instead of sitting in `pending` or `retrying` forever.
  *
+ * Each run leaves one `ops_state` record (`dlq_consumer`: when, how many messages, how many rows moved),
+ * so an operator can tell "the consumer ran and found nothing to move" from "it never ran". Without the
+ * Queues API the Worker cannot read the dead-letter queue's depth (UNVERIFIED), so the alert registry's
+ * `dlq_consumer_no_progress` works from the ledger side instead (docs/RUNBOOK.md).
+ *
  * It never calls a provider and never retries. Every write is scoped by
  * `id AND organization_id AND integration_id`, like the main consumer.
  */
 import type { DeliveryRef } from '../delivery/ledger';
 import type { Bindings } from '../env';
+import { withMessageCorrelation } from '../platform/correlation';
 import { log } from '../platform/log';
 import { parseDeliveryMessage } from './outbox';
 
@@ -49,27 +55,50 @@ interface DeadLetterMessage {
   retry(): void;
 }
 
+export const DLQ_CONSUMER_STATE_KEY = 'dlq_consumer';
+
+/** Counts and a time only. Never throws: the record is evidence, not a dependency of the move. */
+async function recordConsumerRun(db: D1Database, nowMs: number, seen: number, moved: number): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO ops_state(key,value,updated_at) VALUES(?1,?2,?3)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+      )
+      .bind(DLQ_CONSUMER_STATE_KEY, JSON.stringify({ at: nowMs, seen, moved }), nowMs)
+      .run();
+  } catch (e) {
+    log('warn', 'dead_letter_run_record_failed', { error: e });
+  }
+}
+
 export async function consumeDeadLetters(
   batch: MessageBatch<unknown>,
   env: Bindings,
   now: () => number = () => Date.now(),
 ): Promise<void> {
+  let moved = 0;
   for (const msg of batch.messages as readonly DeadLetterMessage[]) {
     const d = parseDeliveryMessage(msg.body);
-    try {
-      const moved = d ? await markDeadLettered(env.DB, d, now()) : false;
-      log('warn', 'delivery_dead_lettered_by_queue', {
-        delivery_id: d?.id ?? null,
-        workspace_id: d?.organizationId ?? null,
-        outcome: moved ? 'dead_lettered' : 'unchanged',
-      });
-    } catch (e) {
-      // Retried within the DLQ consumer's own small budget; the log line is the evidence
-      // if that runs out too.
-      log('error', 'dead_letter_consumer_failed', { delivery_id: d?.id ?? null, error: e });
-      msg.retry();
-      continue;
-    }
-    msg.ack();
+    const handled = await withMessageCorrelation(d?.correlationId, async () => {
+      try {
+        const changed = d ? await markDeadLettered(env.DB, d, now()) : false;
+        if (changed) moved++;
+        log('warn', 'delivery_dead_lettered_by_queue', {
+          delivery_id: d?.id ?? null,
+          workspace_id: d?.organizationId ?? null,
+          outcome: changed ? 'dead_lettered' : 'unchanged',
+        });
+        return true;
+      } catch (e) {
+        // Retried within the DLQ consumer's own small budget; the log line is the evidence
+        // if that runs out too.
+        log('error', 'dead_letter_consumer_failed', { delivery_id: d?.id ?? null, error: e });
+        msg.retry();
+        return false;
+      }
+    });
+    if (handled) msg.ack();
   }
+  await recordConsumerRun(env.DB, now(), batch.messages.length, moved);
 }
