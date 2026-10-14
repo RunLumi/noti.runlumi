@@ -1548,9 +1548,9 @@ deployment.
   changed to "the schema refuses a tenant-less outbox row".
 - **Static query scope (F26, F233).** `tests/support/sql-scope.ts` + `tests/security/tenant-query-scope.test.ts`
   (43 tests). Tenant tables are derived from the schema. **Real violations found: none.** Everything flagged
-  was tenant-agnostic by design and is one of 39 reviewed allowlist entries (credential-keyed ingress
+  was tenant-agnostic by design and is one of 42 reviewed allowlist entries (credential-keyed ingress
   lookups, cron sweeps, retention, one primary-key-correlated subquery); an entry that stops matching fails.
-  Proven against 41 fixtures (a top-level OR, the tenant inside an OR group, NOT, <> and !=, and predicates that exist only in a comment are all refused) and against real files with their predicates stripped.
+  Proven against 42 fixtures (a top-level OR, the tenant inside an OR group, NOT, <> and !=, and predicates that exist only in a comment are all refused) and against real files with their predicates stripped.
 - **Route registry (F232).** `src/auth/route-policy.ts` (39 routes), `tests/security/route-capability.test.ts`
   (46 tests: runtime `app.routes` vs registry vs source parse vs handler guard), `docs/AUTHORIZATION.md` with
   two generated tables and `npm run docs:authorization`. `app` is now a named export of `src/index.ts`;
@@ -1583,4 +1583,4 @@ staging drill and Time Travel re-drill, audit of unknown-installation 403s, type
   0012/0015/0017/0020/0021 are tested.
 - Rebased over #47 and #51: renumbered 0023 to 0026; carries 0024's `integrations.credential_fingerprint`;
   `route-policy` gained the two revoke routes and `/health/ready`; the retention matrix has a row for the quarantine.
-  **When #53 lands as 0025, 0026's rebuild must carry its new columns**; the schema-diff test fails until it does.
+  Rebased again over #53 (0025): the rebuild also carries `deliveries.duplicate_of`, `suppressed_reason`, `possible_duplicate` and `provider_message_id`; the three new ledger tables need no rebuild; the routes `/api/deliveries/replay-plan` and `/replay` are in the registry and the drill; three retention statements (`PURGE_EVENT_DEDUP_SQL`, `PURGE_ATTEMPTS_SQL`, `PURGE_DESTINATION_HEALTH_SQL`) are allowlisted with reasons; the scanner accepts an outer row picked by equality with a scoped subquery. The legacy seed now holds rows with the new columns.

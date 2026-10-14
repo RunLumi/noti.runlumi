@@ -283,6 +283,27 @@ describe('migration 0026: backfill, quarantine and verification', () => {
     ).toEqual([]);
   });
 
+  it('leaves the 0025 ledger tables alone and keeps the 0025 delivery columns', () => {
+    const { raw } = migrated();
+    // event_dedup, delivery_attempts and destination_health were created NOT NULL with a foreign key: no rebuild.
+    expect(count(raw, 'event_dedup')).toBe(1);
+    expect(count(raw, 'delivery_attempts')).toBe(1); // points at a quarantined delivery; retention removes it as an orphan
+    expect(count(raw, 'destination_health')).toBe(1);
+    expect(
+      raw
+        .prepare(
+          "SELECT state,duplicate_of,suppressed_reason,possible_duplicate,provider_message_id FROM deliveries WHERE id='d-set'",
+        )
+        .get(),
+    ).toEqual({
+      state: 'suppressed',
+      duplicate_of: 'd-derive',
+      suppressed_reason: 'duplicate',
+      possible_duplicate: 1,
+      provider_message_id: 'pm-1',
+    });
+  });
+
   it('leaves rows that already had a valid tenant byte-identical', () => {
     const { raw, keptRows } = migrated();
     expect(raw.prepare("SELECT * FROM deliveries WHERE id='d-set'").all()).toEqual(keptRows);

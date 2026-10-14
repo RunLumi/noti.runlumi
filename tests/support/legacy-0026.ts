@@ -79,4 +79,17 @@ export function seedLegacy(raw: DatabaseSync): void {
   );
   noise.run('org-a', 'i-ok', 'k'.repeat(32));
   noise.run('ghost', 'i-ok', 'k'.repeat(32));
+
+  // Delivery ledger depth (0025): the new deliveries columns carry values, and the new tables hold rows
+  // that point at deliveries by id (no foreign key), including at one that will be quarantined.
+  raw.exec(`
+    UPDATE deliveries SET state='suppressed', duplicate_of='d-derive', suppressed_reason='duplicate',
+      possible_duplicate=1, provider_message_id='pm-1' WHERE id IN ('d-set','d-derive');
+    INSERT INTO event_dedup(organization_id,delivery_id,dedup_key,integration_id,first_seen,last_seen,hit_count,expires_at)
+      VALUES('org-a','d-derive','k1','i-ok',1,2,3,99);
+    INSERT INTO delivery_attempts(id,organization_id,delivery_id,integration_id,attempt,started_at,finished_at,outcome,
+      status_class,possible_duplicate,repeat_count)
+      VALUES('a1','org-a','d-orphan','i-orphan',1,1,2,'delivered','2xx',1,4);
+    INSERT INTO destination_health(organization_id,integration_id,state,updated_at) VALUES('org-a','i-ok','closed',1);
+  `);
 }

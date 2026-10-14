@@ -314,7 +314,7 @@ function viaScopedSubquery(
   table: string,
   subScoped: ReadonlyMap<number, Set<string>>,
 ): boolean {
-  for (const m of region.matchAll(/\b(?:rowid|id)\s+IN\s+\?sub(\d+)/gi)) {
+  for (const m of region.matchAll(/\b(?:\w+\.)?(?:rowid|id)\s*(?:IN|=)\s*\?sub(\d+)/gi)) {
     if (subScoped.get(Number(m[1]))?.has(table)) return true;
   }
   return false;

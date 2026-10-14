@@ -440,6 +440,29 @@ const ALLOWLIST: readonly Allowed[] = [
     reason:
       'Sanity guard: counts wrong-unit expiry values in session and verification before the sweep; numbers only.',
   },
+  // --- delivery ledger depth (0025, ADR 0023): age-based retention across tenants ---
+  {
+    file: 'src/delivery/dedup.ts',
+    includes:
+      'DELETE FROM event_dedup WHERE rowid IN ( SELECT rowid FROM event_dedup WHERE expires_at < ?1 LIMIT ?2)',
+    category: 'retention',
+    reason: 'Dedup rows past their own expiry, for every tenant alike (PURGE_EVENT_DEDUP_SQL).',
+  },
+  {
+    file: 'src/pipeline/retention.ts',
+    includes:
+      'DELETE FROM delivery_attempts WHERE rowid IN ( SELECT a.rowid FROM delivery_attempts a WHERE a.started_at < ?2',
+    category: 'retention',
+    reason:
+      'PURGE_ATTEMPTS_SQL: attempts older than the window whose delivery is gone or is itself due, for every tenant; the NOT EXISTS / EXISTS branches join the delivery by id AND organization_id, so a delivery of another tenant never matches.',
+  },
+  {
+    file: 'src/pipeline/retention.ts',
+    includes:
+      "DELETE FROM destination_health WHERE rowid IN ( SELECT rowid FROM destination_health WHERE state='closed' AND updated_at < ?1",
+    category: 'retention',
+    reason: 'PURGE_DESTINATION_HEALTH_SQL: idle closed breakers, for every tenant alike.',
+  },
   // --- correlated by primary key to an org-scoped outer row ---
   {
     file: 'src/observability/slis.ts',
@@ -585,6 +608,10 @@ describe('the scanner (tests/support/sql-scope.ts)', () => {
     [
       'an unrelated OR group beside the tenant predicate',
       'db.prepare("SELECT * FROM integrations WHERE (enabled=? OR repo=?) AND organization_id=?")',
+    ],
+    [
+      'an outer row picked by equality with a scoped subquery',
+      'db.prepare("SELECT 1 FROM deliveries l WHERE l.rowid = (SELECT rowid FROM deliveries WHERE organization_id=?1 LIMIT 1)")',
     ],
     [
       'a block comment elsewhere',

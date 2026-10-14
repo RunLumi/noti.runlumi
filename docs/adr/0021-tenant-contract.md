@@ -68,7 +68,7 @@ by rebuild (the same technique as 0009, 0012 and 0018). In order, in one file:
    inside a transaction, stopping at the first error with no wrapper, and carrying on after errors,
    each with a sabotaged copy and with a row written after the verify. The file is also re-runnable: its
    scratch objects are dropped `IF EXISTS`, the quarantine is idempotent, copies are in `rowid` order
-   (`src/api/deliveries.ts` reads rowid as recency), and each free-text field in the quarantine is cut to
+   (`src/api/deliveries.ts` reads rowid as recency). It carries every column added by 0024 (`integrations.credential_fingerprint`) and 0025 (`deliveries.duplicate_of`, `suppressed_reason`, `possible_duplicate`, `provider_message_id`, with their CHECKs); the schema-diff test over the whole chain fails when a later migration adds one it does not carry. `event_dedup`, `delivery_attempts` and `destination_health` (0025) were already NOT NULL with a foreign key and are not rebuilt; attempt rows of a quarantined delivery are removed later as orphans by the retention job (ADR 0023), and each free-text field in the quarantine is cut to
    200 characters (a 2,400-character legacy repo previously overflowed the record's CHECK).
    It must still run in a write freeze: `MAINTENANCE_MODE=true` answers 503 with Retry-After on every route
    but the probes, skips cron and retries queue batches. A late row would be refused by the guard, but the
@@ -99,13 +99,13 @@ that has one. INSERTs must name `organization_id` in their column list. The set 
 **derived from the migrated schema**, not listed, so a new table with an `organization_id` is covered
 the day it exists, and a new table without one must be explained in the test (17 are).
 
-An **allowlist of 39 reviewed entries** covers statements that are tenant-agnostic by design: ingress
+An **allowlist of 42 reviewed entries** covers statements that are tenant-agnostic by design: ingress
 lookups keyed by a credential (endpoint id, installation id, OAuth state hash) whose row then supplies
 the tenant, cron sweeps (KEK rotation, outbox and ledger discovery, stall detection, purge discovery),
 age-based retention, and one subquery correlated by primary key to an org-scoped row. Every entry names
 a file and a statement fragment, carries a reason, and **fails the test when it stops matching** (no
-dead entries). The scanner is tested against 41 fixtures (it flags 26 shapes of unscoped SQL and passes
-15 scoped ones) and against real files with their predicates stripped.
+dead entries). The scanner is tested against 42 fixtures (it flags 26 shapes of unscoped SQL and passes
+16 scoped ones) and against real files with their predicates stripped.
 
 **Result: no genuinely unscoped query on tenant data was found.** Everything the scanner flagged was an
 intended tenant-agnostic statement. That is a finding, not a placeholder; the value is that the next one

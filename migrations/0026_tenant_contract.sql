@@ -57,7 +57,7 @@
 --      create them again on the new table, release the guard ONLY if the recount balances,
 --      drop `<table>_old`, drop the guard.
 --
--- Every column, default, CHECK, index and trigger that 0001..0024 gave these tables is carried
+-- Every column, default, CHECK, index and trigger that 0001..0025 gave these tables is carried
 -- over in the same column order (tests/migration-0026.test.ts diffs sqlite_master before and
 -- after and fails on any difference other than the intended constraint). The insert triggers
 -- are kept: NOT NULL does not reject '' and the trigger messages are what callers see.
@@ -253,17 +253,25 @@ CREATE TABLE deliveries_v4 (
   dead_lettered_at INTEGER,
   created_at TEXT,
   body_hash TEXT,
-  is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0,1))
+  is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0,1)),
+  duplicate_of TEXT,
+  suppressed_reason TEXT
+  CHECK(suppressed_reason IS NULL OR suppressed_reason IN ('duplicate','claim_conflict','provider_idempotency')),
+  possible_duplicate INTEGER NOT NULL DEFAULT 0 CHECK(possible_duplicate IN (0,1)),
+  provider_message_id TEXT
+  CHECK(provider_message_id IS NULL OR length(provider_message_id) <= 200)
 );
 
 INSERT INTO deliveries_v4(
   id,integration_id,state,attempts,last_error,updated_at,organization_id,last_error_code,dedup_key,
   replay_of,replay_count,claim_token,claimed_at,next_attempt_at,first_attempt_at,last_attempt_at,
-  dead_lettered_at,created_at,body_hash,is_test)
+  dead_lettered_at,created_at,body_hash,is_test,duplicate_of,suppressed_reason,possible_duplicate,
+  provider_message_id)
 SELECT
   id,integration_id,state,attempts,last_error,updated_at,organization_id,last_error_code,dedup_key,
   replay_of,replay_count,claim_token,claimed_at,next_attempt_at,first_attempt_at,last_attempt_at,
-  dead_lettered_at,created_at,body_hash,is_test
+  dead_lettered_at,created_at,body_hash,is_test,duplicate_of,suppressed_reason,possible_duplicate,
+  provider_message_id
 FROM deliveries
 WHERE organization_id IS NOT NULL AND organization_id <> ''
   AND EXISTS (SELECT 1 FROM organization o WHERE o.id = deliveries.organization_id)

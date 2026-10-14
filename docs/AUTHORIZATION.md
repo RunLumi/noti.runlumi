@@ -47,7 +47,7 @@
 | `source.rotate` | yes | no | `POST /api/sources/:id/rotate` |
 | `source.revoke` | yes | no | `POST /api/sources/:id/revoke-credentials` |
 | `delivery.read` | yes | yes | `GET /api/deliveries`<br>`GET /api/deliveries/summary`<br>`GET /api/deliveries/:id`<br>`GET /api/observability/summary`<br>`GET /api/setup/progress` |
-| `delivery.replay` | yes | no | `POST /api/deliveries/:id/replay` |
+| `delivery.replay` | yes | no | `POST /api/deliveries/replay-plan`<br>`POST /api/deliveries/replay`<br>`POST /api/deliveries/:id/replay` |
 | `audit.read` | yes | no | `GET /api/audit` |
 | `workspace.export` | yes | no | `GET /api/workspace/export` |
 | `workspace.delete` | yes | no | `GET /api/workspace/deletion`<br>`POST /api/workspace/deletion`<br>`DELETE /api/workspace/deletion` |
@@ -95,6 +95,8 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `GET /api/deliveries` | capability `delivery.read` | `src/api/deliveries.ts` |
 | `GET /api/deliveries/summary` | capability `delivery.read` | `src/api/deliveries.ts` |
 | `GET /api/deliveries/:id` | capability `delivery.read` | `src/api/deliveries.ts` |
+| `POST /api/deliveries/replay-plan` | capability `delivery.replay` | `src/api/deliveries.ts` |
+| `POST /api/deliveries/replay` | capability `delivery.replay` | `src/api/deliveries.ts` |
 | `POST /api/deliveries/:id/replay` | capability `delivery.replay` | `src/api/deliveries.ts` |
 | `GET /api/observability/summary` | capability `delivery.read` | `src/api/observability.ts` |
 | `GET /api/audit` | capability `audit.read` | `src/api/audit.ts` |

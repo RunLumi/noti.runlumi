@@ -269,6 +269,20 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
   },
   {
     method: 'POST',
+    path: '/api/deliveries/replay-plan',
+    file: 'src/api/deliveries.ts',
+    handler: local('/replay-plan'),
+    access: cap('delivery.replay'),
+  },
+  {
+    method: 'POST',
+    path: '/api/deliveries/replay',
+    file: 'src/api/deliveries.ts',
+    handler: local('/replay'),
+    access: cap('delivery.replay'),
+  },
+  {
+    method: 'POST',
     path: '/api/deliveries/:id/replay',
     file: 'src/api/deliveries.ts',
     handler: local('/:id/replay'),

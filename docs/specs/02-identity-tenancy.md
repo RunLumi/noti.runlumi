@@ -356,7 +356,7 @@ authorization layer to enforce.
 
 ## F26 — Tenant-scoped authorization
 
-**Priority** P0 · **Status** 🟡 `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9); static every-query test with a reviewed, no-dead-entry allowlist (39 entries) (`tests/security/tenant-query-scope.test.ts`, scanner `tests/support/sql-scope.ts`, ADR 0021). Not built: repository functions that take the organization as a parameter (queries are inline literals checked by the scanner, not typed functions); the scanner cannot see dynamically assembled SQL
+**Priority** P0 · **Status** 🟡 `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9); static every-query test with a reviewed, no-dead-entry allowlist (42 entries) (`tests/security/tenant-query-scope.test.ts`, scanner `tests/support/sql-scope.ts`, ADR 0021). Not built: repository functions that take the organization as a parameter (queries are inline literals checked by the scanner, not typed functions); the scanner cannot see dynamically assembled SQL
 
 **Story** As a security reviewer, I want every data access to require an explicit
 organization scope, so that a missing filter is a type error rather than a breach.

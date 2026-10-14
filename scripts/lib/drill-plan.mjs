@@ -45,6 +45,9 @@ const BODIES = {
   'PATCH /api/sources/:id': { enabled: false },
   'POST /api/sources/:id/rotate': {},
   'POST /api/deliveries/:id/replay': {},
+  // Bulk replay (ADR 0023): the plan and the run name a window; with no ids they act on the caller's own workspace only.
+  'POST /api/deliveries/replay-plan': {},
+  'POST /api/deliveries/replay': {},
   'POST /api/integrations/:id/test': {},
   'POST /api/integrations/:id/revoke-credentials': {},
   'POST /api/sources/:id/revoke-credentials': {},
