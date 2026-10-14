@@ -107,7 +107,8 @@ export function evaluate(reconcile, options = {}) {
       blockers.push(
         `${t.table}: a quarantined id is also live, or the counts overlap (missing=${t.missing}, quarantine_also_live=${t.quarantineAlsoLive})`,
       );
-    if (t.live === 0 && t.old > 0)
+    // An empty live table is fine only when EVERY original row was quarantined (a table of orphans).
+    if (t.live === 0 && t.old > t.quarantined)
       blockers.push(
         `${t.table}: the live table is EMPTY but its original has ${t.old} row(s); this can never be acknowledged. Run scripts/migration-0026-recover.mjs`,
       );

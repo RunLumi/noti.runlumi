@@ -552,6 +552,15 @@ describe('finalize: the only step that drops the originals', () => {
     expect(hasTable(raw, 'held_events_old')).toBe(true);
   });
 
+  it('allows an empty live table when every original row was quarantined', async () => {
+    const { raw } = happy();
+    raw.exec('DELETE FROM noise_open_failures');
+    raw.exec("DELETE FROM noise_open_failures_old WHERE organization_id='org-a'");
+    const result = await finalize(over(raw));
+    expect(result.blockers.join('\n')).not.toContain('noise_open_failures: the live table is EMPTY');
+    expect(result.status).toBe('reconciled');
+  });
+
   it('lists the ids of originals that vanished without a quarantine entry', async () => {
     const { raw } = happy();
     raw.exec("DELETE FROM deliveries WHERE id='d-set'");
