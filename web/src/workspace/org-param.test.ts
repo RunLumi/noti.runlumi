@@ -6,11 +6,12 @@ import { describe, expect, it } from 'vitest';
  * The server refuses a write that does not name its workspace (`?org=`) from a person in several
  * workspaces (`400 org is required`). This scans the dashboard's API modules so a new mutation
  * cannot forget it: every POST, PUT, PATCH or DELETE `fetch` option must be in a call whose path
- * is built with `withOrg(...)` (or already carries `org=`). The one exception is switching the
- * active workspace itself, which names its target in the body.
+ * is built with `withOrg(...)` (or already carries `org=`). The exceptions are switching the
+ * active workspace itself, which names its target in the body, and erasing the caller's own account.
  */
 const SRC = join(__dirname, '..');
-const EXEMPT_PATHS = ['/api/workspace/active'];
+// Both act on the caller's own session or account, not on a workspace.
+const EXEMPT_PATHS = ['/api/workspace/active', '/api/workspace/me'];
 const SKIP_FILES = new Set(['sources/snippets.ts']); // sample code shown to the user, not a call
 
 function walk(dir: string): string[] {

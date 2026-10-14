@@ -30,7 +30,8 @@ emailed request must be verified against the signed-in account before anything i
 
 `GET /api/workspace/me/data-export` answers for the caller only. The user id comes from the verified
 session, never from the request, so it cannot be pointed at someone else. It is read-only
-(a plain GET changes nothing except an audit row and a rate-limit counter), returns
+(a plain GET changes nothing except an audit row and a rate-limit counter), refuses a request the browser
+marks `Sec-Fetch-Site: cross-site` or `same-site` (`403`), returns
 `Cache-Control: no-store` and a download header, is limited to 5 per hour per person, and is
 audited as `account.export`. Cross-site pages cannot read it: the API sets no CORS headers.
 
@@ -60,8 +61,24 @@ title that names a person; there is no per-person search of it, and this is a kn
 
 ## Erasure: what `DELETE /api/workspace/me` does
 
-Requires a signed-in, email-verified session, a same-origin request, JSON, and the account email
-typed as confirmation (`{confirm}`; 422 otherwise). Limited to 5 attempts per hour.
+**There is no undo and no waiting period.** The account is deleted at once. (A 24-hour soft-delete grace was
+considered and not built: the account's sessions, passkeys and memberships would have to be suspended and
+restored, and every sign-in path would need to know about it. Until it exists, the dashboard says so before
+the person confirms.)
+
+Requires a signed-in, email-verified session, a same-origin request and JSON. Limited to 5 attempts per hour.
+
+- **Recent sign-in (step-up).** The session must have been created within the last 10 minutes (`session.created_at`,
+  not `updated_at`, which moves on every refresh). Otherwise the answer is `403 {"error":"reauth_required"}` and
+  nothing changes; it does not use up an attempt. The dashboard then asks the person to sign in again (password or
+  passkey), which creates a new session, and retries by itself. Better Auth's own `freshAge` is only enforced on its
+  own routes, so the check is ours. A stolen cookie is rarely fresh, but this is a recent sign-in, not a second
+  factor (AR-41).
+- **Typed email.** `{confirm: "<account email>"}`, `422` otherwise. This is a guard against a misclick. It is not a
+  security control: anyone holding the session can read the address from the page.
+- **Notice.** Before anything is deleted, a plain email goes to the address on file saying the deletion was
+  accepted and how to report it if it was not the person. Best effort: a send failure is logged
+  (`account_deletion_notice_failed`) and never blocks or reveals the erasure.
 
 1. **Refuses (409) while the person is the only admin of any workspace**, naming each one and the
    way out: `transfer_admin_role` (the workspace has other members: make one an admin first) or
@@ -69,9 +86,14 @@ typed as confirmation (`{confirm}`; 422 otherwise). Limited to 5 attempts per ho
    for the purge). Nothing is changed. This follows the database's last-admin trigger, which would
    refuse the delete anyway; the check exists so the answer is a plain explanation.
 2. Otherwise, in one transaction: writes one `account.delete` audit row per workspace the person
-   leaves, deletes pending GitHub install states they started, deletes invitations addressed to
-   their email, and deletes the `user` row, which cascades to sessions, sign-in methods, passkeys,
-   memberships and invitations they sent.
+   leaves (**without** IP address or user agent: that row would outlive the person it describes),
+   deletes pending GitHub install states they started, **hands each pending invitation they sent to
+   another admin of the same workspace** (so an invitee is not silently locked out; a row with no other
+   admin to take it is left to the cascade), deletes invitations addressed to their email, and deletes
+   the `user` row, which cascades to sessions, sign-in methods, passkeys, memberships and the sent
+   invitations that are not pending (accepted, declined, expired).
+   Only the last-admin trigger produces a `409` here (a second admin left between the check and the
+   write); any other database fault is logged and answered `500`, never disguised as a conflict.
 3. **Never deletes a workspace, or any other member's data.** A workspace with other members
    keeps everything: integrations, sources, deliveries, notification content. Those belong to
    the workspace. Only the person's membership goes.
@@ -104,7 +126,8 @@ stable identifier within those rows.
 
 ## Not done
 
-- A fresh-sign-in step before erasure. The typed email is the only re-confirmation (AR-41).
+- A second factor or an undo window for erasure. Step-up is a sign-in within 10 minutes (AR-41); there is no soft-delete.
+- Erasure and export for an account whose email was never verified (both need a verified session). The operator procedure in `RUNBOOK.md` covers it.
 - Correction and restriction mechanisms in the product.
 - A person-level search across notification content.
 - Statutory response deadlines, a request log with a due date, and a privacy-contact address.

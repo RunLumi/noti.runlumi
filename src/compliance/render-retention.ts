@@ -166,8 +166,10 @@ export function renderRetentionDoc(): string {
             `- \`${r.table}\`: ${typeof r.retention === 'object' && r.retention.kind === 'not_enforced' ? r.retention.gap : ''}`,
         )
       : ['- None recorded.']),
-    '- The expiry-based purge (`expired_auth_purge`) scans `session`, `verification`, `github_auth_states` and `rate_limit`',
-    '  once an hour; none has an index on its expiry column. Acceptable at current volume; revisit with an index if they grow.',
+    '- The expiry-based purge (`expired_auth_purge`) runs once an hour. `github_auth_states` has an index on its expiry (migration 0010);',
+    '  `session`, `verification` and `rate_limit` do not, so those scans read the whole table. Acceptable at current volume; add an index if they grow.',
+    '  A sanity guard aborts the pass, and logs `expired_purge_aborted`, if an expiry looks like seconds instead of milliseconds or more than half of a large `session` table would go.',
+    '- Accounts whose email was never verified are not purged by any job, and they cannot use `DELETE /api/workspace/me` (it needs a verified session). Only an operator can remove them (`RUNBOOK.md`, "Data-subject requests").',
     '- Audit rows are append-only and keep the actor id, IP address and user agent after the actor is erased, until the audit retention.',
     '- The workspace export does not include notification content (`notification_outbox`, `held_events`) or repository lists.',
     '',

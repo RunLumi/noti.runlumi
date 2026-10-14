@@ -2,7 +2,9 @@ import { Hono, type Context } from 'hono';
 import { auditStatement, recordAudit, requestOrigin } from '../audit/audit';
 import { currentSession } from '../auth/workspace';
 import type { Bindings } from '../env';
+import { sendNoticeEmail } from '../auth/email';
 import { asRecord } from '../lib/json';
+import { log } from '../platform/log';
 import { hit } from '../security/rate-limit';
 
 /**
@@ -28,6 +30,17 @@ export const EXPORT_ROW_LIMIT = 2000;
 export const EXPORTS_PER_HOUR = 5;
 export const ERASURES_PER_HOUR = 5;
 const HOUR_MS = 60 * 60 * 1000;
+/** Erasure needs a session created this recently: a stolen cookie is rarely fresh (H1). */
+export const FRESH_SESSION_MS = 10 * 60 * 1000;
+/** Raised by the last-admin trigger (migration 0005, 0011). The only error that means "refused". */
+const LAST_ADMIN_TRIGGER = 'organization requires an admin';
+const SECURITY_REPORT_URL = 'https://github.com/RunLumi/noti.runlumi/security/advisories/new';
+
+/** True when the session was created (signed in) within the freshness window. */
+export function isFreshSession(createdAt: unknown, now: number = Date.now()): boolean {
+  const created = createdAt instanceof Date ? createdAt.getTime() : Date.parse(String(createdAt));
+  return Number.isFinite(created) && created <= now + 60_000 && now - created <= FRESH_SESSION_MS;
+}
 
 type Ctx = Context<{ Bindings: Bindings }>;
 
@@ -44,6 +57,12 @@ account.get('/data-export', async (c) => {
   const s = await currentSession(c);
   if (!s) return c.json({ error: 'Unauthorized' }, 401);
   const userId = s.user.id;
+
+  // A cross-site page cannot read the answer (no CORS), but refuse its request outright too (L2):
+  // a browser that says the request is not from our own origin, or a user action, is not our dashboard.
+  const site = c.req.header('sec-fetch-site');
+  if (site !== undefined && site !== 'same-origin' && site !== 'none')
+    return c.json({ error: 'Forbidden' }, 403);
 
   const limit = await hit(c.env.DB, `dsar-export:${userId}`, EXPORTS_PER_HOUR, HOUR_MS);
   if (limit.limited) return tooMany(c, limit.retryAfterSeconds);
@@ -157,6 +176,13 @@ account.delete('/', async (c) => {
     return c.json({ error: 'Expected application/json' }, 415);
   const userId = s.user.id;
 
+  // Step-up (H1): a stolen session cookie must not be enough to erase an account. The person signs in
+  // again (password or passkey), which creates a new session, and retries. Better Auth's own
+  // `session.freshAge` is only enforced on its own routes, so the check is ours, on `createdAt`
+  // (`updatedAt` moves on every refresh).
+  if (!isFreshSession(s.session.createdAt))
+    return c.json({ error: 'reauth_required' }, 403, { 'cache-control': 'no-store' });
+
   const limit = await hit(c.env.DB, `dsar-erase:${userId}`, ERASURES_PER_HOUR, HOUR_MS);
   if (limit.limited) return tooMany(c, limit.retryAfterSeconds);
 
@@ -190,7 +216,7 @@ account.delete('/', async (c) => {
     .prepare('SELECT organization_id FROM member WHERE user_id=?')
     .bind(userId)
     .all<{ organization_id: string }>();
-  const attribution = requestOrigin(c.req.raw.headers);
+  // The erasure row carries no IP address or user agent (L5): it would outlive the person it describes.
   const record = (organizationId: string | null) =>
     auditStatement(db, {
       organizationId,
@@ -199,8 +225,19 @@ account.delete('/', async (c) => {
       subjectType: 'organization',
       subjectId: organizationId,
       outcome: 'success',
-      ...attribution,
     });
+
+  // Tell the address on file before anything is deleted, so a takeover cannot erase silently. Best
+  // effort: a send failure is logged and never blocks (or reveals) the erasure.
+  try {
+    await sendNoticeEmail(c.env, {
+      to: s.user.email,
+      subject: 'Your Lumi Noti account is being deleted',
+      text: `A request to delete your Lumi Noti account was just accepted, and your account, sessions and memberships are being removed. Workspaces you belonged to are not deleted.\n\nIf this was not you, someone was signed in as you. Report it privately: ${SECURITY_REPORT_URL}`,
+    });
+  } catch (error) {
+    log('warn', 'account_deletion_notice_failed', { error });
+  }
 
   try {
     await db.batch([
@@ -210,16 +247,36 @@ account.delete('/', async (c) => {
         ? memberships.results.map((m) => record(m.organization_id))
         : [record(null)]),
       db.prepare('DELETE FROM github_auth_states WHERE user_id=?').bind(userId),
+      // Pending invitations this person sent belong to the invitee too (M1): hand each to another admin of
+      // the same workspace so the cascade below does not delete them. Guarded, because inviter_id is
+      // NOT NULL; with no other admin the row is left to the cascade.
+      db
+        .prepare(
+          `UPDATE invitation SET inviter_id=(
+             SELECT a.user_id FROM member a
+             WHERE a.organization_id=invitation.organization_id AND a.role='admin' AND a.user_id<>?1
+             ORDER BY a.created_at, a.id LIMIT 1)
+           WHERE inviter_id=?1 AND status='pending' AND EXISTS (
+             SELECT 1 FROM member a
+             WHERE a.organization_id=invitation.organization_id AND a.role='admin' AND a.user_id<>?1)`,
+        )
+        .bind(userId),
       // Invitations addressed to this person's email belong to them as well. Invitations they SENT go
       // with the cascade from `user` below.
       db.prepare('DELETE FROM invitation WHERE lower(email)=lower(?)').bind(s.user.email),
       // Cascades: sessions, sign-in methods, passkeys, memberships, invitations sent.
       db.prepare('DELETE FROM "user" WHERE id=?').bind(userId),
     ]);
-  } catch {
-    // The last-admin trigger can still refuse if another admin was removed after the check above.
-    // The batch is one transaction, so nothing was changed.
-    return c.json({ error: 'Your workspaces changed while this ran. Nothing was deleted; try again.' }, 409);
+  } catch (error) {
+    // The batch is one transaction, so nothing was changed. Only the last-admin trigger means "refused"
+    // (another admin was removed after the check above); anything else is a fault, not a conflict (M2).
+    if (error instanceof Error && error.message.includes(LAST_ADMIN_TRIGGER))
+      return c.json(
+        { error: 'Your workspaces changed while this ran. Nothing was deleted; try again.' },
+        409,
+      );
+    log('error', 'account_erase_failed', { error });
+    return c.json({ error: 'Something went wrong. Nothing was deleted; try again later.' }, 500);
   }
 
   return c.json({ deleted: true }, 200, {

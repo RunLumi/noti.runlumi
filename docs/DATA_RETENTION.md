@@ -119,17 +119,20 @@ Not machine-checked. The retention of these is set by Cloudflare or by account c
 - `auth_memberships`: The tables stay in the forward-only migration chain. Whether a live database holds rows is unknown to this repository; the operator should check and drop them in a later migration (AR-10).
 - `auth_tokens`: The tables stay in the forward-only migration chain. Whether a live database holds rows is unknown to this repository; the operator should check and drop them in a later migration (AR-10).
 - `auth_invites`: The tables stay in the forward-only migration chain. Whether a live database holds rows is unknown to this repository; the operator should check and drop them in a later migration (AR-10).
-- The expiry-based purge (`expired_auth_purge`) scans `session`, `verification`, `github_auth_states` and `rate_limit`
-  once an hour; none has an index on its expiry column. Acceptable at current volume; revisit with an index if they grow.
+- The expiry-based purge (`expired_auth_purge`) runs once an hour. `github_auth_states` has an index on its expiry (migration 0010);
+  `session`, `verification` and `rate_limit` do not, so those scans read the whole table. Acceptable at current volume; add an index if they grow.
+  A sanity guard aborts the pass, and logs `expired_purge_aborted`, if an expiry looks like seconds instead of milliseconds or more than half of a large `session` table would go.
+- Accounts whose email was never verified are not purged by any job, and they cannot use `DELETE /api/workspace/me` (it needs a verified session). Only an operator can remove them (`RUNBOOK.md`, "Data-subject requests").
 - Audit rows are append-only and keep the actor id, IP address and user agent after the actor is erased, until the audit retention.
 - The workspace export does not include notification content (`notification_outbox`, `held_events`) or repository lists.
 
 ## Notes per store
 
+- `user`: Accounts whose email was never verified are not purged by any job and cannot use the erasure route (it needs a verified session); they stay until an operator deletes them (gap).
 - `session`: The session expires 30 days after its last refresh (refreshed at most daily).
 - `verification`: Each record carries its own expiry (UNVERIFIED: the exact lifetimes are Better Auth defaults). Rows still valid at the time of an account deletion survive until they expire.
 - `member`: A database trigger refuses to remove the last admin of a workspace outside a started purge.
-- `invitation`: Erasing an account deletes invitations the person sent (cascade on the inviter) and invitations addressed to their email address.
+- `invitation`: Erasing an account hands the pending invitations the person sent to another admin of the same workspace, so the invitee can still accept; sent invitations that are not pending (accepted, declined, expired) go with the cascade on the inviter. Invitations addressed TO the erased email address are deleted. A person whose email is not yet verified cannot use the erasure route (gap).
 - `integrations` (integrations_credentials): Deleting the row destroys the wrapped data key, so a copy of the ciphertext (for example in a Time Travel restore) cannot be opened without that row.
 - `deliveries`: Only terminal deliveries are purged; a dead-lettered row is kept until both its creation and its dead-lettering are older than the cutoff.
 - `audit_events`: Erasing an account does not rewrite these rows: a database trigger refuses every UPDATE (migration 0008). They keep the opaque actor id, the IP address and the user agent until the audit retention above, which the operator must weigh against the erasure obligation.

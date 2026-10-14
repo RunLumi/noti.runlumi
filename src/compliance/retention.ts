@@ -156,6 +156,8 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     personalData: 'direct',
     dataHeld: 'Name, email address, email-verified flag, optional image, timestamps.',
     purpose: 'Sign-in identity; shows who a workspace member is.',
+    notes:
+      'Accounts whose email was never verified are not purged by any job and cannot use the erasure route (it needs a verified session); they stay until an operator deletes them (gap).',
     retention: { kind: 'while_parent_exists', parent: 'account' },
     deletion: [{ kind: 'account_erasure' }],
     inWorkspaceExport: true,
@@ -291,7 +293,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     exportNote: 'Invitations the person sent, without the invitee email address (a third party).',
     ...placeholders,
     notes:
-      'Erasing an account deletes invitations the person sent (cascade on the inviter) and invitations addressed to their email address.',
+      'Erasing an account hands the pending invitations the person sent to another admin of the same workspace, so the invitee can still accept; sent invitations that are not pending (accepted, declined, expired) go with the cascade on the inviter. Invitations addressed TO the erased email address are deleted. A person whose email is not yet verified cannot use the erasure route (gap).',
   },
   // --- workspace -----------------------------------------------------------------------------
   {

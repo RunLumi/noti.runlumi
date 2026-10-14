@@ -11,12 +11,26 @@
  *
  * Only rows that can no longer be used are deleted. Deletes are bounded per statement and per tick
  * and the whole pass runs at most hourly (`ops_state` key `last_expired_auth_purge_at`, advanced only
- * after a complete pass). None of these tables has an index on its expiry column, so each pass scans
- * them; that is acceptable at hourly cadence and small volume, and is listed in the retention doc.
+ * after a complete pass). `github_auth_states` has an index on its expiry (migration 0010); `session`,
+ * `verification` and `rate_limit` have none, so each pass scans them. That is acceptable at hourly
+ * cadence and small volume, and is listed in the retention doc.
+ *
+ * Sanity guard: the purge deletes by comparing a timestamp column with `Date.now()`. If a table held
+ * seconds instead of milliseconds, every live row would look expired. Before deleting anything the
+ * pass therefore aborts, logs `expired_purge_aborted` and deletes nothing when (a) any `session` or
+ * `verification` expiry is below `UNIT_CANARY_MS` (a millisecond timestamp from this century is above
+ * 1e12), or (b) a `session` table of at least `MAJORITY_FLOOR` rows would lose more than half its rows.
+ * An aborted pass does not advance the throttle, so it is retried and logs every hour until a person looks.
  *
  * UNVERIFIED: `meta.changes` for DELETE was exercised only through the Node SQLite fake, not real D1.
  */
+import { log } from '../platform/log';
+
 export const EXPIRED_BATCH = 500;
+/** No millisecond timestamp from this century is below this; a seconds value always is. */
+export const UNIT_CANARY_MS = 1e11;
+/** Below this many rows the "more than half" rule does not apply (a small table can be mostly stale). */
+export const MAJORITY_FLOOR = 200;
 export const EXPIRED_MAX_ROUNDS = 5;
 export const EXPIRED_INTERVAL_MS = 60 * 60_000;
 export const EXPIRED_STATE_KEY = 'last_expired_auth_purge_at';
@@ -34,6 +48,8 @@ export interface ExpiredAuthReport {
   readonly authStates: number;
   readonly authRateLimits: number;
   readonly more: boolean;
+  /** True when the sanity guard stopped the pass before any delete. */
+  readonly aborted: boolean;
 }
 
 /** `?1` cutoff, `?2` limit. Table and column names are fixed constants below, never input. */
@@ -84,10 +100,65 @@ async function markRun(db: Db, nowMs: number): Promise<void> {
   }
 }
 
+interface Anomaly {
+  readonly table: string;
+  readonly reason: 'expiry_not_milliseconds' | 'majority_expired';
+  readonly total: number;
+  readonly expired: number;
+}
+
+async function countRows(db: Db, sql: string, ...binds: number[]): Promise<number> {
+  const row = await db
+    .prepare(sql)
+    .bind(...binds)
+    .first<{ n: number | null }>();
+  return Number(row?.n ?? 0);
+}
+
+/** Looks for a pass that would delete live rows; returns the first anomaly, or null. */
+async function findAnomaly(db: Db, nowMs: number): Promise<Anomaly | null> {
+  for (const table of ['session', 'verification'] as const) {
+    const wrongUnit = await countRows(
+      db,
+      `SELECT COUNT(*) AS n FROM ${table} WHERE expires_at < ?1`,
+      UNIT_CANARY_MS,
+    );
+    if (wrongUnit > 0)
+      return { table, reason: 'expiry_not_milliseconds', total: wrongUnit, expired: wrongUnit };
+  }
+  const total = await countRows(db, 'SELECT COUNT(*) AS n FROM session');
+  if (total >= MAJORITY_FLOOR) {
+    const expired = await countRows(db, 'SELECT COUNT(*) AS n FROM session WHERE expires_at < ?1', nowMs);
+    if (expired * 2 > total) return { table: 'session', reason: 'majority_expired', total, expired };
+  }
+  return null;
+}
+
 export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<ExpiredAuthReport> {
   const previous = await lastRun(db);
   if (previous !== null && nowMs - previous >= 0 && nowMs - previous < EXPIRED_INTERVAL_MS) {
-    return { skipped: true, sessions: 0, verifications: 0, authStates: 0, authRateLimits: 0, more: false };
+    return {
+      skipped: true,
+      sessions: 0,
+      verifications: 0,
+      authStates: 0,
+      authRateLimits: 0,
+      more: false,
+      aborted: false,
+    };
+  }
+  const anomaly = await findAnomaly(db, nowMs);
+  if (anomaly) {
+    log('error', 'expired_purge_aborted', { ...anomaly });
+    return {
+      skipped: false,
+      sessions: 0,
+      verifications: 0,
+      authStates: 0,
+      authRateLimits: 0,
+      more: false,
+      aborted: true,
+    };
   }
   const sessions = await drain(db, PURGE_EXPIRED_SESSIONS_SQL, nowMs);
   const verifications = await drain(db, PURGE_EXPIRED_VERIFICATIONS_SQL, nowMs);
@@ -106,5 +177,6 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
     authStates: authStates.n,
     authRateLimits: authRateLimits.n,
     more,
+    aborted: false,
   };
 }

@@ -1,7 +1,0 @@
-# Lumi Noti vulnerability disclosure (RFC 9116). The policy is SECURITY.md in the repository.
-# This is a best-effort channel for an engineering-alpha product; it is not a bug bounty.
-Contact: https://github.com/RunLumi/noti.runlumi/security/advisories/new
-Expires: 2027-06-30T00:00:00.000Z
-Preferred-Languages: en, vi
-Policy: https://github.com/RunLumi/noti.runlumi/blob/main/SECURITY.md
-Canonical: https://noti.runlumi.app/.well-known/security.txt

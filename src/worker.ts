@@ -16,6 +16,7 @@
 import app from './index';
 import type { Bindings } from './env';
 import { isBackendPath, serveDashboard } from './web/shell';
+import { SECURITY_TXT_PATH, serveSecurityTxt } from './web/security-txt';
 
 /**
  * Loaded on first use, so the React app inside Start's server bundle is never evaluated when
@@ -28,7 +29,10 @@ async function renderWithStart(request: Request): Promise<Response> {
 
 export default {
   fetch(request: Request, env: Bindings, ctx: ExecutionContext): Response | Promise<Response> {
-    if (isBackendPath(new URL(request.url).pathname)) return app.fetch(request, env, ctx);
+    const { pathname } = new URL(request.url);
+    // Generated, never a static file: see src/web/security-txt.ts. Exact path only.
+    if (pathname === SECURITY_TXT_PATH) return serveSecurityTxt(request, env.APP_ORIGIN);
+    if (isBackendPath(pathname)) return app.fetch(request, env, ctx);
     // Start renders the document in two cases only, both build tooling: `vite dev`, and the
     // build's own prerender request while `/_shell.html` does not exist yet (see serveDashboard).
     // A deployed Worker always has the shell, so a request can never reach Start's handler,

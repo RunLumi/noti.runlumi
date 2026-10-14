@@ -1,10 +1,14 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { drizzle } from 'drizzle-orm/d1';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as schema from '../../src/db/schema';
 import {
   AUTH_RATE_LIMIT_MAX_AGE_MS,
   AUTH_STATE_GRACE_MS,
   EXPIRED_BATCH,
   EXPIRED_INTERVAL_MS,
   EXPIRED_STATE_KEY,
+  MAJORITY_FLOOR,
+  UNIT_CANARY_MS,
   purgeExpiredAuthRecords,
 } from '../../src/pipeline/expired-records';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
@@ -56,6 +60,7 @@ describe('purgeExpiredAuthRecords', () => {
       authStates: 1,
       authRateLimits: 1,
       more: false,
+      aborted: false,
     });
     expect(
       (db.raw.prepare('SELECT id FROM "session"').all() as Array<{ id: string }>).map((r) => r.id),
@@ -87,17 +92,81 @@ describe('purgeExpiredAuthRecords', () => {
     const insert = db.raw.prepare(
       'INSERT INTO "session"(id,user_id,token,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?)',
     );
-    for (let i = 0; i < EXPIRED_BATCH * 5 + 10; i++)
-      insert.run(`s${String(i)}`, 'u', `t${String(i)}`, NOW - 1, 1, 1);
+    const expired = EXPIRED_BATCH * 5 + 10;
+    for (let i = 0; i < expired; i++) insert.run(`s${String(i)}`, 'u', `t${String(i)}`, NOW - 1, 1, 1);
+    // Mostly live rows, so the majority guard does not apply to this backlog.
+    for (let i = 0; i < expired * 2; i++) insert.run(`l${String(i)}`, 'u', `lt${String(i)}`, NOW + 1e9, 1, 1);
     db.raw.exec('COMMIT');
 
     const first = await purgeExpiredAuthRecords(db.d1, NOW);
     expect(first).toMatchObject({ sessions: EXPIRED_BATCH * 5, more: true });
-    expect(n('"session"')).toBe(10);
+    expect(n('"session"')).toBe(10 + 2 * (EXPIRED_BATCH * 5 + 10));
     expect(db.raw.prepare('SELECT 1 FROM ops_state WHERE key=?').get(EXPIRED_STATE_KEY)).toBeUndefined();
 
     const second = await purgeExpiredAuthRecords(db.d1, NOW + 1000);
     expect(second).toMatchObject({ sessions: 10, more: false });
-    expect(n('"session"')).toBe(0);
+    expect(n('"session"')).toBe(2 * (EXPIRED_BATCH * 5 + 10));
+  });
+
+  describe('real-shaped rows and the sanity guard (M3)', () => {
+    async function liveSessionViaDrizzle(id: string, expiresAt: Date): Promise<void> {
+      await drizzle(db.d1, { schema })
+        .insert(schema.session)
+        .values({
+          id,
+          token: `tok-${id}`,
+          userId: 'u',
+          expiresAt,
+          createdAt: new Date(NOW),
+          updatedAt: new Date(NOW),
+        });
+    }
+
+    it('keeps a session written the way Better Auth writes it (thirty days ahead, in milliseconds)', async () => {
+      await liveSessionViaDrizzle('live', new Date(NOW + 30 * 86_400_000));
+      await liveSessionViaDrizzle('dead', new Date(NOW - 1000));
+      const stored = db.raw.prepare('SELECT id, expires_at FROM "session" ORDER BY id').all() as Array<{
+        id: string;
+        expires_at: number;
+      }>;
+      // Canary: if the column ever holds seconds, this fails before the purge can be wrong.
+      for (const row of stored) expect(row.expires_at).toBeGreaterThan(1e12);
+
+      const report = await purgeExpiredAuthRecords(db.d1, NOW);
+      expect(report).toMatchObject({ aborted: false, sessions: 1 });
+      expect(
+        (db.raw.prepare('SELECT id FROM "session"').all() as Array<{ id: string }>).map((r) => r.id),
+      ).toEqual(['live']);
+    });
+
+    it('aborts, deletes nothing and logs when an expiry is not in milliseconds', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      session('seconds', Math.floor((NOW + 30 * 86_400_000) / 1000));
+      session('dead', NOW - 1);
+      expect(Math.floor((NOW + 1) / 1000)).toBeLessThan(UNIT_CANARY_MS);
+
+      const report = await purgeExpiredAuthRecords(db.d1, NOW);
+      expect(report.aborted).toBe(true);
+      expect(n('"session"')).toBe(2);
+      expect(error.mock.calls.map((c) => String(c[0])).join('\n')).toContain('expired_purge_aborted');
+      // The throttle did not advance, so the pass is retried.
+      expect(db.raw.prepare('SELECT 1 FROM ops_state WHERE key=?').get(EXPIRED_STATE_KEY)).toBeUndefined();
+      error.mockRestore();
+    });
+
+    it('aborts when a table of real size would lose more than half its sessions, but not a small one', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      for (let i = 0; i < 10; i++) session(`small${String(i)}`, NOW - 1);
+      expect((await purgeExpiredAuthRecords(db.d1, NOW)).aborted).toBe(false);
+      expect(n('"session"')).toBe(0);
+
+      db.raw.exec('BEGIN');
+      for (let i = 0; i < MAJORITY_FLOOR; i++) session(`big${String(i)}`, NOW - 1);
+      db.raw.exec('COMMIT');
+      const report = await purgeExpiredAuthRecords(db.d1, NOW + EXPIRED_INTERVAL_MS);
+      expect(report.aborted).toBe(true);
+      expect(n('"session"')).toBe(MAJORITY_FLOOR);
+      error.mockRestore();
+    });
   });
 });
