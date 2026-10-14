@@ -24,6 +24,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 3a | Tenant-scoped integrations API; domain capabilities; audit log; closed GitHub event catalog; write-time allowlist; DB-enforced tenant contract | F24, F26, F28, F61 (catalog), F72 (write-time) | D9, D12, D16, D2 (contract for new writes) | ✅ | #9 |
 | 3b | GitHub App install flow (verified installation binding), lifecycle events, repository-selection enforcement | F55–F57, F67, F68 | N6 | ✅ | #11 |
 | 4 | Delivery reliability: atomic claim, error taxonomy, bounded retries, dead letter, manual redelivery | F11–F13, F170, F172–F180, F182, F184, F189 (partial; see section) | D4, D10, D11 (partial) | 🟡 | #10 |
+| 4b | Canonical event layer (validated `CanonicalEvent` for GitHub, generic, GitLab, Stripe), one event-type registry, connector descriptor and conformance suite, fixture replay with goldens, GitHub F59/F60/F63/F64 settled, F65/F69 recorded as blocked | F41–F46, F48 (each in part), F59, F60, F62–F65 (in part), F71, F72, F79 (in part) | D13 (part) | 🟡 | this PR |
 | 5 | Destination capability model; Slack, Teams and Lark adapters, wired into the delivery consumer; Teams as a destination kind | F91–F104 | D8 | ✅ (no real-provider test) | #8, wiring PR |
 | 6 | Dashboard: setup wizard, integrations, delivery log, test send | F205–F226 | — | ⬜ | — |
 | 5 | Destination capability model; Slack and Teams adapters (adapters shipped as pure modules; consumer wiring pending slice 4) | F91–F104 | D8 | 🟡 | — |
@@ -1291,3 +1292,32 @@ Several limiters use fixed one-minute windows keyed on `Date.now()`, and a test 
 with a loop could cross a minute boundary half-way and fail about one run in a few hundred
 (seen on PR #47's CI). `tests/setup/pin-clock.ts` now freezes `Date` 10 s into a minute for every
 test (timers and promises stay real). A test that needs time to move calls `vi.setSystemTime`.
+## Slice 4b: canonical event, conformance and fixture replay (ADR 0020, this PR)
+
+- `src/events/`: `CanonicalEvent` (CloudEvents-aligned, versioned, closed `data`), a bounded hand-written
+  validator (64 KiB budget, no payload bodies, unsafe-text rules), the event-type registry
+  (`GITHUB_/GITLAB_/STRIPE_EVENT_TYPES` are derived from it) and shared text hygiene.
+- GitHub, generic, GitLab and Stripe map to a canonical event and validate it before routing;
+  `DeliveryMessage` and the GitHub routing facts are derived from it. Behaviour is unchanged for the
+  existing 2935 tests (3194 now, with the new suites). The one intended change: control characters and bidirectional marks in provider
+  text become spaces, and a non-https GitHub link is dropped.
+- `SourceDescriptor` plus `tests/conformance/conformance.test.ts`: one suite, run against all four
+  sources (verify before parse, size cap including chunked, replay window or idempotency, identical
+  404 or 403, content type, determinism, no payload or personal data in the event, bounded output,
+  closed catalogue).
+- `tests/fixtures/`: 59 documented, derived or composed fixtures with provenance (README), goldens for
+  the canonical event, routing under five filter configurations and Slack, Lark, Teams and Discord
+  payloads, a no-skip corpus gate and a hygiene scan. Updated only with `UPDATE_GOLDEN=1`.
+- GitHub: a delivery without `X-GitHub-Event` is now 400; ghost senders are not shown as people;
+  `[bot]` logins set `isBot`; an oversize body is logged with its reason; ack discipline (5xx on D1
+  failure, dispatcher kick after the commit) is pinned by tests.
+
+**Not done / unverified**: F65 polling and F69 reconciliation are **blocked on the GitHub App private
+key and API access** and are not implemented; fixtures are documented examples, some derived by a
+stated field change (GitHub `closed` is `merged=false`; the merged, draft, bot, ghost and workflow
+conclusion variants are derived), the Stripe ones are composed and the GitLab `failed` pipeline and
+`X-Gitlab-Instance` value are unverified; no real captures. CloudEvents export, a schema registry
+and published JSON Schemas, ULID ids, `orgid`/`connectionid`, the `unmapped:` view, `rawOutcome` and
+`closesEventId`, the stored `adapter_version`, noise facts from the canonical event, and the full
+`SourceAdapter` interface are not built. Titles of push, release, workflow_run and deployment_status
+messages are still the event type string (visible in the goldens).

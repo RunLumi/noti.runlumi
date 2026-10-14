@@ -1,0 +1,176 @@
+{
+  "fixture": "generic/unicode",
+  "provenance": "contract",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "urn:lumi:noti:generic",
+    "type": "io.lumi.noti.generic.deploy.finished",
+    "dataschema": "urn:lumi:noti:schema:generic:deploy.finished:v1",
+    "provider": "generic",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Triển khai thành công — môi trường sản xuất ✅",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "actor": {
+        "login": "nguyễn.văn.a",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "Đã hoàn tất sau 3 phút\nregion: ap-southeast-1"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Triển khai thành công — môi trường sản xuất ✅",
+    "url": "",
+    "status": "info",
+    "eventType": "deploy.finished",
+    "actor": "nguyễn.văn.a",
+    "summary": "Đã hoàn tất sau 3 phút\nregion: ap-southeast-1"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: Triển khai thành công — môi trường sản xuất ✅*\nby nguyễn.văn.a\n\nĐã hoàn tất sau 3 phút\nregion: ap-southeast-1",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: Triển khai thành công — môi trường sản xuất ✅"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "by nguyễn.văn.a"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "Đã hoàn tất sau 3 phút\nregion: ap-southeast-1"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: Triển khai thành công — môi trường sản xuất ✅"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: Triển khai thành công — môi trường sản xuất ✅"
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "by nguyễn.văn.a"
+              },
+              {
+                "tag": "markdown",
+                "content": "Đã hoàn tất sau 3 phút\nregion: ap-southeast-1"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: Triển khai thành công — môi trường sản xuất ✅",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "by nguyễn.văn.a",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Đã hoàn tất sau 3 phút\nregion: ap-southeast-1",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: Triển khai thành công — môi trường sản xuất ✅",
+        "embeds": [
+          {
+            "title": "Info: Triển khai thành công — môi trường sản xuất ✅",
+            "description": "Đã hoàn tất sau 3 phút\nregion: ap-southeast-1",
+            "color": 5793192,
+            "footer": {
+              "text": "by nguyễn.văn.a"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

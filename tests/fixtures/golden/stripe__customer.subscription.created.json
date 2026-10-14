@@ -1,0 +1,146 @@
+{
+  "fixture": "stripe/customer.subscription.created",
+  "provenance": "composed",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "evt_1Pgc76B7WZ01zgkWwyRHS12y",
+    "source": "urn:lumi:noti:stripe",
+    "type": "io.lumi.noti.stripe.customer.subscription.created",
+    "dataschema": "urn:lumi:noti:schema:stripe:customer.subscription.created:v1",
+    "provider": "stripe",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Subscription created",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Subscription created",
+    "url": "",
+    "status": "info",
+    "eventType": "customer.subscription.created",
+    "summary": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: Subscription created*\n\nstatus active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: Subscription created"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: Subscription created"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: Subscription created"
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: Subscription created",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: Subscription created",
+        "embeds": [
+          {
+            "title": "Info: Subscription created",
+            "description": "status active · sub\\_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus\\_QXg1o8vcGmoR32",
+            "color": 5793192
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

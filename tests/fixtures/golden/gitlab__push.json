@@ -1,0 +1,178 @@
+{
+  "fixture": "gitlab/push",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/mike/diaspora",
+    "type": "io.lumi.noti.gitlab.push",
+    "dataschema": "urn:lumi:noti:schema:gitlab:push:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Push to master",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "mike/diaspora",
+      "actor": {
+        "login": "jsmith",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "4 commits · fixed readme"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Push to master",
+    "url": "",
+    "status": "info",
+    "eventType": "push",
+    "summary": "4 commits · fixed readme",
+    "repo": "mike/diaspora",
+    "actor": "jsmith"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: Push to master*\nmike/diaspora · by jsmith\n\n4 commits · fixed readme",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: Push to master"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "mike/diaspora · by jsmith"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "4 commits · fixed readme"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: Push to master"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: Push to master"
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "mike/diaspora · by jsmith"
+              },
+              {
+                "tag": "markdown",
+                "content": "4 commits · fixed readme"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: Push to master",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "mike/diaspora · by jsmith",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "4 commits · fixed readme",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: Push to master",
+        "embeds": [
+          {
+            "title": "Info: Push to master",
+            "description": "4 commits · fixed readme",
+            "color": 5793192,
+            "footer": {
+              "text": "mike/diaspora · by jsmith"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "fixture": "generic/critical",
+  "provenance": "contract",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "urn:lumi:noti:generic",
+    "type": "io.lumi.noti.generic.db.down",
+    "dataschema": "urn:lumi:noti:schema:generic:db.down:v1",
+    "provider": "generic",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Primary database unreachable",
+      "status": "failure",
+      "severity": "critical",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "region: eu-west-1 · replicas: 3 · failover: false"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Primary database unreachable",
+    "url": "",
+    "status": "failure",
+    "eventType": "db.down",
+    "summary": "region: eu-west-1 · replicas: 3 · failover: false"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Failed: Primary database unreachable*\n\nregion: eu-west-1 · replicas: 3 · failover: false",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Failed: Primary database unreachable"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "region: eu-west-1 · replicas: 3 · failover: false"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Failed: Primary database unreachable"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Failed: Primary database unreachable"
+            },
+            "template": "red"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "region: eu-west-1 · replicas: 3 · failover: false"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Failed: Primary database unreachable",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Attention"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "region: eu-west-1 · replicas: 3 · failover: false",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Failed: Primary database unreachable",
+        "embeds": [
+          {
+            "title": "Failed: Primary database unreachable",
+            "description": "region: eu-west-1 · replicas: 3 · failover: false",
+            "color": 14042437
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

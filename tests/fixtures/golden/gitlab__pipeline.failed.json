@@ -1,0 +1,178 @@
+{
+  "fixture": "gitlab/pipeline.failed",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/gitlab-org/gitlab-test",
+    "type": "io.lumi.noti.gitlab.pipeline.failed",
+    "dataschema": "urn:lumi:noti:schema:gitlab:pipeline.failed:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Pipeline failed on master",
+      "status": "failure",
+      "severity": "error",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "gitlab-org/gitlab-test",
+      "actor": {
+        "login": "root",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "test · Failed: test-build · 63s"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Pipeline failed on master",
+    "url": "",
+    "status": "failure",
+    "eventType": "pipeline.failed",
+    "summary": "test · Failed: test-build · 63s",
+    "repo": "gitlab-org/gitlab-test",
+    "actor": "root"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Failed: Pipeline failed on master*\ngitlab-org/gitlab-test · by root\n\ntest · Failed: test-build · 63s",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Failed: Pipeline failed on master"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "gitlab-org/gitlab-test · by root"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "test · Failed: test-build · 63s"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Failed: Pipeline failed on master"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Failed: Pipeline failed on master"
+            },
+            "template": "red"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "gitlab-org/gitlab-test · by root"
+              },
+              {
+                "tag": "markdown",
+                "content": "test · Failed: test-build · 63s"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Failed: Pipeline failed on master",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Attention"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "gitlab-org/gitlab-test · by root",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "test · Failed: test-build · 63s",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Failed: Pipeline failed on master",
+        "embeds": [
+          {
+            "title": "Failed: Pipeline failed on master",
+            "description": "test · Failed: test-build · 63s",
+            "color": 14042437,
+            "footer": {
+              "text": "gitlab-org/gitlab-test · by root"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "fixture": "stripe/charge.dispute.created",
+  "provenance": "composed",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "evt_1Pgc76B7WZ01zgkWwyRHS12y",
+    "source": "urn:lumi:noti:stripe",
+    "type": "io.lumi.noti.stripe.charge.dispute.created",
+    "dataschema": "urn:lumi:noti:schema:stripe:charge.dispute.created:v1",
+    "provider": "stripe",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Dispute opened",
+      "status": "failure",
+      "severity": "error",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Dispute opened",
+    "url": "",
+    "status": "failure",
+    "eventType": "charge.dispute.created",
+    "summary": "10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Failed: Dispute opened*\n\n10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Failed: Dispute opened"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Failed: Dispute opened"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Failed: Dispute opened"
+            },
+            "template": "red"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Failed: Dispute opened",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Attention"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "10.00 USD · reason general · respond by 2024-08-14 · dp_1Pgc71B7WZ01zgkWMevJiAUx",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Failed: Dispute opened",
+        "embeds": [
+          {
+            "title": "Failed: Dispute opened",
+            "description": "10.00 USD · reason general · respond by 2024-08-14 · dp\\_1Pgc71B7WZ01zgkWMevJiAUx",
+            "color": 14042437
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

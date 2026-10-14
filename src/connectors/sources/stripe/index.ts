@@ -40,6 +40,9 @@ function parseSecret(body: Record<string, unknown>, mode: 'create' | 'rotate'): 
 export const stripeConnector: SourceConnector = {
   kind: 'stripe',
   label: 'Stripe',
+  adapterVersion: '1.0.0',
+  // Connect/account ids are never read, so the source is the product, not a tenant.
+  canonicalSource: () => 'urn:lumi:noti:stripe',
   maxBodyBytes: MAX_BODY_BYTES,
   // Stripe retries a 429 with backoff for up to three days, so asking it to retry loses nothing.
   onFlood: 'retry',

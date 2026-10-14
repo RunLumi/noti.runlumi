@@ -1,0 +1,204 @@
+{
+  "fixture": "github/issues.closed",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 5
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/Codertocat/Hello-World",
+    "type": "io.lumi.noti.github.issues.closed",
+    "subject": "Codertocat/Hello-World#1",
+    "dataschema": "urn:lumi:noti:schema:github:issues.closed:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Spelling error in the README file",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": [
+          "bug"
+        ]
+      },
+      "url": "https://github.com/Codertocat/Hello-World/issues/1",
+      "repo": "Codertocat/Hello-World",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "#1 · closed"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "delivered",
+    "humans-only": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 5,
+  "message": {
+    "title": "Spelling error in the README file",
+    "url": "https://github.com/Codertocat/Hello-World/issues/1",
+    "status": "info",
+    "eventType": "issues.closed",
+    "repo": "Codertocat/Hello-World",
+    "actor": "Codertocat",
+    "summary": "#1 · closed"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: Spelling error in the README file*\nCodertocat/Hello-World · by Codertocat\n<https://github.com/Codertocat/Hello-World/issues/1|Open in source>\n\n#1 · closed",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: Spelling error in the README file"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "Codertocat/Hello-World · by Codertocat"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "#1 · closed"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "<https://github.com/Codertocat/Hello-World/issues/1|Open in source>"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: Spelling error in the README file"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: Spelling error in the README file"
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "Codertocat/Hello-World · by Codertocat"
+              },
+              {
+                "tag": "markdown",
+                "content": "#1 · closed"
+              },
+              {
+                "tag": "markdown",
+                "content": "[Open in source](https://github.com/Codertocat/Hello-World/issues/1)"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: Spelling error in the README file",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Codertocat/Hello-World · by Codertocat",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "#1 · closed",
+                  "wrap": true
+                }
+              ],
+              "actions": [
+                {
+                  "type": "Action.OpenUrl",
+                  "title": "Open in source",
+                  "url": "https://github.com/Codertocat/Hello-World/issues/1"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: Spelling error in the README file",
+        "embeds": [
+          {
+            "title": "Info: Spelling error in the README file",
+            "url": "https://github.com/Codertocat/Hello-World/issues/1",
+            "description": "#1 · closed",
+            "color": 5793192,
+            "footer": {
+              "text": "Codertocat/Hello-World · by Codertocat"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

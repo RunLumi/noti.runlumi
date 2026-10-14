@@ -6,11 +6,11 @@
 >
 > External references read **2026-10-13**; see `README.md#sources`.
 
-> **Implementation note, slice 10a.** The generic webhook source does **not** yet produce the
-> F41 envelope or use the closed F42 catalog. It validates a small documented body and maps it
-> straight onto the existing display model (`DeliveryMessage`: title, link, actor, status,
-> summary, free-form `eventType`), the same path the GitHub route uses today. Generic event
-> types are display labels and cannot be filtered on. See [ADR 0012](../adr/0012-generic-source.md).
+> **Implementation note, slice 4b.** Every source (GitHub, generic, GitLab, Stripe) now maps to a
+> validated `CanonicalEvent` before routing, and the delivery message is derived from it. It is a
+> pragmatic subset of F41 (provider `id`, no `orgid`/`connectionid`, `urn:` `dataschema`); see
+> [ADR 0020](../adr/0020-canonical-event.md) for what differs and what is not done. Generic event
+> types are still display labels and cannot be filtered on ([ADR 0012](../adr/0012-generic-source.md)).
 
 ## Why CloudEvents
 
@@ -41,7 +41,7 @@ That is a spec-grade dedup contract, not advice. Two more rules shape the design
 
 ## F41 — Canonical envelope
 
-**Priority** P0 · **Status** ❌ no canonical envelope exists; ingress builds a bounded `DeliveryMessage` (`src/env.ts`) from the payload, not a CloudEvents-style envelope
+**Priority** P0 · **Status** 🟡 `CanonicalEvent` (`src/events/canonical.ts`) is validated before routing for all four sources (`src/events/validate.ts`, `tests/events/canonical.test.ts`, `tests/conformance/conformance.test.ts`, [ADR 0020](../adr/0020-canonical-event.md)); not built: ULID `id`, `orgid`/`connectionid`, `application/cloudevents+json` ingress, a resolvable `dataschema`
 
 **Story** As a routing rule author, I want one stable field vocabulary, so that a filter on
 "which repository" works identically whether the event came from GitHub or GitLab.
@@ -121,7 +121,7 @@ short and makes it safe to log `orgid`/`connectionid`/`correlation_id` (F11).
 
 ## F42 — Closed event type catalog
 
-**Priority** P0 · **Status** 🟡 closed GitHub catalog (`src/connectors/sources/github/catalog.ts`) enforced at write and ingress (PR #9, `tests/api/integrations.test.ts`); not built: provider-neutral type namespace, schema URIs, versions, cross-provider catalog · **Fixes** D12, D16
+**Priority** P0 · **Status** 🟡 one registry (`src/events/catalog.ts`) with label key and default status per type, closed and enforced by the validator (`tests/events/canonical.test.ts`); not built: `event_types` table, `unmapped:<raw>` capture and view · **Fixes** D12, D16
 
 **Story** As a user picking events in the UI, I want a finite list of checkboxes, so that I
 can find "pull request opened" instead of guessing a string format.
@@ -173,7 +173,7 @@ strings that become routing keys.
 
 ## F43 — Identity fields
 
-**Priority** P0 · **Status** 🟡 `actorIsBot` and `actorIsGhost` are extracted as routing facts, `null` when GitHub sends no sender type (`src/connectors/sources/github/facts.ts`, ADR 0010); not built: canonical `data.actor` envelope, renderer ghost handling (F60)
+**Priority** P0 · **Status** 🟡 `data.actor {login, type, isBot, isGhost}` on the canonical event, ghost never shown as a person, `null` when unknown (`src/connectors/sources/github/map.ts`, `tests/events/canonical.test.ts`); `data.actor` is omitted rather than an empty object when there is no sender
 
 **Story** As a filter author, I want to say "not bots", so that I can route real humans'
 activity to a chat and machine activity to a ticketing system.
@@ -200,7 +200,7 @@ be length-capped and treated as plain text in every renderer.
 
 ## F44 — Outcome and state model
 
-**Priority** P0 · **Status** 🟡 `statusOf` maps workflow conclusions to success/failure/info (`src/connectors/sources/github/route.ts`) and resolution notices close failures (`src/routing/noise-store.ts`, ADR 0016); not built: success/failure/neutral enum, `rawOutcome`, `closesEventId`, check_run mapping
+**Priority** P0 · **Status** 🟡 `status` and `severity` are on the event with documented defaults per type (`src/events/catalog.ts`); not built: `rawOutcome`, `closesEventId`, the three-value `outcome` enum
 
 **Story** As a user, I want CI failures coloured red and successes green everywhere,
 including in Slack and Teams, so that I can triage from a glance.
@@ -241,7 +241,7 @@ UI shows "resolved (original not retained)" rather than failing.
 
 ## F45 — Envelope size budget
 
-**Priority** P0 · **Status** 🟡 1 MiB body cap and bounded display fields (`SUMMARY_MAX_CHARS` 280, title 300 in `src/env.ts`, `route.ts`); the raw body is never stored; not built: 64 KiB envelope cap, `truncated` field list, R2 raw storage · **Fixes** part of D15
+**Priority** P0 · **Status** 🟡 64 KiB budget enforced by the validator as `payload_too_large`, never a truncation (`tests/events/canonical.test.ts`); the 1 MiB cap is a named constant (`src/connectors/sources/github/route.ts`); not built: R2 raw body storage, `truncated` markers (no payload arrays are carried) · **Fixes** part of D15
 
 **Story** As an operator, I want bounded envelopes, so that a comment-heavy event cannot
 blow up the queue, the database, or a 28 KB Teams limit.
@@ -280,7 +280,7 @@ under the policy in F184 and is never logged.
 
 ## F46 — Schema versioning and evolution
 
-**Priority** P0 · **Status** ❌ no schema versioning: no `dataschema`, no published JSON Schemas, no `providerApiVersion` capture; depends on the unbuilt envelope (F41)
+**Priority** P0 · **Status** 🟡 versioning rules and `adapterversion` on every event ([ADR 0020](../adr/0020-canonical-event.md), `tests/conformance/conformance.test.ts`); not built: published JSON Schemas, `schema_unknown`, dual `v1`/`v2` emission
 
 **Story** As a customer with a working integration, I want schema changes to be additive, so
 that my notifications never break because we renamed a field.
@@ -366,7 +366,7 @@ they are logged, never treated as authorization.
 
 ## F48 — Untrusted payload tolerance
 
-**Priority** P0 · **Status** 🟡 unknown actions and event kinds are acknowledged without routing via the closed catalog (`src/connectors/sources/github/route.ts`) and summaries never use bodies; not built: `data.extra`, unmapped-events metric or view, no-payload surfacing, renderer purity tests
+**Priority** P0 · **Status** 🟡 mappers ignore unknown keys and actions, ghost never rendered as a person, Vietnamese text replayed (`tests/fixtures/replay.test.ts`); not built: `data.extra`, unmapped-events view
 
 **Story** As an engineer, I want an unexpected upstream change to degrade rather than
 break, so that a new GitHub action does not page us at 3am.

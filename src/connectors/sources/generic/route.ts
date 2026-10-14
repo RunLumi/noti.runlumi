@@ -10,7 +10,9 @@ import { dispatchOutbox } from '../../../pipeline/outbox';
 import { createNoisePlanner } from '../../../routing/noise-ingress';
 import { decisionStatement } from '../../../routing/provenance';
 import { sourceIngressLimiter } from '../../../security/rate-limit';
-import { parseGenericEvent, toDisplayFields } from './event';
+import { displayOf } from '../../../events/canonical';
+import { validateCanonicalEvent } from '../../../events/validate';
+import { parseGenericEvent, toCanonicalEvent } from './event';
 import { openSourceSecret, type SourceCredentialRow } from './secret';
 import { verifyStandardWebhook } from './signature';
 
@@ -109,6 +111,19 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
   const parsed = parseGenericEvent(parsedJson);
   if (!parsed.ok) return c.json({ error: 'Invalid event', fields: parsed.errors }, 400);
 
+  // Normalise before routing (ADR 0020). The sender's own text passed the generic parser; the
+  // canonical validator additionally refuses what no renderer should ever see (unpaired
+  // surrogates, noncharacters, an oversized id), so such an event is a 400 and nothing is written.
+  const normalised = validateCanonicalEvent(toCanonicalEvent(parsed.event, headers.id ?? ''));
+  if (!normalised.ok)
+    return c.json(
+      {
+        error: 'Invalid event',
+        fields: normalised.errors.map((e) => ({ field: e.field, message: 'Not accepted.' })),
+      },
+      400,
+    );
+
   const organizationId = source.organization_id;
   const rows = await c.env.DB.prepare(
     'SELECT id,noise_json FROM integrations WHERE organization_id=? AND source_id=? AND enabled=1',
@@ -124,7 +139,7 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
     source: 'generic',
     eventId: headers.id ?? '',
   });
-  const display = toDisplayFields(parsed.event);
+  const display = displayOf(normalised.event);
 
   // A webhook-id must be unique per event. If this id was already accepted with a DIFFERENT
   // body, the event would be silently dropped as a "duplicate": refuse it loudly instead

@@ -1,0 +1,201 @@
+{
+  "fixture": "github/release.published",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 5
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/Codertocat/Hello-World",
+    "type": "io.lumi.noti.github.release.published",
+    "dataschema": "urn:lumi:noti:schema:github:release.published:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "release.published",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": "master",
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "url": "https://github.com/Codertocat/Hello-World",
+      "repo": "Codertocat/Hello-World",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "published"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "delivered",
+    "humans-only": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 5,
+  "message": {
+    "title": "release.published",
+    "url": "https://github.com/Codertocat/Hello-World",
+    "status": "info",
+    "eventType": "release.published",
+    "repo": "Codertocat/Hello-World",
+    "actor": "Codertocat",
+    "summary": "published"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: release.published*\nCodertocat/Hello-World · by Codertocat\n<https://github.com/Codertocat/Hello-World|Open in source>\n\npublished",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: release.published"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "Codertocat/Hello-World · by Codertocat"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "published"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "<https://github.com/Codertocat/Hello-World|Open in source>"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: release.published"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: release.published"
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "Codertocat/Hello-World · by Codertocat"
+              },
+              {
+                "tag": "markdown",
+                "content": "published"
+              },
+              {
+                "tag": "markdown",
+                "content": "[Open in source](https://github.com/Codertocat/Hello-World)"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: release.published",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Codertocat/Hello-World · by Codertocat",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "published",
+                  "wrap": true
+                }
+              ],
+              "actions": [
+                {
+                  "type": "Action.OpenUrl",
+                  "title": "Open in source",
+                  "url": "https://github.com/Codertocat/Hello-World"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: release.published",
+        "embeds": [
+          {
+            "title": "Info: release.published",
+            "url": "https://github.com/Codertocat/Hello-World",
+            "description": "published",
+            "color": 5793192,
+            "footer": {
+              "text": "Codertocat/Hello-World · by Codertocat"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

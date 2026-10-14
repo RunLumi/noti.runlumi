@@ -1,0 +1,159 @@
+{
+  "fixture": "gitlab/tag_push",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/jsmith/example",
+    "type": "io.lumi.noti.gitlab.tag_push",
+    "dataschema": "urn:lumi:noti:schema:gitlab:tag_push:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Tag v1.0.0 pushed",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "jsmith/example",
+      "actor": {
+        "login": "jsmith",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      }
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Tag v1.0.0 pushed",
+    "url": "",
+    "status": "info",
+    "eventType": "tag_push",
+    "repo": "jsmith/example",
+    "actor": "jsmith"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: Tag v1.0.0 pushed*\njsmith/example · by jsmith",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: Tag v1.0.0 pushed"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "jsmith/example · by jsmith"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: Tag v1.0.0 pushed"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: Tag v1.0.0 pushed"
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "jsmith/example · by jsmith"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: Tag v1.0.0 pushed",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "jsmith/example · by jsmith",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: Tag v1.0.0 pushed",
+        "embeds": [
+          {
+            "title": "Info: Tag v1.0.0 pushed",
+            "color": 5793192,
+            "footer": {
+              "text": "jsmith/example · by jsmith"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

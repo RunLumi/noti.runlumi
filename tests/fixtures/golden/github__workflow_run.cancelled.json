@@ -1,0 +1,201 @@
+{
+  "fixture": "github/workflow_run.cancelled",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 5
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/octo-org/octo-repo",
+    "type": "io.lumi.noti.github.workflow_run.cancelled",
+    "dataschema": "urn:lumi:noti:schema:github:workflow_run.cancelled:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "workflow_run.cancelled",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": "master",
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+      "repo": "octo-org/octo-repo",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "master · cancelled · completed"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "delivered",
+    "humans-only": "delivered",
+    "ready-only": "delivered",
+    "bug-label": "delivered"
+  },
+  "delivered": 5,
+  "message": {
+    "title": "workflow_run.cancelled",
+    "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+    "status": "info",
+    "eventType": "workflow_run.cancelled",
+    "repo": "octo-org/octo-repo",
+    "actor": "Codertocat",
+    "summary": "master · cancelled · completed"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: workflow_run.cancelled*\nocto-org/octo-repo · by Codertocat\n<https://github.com/octo-org/octo-repo/actions/runs/289782451|Open in source>\n\nmaster · cancelled · completed",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: workflow_run.cancelled"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "octo-org/octo-repo · by Codertocat"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "master · cancelled · completed"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "<https://github.com/octo-org/octo-repo/actions/runs/289782451|Open in source>"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: workflow_run.cancelled"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: workflow_run.cancelled"
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "octo-org/octo-repo · by Codertocat"
+              },
+              {
+                "tag": "markdown",
+                "content": "master · cancelled · completed"
+              },
+              {
+                "tag": "markdown",
+                "content": "[Open in source](https://github.com/octo-org/octo-repo/actions/runs/289782451)"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: workflow_run.cancelled",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "octo-org/octo-repo · by Codertocat",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "master · cancelled · completed",
+                  "wrap": true
+                }
+              ],
+              "actions": [
+                {
+                  "type": "Action.OpenUrl",
+                  "title": "Open in source",
+                  "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: workflow\\_run.cancelled",
+        "embeds": [
+          {
+            "title": "Info: workflow_run.cancelled",
+            "url": "https://github.com/octo-org/octo-repo/actions/runs/289782451",
+            "description": "master · cancelled · completed",
+            "color": 5793192,
+            "footer": {
+              "text": "octo-org/octo-repo · by Codertocat"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

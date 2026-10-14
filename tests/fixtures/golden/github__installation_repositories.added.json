@@ -1,0 +1,22 @@
+{
+  "fixture": "github/installation_repositories.added",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "lifecycle": "applied"
+    }
+  },
+  "canonical": null,
+  "routing": {
+    "all": "not_considered",
+    "master-only": "not_considered",
+    "humans-only": "not_considered",
+    "ready-only": "not_considered",
+    "bug-label": "not_considered"
+  },
+  "delivered": 0,
+  "message": null,
+  "rendered": null
+}

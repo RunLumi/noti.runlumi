@@ -1,3 +1,5 @@
+import { STRIPE_DESCRIPTORS } from '../../../events/catalog';
+
 /**
  * The closed set of Stripe notification types an integration can select (spec 06 F84–F86).
  * Deliberately limited to the money-at-risk events the task and spec name: payment failures,
@@ -6,18 +8,12 @@
  *
  * Snapshot payloads only. Thin events (`object: "v2.core.event"`) carry identifiers and need an
  * API read to be useful (F85 enrichment); that is not built, so they are acknowledged and ignored.
+ *
+ * Derived from the event-type registry (src/events/catalog.ts).
  */
-export const STRIPE_EVENT_TYPES = [
-  'invoice.payment_failed',
-  'payment_intent.payment_failed',
-  'charge.dispute.created',
-  'charge.dispute.closed',
-  'customer.subscription.created',
-  'customer.subscription.updated',
-  'customer.subscription.deleted',
-] as const;
+export type StripeEventType = (typeof STRIPE_DESCRIPTORS)[number]['type'];
 
-export type StripeEventType = (typeof STRIPE_EVENT_TYPES)[number];
+export const STRIPE_EVENT_TYPES: readonly StripeEventType[] = STRIPE_DESCRIPTORS.map((d) => d.type);
 
 const KNOWN: ReadonlySet<string> = new Set(STRIPE_EVENT_TYPES);
 

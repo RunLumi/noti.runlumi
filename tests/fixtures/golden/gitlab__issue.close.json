@@ -1,0 +1,178 @@
+{
+  "fixture": "gitlab/issue.close",
+  "provenance": "derived",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://gitlab.com/gitlabhq/gitlab-test",
+    "type": "io.lumi.noti.gitlab.issue.closed",
+    "dataschema": "urn:lumi:noti:schema:gitlab:issue.closed:v1",
+    "provider": "gitlab",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Issue #23 closed: New API: create/update/delete file",
+      "status": "success",
+      "severity": "info",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "repo": "gitlabhq/gitlab-test",
+      "actor": {
+        "login": "root",
+        "type": "unknown",
+        "isBot": null,
+        "isGhost": false
+      },
+      "summary": "Labels: API"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Issue #23 closed: New API: create/update/delete file",
+    "url": "",
+    "status": "success",
+    "eventType": "issue.closed",
+    "summary": "Labels: API",
+    "repo": "gitlabhq/gitlab-test",
+    "actor": "root"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Succeeded: Issue #23 closed: New API: create/update/delete file*\ngitlabhq/gitlab-test · by root\n\nLabels: API",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Succeeded: Issue #23 closed: New API: create/update/delete file"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "gitlabhq/gitlab-test · by root"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "Labels: API"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Succeeded: Issue #23 closed: New API: create/update/delete file"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Succeeded: Issue #23 closed: New API: create/update/delete file"
+            },
+            "template": "green"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "gitlabhq/gitlab-test · by root"
+              },
+              {
+                "tag": "markdown",
+                "content": "Labels: API"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Succeeded: Issue #23 closed: New API: create/update/delete file",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Good"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "gitlabhq/gitlab-test · by root",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Labels: API",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Succeeded: Issue #23 closed: New API: create/update/delete file",
+        "embeds": [
+          {
+            "title": "Succeeded: Issue #23 closed: New API: create/update/delete file",
+            "description": "Labels: API",
+            "color": 3055195,
+            "footer": {
+              "text": "gitlabhq/gitlab-test · by root"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

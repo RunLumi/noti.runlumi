@@ -1,0 +1,15 @@
+{
+  "fixture": "gitlab/merge_request.update",
+  "provenance": "derived",
+  "response": {
+    "status": 200,
+    "body": {
+      "accepted": true,
+      "ignored": "action_not_notified"
+    }
+  },
+  "canonical": null,
+  "delivered": 0,
+  "message": null,
+  "rendered": null
+}

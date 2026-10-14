@@ -1,0 +1,146 @@
+{
+  "fixture": "stripe/customer.subscription.deleted",
+  "provenance": "composed",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "evt_1Pgc76B7WZ01zgkWwyRHS12y",
+    "source": "urn:lumi:noti:stripe",
+    "type": "io.lumi.noti.stripe.customer.subscription.deleted",
+    "dataschema": "urn:lumi:noti:schema:stripe:customer.subscription.deleted:v1",
+    "provider": "stripe",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Subscription canceled",
+      "status": "warning",
+      "severity": "warning",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Subscription canceled",
+    "url": "",
+    "status": "warning",
+    "eventType": "customer.subscription.deleted",
+    "summary": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Warning: Subscription canceled*\n\nstatus active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Warning: Subscription canceled"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Warning: Subscription canceled"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Warning: Subscription canceled"
+            },
+            "template": "orange"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Warning: Subscription canceled",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Warning"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "status active · sub_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus_QXg1o8vcGmoR32",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Warning: Subscription canceled",
+        "embeds": [
+          {
+            "title": "Warning: Subscription canceled",
+            "description": "status active · sub\\_1Pgc6rB7WZ01zgkWNy0Cn5nw · cus\\_QXg1o8vcGmoR32",
+            "color": 14721072
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

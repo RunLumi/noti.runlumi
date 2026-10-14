@@ -1,0 +1,146 @@
+{
+  "fixture": "stripe/invoice.payment_failed",
+  "provenance": "composed",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 1
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "evt_1Pgc76B7WZ01zgkWwyRHS12y",
+    "source": "urn:lumi:noti:stripe",
+    "type": "io.lumi.noti.stripe.invoice.payment_failed",
+    "dataschema": "urn:lumi:noti:schema:stripe:invoice.payment_failed:v1",
+    "provider": "stripe",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Invoice payment failed",
+      "status": "failure",
+      "severity": "error",
+      "facts": {
+        "branch": null,
+        "baseBranch": null,
+        "draft": null,
+        "labels": null
+      },
+      "summary": "10.00 USD · in_1Pgc6tB7WZ01zgkWu9fdqL6I · next retry 2009-02-13 · cus_QXg1o8vcGmoR32"
+    }
+  },
+  "delivered": 1,
+  "message": {
+    "title": "Invoice payment failed",
+    "url": "",
+    "status": "failure",
+    "eventType": "invoice.payment_failed",
+    "summary": "10.00 USD · in_1Pgc6tB7WZ01zgkWu9fdqL6I · next retry 2009-02-13 · cus_QXg1o8vcGmoR32"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Failed: Invoice payment failed*\n\n10.00 USD · in_1Pgc6tB7WZ01zgkWu9fdqL6I · next retry 2009-02-13 · cus_QXg1o8vcGmoR32",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Failed: Invoice payment failed"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "10.00 USD · in_1Pgc6tB7WZ01zgkWu9fdqL6I · next retry 2009-02-13 · cus_QXg1o8vcGmoR32"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Failed: Invoice payment failed"
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Failed: Invoice payment failed"
+            },
+            "template": "red"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "10.00 USD · in_1Pgc6tB7WZ01zgkWu9fdqL6I · next retry 2009-02-13 · cus_QXg1o8vcGmoR32"
+              },
+              {
+                "tag": "markdown",
+                "content": "Source link unavailable"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Failed: Invoice payment failed",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Attention"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "10.00 USD · in_1Pgc6tB7WZ01zgkWu9fdqL6I · next retry 2009-02-13 · cus_QXg1o8vcGmoR32",
+                  "wrap": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Failed: Invoice payment failed",
+        "embeds": [
+          {
+            "title": "Failed: Invoice payment failed",
+            "description": "10.00 USD · in\\_1Pgc6tB7WZ01zgkWu9fdqL6I · next retry 2009-02-13 · cus\\_QXg1o8vcGmoR32",
+            "color": 14042437
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}

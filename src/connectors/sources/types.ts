@@ -10,6 +10,8 @@
  * The generic Standard Webhooks source keeps its own route (ADR 0012) and is not part of this
  * registry; Sentry is deliberately absent (ADR 0015, spec 06 F89).
  */
+import type { DisplayFields } from '../../events/canonical';
+
 export const PROVIDER_KINDS = ['gitlab', 'stripe'] as const;
 export type ProviderKind = (typeof PROVIDER_KINDS)[number];
 
@@ -42,16 +44,11 @@ export interface VerifyInput {
 export type VerifyResult =
   { readonly ok: true; readonly eventId: string | null } | { readonly ok: false; readonly reason: string };
 
-/** The canonical display fields of a notification; a subset of `DeliveryMessage` (src/env.ts). */
-export interface Display {
-  readonly title: string;
-  readonly url: string;
-  readonly repo?: string;
-  readonly actor?: string;
-  readonly status?: 'success' | 'failure' | 'warning' | 'info';
-  readonly eventType?: string;
-  readonly summary?: string;
-}
+/**
+ * The canonical display fields of a notification; a subset of `DeliveryMessage` (src/env.ts),
+ * derived from a canonical event (src/events/canonical.ts) on the delivery path.
+ */
+export type Display = DisplayFields;
 
 export interface MapInput {
   readonly headers: Headers;
@@ -72,6 +69,10 @@ export interface SourceConnector {
   readonly kind: ProviderKind;
   /** Display name, used in logs and guidance only. */
   readonly label: string;
+  /** Semver of the mapping; recorded on every canonical event (spec 04 F54). */
+  readonly adapterVersion: string;
+  /** The CloudEvents `source` of a mapped event: an identifier, never a secret or a tenant. */
+  canonicalSource(display: Display): string;
   readonly maxBodyBytes: number;
   /**
    * What to do when the per-source flood limit is hit. `retry` answers 429 with Retry-After (the

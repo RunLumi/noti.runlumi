@@ -583,7 +583,7 @@ credential, or an organisation.
 
 ## F79 — Fixture corpus gate
 
-**Priority** P0 · **Status** 🟡 GitLab and Stripe fixtures in `tests/sources/fixtures/` drive verify, map and render tests with synthetic secrets; not built: captured real payloads, capture-date and adapter-version stamps, denylist CI grep, per-destination replay, skip-fails-CI gate · **Fixes** part of D13
+**Priority** P0 · **Status** 🟡 fixture corpus and replay for generic, GitLab, Stripe and GitHub with provenance, hygiene scan and a no-skip gate (`tests/fixtures/replay.test.ts`, `tests/fixtures/hygiene.test.ts`); not built: real captures, `Note Hook`, Stripe thin events · **Fixes** part of D13
 
 **Story** As a maintainer, I want a real captured payload per source and per event type, so
 that an upstream change breaks a test instead of a customer's channel.

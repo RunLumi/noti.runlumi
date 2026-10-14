@@ -1,0 +1,204 @@
+{
+  "fixture": "github/pull_request_review_comment.created",
+  "provenance": "documented",
+  "response": {
+    "status": 202,
+    "body": {
+      "accepted": true,
+      "persisted": 3
+    }
+  },
+  "canonical": {
+    "specversion": "1.0",
+    "id": "fixture-delivery-id",
+    "source": "https://github.com/Codertocat/Hello-World",
+    "type": "io.lumi.noti.github.pull_request_review_comment.created",
+    "subject": "Codertocat/Hello-World#2",
+    "dataschema": "urn:lumi:noti:schema:github:pull_request_review_comment.created:v1",
+    "provider": "github",
+    "adapterversion": "1.0.0",
+    "data": {
+      "title": "Update the README with new information.",
+      "status": "info",
+      "severity": "info",
+      "facts": {
+        "branch": "changes",
+        "baseBranch": "master",
+        "draft": null,
+        "labels": [
+          "bug"
+        ]
+      },
+      "url": "https://github.com/Codertocat/Hello-World/pull/2",
+      "repo": "Codertocat/Hello-World",
+      "actor": {
+        "login": "Codertocat",
+        "type": "user",
+        "isBot": false,
+        "isGhost": false
+      },
+      "summary": "#2 · changes → master · created"
+    }
+  },
+  "routing": {
+    "all": "delivered",
+    "master-only": "filtered:not_in_allow_list",
+    "humans-only": "delivered",
+    "ready-only": "filtered:unknown_fact",
+    "bug-label": "delivered"
+  },
+  "delivered": 3,
+  "message": {
+    "title": "Update the README with new information.",
+    "url": "https://github.com/Codertocat/Hello-World/pull/2",
+    "status": "info",
+    "eventType": "pull_request_review_comment.created",
+    "repo": "Codertocat/Hello-World",
+    "actor": "Codertocat",
+    "summary": "#2 · changes → master · created"
+  },
+  "rendered": {
+    "slack": {
+      "format": "card",
+      "payload": {
+        "text": "*Info: Update the README with new information.*\nCodertocat/Hello-World · by Codertocat\n<https://github.com/Codertocat/Hello-World/pull/2|Open in source>\n\n#2 · changes → master · created",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "Info: Update the README with new information."
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              {
+                "type": "plain_text",
+                "text": "Codertocat/Hello-World · by Codertocat"
+              }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "plain_text",
+              "text": "#2 · changes → master · created"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "<https://github.com/Codertocat/Hello-World/pull/2|Open in source>"
+            }
+          }
+        ]
+      }
+    },
+    "lark": {
+      "format": "card",
+      "payload": {
+        "msg_type": "interactive",
+        "card": {
+          "schema": "2.0",
+          "config": {
+            "enable_forward": true,
+            "summary": {
+              "content": "Info: Update the README with new information."
+            }
+          },
+          "header": {
+            "title": {
+              "tag": "plain_text",
+              "content": "Info: Update the README with new information."
+            },
+            "template": "blue"
+          },
+          "body": {
+            "elements": [
+              {
+                "tag": "markdown",
+                "content": "Codertocat/Hello-World · by Codertocat"
+              },
+              {
+                "tag": "markdown",
+                "content": "#2 · changes → master · created"
+              },
+              {
+                "tag": "markdown",
+                "content": "[Open in source](https://github.com/Codertocat/Hello-World/pull/2)"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "teams": {
+      "format": "card",
+      "payload": {
+        "type": "message",
+        "attachments": [
+          {
+            "contentType": "application/vnd.microsoft.card.adaptive",
+            "contentUrl": null,
+            "content": {
+              "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+              "type": "AdaptiveCard",
+              "version": "1.2",
+              "body": [
+                {
+                  "type": "TextBlock",
+                  "text": "Info: Update the README with new information.",
+                  "wrap": true,
+                  "weight": "Bolder",
+                  "size": "Medium",
+                  "color": "Default"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "Codertocat/Hello-World · by Codertocat",
+                  "wrap": true,
+                  "isSubtle": true,
+                  "spacing": "None"
+                },
+                {
+                  "type": "TextBlock",
+                  "text": "#2 · changes → master · created",
+                  "wrap": true
+                }
+              ],
+              "actions": [
+                {
+                  "type": "Action.OpenUrl",
+                  "title": "Open in source",
+                  "url": "https://github.com/Codertocat/Hello-World/pull/2"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "discord": {
+      "format": "card",
+      "payload": {
+        "content": "Info: Update the README with new information.",
+        "embeds": [
+          {
+            "title": "Info: Update the README with new information.",
+            "url": "https://github.com/Codertocat/Hello-World/pull/2",
+            "description": "#2 · changes → master · created",
+            "color": 5793192,
+            "footer": {
+              "text": "Codertocat/Hello-World · by Codertocat"
+            }
+          }
+        ],
+        "allowed_mentions": {
+          "parse": []
+        }
+      }
+    }
+  }
+}
