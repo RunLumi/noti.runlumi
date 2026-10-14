@@ -61,3 +61,15 @@ An admin can schedule a workspace for deletion (`POST /api/workspace/deletion`).
 
 Admins can export their workspace (`GET /api/workspace/export`) as JSON. The export never
 includes credentials.
+
+A signed-in person can export their own data (`GET /api/workspace/me/data-export`) and erase
+their account (`DELETE /api/workspace/me`). Erasure refuses while the person is the only admin
+of a workspace and never deletes a workspace or another member's data. Audit rows keep the opaque
+actor id, IP address and user agent until the audit retention (AR-40). Scope, decisions and limits:
+[`DSAR.md`](DSAR.md).
+
+What is stored, for how long and how it is removed is generated from code in
+[`DATA_RETENTION.md`](DATA_RETENTION.md); who receives data is in
+[`SUBPROCESSORS.md`](SUBPROCESSORS.md); incident handling is in
+[`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md). None of these is a legal document, and the legal
+basis, roles, contracts and deadlines are for the operator to decide.

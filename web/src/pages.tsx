@@ -6,6 +6,7 @@ import { DeliveryStats } from './deliveries/DeliveryStats';
 import { SetupProgressCard } from './setup/SetupProgressCard';
 import { DeliveryLogPage } from './deliveries/DeliveryLogPage';
 import { WorkspaceDataPanel } from './workspace/WorkspaceDataPanel';
+import { DeleteAccountPanel } from './account/DeleteAccountPanel';
 import { WorkspaceSwitcher } from './workspace/WorkspaceSwitcher';
 import { WorkspaceDriftBanner } from './workspace/drift';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
@@ -291,6 +292,7 @@ export function Settings() {
       </Card>
       <PasskeysPanel />
       <WorkspaceDataPanel />
+      {me.data && <DeleteAccountPanel email={me.data.user.email} />}
     </>
   );
 }

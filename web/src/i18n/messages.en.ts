@@ -572,6 +572,34 @@ export const en = {
   'workspace.error.wrongName': 'That doesn’t match the workspace name. Type it exactly, including capitals.',
   'workspace.error.already': 'A deletion is already scheduled for this workspace.',
   'workspace.error.purgeStarted': 'Removal has already started and can’t be cancelled.',
+  'account.erase.title': 'Delete your account',
+  'account.erase.intro':
+    'Deleting your account signs you out everywhere and removes your profile, sign-in methods, passkeys and workspace memberships.',
+  'account.erase.point1': 'Workspaces you belong to are not deleted. Their other members keep everything.',
+  'account.erase.point2':
+    'If you are the only admin of a workspace, make another member an admin or delete the workspace first.',
+  'account.erase.point3': 'There is no undo and no waiting period. We email you when you confirm.',
+  'account.erase.backup':
+    'Records of what you did keep an anonymous id, IP address and browser until the audit retention period ends, and Cloudflare’s backups can hold older copies for up to 30 days.',
+  'account.erase.button': 'Delete my account…',
+  'account.erase.dialog.title': 'Delete your account?',
+  'account.erase.dialog.body': 'This cannot be undone. Type your email address to confirm.',
+  'account.erase.dialog.label': 'Type {email} to confirm',
+  'account.erase.dialog.keep': 'Keep my account',
+  'account.erase.dialog.confirm': 'Delete my account',
+  'account.erase.dialog.deleting': 'Deleting…',
+  'account.erase.reauth.title': 'Sign in again to continue',
+  'account.erase.reauth.body':
+    'For your security, deleting an account needs a recent sign-in. Sign in again and we will finish the deletion.',
+  'account.erase.reauth.password': 'Password',
+  'account.erase.reauth.submit': 'Sign in and delete',
+  'account.erase.reauth.passkey': 'Use a passkey instead',
+  'account.erase.reauth.failed': 'That sign-in did not work. Check your password and try again.',
+  'account.erase.error.wrongEmail': 'That is not your email address. Type it exactly.',
+  'account.erase.error.soleAdmin':
+    'You are the only admin of a workspace. Make another member an admin, or delete the workspace and wait for it to finish, then try again.',
+  'account.erase.error.tooMany': 'Too many attempts. Try again later.',
+  'account.erase.error.generic': 'We couldn’t delete the account. Nothing was changed. Try again.',
   // --- Sources (generic signed webhook source, ADR 0012) --------------------
   'sources.nav': 'Sources',
   'sources.eyebrow': 'CONNECTIONS',

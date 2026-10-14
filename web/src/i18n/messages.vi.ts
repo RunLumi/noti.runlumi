@@ -546,6 +546,36 @@ export const vi = {
   'workspace.export.error': 'Chúng tôi không chuẩn bị được tệp xuất. Chưa có gì bị thay đổi. Hãy thử lại.',
   'workspace.adminOnly':
     'Chỉ quản trị viên không gian làm việc mới làm được việc này. Vai trò của bạn là thành viên.',
+  'account.erase.title': 'Xóa tài khoản của bạn',
+  'account.erase.intro':
+    'Xóa tài khoản sẽ đăng xuất bạn khỏi mọi nơi và gỡ hồ sơ, phương thức đăng nhập, passkey và tư cách thành viên của bạn.',
+  'account.erase.point1':
+    'Các không gian làm việc bạn tham gia không bị xóa. Các thành viên khác vẫn giữ nguyên mọi thứ.',
+  'account.erase.point2':
+    'Nếu bạn là quản trị viên duy nhất của một không gian làm việc, hãy chỉ định thêm một quản trị viên khác hoặc xóa không gian đó trước.',
+  'account.erase.point3':
+    'Không thể hoàn tác và không có thời gian chờ. Chúng tôi sẽ gửi email cho bạn khi bạn xác nhận.',
+  'account.erase.backup':
+    'Các bản ghi về việc bạn đã làm vẫn giữ một mã ẩn danh, địa chỉ IP và trình duyệt cho đến khi hết thời hạn lưu nhật ký kiểm toán, và bản sao lưu của Cloudflare có thể giữ các bản cũ hơn tối đa 30 ngày.',
+  'account.erase.button': 'Xóa tài khoản của tôi…',
+  'account.erase.dialog.title': 'Xóa tài khoản của bạn?',
+  'account.erase.dialog.body': 'Việc này không thể hoàn tác. Hãy nhập địa chỉ email của bạn để xác nhận.',
+  'account.erase.dialog.label': 'Nhập {email} để xác nhận',
+  'account.erase.dialog.keep': 'Giữ tài khoản',
+  'account.erase.dialog.confirm': 'Xóa tài khoản của tôi',
+  'account.erase.dialog.deleting': 'Đang xóa…',
+  'account.erase.reauth.title': 'Đăng nhập lại để tiếp tục',
+  'account.erase.reauth.body':
+    'Vì lý do bảo mật, việc xóa tài khoản cần một lần đăng nhập gần đây. Hãy đăng nhập lại và chúng tôi sẽ hoàn tất việc xóa.',
+  'account.erase.reauth.password': 'Mật khẩu',
+  'account.erase.reauth.submit': 'Đăng nhập và xóa',
+  'account.erase.reauth.passkey': 'Dùng passkey thay thế',
+  'account.erase.reauth.failed': 'Đăng nhập không thành công. Hãy kiểm tra mật khẩu và thử lại.',
+  'account.erase.error.wrongEmail': 'Đó không phải email của bạn. Hãy nhập chính xác.',
+  'account.erase.error.soleAdmin':
+    'Bạn là quản trị viên duy nhất của một không gian làm việc. Hãy chỉ định thêm quản trị viên khác, hoặc xóa không gian đó và đợi hoàn tất, rồi thử lại.',
+  'account.erase.error.tooMany': 'Quá nhiều lần thử. Hãy thử lại sau.',
+  'account.erase.error.generic': 'Chúng tôi không xóa được tài khoản. Chưa có gì bị thay đổi. Hãy thử lại.',
   'workspace.danger.title': 'Xóa không gian làm việc',
   'workspace.danger.intro':
     'Xóa một không gian làm việc sẽ dừng toàn bộ thông báo của nó và, sau thời gian chờ 7 ngày, xóa vĩnh viễn dữ liệu của nó.',

@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import { sendAuthEmail, type EmailEnvironment } from './email';
 import { ac, roles, isOrgRole } from './permissions';
+import { SESSION_EXPIRES_IN_SECONDS, SESSION_UPDATE_AGE_SECONDS } from './session-policy';
 
 export interface AuthBindings extends EmailEnvironment {
   DB: D1Database;
@@ -75,7 +76,7 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
         });
       },
     },
-    session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
+    session: { expiresIn: SESSION_EXPIRES_IN_SECONDS, updateAge: SESSION_UPDATE_AGE_SECONDS },
     databaseHooks: {
       session: {
         create: {

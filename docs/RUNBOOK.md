@@ -2,7 +2,8 @@
 
 The availability and delivery-loss runbook (docs/specs/13-observability.md F201). Security
 incidents are a different document: if you suspect credential exposure or cross-tenant
-access, **stop and escalate** (SECURITY.md, spec 15 F242). Do not triage them here.
+access, **stop and escalate** to [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) (spec 15 F242).
+Do not triage them here.
 
 Status: **written, never rehearsed.** Every command below was derived from the code and
 migrations in this repository. None has been run against a production Cloudflare account.
@@ -47,7 +48,7 @@ No security audit has been performed (docs/SECURITY.md).
 | 1 | Notifications are being lost or are not flowing for many workspaces | outbox not draining (`delivery_stall` renotifying), `/health` returns 503, ingress rejecting valid events, D1 unavailable | Start at "What to check first". Page the owner. Decide the customer message within 30 minutes |
 | 2 | One workspace or one destination is affected | one destination failing, a quarantined credential, a missed webhook window | Diagnose per section below. Tell the affected workspace |
 | 3 | Degraded but not losing anything | slow delivery, growing but draining backlog, retention not keeping up | Fix in working hours; record |
-| Security | Any suspicion of exposure | leaked URL in a log, cross-tenant read | Stop; escalate per SECURITY.md |
+| Security | Any suspicion of exposure | leaked URL in a log, cross-tenant read | Stop; follow `INCIDENT_RESPONSE.md` (classes S1 to S4 there; a Security row here is S1 or S2 until shown otherwise) |
 
 These tiers are this runbook's own judgement. No on-call rota or paging integration exists
 (spec 13 F200 is not built), so today **nobody is paged**: detection is the `delivery_stall`
@@ -306,7 +307,10 @@ SELECT MAX(created_at) FROM deliveries WHERE organization_id='<org>';
 `purgeExpiredRecords` is attempted every cron tick but runs at most once an hour
 (`ops_state` key `last_retention_at`; it is only advanced after a complete pass, so a backlog
 continues on the next tick). Each pass is bounded to 5 rounds of 500 rows per table. Vars in wrangler.jsonc: `DELIVERY_RETENTION_DAYS` (30-365, default 90),
-`AUDIT_RETENTION_DAYS` (30-3650, default 365). Invalid values fall back to the default and log a `retention_config_invalid` warn (variable name only) every tick.
+`AUDIT_RETENTION_DAYS` (30-3650, default 365). Every store, its period and its job is
+listed in docs/DATA_RETENTION.md (generated; `npm run docs:retention`). Expired sessions,
+verification records, install states and Better Auth rate-limit rows are removed hourly by
+`expired_auth_purge` (log line `expired_auth_records_purged`). Invalid values fall back to the default and log a `retention_config_invalid` warn (variable name only) every tick.
 It deletes only terminal delivery rows; a dead-lettered row is kept until its failure is also
 older than the cutoff. The `retention_purge` log line carries `more: true` while it is still
 catching up. If it never reaches `more: false`, volume exceeds the per-tick bound: raise the
@@ -332,6 +336,45 @@ What the files themselves say:
 
 A rollback rehearsal has **not** been performed (docs/RELEASE_GATES.md). A restore from D1
 Time Travel is the only recovery from a destructive mistake; its procedure is **UNVERIFIED**.
+
+## Data-subject requests (operator procedure)
+
+Prefer the product: `GET /api/workspace/me/data-export` and `DELETE /api/workspace/me` (docs/DSAR.md),
+because identity is already established. Use this procedure only when the person cannot use them
+(for example they cannot sign in). It is **written, never rehearsed**, and every write is a
+break-glass action to be named in the incident record. Legal deadlines and the decision whether to
+act are the operator's (docs/DSAR.md).
+
+1. **Verify identity first.** An emailed request is not enough: confirm control of the account
+   email (a verification link to the address on file) before disclosing or deleting anything.
+2. **Access.** Read, select ids and counts, never credentials:
+   `SELECT id,name,email,created_at FROM "user" WHERE email='<email>';` then the same joins the
+   export uses (`src/api/account.ts`): `member`, `session` (omit `token`), `passkey` (omit keys),
+   `audit_events WHERE actor_id='<id>'` (omit `subject_id`, `metadata_json`). Never copy the
+   `token`, `password`, `public_key` or `credential_id` columns.
+3. **Erasure.** First check the person is not the only admin of a workspace:
+   `SELECT organization_id FROM member m WHERE user_id='<id>' AND role='admin' AND NOT EXISTS (SELECT 1 FROM member a WHERE a.organization_id=m.organization_id AND a.role='admin' AND a.user_id<>m.user_id);`
+   Any row means: stop. Another admin must be made first, or the workspace deleted through its own
+   deletion flow. **Never delete a workspace's data because one member asked**, and never touch a
+   workspace that has other members. If clear, run in one `wrangler d1 execute` batch:
+   `DELETE FROM github_auth_states WHERE user_id='<id>'; DELETE FROM invitation WHERE lower(email)=lower('<email>'); DELETE FROM "user" WHERE id='<id>';`
+   (the last cascades sessions, accounts, passkeys, memberships and invitations they sent, **including
+   pending ones other people are waiting on**: first reassign them with the `UPDATE invitation SET inviter_id=...`
+   statement in `src/api/account.ts`, or the invitee loses the invitation). A database trigger aborts the
+   delete if it would leave a workspace without an admin. Accounts whose email was never verified cannot use
+   the product route and are only removable this way.
+4. **Say what is not erased**: audit rows keep the actor id, IP address and user agent until
+   `AUDIT_RETENTION_DAYS` (AR-40); D1 Time Travel keeps history for a period set by Cloudflare
+   (AR-6); destination providers keep what they received (docs/SUBPROCESSORS.md).
+5. Record the request, the identity check, what was done and the date. There is no request log in
+   the product yet.
+
+## security.txt
+
+`/.well-known/security.txt` is generated by the Worker on every request (`src/web/security-txt.ts`) with
+`Expires` 90 days ahead, so there is nothing to renew. Check on each release that the Contact URL still
+opens a private advisory form and that private vulnerability reporting is enabled for the repository (not
+verified from here).
 
 ## Incident record template
 

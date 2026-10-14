@@ -143,6 +143,25 @@ Code: `src/api/workspace-lifecycle.ts`, `src/pipeline/purge.ts`. Tests:
 | R | Accidental deletion | Two phases: integrations disabled at once, purge after 7 days, cancellable | None known |
 | I | Data survives deletion | DEK destruction makes sealed credentials unreadable | D1 Time Travel keeps 30 days (AR-6) |
 
+### 4.6b Account export and erasure `GET /api/workspace/me/data-export`, `DELETE /api/workspace/me`
+
+Code: `src/api/account.ts`, `src/pipeline/expired-records.ts`, `src/compliance/`. Tests:
+`tests/api/account.test.ts`, `tests/pipeline/expired-records.test.ts`,
+`tests/compliance/retention.test.ts`. Decisions and limits: [`DSAR.md`](DSAR.md).
+
+| | Threat | Control | Residual |
+| --- | --- | --- | --- |
+| I | Export used to read another person's or another workspace's data | The user id comes only from the verified session; every statement is bound to it; no member list, no invitee address, and audit rows are returned without subject or metadata (tested for foreign ids, addresses and IPs) | The caller's own audit rows include IP address and user agent by design |
+| I | Export leaks a credential | Explicit column lists; session token and row id, password hash, OAuth tokens, passkey key material are never selected (tested with planted values) | None known |
+| D | Export or erasure used as an enumeration or load vector | Authentication required, 5 per hour per person, audited, `no-store` | The limiter is per person, not per source IP |
+| E | Cross-site request erases an account | Central and local Origin check, JSON content type | None known beyond AR-41. The typed account email is a misclick guard, **not** a security control |
+| E | A stolen session cookie erases the account | Step-up: the session must be under 10 minutes old (`created_at`), else `403 reauth_required`; the person signs in again (password or passkey); an email notice goes to the address on file before the delete; sole-admin refusal; 5 attempts an hour; audit | A recent sign-in is not a second factor: whoever holds the password or a passkey, or a session fresh enough, can still erase (AR-41) |
+| T | An erased admin takes other people's pending invitations with them | Pending invitations are reassigned to another admin of the same workspace in the same transaction (tested); sent invitations that are not pending go with the cascade | A workspace with no other admin cannot occur (last-admin trigger) |
+| I | Export requested by a cross-site page | No CORS headers; `Sec-Fetch-Site` other than same-origin or none is refused (403) | A client that sends no `Sec-Fetch-Site` header is not refused, but still needs the session and cannot be read cross-origin |
+| T | Erasure leaves a workspace without an admin or deletes tenant data | Refuses (409) for a sole admin; a database trigger is the backstop; only the person's own rows and cascades are deleted, never workspace tables | None known |
+| I | Personal data lingers after erasure | Cascade from `user`, explicit deletes of install states and invitations addressed to the person | Audit rows keep actor id, IP and user agent (AR-40); Time Travel (AR-6) |
+| I | Expired authentication records accumulate | Hourly `expired_auth_purge` for sessions, verification records, install states and Better Auth rate-limit rows; a sanity guard aborts the pass (`expired_purge_aborted`) if an expiry looks like seconds or most of a large session table would go | Full-table scans for `session`, `verification` and `rate_limit` (`github_auth_states` is indexed); invitations and never-verified accounts are not purged (gaps in `DATA_RETENTION.md`) |
+
 ### 4.7 Static SPA
 
 | | Threat | Control | Residual |
@@ -175,7 +194,7 @@ Not done: `npm audit signatures` on release builds, `--ignore-scripts` review, O
 
 Owners are roles because this repository has no staffing record. Reviewed 2026-10-13; the
 next review is due within 180 days or at the named trigger, whichever is first (F241).
-IDs AR-1 to AR-12 are the ones in spec 15 F241; AR-13 onward were added here.
+IDs AR-1 to AR-12 are the ones in spec 15 F241; AR-13 onward were added here (AR-40 and AR-41 by the compliance slice S3).
 
 | ID | Risk | Why accepted | Compensating controls | Owner | Review trigger |
 | --- | --- | --- | --- | --- | --- |
@@ -184,11 +203,11 @@ IDs AR-1 to AR-12 are the ones in spec 15 F241; AR-13 onward were added here.
 | AR-3 | DNS rebinding cannot be prevented in Workers (F230) | No custom resolution with SNI and certificate verification preserved | Exact-host allowlist, IP literals rejected, bounded timeout and body | security owner | Workers gains a pinning-capable fetch, or an incident |
 | AR-4 | Key custody depends on Worker secrets (and Secrets Store beta if adopted) (`03` F34) | No HSM at this scale | Versioned KEKs, no key in D1, rotation runbook (`docs/IMPLEMENTATION.md`), boot assertion in `/health` | platform owner | Secrets Store GA |
 | AR-5 | At-least-once delivery produces duplicates (F185) | Queues has no exactly-once; Slack has no server-side dedup key | Ledger claims, dedup key per event and destination, duplicates not hidden | reliability owner | A destination gains real idempotency |
-| AR-6 | Erasure cannot outrun D1 Time Travel (up to 30 days) | Platform-managed backups; documented in `docs/SECURITY.md` | DEK destruction makes sealed credentials unreadable; retention job not yet built for non-workspace data (F237, gap) | data owner | Cloudflare changes Time Travel |
+| AR-6 | Erasure cannot outrun D1 Time Travel (up to 30 days) | Platform-managed backups; documented in `docs/SECURITY.md` and `docs/DSAR.md` | DEK destruction makes sealed credentials unreadable; the retention matrix (`docs/DATA_RETENTION.md`) and its jobs now cover every table, with the remaining gaps named there (F237) | data owner | Cloudflare changes Time Travel |
 | AR-7 | Email Sending platform limits (F235) | Sufficient for V1 | Quota monitoring not built (gap) | product owner | Approaching 50% of a limit |
 | AR-8 | Workers Rate Limiting binding is per-location; our limits are D1 fixed windows, which allow a burst of up to twice the limit across a window boundary | D1 is the authoritative counter; fixed windows are simple | D1-backed counters (`src/security/rate-limit.ts`, `integrations.ts`, Better Auth) | platform owner | A need for exact accounting |
 | AR-9 | Provider APIs change under us (F229, `07`) | We do not control third parties | Closed response taxonomy, terminal-not-retry classification, `unmapped` flag | connector owners | A provider changelog |
-| AR-10 | Dead legacy tables remain in the migration chain, one with plaintext tokens (N1, F234) | Already applied to live databases | Retired-schema test (`tests/retired-schema.test.ts`), excluded from export | identity owner | A migration drops them |
+| AR-10 | Dead legacy tables remain in the migration chain, one with plaintext tokens (N1, F234) | Already applied to live databases | Retired-schema test (`tests/retired-schema.test.ts`), excluded from export; listed as `not_enforced` in the retention matrix because whether a live database still holds rows is unknown to the repository | identity owner | A migration drops them |
 | AR-11 | Outbound requests reveal our egress IP to providers, who log them | Inherent to delivery | Payload limited to the rendered notification | product owner | A provider requires static IPs |
 | AR-12 | A hostile destination receives a POST with notification content | That is the product, bounded by AR-2 and AR-3 | Host allowlist, body caps, timeouts | security owner | An allowlist entry is broadened |
 | AR-13 | One App-wide webhook secret signs every installation's events | GitHub Apps have a single webhook secret | Tenant derived from the installation block, `app_id` check, per-installation scope; rotate on suspicion | security owner | GitHub offers per-installation secrets, or a leak |
@@ -204,6 +223,9 @@ IDs AR-1 to AR-12 are the ones in spec 15 F241; AR-13 onward were added here.
 | AR-23 | Timing parity of the dead-endpoint path is best effort: a live endpoint does a single-row read, a DEK unwrap and a secret open that a dead one does not (a decoy HMAC narrows, not removes, the difference); not measured | The endpoint id has 144 bits of entropy, so enumeration is not the realistic threat | Identical status, body and headers (tested) | security owner | A timing oracle is demonstrated |
 | AR-30 | A customer-chosen webhook host can resolve to a private address after it passed the save-time check (DNS rebinding), and Workers `fetch` cannot be pinned to the address we checked (slice 8a, ADR 0014) | The feature is a customer's right to receive their own events; without a host choice there is no feature | Shape policy and the DNS check at save time, no redirects, port 443, signed requests, response body never read, 10 s timeout, 64 KB body, the destination only receives the rendered notification, never credentials or internal ids beyond an opaque workspace id | security owner | The destination is disabled in production by default; the criteria to enable it are in ADR 0014 decision 18 (host allowlist, periodic re-resolution, Worker egress canary). Or: a pinning-capable fetch; or an incident |
 | AR-31 | Discord's invalid-request budget (401, 403, 429 count; 404 triggers a "temporary restriction") is shared by every workspace on our egress, and the persistent cross-workspace breaker is not built (slice 8a) | Discord documents it; the spec's remedy needs a shared persisted breaker | 404/410 (and 401/403 with Discord's own dead-webhook codes) are permanent with zero retries and pause the integration after the first failure, other 401/403 retry at most once more; `429` is never retried before `retry_after` | reliability owner | A Discord restriction incident, or the breaker being built |
+
+| AR-40 | Erasing an account does not erase the person's audit rows: they keep the opaque actor id, IP address and user agent until `AUDIT_RETENTION_DAYS` (default 365). A database trigger refuses every UPDATE of `audit_events` (migration 0008), so a scrub would need a deliberate migration (F236, F238, `docs/DSAR.md`) | The audit log is the evidence for incident response and append-only is its point; whether this retention satisfies an erasure obligation is a legal decision that is not made here | The actor id no longer resolves to a person once the user row is deleted (the dashboard shows a former member); the retention is configurable down to 30 days; IP and user agent are not in the workspace audit view; the erasure row itself carries no IP or user agent | data owner | The operator's legal decision on erasure versus security logging, or a regulator or customer request |
+| AR-41 | Account erasure is protected by a recent sign-in (session under 10 minutes old, then a re-sign-in by password or passkey), an email notice and a typed email, **not** by a second factor or an undo window. The typed email is an anti-misclick control only: it is not a CSRF or a security control (`DELETE /api/workspace/me`) | A second factor and a soft-delete grace need a Better Auth freshness and suspend design that is not built | Step-up on `session.created_at`, notice email before the delete, sole-admin refusal, 5 attempts an hour, audit row per workspace, same-origin and JSON checks, `Clear-Site-Data`; the person's workspaces survive | identity owner | A report of an erased account, or adding a second factor or soft-delete |
 
 An accepted risk whose compensating control regresses stops being accepted and becomes a
 defect. Adding a row is a PR; removing one requires the control to have shipped.

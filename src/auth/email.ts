@@ -34,3 +34,20 @@ export async function sendAuthEmail(
       input.intro + '\n\n' + link.toString() + '\n\nIf you did not request this, you can ignore this email.',
   });
 }
+
+/**
+ * A plain notice with no link (for example "your account was deleted"). The recipient is the
+ * address on file, the text is built by us, and there is no HTML, so nothing in it comes from a
+ * request.
+ */
+export async function sendNoticeEmail(
+  env: Pick<EmailEnvironment, 'AUTH_EMAIL' | 'AUTH_FROM_EMAIL'>,
+  input: { to: string; subject: string; text: string },
+): Promise<void> {
+  await env.AUTH_EMAIL.send({
+    from: env.AUTH_FROM_EMAIL,
+    to: input.to,
+    subject: input.subject,
+    text: input.text,
+  });
+}

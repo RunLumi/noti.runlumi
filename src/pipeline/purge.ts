@@ -21,6 +21,11 @@ export const TENANT_TABLES = [
   'sources',
 ] as const;
 
+/** Tables that cascade from organization but are drained in bounded rounds first (see boundedDeletes). */
+export const DRAINED_BEFORE_ORGANIZATION_DELETE = ['audit_events', 'github_auth_states'] as const;
+/** Child table of `github_installations`, drained through a join before the organization is deleted. */
+export const DRAINED_VIA_INSTALLATION = ['github_installation_repositories'] as const;
+
 export interface PurgeReport {
   readonly organizationId: string | null;
   readonly deleted: number;
@@ -34,7 +39,7 @@ export interface PurgeReport {
  * delete only cascades small, bounded sets (members, invitations, installations).
  */
 function boundedDeletes(db: D1Database, org: string): D1PreparedStatement[] {
-  const byOrg = [...TENANT_TABLES, 'audit_events', 'github_auth_states'].map((table) =>
+  const byOrg = [...TENANT_TABLES, ...DRAINED_BEFORE_ORGANIZATION_DELETE].map((table) =>
     db
       .prepare(
         `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE organization_id=? LIMIT ?)`,

@@ -75,6 +75,8 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
   'workspace.deletion.request': { purgeAfter: 'string', disabledIntegrations: 'number' },
   'workspace.deletion.cancel': { restoredIntegrations: 'number' },
   'workspace.purged': NONE,
+  'account.export': NONE,
+  'account.delete': NONE,
 };
 
 export const MAX_TEXT = 120;

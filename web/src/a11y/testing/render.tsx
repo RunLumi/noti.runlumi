@@ -119,6 +119,11 @@ export interface ApiState {
   /** The delivery a test creates, as `GET /api/deliveries/:id` reports it. */
   testDelivery: Record<string, unknown>;
   audit: unknown[] | 'error';
+  /**
+   * Answer to `DELETE /api/workspace/me`: `ok`, `reauth_once` (403 `reauth_required` until the person
+   * signs in again, then ok), `sole_admin` (409), or `wrong` (422).
+   */
+  eraseAccount?: 'ok' | 'reauth_once' | 'sole_admin' | 'wrong';
   /** Make `POST /api/workspace/active` fail (a network or server fault). */
   failActivate?: boolean;
   /** The workspace a pending invitation would add the person to. */
@@ -184,6 +189,14 @@ export function installFetch(state: ApiState): void {
     const deliveries = scoped?.deliveries ?? state.deliveries;
     const members = scoped?.members ?? state.members;
     const auditRows = scoped?.audit ?? state.audit;
+    if (method === 'DELETE' && path === '/api/workspace/me') {
+      const mode = state.eraseAccount ?? 'ok';
+      if (mode === 'reauth_once') return Promise.resolve(json({ error: 'reauth_required' }, 403));
+      if (mode === 'sole_admin')
+        return Promise.resolve(json({ error: 'You are the only admin', blockers: [] }, 409));
+      if (mode === 'wrong') return Promise.resolve(json({ error: 'wrong email' }, 422));
+      return Promise.resolve(json({ deleted: true }));
+    }
     if (method === 'POST' && path === '/api/workspace/active' && state.failActivate)
       return Promise.resolve(json({ error: 'boom' }, 500));
     if (
