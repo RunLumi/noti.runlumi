@@ -14,8 +14,8 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 38 | 154 | 49 | 4 | 17 | 262 |
-| P0 | 34 | 105 | 8 | 3 | 8 | 158 |
+| All features | 39 | 153 | 49 | 4 | 17 | 262 |
+| P0 | 35 | 104 | 8 | 3 | 8 | 158 |
 | P1 | 4 | 43 | 23 | 0 | 2 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
@@ -26,7 +26,7 @@
 | [01-platform-runtime.md](01-platform-runtime.md) | 3 | 9 | 1 | 0 | 1 | 14 |
 | [02-identity-tenancy.md](02-identity-tenancy.md) | 8 | 10 | 0 | 0 | 0 | 18 |
 | [03-secrets-and-crypto.md](03-secrets-and-crypto.md) | 3 | 5 | 0 | 0 | 0 | 8 |
-| [04-event-model.md](04-event-model.md) | 0 | 11 | 3 | 0 | 0 | 14 |
+| [04-event-model.md](04-event-model.md) | 1 | 10 | 3 | 0 | 0 | 14 |
 | [05-source-github.md](05-source-github.md) | 8 | 7 | 1 | 2 | 0 | 18 |
 | [06-source-generic-and-more.md](06-source-generic-and-more.md) | 2 | 12 | 3 | 0 | 1 | 18 |
 | [07-destination-capabilities.md](07-destination-capabilities.md) | 4 | 10 | 0 | 0 | 0 | 14 |
@@ -70,7 +70,7 @@
 | F25 | Domain tenancy bridge | [02](02-identity-tenancy.md) | P0 | 🟡 | contract done in schema: `organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE` on `integrations`, `deliveries`, `notification_outbox`, `held_events`, `routing_decisions`, `noise_open_failures` … |
 | F26 | Tenant-scoped authorization | [02](02-identity-tenancy.md) | P0 | 🟡 | `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9); static every-query test with a reviewed, no-dead-entry allowlist (42 … |
 | F27 | Connection and installation registry | [02](02-identity-tenancy.md) | P0 | ✅ | `github_installations` with unique installation id, tenant taken from the verified installation row, unknown installation refused (PR #6, PR #11, ADR 0008; `tests/github/install-flow.test.ts`). Audit of unknown-installation 403s … |
-| F28 | Audit events | [02](02-identity-tenancy.md) | P1 | 🟡 | `audit_events` append-only with integration, source, replay, denial, installation, workspace, member, invitation, role and session events (`src/audit/actions.ts`, ADR 0019, ADR 0030), admin `GET /api/audit` plus page. Not built: … |
+| F28 | Audit events | [02](02-identity-tenancy.md) | P1 | 🟡 | `audit_events` append-only with integration, source, replay, denial, installation, workspace, member, invitation, role and session events (`src/audit/actions.ts`, ADR 0019, ADR 0030), admin `GET /api/audit` plus page; the request … |
 | F29 | Webhook ingress protection | [02](02-identity-tenancy.md) | P0 | 🟡 | per-installation GitHub limiter (`ingressLimiter`, `tests/security/rate-limit.test.ts`) and per-source flood limit with 429 + Retry-After for generic and provider sources (`tests/sources/ingress.test.ts`); D1 counters, fails open. … |
 | F30 | Workspace deletion and data export | [02](02-identity-tenancy.md) | P1 | ✅ | two-phase deletion, bounded purge, credential-free export (PR #12); personal-account export and erasure added in slice S3 (`docs/DSAR.md`) |
 | F31 | Retire the superseded identity schema | [02](02-identity-tenancy.md) | P1 | ✅ | `migrations/0004_identity.sql` marked superseded, `docs/AUTH_SETUP.md` rewritten, CI guard that no source references retired tables (`tests/retired-schema.test.ts`, ADR 0003, PR #12) |
@@ -92,7 +92,7 @@
 | F47 | Provider delivery ID mapping | [04](04-event-model.md) | P0 | 🟡 | GitHub `X-GitHub-Delivery` maps to a tenant-bound dedup key, so a redelivery is accepted once (`src/delivery/ids.ts`, `tests/delivery/ids.test.ts`, `tests/pipeline/reliability.test.ts`); not built: auditable mapping table, … |
 | F48 | Untrusted payload tolerance | [04](04-event-model.md) | P0 | 🟡 | mappers ignore unknown keys and actions, ghost never rendered as a person, Vietnamese text replayed (`tests/fixtures/replay.test.ts`); not built: `data.extra`, unmapped-events view |
 | F49 | Upstream rate limits and enrichment policy | [04](04-event-model.md) | P1 | 🟡 | ingress is payload-only: the GitHub handler makes no outbound API call (`src/connectors/sources/github/route.ts`); not built: opt-in enrichment, per-workspace budget, a test asserting no outbound calls (needs F66 tokens) |
-| F50 | Inbound response codes | [04](04-event-model.md) | P0 | 🟡 | 202 on durable accept, 401 bad signature, 400 malformed, 413 oversize (`tests/pipeline/delivery-path.test.ts`), 429 plus Retry-After (`src/security/rate-limit.ts`); not built: duplicate returns 202 not 200, 415, 410, … |
+| F50 | Inbound response codes | [04](04-event-model.md) | P0 | ✅ | 202 on durable accept (`tests/pipeline/delivery-path.test.ts`), 200 for an exact duplicate on every source, 401 bad signature, 400 malformed, 413 oversize, 415 for a non-JSON content type on every route including GitHub, 410 for a … |
 | F51 | Event retention and payload storage | [04](04-event-model.md) | P1 | 🟡 | scheduled purge of terminal deliveries, outbox and audit rows by age (`src/pipeline/retention.ts`, `tests/pipeline/retention.test.ts`); not built: envelope and raw-body split, R2 prefix delete, the 30/30/90/365 day policy |
 | F52 | Event schema registry | [04](04-event-model.md) | P1 | ❌ | no event schema registry; depends on the unbuilt envelope (F41) and versioning (F46) |
 | F53 | Ingress coalescing and backpressure | [04](04-event-model.md) | P2 | ❌ | no ingress coalescing or backpressure beyond the per-installation limiter (`src/security/rate-limit.ts`); P2 |
@@ -101,7 +101,7 @@
 | F56 | Install flow and tenant binding | [05](05-source-github.md) | P0 | ✅ | verified binding via user token + PKCE, single-use states (PR #11, ADR 0008, `tests/github/install-flow.test.ts`); real-App run not done |
 | F57 | Installation registry and lifecycle | [05](05-source-github.md) | P0 | ✅ | registry, lifecycle status, no-rebind trigger (PR #11, `migrations/0010_github_install_flow.sql`, `tests/github/install-flow.test.ts`) |
 | F58 | Signature verification | [05](05-source-github.md) | P0 | ✅ | raw-bytes HMAC via `crypto.subtle.verify`, shape guard, UTF-8, no SHA-1 path (`src/connectors/sources/github/events.ts`, `tests/github.test.ts` incl. known-answer vector); gaps: bad or missing signature returns 401 not 403, no … |
-| F59 | GitHub header contract | [05](05-source-github.md) | P0 | ✅ | header contract pinned (`tests/github/ingress-contract.test.ts`): missing event or delivery is 400, opaque delivery id, action from the body, case-insensitive, SHA-1 refused, target headers unused; the route does not gate on … |
+| F59 | GitHub header contract | [05](05-source-github.md) | P0 | ✅ | header contract pinned (`tests/github/ingress-contract.test.ts`): missing event or delivery is 400, opaque delivery id, action from the body, case-insensitive, SHA-1 refused, target headers unused; a body that is not … |
 | F60 | Actor trust and the ghost user | [05](05-source-github.md) | P0 | ✅ | login and `sender.type` only; ghost flagged and not shown as a person; `[bot]` suffix or `Bot` type sets `isBot`; display names never read (`tests/events/canonical.test.ts`, `tests/github/ingress-contract.test.ts`) |
 | F61 | Event catalog and permission gating | [05](05-source-github.md) | P0 | 🟡 | closed catalog of 18 types enforced at write and ingress (PR #9, `catalog.ts`); not built: check_run, check_suite, review_thread, repository events, permission gating needs a real App (3b) |
 | F62 | Event normalization | [05](05-source-github.md) | P0 | 🟡 | every catalogued event maps to the canonical event, with documented examples as fixtures (`src/connectors/sources/github/map.ts`, `tests/fixtures/replay.test.ts`); not built: `rawOutcome`, state transitions (F44), `unmapped:<raw>` |
@@ -118,7 +118,7 @@
 | F73 | Source ranking and the admission bar | [06](06-source-generic-and-more.md) | P0 | 🟡 | ranking table and verdicts are written in this spec and the Sentry refusal is enforced by `tests/sources/provider-api.test.ts`; not built: the admission-axes test, the review stamp and the stale-row CI check. |
 | F74 | Standard Webhooks verification core | [06](06-source-generic-and-more.md) | P0 | ✅ | `src/connectors/sources/generic/signature.ts` with `tests/sources/signature.test.ts` and `tests/sources/ingress.test.ts` (ADR 0012); deviations: webhook-id cap is 128 not 255, v1a is ignored but not declared unsupported in the UI. |
 | F75 | Replay window and idempotency key | [06](06-source-generic-and-more.md) | P0 | 🟡 | fixed 5-minute seconds-only window and dedup on webhook-id in `src/connectors/sources/generic/signature.ts` and `route.ts`, tested in `tests/sources/ingress.test.ts`; not built: per-connection tolerance, `clock_skew_suspected`, … |
-| F76 | Unguessable tenant key in the URL path | [06](06-source-generic-and-more.md) | P0 | 🟡 | 144-bit random endpoint id, tenant taken from the source row, identical 404 (`src/connectors/sources/generic/route.ts`, `tests/sources/ingress.test.ts`); not built: hashed key storage, two live keys with overlap, `ingress_keys` … |
+| F76 | Unguessable tenant key in the URL path | [06](06-source-generic-and-more.md) | P0 | 🟡 | 144-bit random endpoint id, tenant taken from the source row, identical 404 for an unknown or malformed id and 410 Gone for a paused or revoked endpoint (`src/connectors/sources/generic/route.ts`, `tests/sources/ingress.test.ts`, … |
 | F77 | Zero-downtime secret rotation | [06](06-source-generic-and-more.md) | P0 | 🟡 | sealed secret with AAD binding and admin rotation as cutover (`src/connectors/sources/generic/secret.ts`, `tests/sources/api.test.ts`); not built: dual active secrets, overlap rotation wizard, `secret_id_used`. |
 | F78 | Generic source mapping and schema contract | [06](06-source-generic-and-more.md) | P0 | 🟡 | strictly validated fixed envelope, JSON-object only, 256 KiB cap, 415/413 (`src/connectors/sources/generic/event.ts`, `tests/sources/event.test.ts`); not built: per-connection field mapping, CloudEvents detection, `data.extra`, 1 … |
 | F79 | Fixture corpus gate | [06](06-source-generic-and-more.md) | P0 | 🟡 | fixture corpus and replay for generic, GitLab, Stripe and GitHub with provenance, hygiene scan and a no-skip gate (`tests/fixtures/replay.test.ts`, `tests/fixtures/hygiene.test.ts`); not built: real captures, `Note Hook`, Stripe … |
@@ -264,7 +264,7 @@
 | F219 | Notification preferences UI | [14](14-dashboard-and-ux.md) | P1 | ❌ | no notification-preferences screen or API; only the per-integration noise-control section (quiet hours, grouping, digests; ADR 0016, `web/src/integrations/noise/`); depends on the F147-F150 preferences backend, which is not built |
 | F220 | Plain-language error message system | [14](14-dashboard-and-ux.md) | P0 | 🟡 | status-to-copy catalogue and delivery-failure cause copy with the status only as a secondary reference (`web/src/integrations/errors.ts`, `web/src/deliveries/copy.ts`), hard-coded-string test … |
 | F221 | Accessibility | [14](14-dashboard-and-ux.md) | P0 | 🟡 | slice 6c, ADR 0013: axe-core over every route, wizard step, dialog and error state in jsdom (`web/src/a11y/pages.a11y.test.tsx`, `dialogs.a11y.test.tsx`), palette contrast test, skip link, route title and focus, stylesheet … |
-| F222 | Audit trail and change history | [14](14-dashboard-and-ux.md) | P0 | 🟡 | slice 6e, ADR 0019: admin-only `/audit` over `GET /api/audit` with action, result and date filters, en/vi labels, allow-listed details, stated retention (`web/src/audit/`, `tests/api/audit.test.ts`); not built: actor, target and … |
+| F222 | Audit trail and change history | [14](14-dashboard-and-ux.md) | P0 | 🟡 | slice 6e, ADR 0019: admin-only `/audit` over `GET /api/audit` with action, result and date filters, en/vi labels, allow-listed details, stated retention (`web/src/audit/`, `tests/api/audit.test.ts`); ADR 0028 adds the actor … |
 | F223 | Responsive and mobile UX | [14](14-dashboard-and-ux.md) | P0 | 🟡 | slice 6c: jsdom tests plus a manual real-browser pass (not repeatable in CI, no Playwright in repo) found no horizontal scroll or sub-44px control at 320 px on the main screens; stylesheet size checks in … |
 | F224 | Internationalisation and translated-ready strings | [14](14-dashboard-and-ux.md) | P1 | 🟡 | slice 6c, ADR 0013: Vietnamese catalogue, language switcher, saved choice, `<html lang>`, `Intl` formatting, `:lang(vi)` type, drift and hard-coded-string tests (`web/src/i18n/`); not done: locale in URL, localised server errors, … |
 | F225 | Loading, skeleton, empty and error states | [14](14-dashboard-and-ux.md) | P0 | 🟡 | per-page aria-busy skeleton cards and loading, empty and error states on integrations, activity, audit, sources and settings (e.g. `web/src/integrations/IntegrationsPage.tsx`, `web/src/deliveries/DeliveryLogPage.tsx`); not built: … |
