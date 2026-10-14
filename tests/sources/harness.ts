@@ -92,7 +92,7 @@ export function caller(worker: Worker, h: () => Harness) {
       new Request(`${ORIGIN}${path}`, {
         method,
         headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        body: options.body === undefined ? null : JSON.stringify(options.body),
       }),
       h().env,
       { waitUntil: h().waitUntil, passThroughOnException: () => undefined } as unknown as ExecutionContext,

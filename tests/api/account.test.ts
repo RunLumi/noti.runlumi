@@ -218,7 +218,12 @@ describe('GET /api/workspace/me/data-export', () => {
 
 describe('DELETE /api/workspace/me', () => {
   const erase = (as: string, confirm: unknown, origin?: string | null) =>
-    call('/api/workspace/me', { as, method: 'DELETE', body: { confirm }, origin });
+    call('/api/workspace/me', {
+      as,
+      method: 'DELETE',
+      body: { confirm },
+      ...(origin !== undefined && { origin }),
+    });
 
   it('requires a session, a same-origin request and the typed email', async () => {
     expect((await call('/api/workspace/me', { method: 'DELETE', body: {}, origin: null })).status).toBe(403);

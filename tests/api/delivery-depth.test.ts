@@ -159,7 +159,7 @@ async function call(
     new Request(`${ORIGIN}${path}`, {
       method,
       headers,
-      body: method === 'POST' ? JSON.stringify(options.body ?? {}) : undefined,
+      body: method === 'POST' ? JSON.stringify(options.body ?? {}) : null,
     }),
     env,
     { waitUntil: () => undefined, passThroughOnException: () => undefined } as unknown as ExecutionContext,

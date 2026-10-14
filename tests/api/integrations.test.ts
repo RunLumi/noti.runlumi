@@ -74,7 +74,7 @@ async function call(
     new Request(`${ORIGIN}${path}`, {
       method,
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body: options.body === undefined ? null : JSON.stringify(options.body),
     }),
     env,
     { waitUntil: () => undefined, passThroughOnException: () => undefined } as unknown as ExecutionContext,

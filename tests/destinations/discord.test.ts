@@ -46,7 +46,7 @@ describe('Discord renderer', () => {
   });
 
   it('never emits two embeds, whatever the input, so URL-deduplication cannot drop an event', () => {
-    for (const n of [BASE, { ...BASE, summary: 'x'.repeat(10_000) }, { ...BASE, url: undefined }]) {
+    for (const n of [BASE, { ...BASE, summary: 'x'.repeat(10_000) }, { ...BASE, url: '' }]) {
       expect(payload(render(n)).embeds?.length ?? 1).toBe(1);
     }
   });

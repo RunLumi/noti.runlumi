@@ -407,17 +407,32 @@ export function parseUpdateIntegration(
 
   const errors: FieldError[] = [];
   const out: { -readonly [K in keyof UpdateIntegrationInput]: UpdateIntegrationInput[K] } = {};
-  if ('name' in r) out.name = parseName(r.name, errors);
-  if ('repo' in r) out.repo = parseRepo(r.repo, errors);
+  // A failed parse returns undefined and has already pushed a field error, so the value is simply not set.
+  if ('name' in r) {
+    const name = parseName(r.name, errors);
+    if (name !== undefined) out.name = name;
+  }
+  if ('repo' in r) {
+    const repo = parseRepo(r.repo, errors);
+    if (repo !== undefined) out.repo = repo;
+  }
   if ('eventTypes' in r) {
-    if (isSource) out.sourceEventTypes = parseSourceEventTypes(r.eventTypes, errors);
-    else out.eventTypes = parseEventTypes(r.eventTypes, errors);
+    if (isSource) {
+      const types = parseSourceEventTypes(r.eventTypes, errors);
+      if (types !== undefined) out.sourceEventTypes = types;
+    } else {
+      const types = parseEventTypes(r.eventTypes, errors);
+      if (types !== undefined) out.eventTypes = types;
+    }
   }
   if ('enabled' in r) {
     if (typeof r.enabled === 'boolean') out.enabled = r.enabled;
     else errors.push({ field: 'enabled', message: 'Must be true or false.' });
   }
-  if ('filters' in r) out.filters = parseFilterField(r, errors);
+  if ('filters' in r) {
+    const filters = parseFilterField(r, errors);
+    if (filters !== undefined) out.filters = filters;
+  }
   if ('noise' in r) {
     const noise = parseNoiseField(r, errors);
     if (noise !== undefined) out.noise = noise;

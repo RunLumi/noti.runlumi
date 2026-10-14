@@ -8,6 +8,7 @@
     // triple-slash reference, and tests/ and scripts import node:* modules.
     "types": ["@cloudflare/workers-types", "node"],
     "strict": true,
+    "exactOptionalPropertyTypes": true,
 
     // Hardening beyond `strict`. Each of these has already caught or would catch a real
     // class of defect in this codebase; see docs/specs/01-platform-runtime.md F01.

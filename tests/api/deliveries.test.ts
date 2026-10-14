@@ -112,7 +112,7 @@ async function call(
   if (options.org) headers.set('x-test-active-org', options.org);
   if (options.origin !== null) headers.set('origin', options.origin ?? ORIGIN);
   return worker.fetch(
-    new Request(`${ORIGIN}${path}`, { method, headers, body: method === 'POST' ? '{}' : undefined }),
+    new Request(`${ORIGIN}${path}`, { method, headers, body: method === 'POST' ? '{}' : null }),
     env,
     { waitUntil: () => undefined, passThroughOnException: () => undefined } as unknown as ExecutionContext,
   );

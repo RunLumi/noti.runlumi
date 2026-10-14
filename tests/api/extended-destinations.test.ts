@@ -102,7 +102,7 @@ async function call(method: string, path: string, body?: unknown): Promise<Respo
     new Request(`${ORIGIN}${path}`, {
       method,
       headers: new Headers({ 'content-type': 'application/json', 'x-test-user': 'bob', origin: ORIGIN }),
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? null : JSON.stringify(body),
     }),
     env,
     { waitUntil: () => undefined, passThroughOnException: () => undefined } as unknown as ExecutionContext,

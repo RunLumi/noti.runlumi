@@ -465,7 +465,9 @@ describe('custom webhook: feature flag, own hosts and tenant-visible reasons (AD
   it('refuses to send to a stored row while the feature is off, with no network call', async () => {
     const { id } = await integration('generic_webhook');
     for (const flag of [undefined, '', 'false', 'TRUE', '1', 'yes']) {
-      env = { ...env, GENERIC_WEBHOOK_ENABLED: flag };
+      env = { ...env };
+      if (flag === undefined) delete env.GENERIC_WEBHOOK_ENABLED;
+      else env.GENERIC_WEBHOOK_ENABLED = flag;
       await consume(enqueue(`d-${String(flag)}`, id));
       expect(row(`d-${String(flag)}`)).toMatchObject({
         state: 'dead_lettered',

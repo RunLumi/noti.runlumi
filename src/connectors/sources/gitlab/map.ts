@@ -80,7 +80,7 @@ function push(body: Record<string, unknown>, tag: boolean): Mapped | null {
 }
 
 const MR_ACTIONS: Readonly<
-  Record<string, { type: GitlabEventType; word: string; status: Display['status'] }>
+  Record<string, { type: GitlabEventType; word: string; status: NonNullable<Display['status']> }>
 > = {
   open: { type: 'merge_request.opened', word: 'opened', status: 'info' },
   reopen: { type: 'merge_request.reopened', word: 'reopened', status: 'info' },
@@ -107,7 +107,7 @@ function mergeRequest(body: Record<string, unknown>): Mapped | null {
 }
 
 const ISSUE_ACTIONS: Readonly<
-  Record<string, { type: GitlabEventType; word: string; status: Display['status'] }>
+  Record<string, { type: GitlabEventType; word: string; status: NonNullable<Display['status']> }>
 > = {
   open: { type: 'issue.opened', word: 'opened', status: 'info' },
   reopen: { type: 'issue.reopened', word: 'reopened', status: 'info' },

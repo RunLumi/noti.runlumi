@@ -71,7 +71,13 @@ function member(userId: string, org: string, role: 'admin' | 'member'): void {
 async function integration(
   id: string,
   kind: Kind,
-  options: { org?: string; enabled?: number; quarantined?: boolean; filters?: string; noise?: string } = {},
+  options: {
+    org?: string;
+    enabled?: number;
+    quarantined?: boolean;
+    filters?: string | undefined;
+    noise?: string | undefined;
+  } = {},
 ): Promise<void> {
   db.raw
     .prepare(
