@@ -1,0 +1,46 @@
+/* ============================================================================
+   Audit log. Reuses the delivery table, filters and empty-state rules; only the
+   details list is new. Tokens only (DESIGN.md §5-§8).
+   ========================================================================= */
+
+.audit-details {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: 13px;
+}
+
+.audit-details div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+
+.audit-details dt {
+  color: var(--color-soft-slate);
+}
+
+.audit-details dt::after {
+  content: ':';
+}
+
+.audit-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-table td:last-child {
+  max-width: 28rem;
+}
+
+/* Above the stacked-card breakpoint (760px, deliveries.css) six columns need room: on a narrow
+   window the wrapper scrolls inside itself rather than squeezing a name into one letter per line. */
+@media (min-width: 761px) {
+  .audit-table {
+    min-width: 820px;
+  }
+
+  .audit-table td:nth-child(3) {
+    min-width: 8rem;
+  }
+}

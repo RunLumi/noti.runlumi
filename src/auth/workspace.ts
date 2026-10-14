@@ -1,8 +1,9 @@
 import { Hono, type Context } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { recordDenial, requestOrigin } from '../audit/audit';
+import { hit } from '../security/rate-limit';
 import { createAuth, type AuthBindings } from './better-auth';
 import { can, type Capability } from './permissions';
 
@@ -26,7 +27,9 @@ type Resolved = {
   orgName: string;
 };
 
-type Failure = { status: 401 | 403 | 404; error: string };
+type Failure = { status: 400 | 401 | 403 | 404; error: string };
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 async function current(c: WorkspaceContext) {
   // Constructed per request on purpose. Better Auth caches async init promises on
@@ -109,6 +112,13 @@ async function resolveWorkspace(c: WorkspaceContext): Promise<Resolved | Failure
     name: s.user.name,
   };
 
+  // A person in several workspaces must NAME the workspace on every write. Without this a tab
+  // left open on workspace A would write into B after another tab switched the session's active
+  // workspace. One membership is unambiguous, so it needs no parameter. Enforced here, the one
+  // place every domain route resolves its tenant.
+  if (MUTATING_METHODS.has(c.req.method) && memberships.length > 1 && !c.req.query('org'))
+    return { status: 400, error: 'org is required' };
+
   const selection = selectMembership(memberships, {
     requested: c.req.query('org'),
     activeId: s.session.activeOrganizationId,
@@ -170,6 +180,7 @@ workspace.get('/me', async (c) => {
             org_id: null,
             org_name: null,
             role: null,
+            activeOrgId: null,
             organizations: [],
           },
         });
@@ -187,7 +198,8 @@ workspace.get('/me', async (c) => {
     })
     .from(schema.member)
     .innerJoin(schema.organization, eq(schema.organization.id, schema.member.organizationId))
-    .where(eq(schema.member.userId, resolved.userId));
+    .where(eq(schema.member.userId, resolved.userId))
+    .orderBy(schema.member.createdAt, schema.member.organizationId);
 
   return c.json({
     user: {
@@ -198,11 +210,75 @@ workspace.get('/me', async (c) => {
       org_id: resolved.orgId,
       org_name: resolved.orgName,
       role: resolved.role,
+      // The workspace this response describes: the session's active one, as settled above.
+      activeOrgId: resolved.orgId,
       // Every workspace the caller belongs to, so a client can offer a switcher.
       // Scoped to this user by definition; the caller cannot see anyone else's.
       organizations,
     },
   });
+});
+
+/** Switching is a write to the caller's own session only; a generous ceiling for a person clicking. */
+const SWITCHES_PER_MINUTE = 30;
+
+/**
+ * `POST /api/workspace/active` `{ organizationId }`: make a workspace the session's active one.
+ *
+ * Membership is checked here, from the database, for exactly this user: the id in the body is
+ * never trusted. A workspace the caller is not in and one that does not exist answer
+ * identically (404, same body), so the endpoint cannot be used to learn which ids exist. Only
+ * `session.active_organization_id` of the caller's own session changes. CSRF (Origin) is
+ * enforced for every `/api/*` mutation by `requireSameOrigin` (and repeated below).
+ */
+workspace.post('/active', async (c) => {
+  // Repeats the central Origin check (`requireSameOrigin`) so this file stands on its own.
+  const origin = c.req.header('origin');
+  if (!origin || origin !== new URL(c.env.APP_ORIGIN).origin) return c.json({ error: 'Forbidden' }, 403);
+  const s = await current(c);
+  if (!s) return c.json({ error: 'Unauthorized' }, 401);
+  if (!(c.req.header('content-type') ?? '').toLowerCase().startsWith('application/json'))
+    return c.json({ error: 'Expected application/json' }, 415);
+  const body: unknown = await c.req.json().catch(() => null);
+  const requested =
+    typeof body === 'object' && body !== null && 'organizationId' in body ? body.organizationId : null;
+  if (typeof requested !== 'string' || requested.length === 0 || requested.length > 64)
+    return c.json(
+      { error: 'Validation failed', fields: [{ field: 'organizationId', message: 'Required.' }] },
+      422,
+    );
+
+  const limit = await hit(c.env.DB, `workspace-active:${s.user.id}`, SWITCHES_PER_MINUTE, 60_000);
+  if (limit.limited)
+    return c.json({ error: 'Too many requests; try again shortly' }, 429, {
+      'retry-after': String(limit.retryAfterSeconds),
+    });
+
+  const db = drizzle(c.env.DB, { schema });
+  const found = await db
+    .select({
+      orgId: schema.member.organizationId,
+      role: schema.member.role,
+      orgName: schema.organization.name,
+    })
+    .from(schema.member)
+    .innerJoin(schema.organization, eq(schema.organization.id, schema.member.organizationId))
+    .where(and(eq(schema.member.userId, s.user.id), eq(schema.member.organizationId, requested)))
+    .limit(1);
+  const membership = found[0];
+  if (!membership) {
+    await recordProbe(c, requested, 'workspace.switch');
+    return c.json({ error: 'Not found' }, 404);
+  }
+
+  // Scoped to the caller's own session row, so another user's session can never be touched.
+  if (typeof s.session.id === 'string')
+    await db
+      .update(schema.session)
+      .set({ activeOrganizationId: membership.orgId })
+      .where(and(eq(schema.session.id, s.session.id), eq(schema.session.userId, s.user.id)));
+  c.header('Cache-Control', 'no-store');
+  return c.json({ activeOrgId: membership.orgId, orgName: membership.orgName, role: membership.role });
 });
 
 workspace.get('/team', async (c) => {
@@ -227,6 +303,41 @@ workspace.get('/team', async (c) => {
   return c.json({ organizationId: resolved.orgId, members });
 });
 
+/** Probes recorded per person per minute; a scan of organization ids must not fill the log. */
+const PROBES_RECORDED_PER_MINUTE = 20;
+
+/**
+ * Record a request for a workspace the caller is not a member of. It is written against that
+ * workspace when it exists, so its admins can see probes, and never reveals which case it was.
+ * Organization ids are short; anything longer is not one and is not stored verbatim. A person
+ * is limited to a few recorded probes a minute (the response is unaffected), so scanning ids
+ * cannot be used to flood another workspace's audit log or the orphan (no-workspace) rows.
+ */
+async function recordProbe(c: WorkspaceContext, raw: string | null, capability: string): Promise<void> {
+  const requested = raw && raw.length <= 64 ? raw : raw ? '(invalid)' : null;
+  const s = await current(c);
+  if (s) {
+    const limit = await hit(c.env.DB, `probe-audit:${s.user.id}`, PROBES_RECORDED_PER_MINUTE, 60_000).catch(
+      () => null,
+    );
+    if (limit?.limited) return;
+  }
+  const exists =
+    requested && requested !== '(invalid)'
+      ? await c.env.DB.prepare('SELECT 1 AS x FROM organization WHERE id=?').bind(requested).first()
+      : null;
+  await recordDenial(c.env.DB, {
+    organizationId: exists ? requested : null,
+    actorId: s?.user.id ?? null,
+    action: 'access.denied',
+    subjectType: 'organization',
+    subjectId: requested,
+    outcome: 'denied',
+    ...requestOrigin(c.req.raw.headers),
+    metadata: { capability, reason: 'not_a_member' },
+  });
+}
+
 /**
  * The single authorization gate for domain routes (F24, F26).
  *
@@ -239,28 +350,7 @@ export async function authorize(c: WorkspaceContext, capability: Capability): Pr
   const origin = requestOrigin(c.req.raw.headers);
 
   if (isFailure(resolved)) {
-    if (resolved.status === 404) {
-      // A request for a workspace the caller is not a member of. Record it against that
-      // workspace when it exists, so its admins can see probes; never reveal which it was.
-      // Organization ids are short; anything longer is not one and is not stored verbatim.
-      const raw = c.req.query('org') ?? null;
-      const requested = raw && raw.length <= 64 ? raw : raw ? '(invalid)' : null;
-      const exists =
-        requested && requested !== '(invalid)'
-          ? await c.env.DB.prepare('SELECT 1 AS x FROM organization WHERE id=?').bind(requested).first()
-          : null;
-      const s = await current(c);
-      await recordDenial(c.env.DB, {
-        organizationId: exists ? requested : null,
-        actorId: s?.user.id ?? null,
-        action: 'access.denied',
-        subjectType: 'organization',
-        subjectId: requested,
-        outcome: 'denied',
-        ...origin,
-        metadata: { capability, reason: 'not_a_member' },
-      });
-    }
+    if (resolved.status === 404) await recordProbe(c, c.req.query('org') ?? null, capability);
     return resolved;
   }
 

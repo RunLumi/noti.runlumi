@@ -1,3 +1,4 @@
+import { StaleWorkspaceNotice, useBoundWorkspace } from '../../workspace/bound';
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useBlocker, useNavigate } from '@tanstack/react-router';
 import { IconArrowLeft, IconArrowRight, IconCheck } from '@tabler/icons-react';
@@ -50,11 +51,13 @@ const LAST = STEPS.length - 1;
  */
 export function CreateWizard() {
   useLocale();
-  const orgId = useOrgId();
-  const create = useCreateIntegration(orgId ?? '');
+  // Bound at mount: another tab switching workspace must not redirect this form's write.
+  const ws = useBoundWorkspace(useOrgId());
+  const orgId = ws.orgId;
+  const create = useCreateIntegration(orgId);
   const navigate = useNavigate();
   const formRef = useRef<HTMLFormElement>(null);
-  const connection = useGithubConnection(orgId);
+  const connection = useGithubConnection(orgId || null);
   const installations = connection.data?.installations ?? [];
   // No active installation means no repository can be named: step 1 becomes "Connect GitHub".
   const gated = activeInstallations(installations).length === 0;
@@ -96,7 +99,7 @@ export function CreateWizard() {
   };
 
   const submit = async () => {
-    if (create.isPending) return;
+    if (create.isPending || ws.stale) return;
     const all = validateAll(draft, installations);
     if (Object.keys(all).length > 0 || !draft.destination) return showErrors(all, earliestStep(all, 0));
     setFormNotice([]);
@@ -186,6 +189,7 @@ export function CreateWizard() {
               title: t(steps[step] ?? STEPS[0]),
             })}
           </h2>
+          <StaleWorkspaceNotice show={ws.stale} />
           {formNotice.length > 0 && (
             <Notice kind="error">
               {formNotice.map((line) => (
@@ -194,7 +198,7 @@ export function CreateWizard() {
             </Notice>
           )}
           {step === 0 && gated ? (
-            <GithubGate orgId={orgId ?? ''} connection={connection} />
+            <GithubGate orgId={orgId} connection={connection} />
           ) : Body ? (
             <Body draft={draft} errors={errors} update={update} installations={installations} />
           ) : (
@@ -218,7 +222,7 @@ export function CreateWizard() {
               </Link>
             )}
             {!(step === 0 && gated) && (
-              <Button type="submit" aria-disabled={create.isPending || undefined}>
+              <Button type="submit" aria-disabled={create.isPending || ws.stale || undefined}>
                 {step === LAST ? (
                   <>
                     <IconCheck size={18} aria-hidden="true" />

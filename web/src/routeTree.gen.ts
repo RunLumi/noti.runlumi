@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ActivityRouteImport } from './routes/activity'
+import { Route as AuditRouteImport } from './routes/audit'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
@@ -33,6 +34,11 @@ const IndexRoute = IndexRouteImport.update({
 const ActivityRoute = ActivityRouteImport.update({
   id: '/activity',
   path: '/activity',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuditRoute = AuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
@@ -104,6 +110,7 @@ const IntegrationsNewRoute = IntegrationsNewRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/audit': typeof AuditRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/onboarding': typeof OnboardingRoute
@@ -121,6 +128,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/audit': typeof AuditRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/onboarding': typeof OnboardingRoute
@@ -139,6 +147,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/audit': typeof AuditRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/onboarding': typeof OnboardingRoute
@@ -158,6 +167,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/activity'
+    | '/audit'
     | '/forgot-password'
     | '/invite'
     | '/onboarding'
@@ -175,6 +185,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/activity'
+    | '/audit'
     | '/forgot-password'
     | '/invite'
     | '/onboarding'
@@ -192,6 +203,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/activity'
+    | '/audit'
     | '/forgot-password'
     | '/invite'
     | '/onboarding'
@@ -210,6 +222,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivityRoute: typeof ActivityRoute
+  AuditRoute: typeof AuditRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   InviteRoute: typeof InviteRoute
   OnboardingRoute: typeof OnboardingRoute
@@ -239,6 +252,13 @@ declare module '@tanstack/react-router' {
       path: '/activity'
       fullPath: '/activity'
       preLoaderRoute: typeof ActivityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audit': {
+      id: '/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forgot-password': {
@@ -338,6 +358,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
+  AuditRoute: AuditRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   InviteRoute: InviteRoute,
   OnboardingRoute: OnboardingRoute,

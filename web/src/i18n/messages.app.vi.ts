@@ -12,6 +12,18 @@ export const appVi = {
   'shell.loading': 'Đang tải không gian làm việc của bạn…',
   'shell.workspaceFallback': 'Không gian làm việc chưa đặt tên',
   'shell.workspaceKind': 'Tổ chức',
+  'workspace.drift.title': 'Không gian làm việc đã đổi ở một tab khác',
+  'workspace.drift.body':
+    'Tab này giờ hiển thị {name}. Mọi thứ bạn đang điền ở đây là cho không gian làm việc trước đó nên chưa được gửi. Hãy kiểm tra bạn đang ở đâu trước khi tiếp tục.',
+  'workspace.drift.dismiss': 'Đã hiểu',
+  'workspace.stale.form':
+    'Không gian làm việc đã đổi ở một tab khác nên biểu mẫu này bị tắt để không lưu nhầm vào sai không gian. Hãy tải lại trang hoặc quay lại không gian làm việc bạn định dùng.',
+  'switcher.heading': 'Không gian làm việc của bạn',
+  'switcher.trigger': 'Không gian làm việc: {name}, {role}. Chuyển không gian làm việc',
+  'switcher.create': 'Tạo không gian làm việc',
+  'switcher.createAnother': 'Tạo không gian làm việc khác',
+  'switcher.changed': 'Đã chuyển sang {name}. Vai trò của bạn ở đây: {role}.',
+  'switcher.error': 'Không chuyển được không gian làm việc. Bạn vẫn đang ở {name}.',
   'shell.navLabel': 'Điều hướng chính',
   'shell.breadcrumbRoot': 'Không gian làm việc',
   'shell.preview': 'Bản xem trước',
@@ -19,6 +31,7 @@ export const appVi = {
   'nav.integrations': 'Tích hợp',
   'nav.activity': 'Hoạt động',
   'nav.team': 'Thành viên',
+  'nav.audit': 'Nhật ký kiểm toán',
   'nav.settings': 'Cài đặt',
   'role.admin': 'Quản trị viên',
   'role.member': 'Thành viên',
@@ -31,6 +44,7 @@ export const appVi = {
   'route.title.integration': 'Cài đặt tích hợp',
   'route.title.activity': 'Hoạt động',
   'route.title.team': 'Thành viên và quyền',
+  'route.title.audit': 'Nhật ký kiểm toán',
   'route.title.settings': 'Cài đặt',
   'route.title.onboarding': 'Tạo không gian làm việc',
   'route.title.invite': 'Lời mời tham gia nhóm',
@@ -142,6 +156,10 @@ export const appVi = {
   'auth.reset.failed': 'Đặt lại không thành công',
 
   // --- Onboarding and invitations ----------------------------------------------------------------
+  'onboarding.titleAdditional': 'Tạo thêm một không gian làm việc',
+  'onboarding.bodyAdditional':
+    'Không gian làm việc mới có tích hợp, nguồn, thành viên và nhật ký kiểm toán riêng. Không có gì được chia sẻ với các không gian làm việc khác của bạn. Bạn có thể chuyển qua lại từ thanh bên.',
+  'onboarding.cancel': 'Quay lại không gian làm việc của bạn',
   'onboarding.title': 'Tạo không gian làm việc của bạn',
   'onboarding.body':
     'Mỗi người thuộc về một tổ chức tại một thời điểm. Bạn có thể mời thêm người sau khi thiết lập xong.',
@@ -158,8 +176,6 @@ export const appVi = {
     'Hãy đăng nhập bằng địa chỉ email đã nhận lời mời này. Hãy xác minh email đó trước khi chấp nhận.',
   'invite.signinAction': 'Đăng nhập để chấp nhận',
   'invite.signupLink': 'Bạn mới dùng Lumi Noti? Tạo tài khoản',
-  'invite.alreadyMember':
-    'Bạn đã thuộc về một tổ chức. Hãy rời khỏi tổ chức đó trước khi chấp nhận lời mời này.',
   'invite.signedInAs': 'Bạn đang đăng nhập với {email}. Chấp nhận lời mời sẽ đưa bạn vào tổ chức đã mời.',
   'invite.accept': 'Chấp nhận lời mời',
   'invite.accepting': 'Đang tham gia…',

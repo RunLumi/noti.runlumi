@@ -5,27 +5,8 @@
  * hostnames). Free text, URLs with paths and credentials never belong here; the type below
  * only admits primitives and string arrays, and the serialised size is capped.
  */
-export type AuditAction =
-  | 'integration.create'
-  | 'integration.update'
-  | 'integration.delete'
-  | 'integration.credentials.rotate'
-  | 'integration.auto_pause'
-  | 'integration.test'
-  | 'source.create'
-  | 'source.update'
-  | 'source.delete'
-  | 'source.secret.rotate'
-  | 'delivery.replay'
-  | 'access.denied'
-  | 'github.installation.bind'
-  | 'github.installation.bind_refused'
-  | 'github.installation.lifecycle'
-  | 'github.repository.out_of_scope'
-  | 'workspace.export'
-  | 'workspace.deletion.request'
-  | 'workspace.deletion.cancel'
-  | 'workspace.purged';
+export { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction } from './actions';
+import type { AUDIT_SUBJECT_TYPES, AuditAction } from './actions';
 
 export type AuditMetadata = Readonly<Record<string, string | number | boolean | null | readonly string[]>>;
 
@@ -33,14 +14,7 @@ export interface AuditEntry {
   readonly organizationId: string | null;
   readonly actorId: string | null;
   readonly action: AuditAction;
-  readonly subjectType:
-    | 'integration'
-    | 'source'
-    | 'delivery'
-    | 'organization'
-    | 'capability'
-    | 'github_installation'
-    | 'repository';
+  readonly subjectType: (typeof AUDIT_SUBJECT_TYPES)[number];
   readonly subjectId: string | null;
   readonly outcome: 'success' | 'denied';
   readonly ip?: string | null;

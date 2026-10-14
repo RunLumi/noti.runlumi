@@ -1,3 +1,4 @@
+import { StaleWorkspaceNotice, useBoundWorkspace } from '../../workspace/bound';
 import { useRef, useState, type FormEvent } from 'react';
 import { IconKey } from '@tabler/icons-react';
 import { focusFirstInvalid } from '../../components/form';
@@ -35,9 +36,10 @@ const STATE_LABEL = {
  * Credential rotation is a separate, explicit action (F211/F217). The stored URL is never
  * shown; the only operation is to replace it, which discards the old key material.
  */
-export function CredentialsSection({ orgId, integration }: CredentialsSectionProps) {
+export function CredentialsSection({ orgId: liveOrgId, integration }: CredentialsSectionProps) {
   useLocale();
-  const rotate = useRotateCredentials(orgId, integration.id);
+  const ws = useBoundWorkspace(liveOrgId);
+  const rotate = useRotateCredentials(ws.orgId, integration.id);
   const info = DESTINATIONS[integration.destination];
   const destination = t(info.name);
   const [open, setOpen] = useState(integration.credentials !== 'ok');
@@ -63,7 +65,7 @@ export function CredentialsSection({ orgId, integration }: CredentialsSectionPro
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
-    if (rotate.isPending) return;
+    if (rotate.isPending || ws.stale) return;
     const found = compact({
       webhookUrl: validateWebhookUrl(webhookUrl, integration.destination),
       signingSecret: info.supportsSigningSecret ? validateSigningSecret(signingSecret) : undefined,
@@ -129,6 +131,7 @@ export function CredentialsSection({ orgId, integration }: CredentialsSectionPro
       )}
       {open ? (
         <form className="rotate-form" onSubmit={(e) => void onSubmit(e)} noValidate>
+          <StaleWorkspaceNotice show={ws.stale} />
           <p>{t('settings.credentials.replaceIntro', { destination })}</p>
           <WebhookGuide destination={integration.destination} />
           <WebhookFields
@@ -146,7 +149,7 @@ export function CredentialsSection({ orgId, integration }: CredentialsSectionPro
             </Notice>
           )}
           <div className="form-actions">
-            <Button type="submit" aria-disabled={rotate.isPending || undefined}>
+            <Button type="submit" aria-disabled={rotate.isPending || ws.stale || undefined}>
               {rotate.isPending ? t('settings.saving') : t('settings.credentials.save')}
             </Button>
             <Button

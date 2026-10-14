@@ -1,3 +1,4 @@
+import { StaleWorkspaceNotice, useBoundWorkspace } from './bound';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { AlertDialog } from '@base-ui/react/alert-dialog';
 import { useMutation } from '@tanstack/react-query';
@@ -26,8 +27,14 @@ function failure(error: unknown): string {
  * Typing the workspace name is the confirmation (it matches the server's check). Focus starts
  * on the cancel button, so a stray Enter cannot schedule a deletion (F221).
  */
-export function DeleteWorkspaceDialog({ orgId, orgName, onScheduled }: DeleteWorkspaceDialogProps) {
+export function DeleteWorkspaceDialog({
+  orgId: liveOrgId,
+  orgName,
+  onScheduled,
+}: DeleteWorkspaceDialogProps) {
   useLocale();
+  const ws = useBoundWorkspace(liveOrgId);
+  const orgId = ws.orgId;
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -53,7 +60,7 @@ export function DeleteWorkspaceDialog({ orgId, orgName, onScheduled }: DeleteWor
   };
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (matches && !schedule.isPending) schedule.mutate();
+    if (matches && !schedule.isPending && !ws.stale) schedule.mutate();
   };
 
   return (
@@ -70,6 +77,7 @@ export function DeleteWorkspaceDialog({ orgId, orgName, onScheduled }: DeleteWor
           </AlertDialog.Title>
           <AlertDialog.Description>{t('workspace.danger.dialog.body')}</AlertDialog.Description>
           <form className="form-stack" onSubmit={onSubmit}>
+            <StaleWorkspaceNotice show={ws.stale} />
             <div className="field">
               <label className="field-label" htmlFor={inputId}>
                 {t('workspace.danger.dialog.label', { name: orgName })}
@@ -94,7 +102,7 @@ export function DeleteWorkspaceDialog({ orgId, orgName, onScheduled }: DeleteWor
               <Button
                 type="submit"
                 variant="danger"
-                aria-disabled={!matches || schedule.isPending || undefined}
+                aria-disabled={!matches || schedule.isPending || ws.stale || undefined}
               >
                 {schedule.isPending
                   ? t('workspace.danger.dialog.scheduling')

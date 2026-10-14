@@ -31,6 +31,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 6b | Dashboard: delivery log and manual redelivery (API and UI; migration 0013 indexes), workspace export and deletion screens, Teams in the create wizard. Test send and the setup-progress model remain | F181 (part), F182 (part), F213 (part), F218 (part), F211 (Teams) | D11 (surface) | 🟡 | #16 |
 | 6c | Dashboard: accessibility gate (axe-core on every route, wizard step and dialog), route-change title/announcement/focus, skip link, palette-contrast and stylesheet-preference tests, Vietnamese catalogue with a language switcher, hard-coded-string and catalogue-drift tests | F221 (part), F223 (part), F224 (part) | — | 🟡 | this PR |
 | 6d | Dashboard: "Send a test notification" through the real delivery path (API, settings section, list button, optional wizard step), derived setup-progress API and Overview card, `is_test` column (migration 0022) | F98 (part), F207 (part), F215 (part), F216 (part) | — | 🟡 | this PR |
+| 6e | Dashboard: workspace switcher (`POST /api/workspace/active`, `activeOrgId`, query-key isolation, create another workspace) and the admin-only audit log (`GET /api/audit`, `/audit`, plain-language en/vi labels, allow-listed metadata, CSV of the loaded events) | F28 (read side, in part), F222 (read side, in part), F205 (part), F224 (part) | — | 🟡 | this PR |
 | 7 | Per-integration routing filters with provenance (backend, API, dashboard); the F121 rule engine is not started | F124, F125, F127, F128, F136–F140 (each in part) | — | 🟡 | #25 |
 | 8 | Noise control: quiet hours, burst grouping, hourly/daily digests, resolved notices, held-event store and release job, settings API and dashboard section. Not the preset library, preferences, silences or AI | F141–F146, F148, F152, F159, F165, F166 (each in part, see section) | — | 🟡 | this PR |
 | 9 | Observability and runbook: correlation id, D1-derived SLIs and summary API, stall detection, retention, operator runbook | F193 (partial), F194 (partial), F197 (partial), F198 (partial), F200 (partial), F201 (partial) | — | 🟡 | #16 |
@@ -1019,8 +1020,38 @@ Found by the accessibility agent while walking the app in a real browser.
   and that choice is stored on the session. An explicit `?org=` for a workspace the caller is
   not in is still a 404.
 - Covered by `tests/api/workspace-me.test.ts`.
-- Not built: a workspace switcher in the dashboard. Users in several workspaces stay in the
-  active one until the switcher ships.
+- The workspace switcher was not built here; it shipped in slice 6e (below).
+
+## Slice 6e — workspace switcher and audit log (ADR 0019, this PR)
+
+Two gaps left on purpose. Full decisions, the disclosure rules and the verification record are in
+[ADR 0019](adr/0019-workspace-switcher-audit-log.md); this is the summary.
+
+- **Workspace switcher.** `POST /api/workspace/active` (membership from the database, 404 with one
+  shape for a non-member and an unknown organization, own session row only, CSRF by the central
+  middleware, 30 a minute per user); `/me` returns `activeOrgId`. A sidebar menu (Base UI) for
+  several workspaces, a static label plus "Create another workspace" for one, nothing for none.
+  Every workspace-scoped query key is `[area, orgId, ...]` (the team list was the one that was not);
+  a switch drops every other workspace's cache and refetches. Onboarding can create an additional
+  workspace and activates it through our endpoint.
+- **Audit log.** `GET /api/audit` (`audit.read`, admin only), cursor on `(created_at, id)`, filters,
+  120 reads a minute. Actor is a **name only** and only for a current member; no email, no IP, no user
+  agent; `metadata_json` goes through a per-action allow-list with truncation. `/audit` page with
+  plain-language English and Vietnamese labels for every recorded action, URL-backed filters, empty and
+  error states, the retention in force, and a formula-safe CSV of the events loaded.
+- **Tests.** API (`tests/api/workspace-active.test.ts`, `tests/api/audit.test.ts`) and dashboard
+  (`web/src/workspace/switcher.test.tsx`, `web/src/audit/audit.test.tsx`, new axe scenarios for `/audit`
+  and the multi-workspace shell in both languages).
+- **Security review follow-ups (this PR):** a person in several workspaces must send `?org=` on every
+  write (400 otherwise, enforced in `resolveWorkspace`), forms bind the workspace they were opened for,
+  a tab detects a switch made in another tab and says so; invitations can be accepted by an existing
+  member; onboarding no longer invites a duplicate on a failed activation; the audit actor distinguishes
+  a former member from an outside user; refused-probe auditing is rate limited per person (and a refused
+  switch is audited); more invisible characters stripped and cuts are by code point; CSV has a BOM.
+- **Not done:** the F222
+  read side beyond this (actor/target filters, total, correlation id, diff, member and session
+  events); the workspace export still carries raw `metadata_json`; no screen reader, Firefox or Safari
+  pass; the Vietnamese copy is unreviewed.
 
 ## Slice 10b — GitLab and Stripe sources, Sentry refused (this PR)
 

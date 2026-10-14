@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconBuilding, IconUserPlus } from '@tabler/icons-react';
 import { authClient, assertAuthSuccess } from './lib/auth-client';
 import { authApi } from './lib/api';
+import { adoptWorkspace } from './workspace/switching';
 import { Card, Button, Input } from './components/ui';
 import { t } from './i18n';
 import { useLocale } from './i18n/LocaleProvider';
@@ -22,6 +23,10 @@ export function OnboardingPage() {
   useLocale();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
+  // A person who already has a workspace can add another from the switcher; the page then
+  // offers a way back instead of being a one-way first-run step.
+  const additional = (me.data?.user.organizations.length ?? 0) > 0;
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -29,18 +34,27 @@ export function OnboardingPage() {
     e.preventDefault();
     setBusy(true);
     setError('');
+    let created: { id?: string } | null | undefined;
     try {
-      assertAuthSuccess(
+      created = assertAuthSuccess(
         await authClient.organization.create({
           name: name.trim(),
           slug: slug(name) + '-' + crypto.randomUUID().slice(0, 8),
         }),
       );
-      await qc.invalidateQueries({ queryKey: ['me'] });
-      await nav({ to: '/' });
     } catch (e) {
+      // The workspace was NOT created: the form stays and the person may try again.
       setError(e instanceof Error ? e.message : t('onboarding.error'));
+      setBusy(false);
+      return;
+    }
+    // From here the workspace exists. Nothing below may show an error that invites a retry,
+    // because a retry would create a second workspace.
+    try {
+      if (created?.id) await adoptWorkspace(qc, created.id);
+      else await qc.invalidateQueries({ queryKey: ['me'] });
     } finally {
+      await nav({ to: '/' });
       setBusy(false);
     }
   }
@@ -50,8 +64,8 @@ export function OnboardingPage() {
         <div className="empty-icon" aria-hidden="true">
           <IconBuilding />
         </div>
-        <h1>{t('onboarding.title')}</h1>
-        <p className="muted">{t('onboarding.body')}</p>
+        <h1>{t(additional ? 'onboarding.titleAdditional' : 'onboarding.title')}</h1>
+        <p className="muted">{t(additional ? 'onboarding.bodyAdditional' : 'onboarding.body')}</p>
         <form onSubmit={(e) => void submit(e)} className="auth-form">
           <label>
             {t('onboarding.field')}
@@ -73,7 +87,13 @@ export function OnboardingPage() {
             {busy ? t('onboarding.submitting') : t('onboarding.submit')}
           </Button>
         </form>
-        <p className="muted">{t('onboarding.joinHint')}</p>
+        {additional ? (
+          <p>
+            <Link to="/">{t('onboarding.cancel')}</Link>
+          </p>
+        ) : (
+          <p className="muted">{t('onboarding.joinHint')}</p>
+        )}
       </Card>
     </div>
   );
@@ -93,10 +113,20 @@ export function InvitePage() {
     setError('');
     setBusy(true);
     try {
-      assertAuthSuccess(await authClient.organization.acceptInvitation({ invitationId: id }));
-      await qc.invalidateQueries({ queryKey: ['me'] });
+      const before = new Set(me.data?.user.organizations.map((o) => o.orgId));
+      const joined = assertAuthSuccess(await authClient.organization.acceptInvitation({ invitationId: id }));
+      // The invited workspace: named by the answer, else the one that is new in `me`.
+      let orgId = joined?.member?.organizationId ?? joined?.invitation?.organizationId ?? null;
+      if (!orgId) {
+        const fresh = await qc.fetchQuery({ queryKey: ['me'], queryFn: authApi.me, staleTime: 0 });
+        const added = fresh.user.organizations.filter((o) => !before.has(o.orgId));
+        orgId = added.length === 1 ? (added[0]?.orgId ?? null) : null;
+      }
+      if (orgId) await adoptWorkspace(qc, orgId);
+      else await qc.invalidateQueries({ queryKey: ['me'] });
       await nav({ to: '/' });
     } catch (e) {
+      // Includes "already a member of that organization", shown as the server words it.
       setError(e instanceof Error ? e.message : t('invite.error'));
     } finally {
       setBusy(false);
@@ -123,8 +153,6 @@ export function InvitePage() {
               <Link to="/signup">{t('invite.signupLink')}</Link>
             </p>
           </>
-        ) : me.data.user.org_id ? (
-          <p role="alert">{t('invite.alreadyMember')}</p>
         ) : (
           <>
             <p className="muted">{t('invite.signedInAs', { email: me.data.user.email })}</p>

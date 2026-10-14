@@ -6,8 +6,12 @@ import { authClient, assertAuthSuccess } from './lib/auth-client';
 import { api, authApi } from './lib/api';
 import { Badge, Button, Card, Input } from './components/ui';
 import { t } from './i18n';
+import { dropOtherWorkspaces } from './workspace/switching';
 import { roleLabel } from './lib/role-label';
 import { useLocale } from './i18n/LocaleProvider';
+
+/** Query key for a workspace's member list. */
+export const teamKey = (orgId: string) => ['team', orgId] as const;
 
 type Member = {
   id: string;
@@ -20,10 +24,12 @@ type Member = {
 export function TeamManagement() {
   useLocale();
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
+  const orgId = me.data?.user.org_id;
+  // Keyed by workspace and asked for by name, so a switch can never show the other one's members.
   const team = useQuery({
-    queryKey: ['team'],
-    queryFn: () => api<{ members: Member[] }>('/api/workspace/team'),
-    enabled: Boolean(me.data?.user.org_id),
+    queryKey: teamKey(orgId ?? ''),
+    queryFn: () => api<{ members: Member[] }>(`/api/workspace/team?org=${encodeURIComponent(orgId ?? '')}`),
+    enabled: Boolean(orgId),
   });
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -32,9 +38,8 @@ export function TeamManagement() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(''),
     [message, setMessage] = useState('');
-  const orgId = me.data?.user.org_id;
   const isAdmin = me.data?.user.role === 'admin';
-  const refresh = () => qc.invalidateQueries({ queryKey: ['team'] });
+  const refresh = () => qc.invalidateQueries({ queryKey: teamKey(orgId ?? '') });
 
   async function invite(e: FormEvent) {
     e.preventDefault();
@@ -95,8 +100,10 @@ export function TeamManagement() {
     setError('');
     try {
       assertAuthSuccess(await authClient.organization.leave({ organizationId: orgId }));
+      // Whatever workspace they still have becomes active; with none, the shell opens onboarding.
+      dropOtherWorkspaces(qc, '');
       await qc.invalidateQueries({ queryKey: ['me'] });
-      await navigate({ to: '/onboarding' });
+      await navigate({ to: '/' });
     } catch (e) {
       setError(e instanceof Error ? e.message : t('team.membership.leaveError'));
     }

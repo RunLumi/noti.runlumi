@@ -16,6 +16,8 @@ export function routeTitleId(pathname: string): MessageId {
       return 'sources.title';
     case '/activity':
       return 'route.title.activity';
+    case '/audit':
+      return 'route.title.audit';
     case '/team':
       return 'route.title.team';
     case '/settings':

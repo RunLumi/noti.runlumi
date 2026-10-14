@@ -110,7 +110,7 @@ Rules for new UI:
 
 `/signup` `/signin` `/forgot-password` `/verify` `/reset` ·
 `/` (overview) `/integrations` `/integrations/new` `/integrations/:id` `/sources` `/activity` `/team`
-`/settings` `/onboarding` `/invite`
+`/audit` (admins) `/settings` `/onboarding` `/invite`
 
 ## Delivery log and workspace data (`web/src/deliveries/`, `web/src/workspace/`)
 
@@ -124,6 +124,28 @@ Decisions and verification: [ADR 0009](adr/0009-delivery-log-ux.md).
 | `deliveries/DeliveryStats.tsx` | Overview figures from `GET /api/deliveries/summary` (last 24 hours, counted not estimated) |
 | `deliveries/search.ts`, `api.ts`, `copy.ts` | URL-backed filters, strict response parsing, state and error copy |
 | `workspace/` | Settings: credential-free export download and two-phase workspace deletion |
+
+## Workspace switcher and audit log (`web/src/workspace/`, `web/src/audit/`)
+
+Decisions and verification: [ADR 0019](adr/0019-workspace-switcher-audit-log.md). The "workspace
+switcher was explicitly not built" note from slice Fix F is closed by this.
+
+| Path | Role |
+| --- | --- |
+| `workspace/WorkspaceSwitcher.tsx`, `switcher.css` | Sidebar control: Base UI menu (radio list plus Create workspace) for several workspaces, a static label with a create link for one, nothing for none; own live region |
+| `workspace/switching.ts` | `useSwitchWorkspace` (persists via `POST /api/workspace/active`, updates `me`, then `dropOtherWorkspaces`) |
+| `audit/AuditPage.tsx`, `AuditFilters.tsx`, `AuditTable.tsx` | `/audit`, admin only: filters in the URL, table that stacks into cards, load more, empty/error/forbidden states, retention note, CSV of the loaded events |
+| `audit/api.ts`, `hooks.ts`, `search.ts`, `copy.ts`, `csv.ts` | Strict parsing, query keys `['audit', orgId, ...]`, URL validation, plain-language labels (`audit.action.<id>`, `audit.detail.<key>`), formula-safe CSV |
+
+| `workspace/bound.tsx` | `useBoundWorkspace`: a form, wizard or dialog keeps the workspace it was opened for; `StaleWorkspaceNotice` |
+| `workspace/drift.tsx` | `WorkspaceDriftBanner`: detects an active-workspace change made in another tab (`BroadcastChannel('noti-workspace')`, focus), drops caches, alerts |
+
+**Write rule:** every dashboard mutation names its workspace with `?org=` (the server requires it for
+people in several workspaces); `workspace/org-param.test.ts` scans for a mutation that does not.
+
+**Query-key rule:** every workspace-scoped key is `[area, orgId, ...]`. On a switch every cached
+query that is not `me`, `passkeys` or the new workspace's is removed, so a new feature must follow
+the rule or its data is dropped (never leaked).
 
 ## Integrations feature (`web/src/integrations/`)
 
@@ -288,6 +310,10 @@ changes and manages focus; the interface can be switched between English and Vie
 screen reader has been run and no conformance level is claimed.
 
 Test send and setup progress (slice 6d, ADR 0018) are wired to the real API; see "Not verified" for what the browser pass did not cover.
+
+The workspace switcher and the admin-only audit log (`/audit`) are wired to the real API (ADR 0019)
+and had a browser pass in Chrome at 1280 and 320 px in Vietnamese against a local Worker and D1 with
+two workspaces; no screen reader, Firefox or Safari.
 
 **Not implemented:** scheduled re-tests, a payload preview or provider status in the test result, per-attempt history and bulk replay.
 Passkeys register and authenticate but have not been acceptance-tested for counter

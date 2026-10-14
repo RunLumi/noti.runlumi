@@ -6,6 +6,8 @@ import { DeliveryStats } from './deliveries/DeliveryStats';
 import { SetupProgressCard } from './setup/SetupProgressCard';
 import { DeliveryLogPage } from './deliveries/DeliveryLogPage';
 import { WorkspaceDataPanel } from './workspace/WorkspaceDataPanel';
+import { WorkspaceSwitcher } from './workspace/WorkspaceSwitcher';
+import { WorkspaceDriftBanner } from './workspace/drift';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,6 +16,7 @@ import {
   IconArrowRight,
   IconBell,
   IconChevronRight,
+  IconHistory,
   IconLayoutDashboard,
   IconLogout,
   IconPlugConnected,
@@ -33,7 +36,16 @@ import { SkipLink } from './a11y/SkipLink';
 import { routeTitleId } from './a11y/route-titles';
 import { roleLabel } from './lib/role-label';
 import { useLocale } from './i18n/LocaleProvider';
-const privatePaths = ['/', '/integrations', '/sources', '/activity', '/team', '/settings', '/onboarding'];
+const privatePaths = [
+  '/',
+  '/integrations',
+  '/sources',
+  '/activity',
+  '/audit',
+  '/team',
+  '/settings',
+  '/onboarding',
+];
 /** `/integrations/new` and `/integrations/:id` live under the Integrations section. */
 const sectionOf = (pathname: string) => '/' + (pathname.split('/')[1] ?? '');
 function Logo() {
@@ -71,7 +83,6 @@ function ShellContent() {
       void nav({ to: '/onboarding' });
       return;
     }
-    if (me.data?.user.org_id && pathname === '/onboarding') void nav({ to: '/' });
   }, [isPrivate, me.isPending, me.isError, me.data, pathname, nav]);
   if (!isPrivate) return <Outlet />;
   if (me.isPending)
@@ -89,13 +100,7 @@ function ShellContent() {
         <Link to="/" className="logo-link">
           <Logo />
         </Link>
-        <div className="workspace">
-          <div className="workspace-icon">N</div>
-          <div>
-            <b>{me.data.user.org_name || t('shell.workspaceFallback')}</b>
-            <small>{t('shell.workspaceKind')}</small>
-          </div>
-        </div>
+        <WorkspaceSwitcher user={me.data.user} />
         <nav aria-label={t('shell.navLabel')}>
           {[
             { to: '/', icon: IconLayoutDashboard, label: t('nav.overview') },
@@ -103,6 +108,10 @@ function ShellContent() {
             { to: '/sources', icon: IconPlugConnected, label: t('sources.nav') },
             { to: '/activity', icon: IconActivity, label: t('nav.activity') },
             { to: '/team', icon: IconUsers, label: t('nav.team') },
+            // The audit log is admin-only (`audit.read`); a member is not shown a dead link.
+            ...(me.data.user.role === 'admin'
+              ? [{ to: '/audit', icon: IconHistory, label: t('nav.audit') }]
+              : []),
             { to: '/settings', icon: IconSettings, label: t('nav.settings') },
           ].map((item) => (
             <Link
@@ -139,6 +148,7 @@ function ShellContent() {
           <Badge variant="neutral">{t('shell.preview')}</Badge>
         </header>
         <div className="content">
+          <WorkspaceDriftBanner user={me.data.user} />
           <Outlet />
         </div>
       </main>

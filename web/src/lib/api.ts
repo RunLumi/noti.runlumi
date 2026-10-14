@@ -4,6 +4,14 @@ import { parseNoise, type NoiseSettings } from '../../../src/routing/noise';
 import { authClient, assertAuthSuccess } from './auth-client';
 import { t } from '../i18n';
 
+/** One workspace the signed-in person belongs to, as `GET /api/workspace/me` lists them. */
+export interface Membership {
+  readonly orgId: string;
+  /** `admin` or `member`; typed as text because the server may add roles. */
+  readonly role: string;
+  readonly name: string;
+}
+
 export type Me = {
   user: {
     id: string;
@@ -13,8 +21,18 @@ export type Me = {
     org_id: string | null;
     org_name: string | null;
     role: 'admin' | 'member' | null;
+    /** The workspace this response describes (equals `org_id`); null when there is none. */
+    activeOrgId: string | null;
+    /** Every workspace the person belongs to; only their own are ever listed. */
+    organizations: readonly Membership[];
   };
 };
+
+export interface ActiveWorkspace {
+  readonly activeOrgId: string;
+  readonly orgName: string;
+  readonly role: string;
+}
 export type FieldError = { readonly field: string; readonly message: string };
 
 export class ApiError extends Error {
@@ -426,6 +444,12 @@ export const githubApi = {
 
 export const authApi = {
   me: () => api<Me>('/api/workspace/me'),
+  /** Makes `organizationId` the session's active workspace. 404 for one the caller is not in. */
+  setActiveWorkspace: (organizationId: string) =>
+    api<ActiveWorkspace>('/api/workspace/active', {
+      method: 'POST',
+      body: JSON.stringify({ organizationId }),
+    }),
   signin: async (email: string, password: string) => {
     assertAuthSuccess(await authClient.signIn.email({ email, password }));
     return { authenticated: true };

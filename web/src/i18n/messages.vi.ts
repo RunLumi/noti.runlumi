@@ -1,4 +1,5 @@
 import type { en, PluralMessage } from './messages.en';
+import { auditVi } from './messages.audit.vi';
 import { destinationsVi } from './messages.destinations.vi';
 import { filtersVi } from './messages.filters.vi';
 import { noiseVi } from './messages.noise.vi';
@@ -20,6 +21,7 @@ import { sourcesVi } from './messages.sources.vi';
  * `catalogue.test.ts` fails if an id is missing or a `{placeholder}` differs from English.
  */
 export const vi = {
+  ...auditVi,
   ...filtersVi,
   ...noiseVi,
   ...setupVi,

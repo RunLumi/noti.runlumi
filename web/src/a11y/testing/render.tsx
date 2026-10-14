@@ -16,10 +16,13 @@ import { SourcesPage } from '../../sources/SourcesPage';
 import { CreateWizard } from '../../integrations/wizard/CreateWizard';
 import { IntegrationSettings } from '../../integrations/settings/IntegrationSettings';
 import { validateActivitySearch } from '../../deliveries/search';
+import { AuditPage } from '../../audit/AuditPage';
+import { validateAuditSearch } from '../../audit/search';
 import { LocaleProvider } from '../../i18n/LocaleProvider';
 import { setLocale, type Locale } from '../../i18n/locale';
 import {
   ADMIN,
+  AUDIT_EVENTS,
   DELIVERIES,
   INSTALLATIONS,
   INTEGRATIONS,
@@ -48,6 +51,7 @@ export const ROUTE_PATHS = [
   '/onboarding',
   '/invite',
   '/activity',
+  '/audit',
   '/team',
   '/settings',
   '/signin',
@@ -74,6 +78,12 @@ function buildRouter(initialPath: string) {
       path: '/activity',
       component: Activity,
       validateSearch: validateActivitySearch,
+    }),
+    createRoute({
+      getParentRoute: () => root,
+      path: '/audit',
+      component: AuditPage,
+      validateSearch: validateAuditSearch,
     }),
     route('/team', Team),
     route('/settings', Settings),
@@ -108,6 +118,19 @@ export interface ApiState {
   testSend: 'ok' | 'in_flight' | 409 | 429 | 500;
   /** The delivery a test creates, as `GET /api/deliveries/:id` reports it. */
   testDelivery: Record<string, unknown>;
+  audit: unknown[] | 'error';
+  /** Make `POST /api/workspace/active` fail (a network or server fault). */
+  failActivate?: boolean;
+  /** The workspace a pending invitation would add the person to. */
+  invitation?: { orgId: string; name: string; role: string };
+  /**
+   * Per-workspace data, selected by the `?org=` the page asked for. When present it overrides
+   * `integrations`, `deliveries`, `members` and `audit`, so a test can prove that workspace A's
+   * rows are never shown under workspace B.
+   */
+  orgs?: Readonly<
+    Record<string, { integrations: unknown[]; deliveries: unknown[]; members: unknown[]; audit: unknown[] }>
+  >;
 }
 
 export const defaultApi = (): ApiState => ({
@@ -123,6 +146,7 @@ export const defaultApi = (): ApiState => ({
   setup: SETUP_PROGRESS,
   testSend: 'ok',
   testDelivery: { state: 'sent' },
+  audit: [...AUDIT_EVENTS],
 });
 
 /** A made-up value in the real `whsec_` shape; built at runtime so no literal looks like a credential. */
@@ -138,6 +162,10 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 export const unhandled: string[] = [];
 export const clearUnhandled = () => unhandled.splice(0, unhandled.length);
 
+/** Every request the mock saw, as `METHOD path?query`, for tests that assert what was asked. */
+export const requests: string[] = [];
+export const clearRequests = () => requests.splice(0, requests.length);
+
 export function installFetch(state: ApiState): void {
   setFetchHandler((input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(
@@ -146,6 +174,83 @@ export function installFetch(state: ApiState): void {
     );
     const method = (init?.method ?? 'GET').toUpperCase();
     const path = url.pathname;
+    requests.push(`${method} ${path}${url.search}`);
+    const org = url.searchParams.get('org');
+    const scoped = org && state.orgs ? state.orgs[org] : undefined;
+    // With per-workspace data, a request for a workspace the mock does not know is a 404.
+    if (state.orgs && org && !scoped && path !== '/api/workspace/me')
+      return Promise.resolve(json({ error: 'Not found' }, 404));
+    const integrations = scoped?.integrations ?? state.integrations;
+    const deliveries = scoped?.deliveries ?? state.deliveries;
+    const members = scoped?.members ?? state.members;
+    const auditRows = scoped?.audit ?? state.audit;
+    if (method === 'POST' && path === '/api/workspace/active' && state.failActivate)
+      return Promise.resolve(json({ error: 'boom' }, 500));
+    if (
+      method === 'POST' &&
+      path === '/api/auth/organization/accept-invitation' &&
+      state.me !== 'unauthenticated' &&
+      state.invitation
+    ) {
+      const joined = {
+        orgId: state.invitation.orgId,
+        role: state.invitation.role,
+        name: state.invitation.name,
+      };
+      state.me = { user: { ...state.me.user, organizations: [...state.me.user.organizations, joined] } };
+      return Promise.resolve(
+        json({ invitation: { organizationId: joined.orgId }, member: { organizationId: joined.orgId } }),
+      );
+    }
+    if (method === 'POST' && path === '/api/workspace/active' && state.me !== 'unauthenticated') {
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        organizationId?: string;
+      };
+      const target = state.me.user.organizations.find((o) => o.orgId === body.organizationId);
+      if (!target) return Promise.resolve(json({ error: 'Not found' }, 404));
+      state.me = {
+        user: {
+          ...state.me.user,
+          org_id: target.orgId,
+          activeOrgId: target.orgId,
+          org_name: target.name,
+          role: target.role === 'admin' ? 'admin' : 'member',
+        },
+      };
+      return Promise.resolve(json({ activeOrgId: target.orgId, orgName: target.name, role: target.role }));
+    }
+    if (method === 'POST' && path === '/api/auth/organization/create' && state.me !== 'unauthenticated') {
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        name?: string;
+        slug?: string;
+      };
+      const created = {
+        orgId: `org_created_${state.me.user.organizations.length + 1}`,
+        role: 'admin',
+        name: body.name ?? '',
+      };
+      // Better Auth makes a new organization the session's active one.
+      state.me = {
+        user: {
+          ...state.me.user,
+          org_id: created.orgId,
+          activeOrgId: created.orgId,
+          org_name: created.name,
+          role: 'admin',
+          organizations: [...state.me.user.organizations, created],
+        },
+      };
+      return Promise.resolve(json({ id: created.orgId, name: created.name, slug: body.slug }));
+    }
+    if (method === 'GET' && path === '/api/audit') {
+      if (state.me !== 'unauthenticated' && state.me.user.role !== 'admin')
+        return Promise.resolve(json({ error: 'Missing capability: audit.read' }, 403));
+      return Promise.resolve(
+        auditRows === 'error'
+          ? json({ error: 'boom' }, 500)
+          : json({ organizationId: org, events: auditRows, nextCursor: null, retentionDays: 365 }),
+      );
+    }
     if (method === 'GET') {
       if (path === '/api/workspace/me')
         return Promise.resolve(
@@ -153,9 +258,7 @@ export function installFetch(state: ApiState): void {
         );
       if (path === '/api/integrations')
         return Promise.resolve(
-          state.integrations === 'error'
-            ? json({ error: 'boom' }, 500)
-            : json({ integrations: state.integrations, truncated: false }),
+          integrations === 'error' ? json({ error: 'boom' }, 500) : json({ integrations, truncated: false }),
         );
       if (path === '/api/sources')
         return Promise.resolve(
@@ -170,8 +273,8 @@ export function installFetch(state: ApiState): void {
       if (/^\/api\/integrations\/[^/]+\/routing-log$/.test(path))
         return Promise.resolve(json({ entries: ROUTING_LOG, nextCursor: null }));
       const one = /^\/api\/integrations\/([^/]+)$/.exec(path);
-      if (one && Array.isArray(state.integrations)) {
-        const found = (state.integrations as { id: string }[]).find((i) => i.id === one[1]);
+      if (one && Array.isArray(integrations)) {
+        const found = (integrations as { id: string }[]).find((i) => i.id === one[1]);
         return Promise.resolve(found ? json({ integration: found }) : json({ error: 'Not found' }, 404));
       }
       if (path === '/api/github/installations')
@@ -194,9 +297,7 @@ export function installFetch(state: ApiState): void {
         );
       if (path === '/api/deliveries')
         return Promise.resolve(
-          state.deliveries === 'error'
-            ? json({ error: 'boom' }, 500)
-            : json({ deliveries: state.deliveries, nextCursor: null }),
+          deliveries === 'error' ? json({ error: 'boom' }, 500) : json({ deliveries, nextCursor: null }),
         );
       if (path === `/api/deliveries/${TEST_DELIVERY_ID}`)
         return Promise.resolve(
@@ -214,8 +315,8 @@ export function installFetch(state: ApiState): void {
       if (path === '/api/setup/progress')
         return Promise.resolve(state.setup === 'error' ? json({ error: 'boom' }, 500) : json(state.setup));
       const detail = /^\/api\/deliveries\/([^/]+)$/.exec(path);
-      if (detail && Array.isArray(state.deliveries)) {
-        const found = (state.deliveries as { id: string }[]).find((d) => d.id === detail[1]);
+      if (detail && Array.isArray(deliveries)) {
+        const found = (deliveries as { id: string }[]).find((d) => d.id === detail[1]);
         return Promise.resolve(
           found
             ? json({
@@ -229,7 +330,7 @@ export function installFetch(state: ApiState): void {
             : json({ error: 'Not found' }, 404),
         );
       }
-      if (path === '/api/workspace/team') return Promise.resolve(json({ members: state.members }));
+      if (path === '/api/workspace/team') return Promise.resolve(json({ members }));
       if (path === '/api/workspace/deletion') return Promise.resolve(json(state.deletion));
       if (path.endsWith('/passkey/list-user-passkeys')) return Promise.resolve(json(state.passkeys));
     }
@@ -266,6 +367,8 @@ export function installFetch(state: ApiState): void {
 
 export interface RenderedApp extends RenderResult {
   readonly router: ReturnType<typeof buildRouter>;
+  /** The mock server's live state: a test changes it to play "another tab" or a server fault. */
+  readonly api: ApiState;
 }
 
 export interface RenderOptions {
@@ -278,7 +381,8 @@ export async function renderApp(path: string, options: RenderOptions = {}): Prom
   setLocale(options.locale ?? 'en', { persist: false });
   // Pages such as /invite and /verify read the query string from `window.location`.
   window.history.replaceState(null, '', path);
-  installFetch({ ...defaultApi(), ...options.api });
+  const api: ApiState = { ...defaultApi(), ...options.api };
+  installFetch(api);
   const router = buildRouter(path);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   await router.load();
@@ -289,7 +393,7 @@ export async function renderApp(path: string, options: RenderOptions = {}): Prom
       </LocaleProvider>
     </QueryClientProvider>,
   );
-  return Object.assign(result, { router });
+  return Object.assign(result, { router, api });
 }
 
 export { ORG_ID };

@@ -12,6 +12,18 @@ export const appEn = {
   'shell.loading': 'Loading your workspace…',
   'shell.workspaceFallback': 'Setup workspace',
   'shell.workspaceKind': 'Organization',
+  'workspace.drift.title': 'Workspace changed in another tab',
+  'workspace.drift.body':
+    'This tab now shows {name}. Anything you were filling in here was meant for the previous workspace, so it has not been sent. Check where you are before you continue.',
+  'workspace.drift.dismiss': 'Got it',
+  'workspace.stale.form':
+    'The workspace changed in another tab, so this form is turned off to stop it saving into the wrong workspace. Reload or go back to the workspace you meant to use.',
+  'switcher.heading': 'Your workspaces',
+  'switcher.trigger': 'Workspace: {name}, {role}. Switch workspace',
+  'switcher.create': 'Create workspace',
+  'switcher.createAnother': 'Create another workspace',
+  'switcher.changed': 'Switched to {name}. Your role here: {role}.',
+  'switcher.error': 'Couldn’t switch workspace. You are still in {name}.',
   'shell.navLabel': 'Main navigation',
   'shell.breadcrumbRoot': 'Workspace',
   'shell.preview': 'Preview',
@@ -19,6 +31,7 @@ export const appEn = {
   'nav.integrations': 'Integrations',
   'nav.activity': 'Activity',
   'nav.team': 'Team',
+  'nav.audit': 'Audit log',
   'nav.settings': 'Settings',
   'role.admin': 'Admin',
   'role.member': 'Member',
@@ -31,6 +44,7 @@ export const appEn = {
   'route.title.integration': 'Integration settings',
   'route.title.activity': 'Activity',
   'route.title.team': 'Team',
+  'route.title.audit': 'Audit log',
   'route.title.settings': 'Settings',
   'route.title.onboarding': 'Create your workspace',
   'route.title.invite': 'Team invitation',
@@ -141,6 +155,10 @@ export const appEn = {
 
   // --- Onboarding and invitations ----------------------------------------------------------------
   'onboarding.title': 'Create your workspace',
+  'onboarding.titleAdditional': 'Create another workspace',
+  'onboarding.bodyAdditional':
+    'A new workspace has its own integrations, sources, team and audit log. Nothing is shared with your other workspaces. You can switch between them from the sidebar.',
+  'onboarding.cancel': 'Back to your workspace',
   'onboarding.body':
     'Each person belongs to one organization at a time. You can invite more people after setup.',
   'onboarding.field': 'Organization name',
@@ -156,7 +174,6 @@ export const appEn = {
     'Sign in with the email address that received this invitation. Verify that email before accepting.',
   'invite.signinAction': 'Sign in to accept',
   'invite.signupLink': 'New to Lumi Noti? Create an account',
-  'invite.alreadyMember': 'You already belong to an organization. Leave it before accepting this invitation.',
   'invite.signedInAs': 'You’re signed in as {email}. Accepting joins the inviting organization.',
   'invite.accept': 'Accept invitation',
   'invite.accepting': 'Joining…',

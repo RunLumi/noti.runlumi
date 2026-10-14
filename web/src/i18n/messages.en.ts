@@ -5,6 +5,7 @@
  * Copy rules (F220, DESIGN.md §12/§14): plain verbs, one claim at a time, say what happened
  * and what to do next, never blame the reader, never claim a success the system has not seen.
  */
+import { auditEn } from './messages.audit.en';
 import { destinationsEn } from './messages.destinations.en';
 import { filtersEn } from './messages.filters.en';
 import { noiseEn } from './messages.noise.en';
@@ -14,6 +15,7 @@ import { setupEn } from './messages.setup.en';
 export type PluralMessage = { readonly one?: string; readonly other: string };
 
 export const en = {
+  ...auditEn,
   ...filtersEn,
   ...noiseEn,
   ...setupEn,

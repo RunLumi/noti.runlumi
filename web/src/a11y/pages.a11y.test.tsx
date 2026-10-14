@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { audit, describeViolations } from './testing/axe';
-import { MEMBER, NO_WORKSPACE } from './testing/fixtures';
+import { MEMBER, MULTI, NO_WORKSPACE } from './testing/fixtures';
 import { ROUTE_PATHS, renderApp, unhandled, type RenderOptions } from './testing/render';
 import type { Locale } from '../i18n/locale';
 
@@ -146,6 +146,46 @@ const SCENARIOS: readonly Scenario[] = [
     path: '/activity',
     options: { api: { deliveries: 'error' } },
     ready: () => screen.findByRole('alert'),
+  },
+  {
+    name: 'audit log (admin)',
+    path: '/audit',
+    ready: () => screen.findByRole('table', { name: /Audit events|Các sự kiện kiểm toán/ }),
+  },
+  {
+    name: 'audit log (filtered by URL)',
+    path: '/audit?action=access.denied&outcome=denied&from=2026-10-01&to=2026-10-31',
+    ready: () => screen.findByRole('table', { name: /Audit events|Các sự kiện kiểm toán/ }),
+  },
+  {
+    name: 'audit log empty',
+    path: '/audit',
+    options: { api: { audit: [] } },
+    ready: () => screen.findByRole('heading', { name: /No events yet|Chưa có sự kiện nào/ }),
+  },
+  {
+    name: 'audit log error',
+    path: '/audit',
+    options: { api: { audit: 'error' } },
+    ready: () => screen.findByRole('alert'),
+  },
+  {
+    name: 'audit log (member, not allowed)',
+    path: '/audit',
+    options: { api: { me: { user: { ...MEMBER.user, organizations: [...MULTI.user.organizations] } } } },
+    ready: () => screen.findByRole('heading', { name: /Only admins can read|Chỉ quản trị viên mới đọc/ }),
+  },
+  {
+    name: 'overview (several workspaces)',
+    path: '/',
+    options: { api: { me: MULTI } },
+    ready: () => screen.findByRole('button', { name: /Switch workspace|Chuyển không gian làm việc/ }),
+  },
+  {
+    name: 'create another workspace',
+    path: '/onboarding',
+    options: { api: { me: MULTI } },
+    ready: () => screen.findByRole('heading', { name: /Create another workspace|Tạo thêm một không gian/ }),
   },
   { name: 'team (admin)', path: '/team', ready: text('Minh Tran') },
   { name: 'team (member)', path: '/team', options: { api: { me: MEMBER } }, ready: text('Minh Tran') },
