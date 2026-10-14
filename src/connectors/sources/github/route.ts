@@ -15,6 +15,7 @@ import { repositoryInScope, resolveTenant } from './tenant';
 import { log } from '../../../platform/log';
 import { buildCanonical } from '../build';
 import { boundedEventId } from '../../../events/id';
+import { ingressBatch } from '../../../db/retry';
 import type { RoutingFacts } from '../../../routing/filters';
 import { createRouteDecider } from '../../../routing/ingress';
 import { decisionStatement, type RoutingDecisionRow } from '../../../routing/provenance';
@@ -338,7 +339,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
 
     // One batch, one transaction: the delivery row and the outbox row commit together.
     const notLegacy = 'WHERE NOT EXISTS (SELECT 1 FROM deliveries WHERE id=? AND organization_id=?)';
-    const results = await c.env.DB.batch([
+    const results = await ingressBatch(c.env.DB, [
       ...opening,
       // Not when this very event is already waiting in `held_events` (it was held, then the
       // settings changed and GitHub redelivered it): it is released on schedule, once.

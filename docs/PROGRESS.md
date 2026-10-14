@@ -40,6 +40,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 10a | Generic signed-webhook source: Standard Webhooks verification, sealed per-source secrets, sources API and dashboard page, routing to source integrations | F74, F75, F76, F77, F78, F79, F80 (each in part, see section) | — | 🟡 | this PR |
 | W | Workspace export and two-phase deletion; retired-schema guard; single destination allowlist | F30, F31 | N3 | ✅ | #12 |
 | S3 | Compliance: retention matrix (code-checked, generated `docs/DATA_RETENTION.md`), hourly purge of expired auth records, account data export and erasure, `security.txt`, subprocessor inventory, incident response skeleton | F237, F238, F242 (each in part) | — | 🟡 | this PR |
+| C | Credential lifecycle and boot hygiene (ADR 0022): credential fingerprint, revoke for integrations and sources, shredding proof, guarded KEK destruction with an audited event, per-environment KEK check value, `assertConfig` at every entrypoint, `/health/ready`, `withD1Retry`, bound-parameter guard (migration 0024) | F34, F37, F39, F40, F04, F09, F10 (each in part) | D1 | 🟡 | this PR |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
@@ -1392,3 +1393,79 @@ and published JSON Schemas, ULID ids, `orgid`/`connectionid`, the `unmapped:` vi
 `closesEventId`, the stored `adapter_version`, noise facts from the canonical event, and the full
 `SourceAdapter` interface are not built. Titles of push, release, workflow_run and deployment_status
 messages are still the event type string (visible in the goldens).
+
+## Credential lifecycle, boot hygiene and D1 write discipline (ADR 0022)
+
+REMAINING.md slices 1.2, 1.3 and 1.4. Decisions and the not-done list are in
+[ADR 0022](adr/0022-credential-lifecycle-and-boot.md).
+
+**What changed**
+
+- `migrations/0024_credential_lifecycle.sql` (expand-only, apply before the Worker):
+  `integrations.credential_fingerprint`, `sources.credential_fingerprint`,
+  `sources.credentials_revoked_at`.
+- `src/crypto/fingerprint.ts`: `credentialFingerprint` (tenant-keyed HMAC under `FINGERPRINT_KEY`, F39; first version was an
+  unsalted SHA-256 prefix, replaced in the review round below) and `kekCheckValue` (HKDF of a label under the KEK, F34). The fingerprint is written when a credential is sealed
+  (create, rotate, v0 migration) and returned as `credentialFingerprint`.
+- Revoke: `POST /api/integrations/:id/revoke-credentials` and `POST /api/sources/:id/revoke-credentials`
+  (new admin-only capabilities `integration.revoke`, `source.revoke`; audit actions
+  `integration.credentials.revoke`, `source.credentials.revoke`). Integration: quarantine reason `revoked`,
+  `revoked: true` in the view, counted separately by `credentialStatus`. Source: disabled plus
+  `credentials_revoked_at`, re-enable blocked until `rotate`.
+- `scripts/kek-destroy-check.mjs` (`check-value`, `destroy-check`, `record-destruction`) and the platform audit
+  event `key.destroy` (subject type `key`, no workspace). The check counts rows by the `kek_version` column and by
+  the version inside the wrapped key.
+- `src/platform/config.ts`: `assertConfig(env)` (names only), `kekMismatches`, `bootReport`. New vars
+  `ENVIRONMENT_NAME`, `KEK_CHECK_V1`, `KEK_CHECK_V2` (`wrangler.jsonc`, `.dev.vars.example`).
+  `src/index.ts`: fetch guard middleware (tiered, see the review round below), `queue` retries each delivery message on
+  a growing delay, `scheduled` throws after recording its heartbeat; `GET /health` (config only, 200 while D1 is down) and the new
+  `GET /health/ready` (`{ok, checks:{config,d1,queue}}`).
+- `src/db/retry.ts`: `classifyD1Error`, `withD1Retry` (full jitter, at most 5 attempts, `idempotent` required),
+  `ingressBatch` applied to the delivery+outbox batch of the GitHub, generic and provider routes.
+- i18n: en and vi labels for the three new audit actions and the `key` subject.
+
+**Verified by** (new tests; the suite went from 2948 to 3037 tests)
+
+- `tests/security/credential-lifecycle.test.ts`: fingerprint, revoke for both kinds (admin only, CSRF, tenant scope,
+  validation, idempotence, queued messages not delivered, cleared only by a new credential), and the
+  crypto-shredding proof (no copy of the wrapped key or ciphertext survives any table; the ciphertext does not open
+  even with the KEK).
+- `tests/security/secrets-not-stored.test.ts`: a scan of every column of every table, every queue message and every
+  log line after a realistic run (API-created sources and integrations, a v0 row migrated, a GitHub and a generic
+  event delivered, a KEK rotation) for KEK v1 and v2, the legacy key, the webhook and session secrets and the
+  clear webhook URLs and signing secret; plus a control showing the scan finds a planted value in text, base64 and BLOB form.
+- `tests/platform/boot.test.ts`: `assertConfig`, the check value, `/health` and `/health/ready` with D1 down, a
+  rejecting D1, a missing queue, a bad key ring and a foreign KEK, the fail-closed paths with headers and a
+  correlation id, the queue retry and the failing tick.
+- `tests/security/kek-destroy-check.test.ts`: the destruction check against the real migrations, including a stale
+  column, and the single-statement audit record.
+- `tests/db/retry.test.ts`: classification of the documented messages, bounded full-jitter retry, no retry of
+  constraint or overload errors, and an ingress batch that is retried before the commit and after it (one delivery,
+  one outbox row either way).
+- `tests/security/bound-parameters.test.ts`: every dynamic part of every SQL string in `src/` is reviewed and none is
+  request-derived.
+
+**Not done** (see the ADR for reasons): Secrets Store for the KEK; drain-then-destroy on revoke and
+`destination_revoked` in the consumer; a dashboard control and fingerprint display; `withD1Retry` on the outbox
+claim and dispatch writes; `APP_ORIGIN`, `BETTER_AUTH_SECRET` and the GitHub bindings in `assertConfig`; the
+`no_query_exceeds_100_bound_parameters` test; a staging rehearsal of rotation and destruction.
+**UNVERIFIED:** the D1 error message wording (taken from Cloudflare's documentation, not observed).
+
+### Review round for ADR 0022 (PR #51)
+
+An independent review (no critical, 3 high, 6 medium, 7 low) is fixed in the same PR, each with tests:
+
+- **High.** `/health/ready` was answered by the SPA shell in a deployment (`isBackendPath` matched only `/health`): fixed and
+  tested through `src/worker.ts`. A configuration outage retried the whole batch on a flat 60 s delay and would have
+  dead-lettered in-flight deliveries after five minutes: each message now backs off 5 min doubling (about 2.6 h), the DLQ
+  consumer is never gated, and the docs say what is and is not recovered. A fail-closed 503 lost webhooks: ingress is now
+  gated only on D1; a key-ring or KEK fault stops only requests that seal or open credentials.
+- **Medium.** A predeploy guard, a CI allow-list for placeholders and a post-deploy smoke check; the rotation order; a malformed
+  optional `ENCRYPTION_KEY` is a `/health` warning that stands down only the v0 migration (required vs optional bindings are
+  tabulated in the ADR); a revoke cannot be undone by pasting the same credential or by a member; revoke writes one audit
+  entry under concurrency; the fingerprint is a tenant-keyed HMAC under a dedicated optional `FINGERPRINT_KEY`.
+- **Low.** Heartbeat and stall detection run before the boot throw; `bootReport` never rejects or memoises a failure;
+  `development` needs a local `APP_ORIGIN`; the check value is HKDF-derived (label `kcv/v2`); `/health/ready` is cached 5 s with
+  its timer cleared; `key.destroy` reads "authorised" and is exempt from the audit purge; the post-commit retry caveat is
+  documented; the bound-parameter guard now catches `+` after any literal, string methods, `String.raw` and aliased `prepare`,
+  requires allow-listed identifiers to be declared from literals in the same file, and scans `scripts/*.mjs`.

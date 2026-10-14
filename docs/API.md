@@ -108,7 +108,9 @@ type Integration = {
   destination: 'lark' | 'slack' | 'teams' | 'discord' | 'generic_webhook';
   destinationHost: string | null;     // e.g. "hooks.slack.com"
   enabled: boolean;
-  credentials: 'ok' | 'legacy' | 'quarantined';
+  credentials: 'ok' | 'legacy' | 'quarantined'; // a revoked credential reads 'quarantined' (nothing is sent) with revoked: true
+  revoked: boolean;                   // the customer revoked the credential (ADR 0022); cleared only by entering a new one
+  credentialFingerprint: string | null; // 8 base32 chars of a tenant-keyed HMAC of the webhook URL (key FINGERPRINT_KEY); null if no key is configured or it was sealed before this release
   filters: FilterConfig;              // {} when none; see "Routing filters"
   filtersInvalid: boolean;            // stored filters corrupt/invalid: events are HELD BACK until replaced
   filtersNewer: boolean;              // saved by a newer release (rollback): sent unfiltered
@@ -126,6 +128,7 @@ type Integration = {
 | `GET /api/integrations/:id` | — | `200 {integration}` |
 | `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?, triggerAuth?, filters?, noise?}` | `201 {integration, warnings}` (plus `signingSecret` once for `generic_webhook`, with `Cache-Control: no-store`); `409` at 100 per workspace |
 | `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled, filters, noise}` (`filters` and `noise` replace everything; `null` or `{}` clears them), and/or `{webhookUrl, signingSecret?, triggerAuth?}` to rotate credentials | `200 {integration, warnings}` (rotating a `generic_webhook` also returns a new `signingSecret`, once) |
+| `POST /api/integrations/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` (default `other`) | **Admin only** (`integration.revoke`), Origin and JSON content type required. `200 {integration}` with `revoked: true`, `credentials: 'quarantined'`. Nothing more is sent for it, including messages already queued. Entering a new credential (`PATCH` with `webhookUrl`) clears it, but only for an admin (`integration.revoke`; a member gets `403`) and only with a value different from the revoked one (`422`). Repeating the call, or two racing calls, is a no-op (one audit entry). `422` for an unknown `reason`. |
 | `DELETE /api/integrations/:id` | — | `204` |
 
 Validation failures return `422 {"error":"Validation failed","fields":[{field,message}]}`. Every
@@ -400,6 +403,8 @@ type Source = {
   createdAt: string; updatedAt: string;
   lastReceivedAt: string | null;      // last accepted, verified event
   secretRotatedAt: string | null;
+  credentialFingerprint: string | null; // 8 base32 chars of a tenant-keyed HMAC of the secret (key FINGERPRINT_KEY); null if no key is configured or it was sealed before this release
+  revoked: boolean;                   // the secret was revoked: the source is off until `rotate` enters a new one
   reusedIdRejections: number;         // events refused with 409 webhook_id_reused
   lastReuseRejectedAt: string | null;
   integrationCount: number;           // chats bound to it
@@ -413,6 +418,7 @@ type Source = {
 | `POST /api/sources` | `{name, kind?}` (1–80 characters, no control characters; `kind` defaults to `generic`; GitLab and Stripe take a pasted credential, see [Provider sources](#provider-sources-gitlab-and-stripe)) | `201 {source, secret}` for `generic`, `201 {source}` for a provider; `Cache-Control: no-store` |
 | `PATCH /api/sources/:id` | `{name?, enabled?}` | `200 {source}`; any other field is `422` |
 | `POST /api/sources/:id/rotate` | none for `generic`; the new pasted credential for a provider | **Admin only** (`source.rotate`). `200 {source, secret}` (generic) or `200 {source}` (provider), `Cache-Control: no-store`; the previous secret is invalid at once. `409` if the source changed while rotating (nothing changed; retry). |
+| `POST /api/sources/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` | **Admin only** (`source.revoke`). `200 {source}` with `revoked: true, enabled: false`: ingress answers 404 for it at once and `PATCH {enabled: true}` is `422` until `rotate` seals a new secret (which clears `revoked` and turns the source back on; a revoked GitLab or Stripe source refuses the same pasted credential with `422`). Repeating the call, or two racing calls, is a no-op (one audit entry). |
 | `DELETE /api/sources/:id[?cascade=true]` | none | **Admin only** (`source.delete`). `204`. A source with connected chats returns `409 {error, integrations: n}` unless `cascade=true`, which also deletes those integrations and their saved webhook URLs. |
 
 `secret` (`whsec_` + base64 of 32 random bytes) is returned **only** by create and rotate and is
@@ -697,3 +703,26 @@ is reported as `outcomeKind: "accepted"`. Latency is `last_attempt_at` minus `cr
 `created_at` has one-second resolution. Every response from the Worker carries an
 `x-request-id` header (our own id; a caller-supplied one is only logged beside it).
 
+## Health and readiness
+
+Public, unauthenticated, `Cache-Control: no-store`, carrying the same security headers and
+`x-request-id` as every response. Neither sends a queue message or makes an outbound call. Decisions:
+[ADR 0022](adr/0022-credential-lifecycle-and-boot.md).
+
+| Method and path | Success | Failure |
+| --- | --- | --- |
+| `GET /health` | `200 {ok: true, service: 'lumi-noti', warnings?: string[]}`. Configuration only: it does not touch D1, so it stays `200` while D1 is down. `warnings` names malformed optional bindings (`ENCRYPTION_KEY`, `FINGERPRINT_KEY`) or a second KEK without a check value. | `503 {ok: false, service, code: 'config_invalid' \| 'kek_environment_mismatch', misconfigured: string[]}`: binding **names** only (e.g. `KEK_V1`, `KEK_CHECK_V1`, `ENVIRONMENT_NAME`), never a value, length or prefix. |
+| `GET /health/ready` | `200 {ok: true, checks: {config: true, d1: true, queue: true}}` | `503 {ok: false, checks: {...}}` with the failing checks `false`. `d1` is a `SELECT 1` bounded at 3 seconds; `queue` is a presence check of the binding; `config` is the `/health` check, without the names. The answer is cached for 5 seconds per isolate. |
+
+What a configuration fault stops is tiered (docs/RUNBOOK.md, "What a configuration fault stops"):
+
+- `DB` missing: every backend path except the two probes answers `503 {"error":"Service unavailable"}`
+  with `Retry-After: 30`.
+- A bad key ring, `ENVIRONMENT_NAME`, `KEK_CHECK_V<n>` or a KEK that does not match its environment: only
+  the requests that seal or open a credential (`POST`/`PATCH`/`PUT` on `/api/integrations`,
+  `/api/integrations/:id`, `/api/integrations/:id/test`, `/api/sources`, `/api/sources/:id`,
+  `/api/sources/:id/rotate`) answer that 503. Webhook ingress, sign-in, reads, delete and revoke keep working.
+
+A 503 from ingress is **not** reliably retried by the sender: GitHub does not automatically redeliver a
+failed webhook (redeliver by hand from the App's Recent Deliveries), and GitLab disables a webhook after
+repeated failures. That is why ingress is gated on nothing but D1.

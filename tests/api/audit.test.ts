@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
 import { AUDIT_ACTIONS } from '../../src/audit/audit';
 import { SUMMARY_FIELDS, safeText, summarise } from '../../src/api/audit-view';
@@ -85,7 +86,7 @@ beforeEach(() => {
   join.run('m1', 'alice', 'org-a', 'admin', 1);
   join.run('m2', 'bob', 'org-a', 'member', 1);
   join.run('m3', 'carol', 'org-b', 'admin', 1);
-  env = { DB: db.d1, APP_ORIGIN: ORIGIN } as unknown as Bindings;
+  env = { ...BOOT_ENV, DB: db.d1, APP_ORIGIN: ORIGIN } as unknown as Bindings;
 });
 
 describe('authorization', () => {

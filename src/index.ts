@@ -15,7 +15,7 @@ import { genericWebhook } from './connectors/sources/generic/route';
 import { providerWebhook } from './connectors/sources/provider-route';
 import { PROVIDER_KINDS } from './connectors/sources/types';
 import { rewrapStaleSourceKeys } from './connectors/sources/generic/secret';
-import { keyringFromEnv, keyringProblem } from './crypto/keyring-env';
+import { keyringFromEnv } from './crypto/keyring-env';
 import type { Bindings } from './env';
 import { consumeDeliveries } from './pipeline/consumer';
 import { DEAD_LETTER_QUEUE, consumeDeadLetters } from './pipeline/dead-letter';
@@ -33,6 +33,7 @@ import { purgeRoutingDecisions } from './routing/provenance';
 import { purgeNoiseRecords, releaseHeldEvents } from './pipeline/noise-release';
 import { sweepStaleClaims } from './pipeline/sweep';
 import { correlation } from './platform/correlation';
+import { bootReport } from './platform/config';
 import { log } from './platform/log';
 import { requireSameOrigin } from './security/csrf';
 import { securityHeaders } from './security/headers';
@@ -42,6 +43,42 @@ const app = new Hono<{ Bindings: Bindings }>();
 app.use('*', correlation);
 app.use('*', securityHeaders);
 app.use('/api/*', requireSameOrigin);
+
+const PROBE_PATHS: ReadonlySet<string> = new Set(['/health', '/health/ready']);
+/**
+ * The requests that SEAL or OPEN a credential, so they need a trustworthy key ring: create or update an
+ * integration or source, rotate a source secret, send a test notification. Everything else under
+ * `/api` (reads, delete, revoke, filters, the delivery log) never touches a key and stays up.
+ */
+const SEALING_METHODS: ReadonlySet<string> = new Set(['POST', 'PATCH', 'PUT']);
+const SEALING_PATH = /^\/api\/(integrations|sources)(\/[^/]+(\/(test|rotate))?)?$/;
+let configFailureLogged = false;
+
+/**
+ * Fail closed only where a fault makes the work unsafe or impossible (F04, F34; tiers in
+ * src/platform/config.ts, ADR 0022):
+ *  - no D1: nothing can be served, so everything except the probes is 503;
+ *  - a bad key ring or a KEK that does not match this environment: requests that SEAL or OPEN a
+ *    credential (see SEALING_PATH) are 503. Webhook ingress, sign-in and every read keep
+ *    working: ingress never opens a credential to persist an event, and a webhook sender may not
+ *    redeliver what we refuse (GitHub does not). A source whose secret cannot be opened answers 5xx
+ *    from its own route, as before.
+ * Names go to the log (once per isolate), never to the caller. Registered after the correlation id
+ * and security headers, so the 503 carries both.
+ */
+app.use('*', async (c, next) => {
+  if (PROBE_PATHS.has(c.req.path)) return next();
+  const report = await bootReport(c.env);
+  const blocked =
+    report.storage.length > 0 ||
+    (report.credentials.length > 0 && SEALING_METHODS.has(c.req.method) && SEALING_PATH.test(c.req.path));
+  if (!blocked) return next();
+  if (!configFailureLogged) {
+    configFailureLogged = true;
+    log('error', 'config_invalid', { misconfigured: report.names, code: report.code });
+  }
+  return c.json({ error: 'Service unavailable' }, 503, { 'retry-after': '30', 'cache-control': 'no-store' });
+});
 
 app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
 app.route('/api/workspace/me', account);
@@ -58,12 +95,76 @@ app.route('/api/setup', setupProgress);
 app.route('/api/github', githubApi);
 app.route('/github', githubBrowser);
 
-app.get('/health', (c) => {
-  // Names the misconfigured binding, never its value (F04, F34).
-  const problem = keyringProblem(c.env);
-  return problem
-    ? c.json({ ok: false, service: 'lumi-noti', misconfigured: problem }, 503)
-    : c.json({ ok: true, service: 'lumi-noti' });
+/**
+ * Liveness plus configuration (F04, F10): cheap, public, and it touches no dependency, so it stays
+ * 200 while D1 is down. Names the misconfigured bindings, never a value, a length or a prefix.
+ * Optional-binding faults are `warnings` on a 200: they stop one job, not the Worker.
+ */
+app.get('/health', async (c) => {
+  const report = await bootReport(c.env);
+  return report.names.length > 0
+    ? c.json(
+        {
+          ok: false,
+          service: 'lumi-noti',
+          code: report.code,
+          misconfigured: report.names,
+          ...(report.warnings.length > 0 ? { warnings: report.warnings } : {}),
+        },
+        503,
+        { 'cache-control': 'no-store' },
+      )
+    : c.json(
+        {
+          ok: true,
+          service: 'lumi-noti',
+          ...(report.warnings.length > 0 ? { warnings: report.warnings } : {}),
+        },
+        200,
+        { 'cache-control': 'no-store' },
+      );
+});
+
+const READY_D1_TIMEOUT_MS = 3000;
+const READY_CACHE_MS = 5000;
+const readyCache = new WeakMap<object, { at: number; ok: boolean; checks: Record<string, boolean> }>();
+
+async function d1Answers(db: D1Database): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const probe = db.prepare('SELECT 1 AS ok').first<{ ok: number }>();
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('timeout')), READY_D1_TIMEOUT_MS);
+    });
+    return (await Promise.race([probe, timeout]))?.ok === 1;
+  } catch {
+    log('error', 'ready_d1_failed');
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Readiness (F10): is configuration valid, does D1 answer `SELECT 1`, is the queue binding present?
+ * Booleans only, so it is safe to leave public; it sends no queue message and makes no outbound
+ * call. 503 when any check fails. The answer is cached in the isolate for 5 seconds, so a public
+ * caller cannot turn this into a D1 query per request.
+ */
+app.get('/health/ready', async (c) => {
+  const cached = readyCache.get(c.env);
+  const now = Date.now();
+  if (cached && now - cached.at < READY_CACHE_MS)
+    return c.json({ ok: cached.ok, checks: cached.checks }, cached.ok ? 200 : 503, {
+      'cache-control': 'no-store',
+    });
+  const report = await bootReport(c.env);
+  const d1 = await d1Answers(c.env.DB);
+  const queue = typeof c.env.DELIVERY_QUEUE?.send === 'function';
+  const checks = { config: report.names.length === 0, d1, queue };
+  const ok = checks.config && checks.d1 && checks.queue;
+  readyCache.set(c.env, { at: now, ok, checks });
+  return c.json({ ok, checks }, ok ? 200 : 503, { 'cache-control': 'no-store' });
 });
 
 app.post('/webhooks/github', githubWebhook);
@@ -78,9 +179,12 @@ for (const kind of PROVIDER_KINDS) app.post(`/webhooks/${kind}/:endpointId`, pro
  */
 async function maintainCredentials(env: Bindings): Promise<void> {
   const keyring = keyringFromEnv(env);
-  const migrated = env.ENCRYPTION_KEY
-    ? await migrateLegacyCredentials(env.DB, keyring, env.ENCRYPTION_KEY)
-    : null;
+  // A malformed optional legacy key stands down only this step (`/health` warns), never the Worker.
+  const migrated =
+    env.ENCRYPTION_KEY && /^[0-9a-f]{64}$/i.test(env.ENCRYPTION_KEY)
+      ? await migrateLegacyCredentials(env.DB, keyring, env.ENCRYPTION_KEY, env.FINGERPRINT_KEY)
+      : null;
+  if (env.ENCRYPTION_KEY && migrated === null) log('warn', 'legacy_key_malformed_migration_skipped');
   const rewrapped = await rewrapStaleKeys(env.DB, keyring);
   const sourcesRewrapped = await rewrapStaleSourceKeys(env.DB, keyring);
   const remaining = await credentialStatus(env.DB, keyring.activeVersion);
@@ -137,6 +241,30 @@ async function purgeRetention(env: Bindings): Promise<void> {
     log('info', 'retention_purge', { ...retention });
 }
 
+/**
+ * A misconfigured Worker still records its heartbeat and runs stall detection (so the outage is
+ * visible and the silence is measurable), then fails the invocation naming the bindings.
+ */
+async function assertBootable(env: Bindings): Promise<void> {
+  const report = await bootReport(env);
+  if (report.names.length === 0) return;
+  log('error', 'config_invalid', { misconfigured: report.names, code: report.code });
+  await runCronJobs([
+    { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
+    { name: 'stall_detection', run: () => detectStalls(env) },
+  ]).catch(() => undefined);
+  throw new Error(`config_invalid: ${report.names.join(',')}`);
+}
+
+/**
+ * Per-message redelivery delay while the Worker is misconfigured: 5 minutes doubling per attempt, so the
+ * five queue retries of `wrangler.jsonc` span about 2.6 hours (the Queues maximum delay is 12 hours).
+ * A flat short delay would burn all retries in minutes and dead-letter in-flight deliveries.
+ */
+export function configRetryDelaySeconds(attempts: number): number {
+  return Math.min(43_200, 300 * 2 ** Math.max(0, attempts - 1));
+}
+
 export default {
   fetch: app.fetch,
 
@@ -144,6 +272,7 @@ export default {
   // job is isolated (src/observability/cron.ts) so one failure never skips the others; the
   // invocation still rejects at the end. Detection runs first so it survives any later failure.
   async scheduled(_event: ScheduledEvent, env: Bindings) {
+    await assertBootable(env);
     await runCronJobs([
       { name: 'heartbeat', run: () => writeHeartbeat(env.DB, Date.now()) },
       { name: 'stall_detection', run: () => detectStalls(env) },
@@ -164,6 +293,20 @@ export default {
 
   // One Worker consumes both queues. Wrapped so the runtime's third argument
   // (ExecutionContext) is never taken for test deps.
-  queue: (batch: MessageBatch<unknown>, env: Bindings) =>
-    batch.queue === DEAD_LETTER_QUEUE ? consumeDeadLetters(batch, env) : consumeDeliveries(batch, env),
+  // While the Worker cannot open credentials or reach D1, each delivery message is retried on its own
+  // growing delay rather than consumed. This postpones, it does not make loss impossible: an outage
+  // longer than the queue's retries (about 2.6 hours) moves messages to the dead-letter queue, whose
+  // consumer marks the deliveries `dead_lettered` for replay (docs/RUNBOOK.md). The dead-letter consumer
+  // only needs D1 and is never gated here.
+  queue: async (batch: MessageBatch<unknown>, env: Bindings) => {
+    if (batch.queue === DEAD_LETTER_QUEUE) return consumeDeadLetters(batch, env);
+    const report = await bootReport(env);
+    if (report.storage.length > 0 || report.credentials.length > 0) {
+      log('error', 'config_invalid', { misconfigured: report.names, code: report.code });
+      for (const message of batch.messages)
+        message.retry({ delaySeconds: configRetryDelaySeconds(message.attempts) });
+      return;
+    }
+    return consumeDeliveries(batch, env);
+  },
 };

@@ -7,7 +7,9 @@
   },
   "scripts": {
     "dev": "cd web && vite dev",
-    "deploy": "npm run build:web && node scripts/verify_worker_bundle.mjs --deploy && wrangler deploy --config web/dist/server/wrangler.json",
+    "predeploy": "node scripts/predeploy-check.mjs",
+    "deploy": "npm run build:web && node scripts/verify_worker_bundle.mjs --deploy && wrangler deploy --config web/dist/server/wrangler.json && node scripts/smoke-health.mjs",
+    "smoke": "node scripts/smoke-health.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

@@ -12,6 +12,20 @@
 KEK_V1=replace-with-64-hex-characters
 KEK_V2=
 
+# Deployment name and the key check values of the KEKs above (F34). Locally the environment is
+# `development` (accepted only with a local APP_ORIGIN: localhost, 127.0.0.1, [::1] or *.localhost),
+# where a check value is optional; when you set one it must match its KEK, so
+# copying a staging KEK into a dev file is caught. Compute: `node scripts/kek-destroy-check.mjs
+# check-value` (docs/RUNBOOK.md). Not secrets.
+ENVIRONMENT_NAME=development
+KEK_CHECK_V1=
+KEK_CHECK_V2=
+
+# Optional. 64 hex characters (`openssl rand -hex 32`). Keys the tenant-scoped credential
+# fingerprint shown next to a credential (F39). Its own secret, not a KEK derivative, so a KEK
+# rotation never changes a fingerprint. Empty: no fingerprints are shown.
+FINGERPRINT_KEY=
+
 # LEGACY v0 key (pre-envelope format). Read-only: the scheduled job re-seals every v0
 # row under the KEK and then this key can be retired. Same 64-hex format.
 ENCRYPTION_KEY=replace-with-64-hex-characters

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
@@ -59,6 +60,7 @@ beforeEach(() => {
   join.run('m2', 'multi', 'org-b', 'admin', 2);
   join.run('m3', 'solo', 'org-a', 'admin', 3);
   env = {
+    ...BOOT_ENV,
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
     GITHUB_APP_ID: '12345',

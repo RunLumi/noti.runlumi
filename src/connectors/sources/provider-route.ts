@@ -10,6 +10,7 @@ import { buildCanonical } from './build';
 import { validateCanonicalEvent } from '../../events/validate';
 import { readBodyCapped } from '../../lib/body';
 import { log } from '../../platform/log';
+import { ingressBatch } from '../../db/retry';
 import { dispatchOutbox } from '../../pipeline/outbox';
 import { createNoisePlanner } from '../../routing/noise-ingress';
 import { decisionStatement } from '../../routing/provenance';
@@ -311,7 +312,7 @@ export function providerWebhook(kind: ProviderKind) {
         if (stored?.meta.changes) held++;
         continue;
       }
-      const results = await c.env.DB.batch([
+      const results = await ingressBatch(c.env.DB, [
         // Not when this event is already waiting in `held_events` (ADR 0016).
         c.env.DB.prepare(
           `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,created_at)

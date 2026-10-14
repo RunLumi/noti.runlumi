@@ -15,7 +15,7 @@ import { SPA_HEADERS } from '../security/headers';
 
 /** Everything the API Worker owns. Anything else is the dashboard. */
 export function isBackendPath(pathname: string): boolean {
-  return /^\/(api|webhooks|github)(\/|$)/.test(pathname) || pathname === '/health';
+  return /^\/(api|webhooks|github|health)(\/|$)/.test(pathname);
 }
 
 const SHELL_PATH = '/_shell.html';

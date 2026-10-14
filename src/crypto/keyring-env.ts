@@ -16,8 +16,9 @@ export function keyringFromEnv(env: KeyringEnv): Keyring {
 }
 
 /**
- * Boot-time check for /health (F04). Returns the *name* of the misconfigured binding,
- * never its value or length.
+ * Boot-time check of the key ring (F04). Returns the *names* of the misconfigured bindings,
+ * never a value or length. The optional legacy key is checked separately (`legacyKeyProblem`
+ * in src/platform/config.ts): a malformed one must not stop the Worker serving.
  */
 export function keyringProblem(env: KeyringEnv): string | null {
   try {
@@ -26,8 +27,5 @@ export function keyringProblem(env: KeyringEnv): string | null {
     if (e instanceof CryptoError) return 'KEK_V1/KEK_V2/KMS_ACTIVE_VERSION';
     throw e;
   }
-  // The legacy key is optional, but a present one must be well-formed, or the migration
-  // job would fail every row.
-  if (env.ENCRYPTION_KEY && !/^[0-9a-f]{64}$/i.test(env.ENCRYPTION_KEY)) return 'ENCRYPTION_KEY';
   return null;
 }

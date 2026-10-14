@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
 import { runCronJobs } from '../../src/observability/cron';
 import { sqliteTimestamp } from '../../src/delivery/claim';
@@ -50,8 +51,19 @@ describe('scheduled()', () => {
     seedOrganization(db.raw, 'org-a');
   });
 
-  // No KEK configured: credential maintenance throws, which used to skip everything after it.
-  const env = (): Bindings => ({ DB: db.d1 }) as unknown as Bindings;
+  // Credential maintenance throws (its first query fails), which used to skip everything after it.
+  // The configuration itself is valid, so the tick gets past the boot check.
+  const failingCredentialJob = (): D1Database =>
+    new Proxy(db.d1, {
+      get(target, prop) {
+        if (prop !== 'prepare') return Reflect.get(target, prop) as unknown;
+        return (sql: string) => {
+          if (/kek_version IS NOT/.test(sql)) throw new Error('boom');
+          return target.prepare(sql);
+        };
+      },
+    });
+  const env = (): Bindings => ({ ...BOOT_ENV, DB: failingCredentialJob() }) as unknown as Bindings;
   const tick = (): Promise<void> => Promise.resolve(worker.scheduled({} as ScheduledEvent, env()));
 
   function oldDelivery(): void {

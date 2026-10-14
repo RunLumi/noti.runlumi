@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
@@ -77,7 +78,7 @@ beforeEach(() => {
   join.run('m2', 'multi', 'org-b', 'member', 2);
   join.run('m3', 'other', 'org-private', 'admin', 1);
   db.raw.prepare('UPDATE "session" SET active_organization_id=? WHERE id=?').run('org-a', 'sess-multi');
-  env = { DB: db.d1, APP_ORIGIN: ORIGIN } as unknown as Bindings;
+  env = { ...BOOT_ENV, DB: db.d1, APP_ORIGIN: ORIGIN } as unknown as Bindings;
 });
 
 describe('POST /api/workspace/active', () => {

@@ -6,6 +6,7 @@ import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../../delive
 import type { Bindings, DeliveryMessage } from '../../../env';
 import { readBodyCapped } from '../../../lib/body';
 import { log } from '../../../platform/log';
+import { ingressBatch } from '../../../db/retry';
 import { dispatchOutbox } from '../../../pipeline/outbox';
 import { createNoisePlanner } from '../../../routing/noise-ingress';
 import { decisionStatement } from '../../../routing/provenance';
@@ -218,7 +219,7 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
       if (stored?.meta.changes) held++;
       continue;
     }
-    const results = await c.env.DB.batch([
+    const results = await ingressBatch(c.env.DB, [
       // Not when this event is already waiting in `held_events` (ADR 0016).
       c.env.DB.prepare(
         `INSERT OR IGNORE INTO deliveries(id,integration_id,organization_id,state,dedup_key,body_hash,created_at)

@@ -41,6 +41,8 @@ describe('isBackendPath', () => {
     '/webhooks/generic/abc',
     '/github/callback',
     '/health',
+    '/health/ready',
+    '/health/',
   ])('%s belongs to the API Worker', (path) => expect(isBackendPath(path)).toBe(true));
   it.each([
     '/',
@@ -48,6 +50,9 @@ describe('isBackendPath', () => {
     '/integrations/abc',
     '/apiary',
     '/healthz',
+    '/healthy',
+    '/health-check',
+    '/healthready',
     '/github-app',
     '/_serverFn/x',
     '/webhooksx',

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
@@ -159,10 +160,13 @@ beforeEach(() => {
   integration('int-a', 'org-a', 'Alerts');
   integration('int-b', 'org-b', 'Other tenant');
   env = {
+    ...BOOT_ENV,
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
     KEK_V1: '11'.repeat(32),
     KMS_ACTIVE_VERSION: '1',
+    ENVIRONMENT_NAME: 'staging',
+    KEK_CHECK_V1: '4464ea2121d3a99ebd188370f1ef6cd0',
   } as unknown as Bindings;
 });
 

@@ -432,6 +432,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
       'kek_version',
       'credentials_quarantined_at',
       'credentials_quarantine_reason',
+      'credential_fingerprint',
     ],
     category: 'tenant_credential_sealed',
     personalData: 'none',
@@ -489,7 +490,14 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
   {
     id: 'sources_credentials',
     table: 'sources',
-    columns: ['secret_envelope', 'key_salt', 'dek_wrapped', 'kek_version'],
+    columns: [
+      'secret_envelope',
+      'key_salt',
+      'dek_wrapped',
+      'kek_version',
+      'credential_fingerprint',
+      'credentials_revoked_at',
+    ],
     category: 'tenant_credential_sealed',
     personalData: 'none',
     dataHeld: 'The per-source signing secret, sealed like integration credentials.',

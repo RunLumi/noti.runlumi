@@ -1,3 +1,4 @@
+import { credentialFingerprint } from '../crypto/fingerprint';
 import {
   createConnectionKeys,
   CryptoError,
@@ -36,6 +37,16 @@ export interface CredentialRow {
   readonly webhook_envelope: unknown;
   readonly lark_secret_envelope: unknown;
 }
+
+/**
+ * `credentials_quarantine_reason` of a row whose secret must be treated as burned (F40). It reuses
+ * the quarantine columns on purpose: every delivery path already refuses a quarantined row, so a
+ * revoked integration stops sending without a change to the consumer. It differs from a
+ * quarantine in cause and cure: quarantine is OUR fault with the row's bytes; revoke is the
+ * customer's decision about the secret. Neither is cleared by a job, only by entering a new
+ * credential.
+ */
+export const REVOKED_REASON = 'revoked';
 
 export const CREDENTIAL_COLUMNS =
   'id,organization_id,webhook_ciphertext,lark_secret_ciphertext,key_salt,dek_wrapped,kek_version,webhook_envelope,lark_secret_envelope';
@@ -99,6 +110,8 @@ export interface SealedCredentials {
   readonly kekVersion: number;
   readonly webhookEnvelope: Uint8Array;
   readonly signingSecretEnvelope: Uint8Array | null;
+  /** Tenant-keyed fingerprint of the webhook URL, non-secret, for display (F39); null without FINGERPRINT_KEY. */
+  readonly fingerprint: string | null;
 }
 
 /** Seal credentials for a connection under fresh key material and the active KEK. */
@@ -106,6 +119,7 @@ export async function sealCredentials(
   ids: { organizationId: string; connectionId: string },
   credentials: DestinationCredentials,
   keyring: Keyring,
+  fingerprintKey?: string,
 ): Promise<SealedCredentials> {
   const { material: m, dek } = await createConnectionKeys(keyring, {
     orgId: ids.organizationId,
@@ -121,6 +135,7 @@ export async function sealCredentials(
     signingSecretEnvelope: credentials.signingSecret
       ? await seal(dek, credentials.signingSecret, fieldContext(row, 'signing_secret'))
       : null,
+    fingerprint: await credentialFingerprint(credentials.webhookUrl, ids.organizationId, fingerprintKey),
   };
 }
 
@@ -206,7 +221,7 @@ async function runBatch(
       await db
         .prepare(
           `UPDATE integrations SET credentials_quarantined_at=CURRENT_TIMESTAMP,credentials_quarantine_reason=?
-           WHERE id=? AND organization_id=?`,
+           WHERE id=? AND organization_id=? AND credentials_quarantined_at IS NULL`,
         )
         .bind(o.reason, o.row.id, o.row.organization_id)
         .run();
@@ -232,6 +247,7 @@ export async function migrateLegacyCredentials(
   db: D1Database,
   keyring: Keyring,
   legacyKeyHex: string,
+  fingerprintKey?: string,
 ): Promise<JobReport> {
   const rows = await db
     .prepare(
@@ -245,7 +261,7 @@ export async function migrateLegacyCredentials(
   return runBatch(db, rows.results, async (row) => {
     const plain = await openCredentials(row, keyring, legacyKeyHex);
     const ids = { organizationId: row.organization_id, connectionId: row.id };
-    const sealed = await sealCredentials(ids, plain, keyring);
+    const sealed = await sealCredentials(ids, plain, keyring, fingerprintKey);
     const reopened = await openCredentials(
       {
         ...row,
@@ -264,7 +280,8 @@ export async function migrateLegacyCredentials(
     return async () => {
       const result = await db
         .prepare(
-          `UPDATE integrations SET key_salt=?,dek_wrapped=?,kek_version=?,webhook_envelope=?,lark_secret_envelope=?
+          `UPDATE integrations SET key_salt=?,dek_wrapped=?,kek_version=?,webhook_envelope=?,lark_secret_envelope=?,
+             credential_fingerprint=?
            WHERE id=? AND organization_id=? AND webhook_envelope IS NULL
              AND webhook_ciphertext=? AND lark_secret_ciphertext IS ?`,
         )
@@ -274,6 +291,7 @@ export async function migrateLegacyCredentials(
           sealed.kekVersion,
           blob(sealed.webhookEnvelope),
           blob(sealed.signingSecretEnvelope),
+          sealed.fingerprint,
           row.id,
           row.organization_id,
           row.webhook_ciphertext,
@@ -326,7 +344,10 @@ export async function rewrapStaleKeys(db: D1Database, keyring: Keyring): Promise
 export interface CredentialStatus {
   readonly legacyRemaining: number;
   readonly staleKekRemaining: number;
+  /** Quarantined for a defect in the row's own bytes (not counting revoked rows). */
   readonly quarantined: number;
+  /** Revoked by the customer (F40): the secret is burned and a new one must be entered. */
+  readonly revoked: number;
 }
 
 /** The numbers the rotation runbook's zero-check reads (F37). Counts only, never values. */
@@ -336,14 +357,21 @@ export async function credentialStatus(db: D1Database, activeVersion: number): P
       `SELECT
          SUM(CASE WHEN webhook_envelope IS NULL AND organization_id IS NOT NULL AND credentials_quarantined_at IS NULL THEN 1 ELSE 0 END) AS legacy,
          SUM(CASE WHEN dek_wrapped IS NOT NULL AND kek_version IS NOT ? AND credentials_quarantined_at IS NULL THEN 1 ELSE 0 END) AS stale,
-         SUM(CASE WHEN credentials_quarantined_at IS NOT NULL THEN 1 ELSE 0 END) AS quarantined
+         SUM(CASE WHEN credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason IS NOT ? THEN 1 ELSE 0 END) AS quarantined,
+         SUM(CASE WHEN credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason IS ? THEN 1 ELSE 0 END) AS revoked
        FROM integrations`,
     )
-    .bind(activeVersion)
-    .first<{ legacy: number | null; stale: number | null; quarantined: number | null }>();
+    .bind(activeVersion, REVOKED_REASON, REVOKED_REASON)
+    .first<{
+      legacy: number | null;
+      stale: number | null;
+      quarantined: number | null;
+      revoked: number | null;
+    }>();
   return {
     legacyRemaining: row?.legacy ?? 0,
     staleKekRemaining: row?.stale ?? 0,
     quarantined: row?.quarantined ?? 0,
+    revoked: row?.revoked ?? 0,
   };
 }

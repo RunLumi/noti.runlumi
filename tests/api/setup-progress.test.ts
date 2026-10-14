@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOT_ENV } from '../support/boot-env';
 import { FIRST_EVENT_SQL, VERIFIED_SQL, deriveProgress, STEP_IDS } from '../../src/api/setup-progress';
 import type { Bindings } from '../../src/env';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
@@ -174,7 +175,7 @@ beforeEach(() => {
   seedOrganization(db.raw, 'org-b');
   seedUser('bob', 'org-a');
   seedUser('mallory', 'org-b');
-  env = { DB: db.d1, APP_ORIGIN: 'https://noti.test' } as unknown as Bindings;
+  env = { ...BOOT_ENV, DB: db.d1, APP_ORIGIN: 'https://noti.test' } as unknown as Bindings;
 });
 
 describe('GET /api/setup/progress', () => {

@@ -5,7 +5,17 @@ import type { Capability } from '../auth/permissions';
 import { eventCatalogFor } from '../connectors/sources/registry';
 import { keyringFromEnv } from '../crypto/keyring-env';
 import type { Bindings } from '../env';
-import { sealCredentials, blob, type DestinationCredentials } from '../pipeline/credentials';
+import {
+  sealCredentials,
+  blob,
+  openCredentials,
+  CREDENTIAL_COLUMNS,
+  REVOKED_REASON,
+  type CredentialRow,
+  type DestinationCredentials,
+} from '../pipeline/credentials';
+import { can } from '../auth/permissions';
+import { sameSecret } from '../lib/digest';
 import type { DestinationKind } from '../pipeline/allowlist';
 import { genericWebhookEnabled } from '../connectors/destinations/features';
 import { ownHostsOf } from '../connectors/destinations/url-policy';
@@ -25,6 +35,7 @@ import {
   type NoiseSettings,
 } from '../routing/noise';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
+import { readRevokeReason } from './revoke';
 import { isDeletionPending } from './workspace-lifecycle';
 import {
   activeFilterIds,
@@ -88,13 +99,15 @@ interface IntegrationRow {
   updated_at: string | null;
   credentials_quarantined_at: string | null;
   credentials_quarantine_reason: string | null;
+  credential_fingerprint: string | null;
   filters_json: string | null;
   noise_json: string | null;
   sealed: number;
 }
 
 const SELECT_COLUMNS = `id,name,repo,source_id,event_types,destination,destination_host,enabled,created_at,updated_at,
-  credentials_quarantined_at,credentials_quarantine_reason,filters_json,noise_json,(webhook_envelope IS NOT NULL) AS sealed`;
+  credentials_quarantined_at,credentials_quarantine_reason,credential_fingerprint,filters_json,noise_json,
+  (webhook_envelope IS NOT NULL) AS sealed`;
 
 export interface IntegrationView {
   readonly id: string;
@@ -107,7 +120,15 @@ export interface IntegrationView {
   readonly destination: DestinationKind;
   readonly destinationHost: string | null;
   readonly enabled: boolean;
+  /**
+   * `quarantined` also covers a revoked credential (see `revoked`): either way nothing is sent
+   * until a new credential is entered. Kept to the three values dashboards already parse.
+   */
   readonly credentials: 'ok' | 'legacy' | 'quarantined';
+  /** The customer revoked the credential (F40): its secret is burned, not merely unreadable. */
+  readonly revoked: boolean;
+  /** base32(SHA-256(webhook URL))[0:8] to match it in the provider's console; null if sealed before F39. */
+  readonly credentialFingerprint: string | null;
   /** Routing filters; `{}` when none. A stored document that no longer validates reads as `{}`. */
   readonly filters: FilterConfig;
   /**
@@ -149,6 +170,8 @@ export function toView(row: IntegrationRow): IntegrationView {
     destinationHost: row.destination_host,
     enabled: row.enabled === 1,
     credentials: row.credentials_quarantined_at ? 'quarantined' : row.sealed ? 'ok' : 'legacy',
+    revoked: row.credentials_quarantined_at !== null && row.credentials_quarantine_reason === REVOKED_REASON,
+    credentialFingerprint: row.credential_fingerprint,
     filters: stored.kind === 'ok' ? stored.config : {},
     filtersInvalid: stored.kind === 'invalid',
     filtersNewer: stored.kind === 'newer',
@@ -245,7 +268,8 @@ function audit(
   action: Parameters<typeof auditStatement>[1]['action'],
   id: string,
   metadata: AuditMetadata,
-  guarded = true,
+  /** `true`: only if the integration exists; `false`: unconditional; `'previous'`: only if the statement before changed a row. */
+  guarded: boolean | 'previous' = true,
 ) {
   return auditStatement(
     c.env.DB,
@@ -260,12 +284,18 @@ function audit(
       metadata,
     },
     // Create has nothing to guard on: the row and its audit entry are inserted together.
-    guarded ? { id, organizationId: who.orgId } : undefined,
+    guarded === true ? { id, organizationId: who.orgId } : undefined,
+    guarded === 'previous' ? { onlyIfPreviousStatementChangedRows: true } : {},
   );
 }
 
 async function seal(c: Ctx, orgId: string, id: string, credentials: DestinationCredentials) {
-  return sealCredentials({ organizationId: orgId, connectionId: id }, credentials, keyringFromEnv(c.env));
+  return sealCredentials(
+    { organizationId: orgId, connectionId: id },
+    credentials,
+    keyringFromEnv(c.env),
+    c.env.FINGERPRINT_KEY,
+  );
 }
 
 /** Feature names only, for audit metadata: times, zones and windows never enter the log. */
@@ -378,8 +408,8 @@ integrations.post('/', async (c) => {
     c.env.DB.prepare(
       `INSERT INTO integrations(id,organization_id,name,repo,source_id,event_types,destination,destination_host,
          webhook_ciphertext,key_salt,dek_wrapped,kek_version,webhook_envelope,lark_secret_envelope,
-         enabled,created_by,created_at,updated_at,filters_json,noise_json)
-       VALUES(?,?,?,?,?,?,?,?,'',?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?,?)`,
+         credential_fingerprint,enabled,created_by,created_at,updated_at,filters_json,noise_json)
+       VALUES(?,?,?,?,?,?,?,?,'',?,?,?,?,?,?,1,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?,?)`,
     ).bind(
       id,
       who.orgId,
@@ -394,6 +424,7 @@ integrations.post('/', async (c) => {
       sealed.kekVersion,
       blob(sealed.webhookEnvelope),
       blob(sealed.signingSecretEnvelope),
+      sealed.fingerprint,
       who.userId,
       serializeFilters(input.filters),
       serializeNoise(input.noise),
@@ -528,6 +559,16 @@ integrations.patch('/:id', async (c) => {
   }
 
   const statements = [];
+  if (input.credentials && isRevoked(existing)) {
+    // A burned credential must not be brought back by whoever can still edit the integration, nor by
+    // pasting the same value again: clearing a revoke takes the revoke capability and a NEW secret.
+    if (!can(who.role, 'integration.revoke'))
+      return c.json({ error: 'Missing capability: integration.revoke' }, 403);
+    if (await sameAsStoredCredentials(c, who.orgId, id, input.credentials))
+      return invalid(c, [
+        { field: 'webhookUrl', message: 'This credential was revoked. Enter a new one, not the same value.' },
+      ]);
+  }
   if (input.credentials) {
     // Fresh key material on every rotation: the old DEK is discarded with the old ciphertext,
     // so nothing sealed before can be opened with what is stored after (F40-style shredding).
@@ -540,6 +581,7 @@ integrations.patch('/:id', async (c) => {
       'kek_version=?',
       'webhook_envelope=?',
       'lark_secret_envelope=?',
+      'credential_fingerprint=?',
       'destination_host=?',
       'credentials_quarantined_at=NULL',
       'credentials_quarantine_reason=NULL',
@@ -550,6 +592,7 @@ integrations.patch('/:id', async (c) => {
       sealed.kekVersion,
       blob(sealed.webhookEnvelope),
       blob(sealed.signingSecretEnvelope),
+      sealed.fingerprint,
       new URL(input.credentials.webhookUrl).hostname,
     );
     statements.push(
@@ -636,6 +679,75 @@ integrations.patch('/:id', async (c) => {
     200,
     issued ? { 'cache-control': 'no-store' } : {},
   );
+});
+
+/**
+ * Revoke a connection's credentials (F40): the customer says this webhook URL / signing secret
+ * must be treated as burned. Admin-only. The row is marked quarantined with the reason `revoked`,
+ * which every delivery path already refuses (consumer, noise release, redelivery, test send), so
+ * nothing more is sent and nothing is decrypted for it. Entering a new credential (PATCH with
+ * `credentials`) seals it under fresh key material and clears the state; deleting the integration
+ * destroys the wrapped key. Repeating the call is a no-op and writes no second audit entry.
+ */
+function isRevoked(row: IntegrationRow): boolean {
+  return row.credentials_quarantined_at !== null && row.credentials_quarantine_reason === REVOKED_REASON;
+}
+
+/**
+ * Is the proposed credential the one already stored? Both sides are hashed first, so the comparison
+ * time says nothing about the attacker-supplied value. A stored credential that cannot be opened is
+ * simply "not the same".
+ */
+async function sameAsStoredCredentials(
+  c: Ctx,
+  orgId: string,
+  id: string,
+  next: DestinationCredentials,
+): Promise<boolean> {
+  const row = await c.env.DB.prepare(
+    `SELECT ${CREDENTIAL_COLUMNS} FROM integrations WHERE id=? AND organization_id=?`,
+  )
+    .bind(id, orgId)
+    .first<CredentialRow>();
+  if (!row) return false;
+  try {
+    const stored = await openCredentials(row, keyringFromEnv(c.env), c.env.ENCRYPTION_KEY ?? '');
+    // The URL alone is the bearer credential: the same URL with a different signing secret is still the same URL.
+    return await sameSecret(stored.webhookUrl, next.webhookUrl);
+  } catch {
+    return false;
+  }
+}
+
+integrations.post('/:id/revoke-credentials', async (c) => {
+  const who = await mutationGate(c, 'integration.revoke');
+  if (who instanceof Response) return who;
+  const id = c.req.param('id');
+  const existing = await loadRow(c, who.orgId, id);
+  if (!existing) return c.json({ error: 'Not found' }, 404);
+  const reason = await readRevokeReason(c);
+  if (reason instanceof Response) return reason;
+  if (isRevoked(existing)) return c.json({ integration: toView(existing) });
+  // The UPDATE is guarded on "not already revoked" and the audit row on that UPDATE having changed a
+  // row, so two concurrent revokes write exactly one audit entry.
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `UPDATE integrations SET credentials_quarantined_at=CURRENT_TIMESTAMP,credentials_quarantine_reason=?1,
+         updated_at=CURRENT_TIMESTAMP
+       WHERE id=?2 AND organization_id=?3
+         AND NOT (credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason IS ?1)`,
+    ).bind(REVOKED_REASON, id, who.orgId),
+    audit(
+      c,
+      who,
+      'integration.credentials.revoke',
+      id,
+      { destinationHost: existing.destination_host, reason },
+      'previous',
+    ),
+  ]);
+  const row = await loadRow(c, who.orgId, id);
+  return row ? c.json({ integration: toView(row) }) : c.json({ error: 'Not found' }, 404);
 });
 
 integrations.delete('/:id', async (c) => {

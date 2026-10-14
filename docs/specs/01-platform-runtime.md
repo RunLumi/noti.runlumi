@@ -138,7 +138,7 @@ Lark/Slack/Teams group**. Confirm nothing lands in the production groups.
 
 ## F04 — Configuration validation at boot
 
-**Priority** P0 · **Status** 🟡 `/health` returns 503 naming the misconfigured keyring binding, never a value (`src/index.ts`, `tests/pipeline/delivery-path.test.ts`); `.dev.vars.example` vs source drift tests (`tests/config.dev_vars.test.ts`); not built: no single `assertConfig(env)` over every required binding at every entrypoint, no `queue`/`scheduled` boot check · **Fixes** D1
+**Priority** P0 · **Status** 🟡 `src/platform/config.ts` `assertConfig(env)` returns binding names only and runs at the `fetch` (tiered guard: only D1 stops ingress), `queue` (per-message backoff) and `scheduled` (heartbeat first, then the tick fails visibly) entrypoints of `src/index.ts`; `/health` names misconfigured bindings, never a value (`tests/platform/boot.test.ts`, ADR 0022); `.dev.vars.example` vs source drift tests (`tests/config.dev_vars.test.ts`). Not built: `APP_ORIGIN`, `BETTER_AUTH_SECRET` and the GitHub bindings are not asserted at boot, there is no `email` entrypoint, unknown extra keys are not logged · **Fixes** D1
 
 **Story** As a maintainer, I want the Worker to fail loudly and immediately when its
 configuration is wrong, so that a wrong secret name is a crash, not a silent 503.
@@ -356,7 +356,7 @@ truncated path only (F12).
 
 ## F09 — D1 write discipline
 
-**Priority** P0 · **Status** 🟡 event, delivery and outbox rows are written in one `db.batch()` (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`) and no D1 `exec()` is used; not built: no `withD1Retry` wrapper for transient write errors (`overloaded`, `Network connection lost`), no bound-parameter static test (only per-site 75-param sizing in `src/connectors/sources/github/repos.ts`)
+**Priority** P0 · **Status** 🟡 event, delivery and outbox rows are written in one `db.batch()` (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`) and no D1 `exec()` is used; `withD1Retry` with full jitter and an `idempotent` contract wraps the ingress batch (`src/db/retry.ts`, `tests/db/retry.test.ts`, ADR 0022); `tests/security/bound-parameters.test.ts` guards that no SQL interpolates request data. Not built: no retry on the outbox claim and dispatch writes, no `no_query_exceeds_100_bound_parameters` test (only per-site 75-param sizing in `src/connectors/sources/github/repos.ts`); overload is deliberately not retried (Cloudflare guidance), unlike the table above
 
 **Story** As an operator, I want one round trip per event and a retry path for failed
 writes, so that D1's single-writer model does not become our throughput ceiling.
@@ -403,7 +403,7 @@ us or the event is silently lost.
 
 ## F10 — Health, readiness and diagnostics
 
-**Priority** P0 · **Status** 🟡 `GET /health` exists and 503s on keyring misconfiguration without leaking values (`src/index.ts`); not built: no `/health/ready`, no D1 or queue-binding probe, no per-dependency codes, and `/health` is not purely liveness; no test that health stays 200 when D1 is down
+**Priority** P0 · **Status** 🟡 `GET /health` is configuration only and stays 200 while D1 is down; `GET /health/ready` probes config, D1 (`SELECT 1`) and the queue binding and returns booleans only, 503 on failure, cached 5 s, routed to the API in a deployment (`src/index.ts`, `src/web/shell.ts`, `tests/platform/boot.test.ts`, `tests/web/worker-health.test.ts`, ADR 0022). Not built: no per-dependency message or code beyond the booleans, no authenticated operator detail, `/health` still names misconfigured bindings publicly
 
 **Story** As an operator, I want a health endpoint that distinguishes "process is up" from
 "dependencies work", so that an outage is diagnosable without shell access.

@@ -126,7 +126,10 @@ describe('wrangler.jsonc carries no secrets', () => {
   });
 
   it('no var is named like a secret (secrets belong in `wrangler secret put`)', () => {
-    expect(Object.keys(vars).filter((k) => SECRET_NAME.test(k))).toEqual([]);
+    // KEK_CHECK_V<n> is the one exception: a key check value (an HMAC of a label under the KEK) is
+    // public and one-way by design, and it must live in `vars` so each environment carries its own.
+    const PUBLIC_CHECK_VALUE = /^KEK_CHECK_V\d+$/;
+    expect(Object.keys(vars).filter((k) => SECRET_NAME.test(k) && !PUBLIC_CHECK_VALUE.test(k))).toEqual([]);
   });
 
   it('nothing in the file looks like a key, token or private key', () => {

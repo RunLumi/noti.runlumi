@@ -8,8 +8,8 @@ import { defaultStatements } from 'better-auth/plugins/organization/access';
  */
 const statements = {
   ...defaultStatements,
-  integration: ['read', 'create', 'update', 'delete'],
-  source: ['read', 'create', 'update', 'delete', 'rotate'],
+  integration: ['read', 'create', 'update', 'delete', 'revoke'],
+  source: ['read', 'create', 'update', 'delete', 'rotate', 'revoke'],
   delivery: ['read', 'replay'],
   audit: ['read'],
   workspace: ['export', 'delete'],
@@ -22,8 +22,8 @@ export const roles = {
     organization: ['update'],
     member: ['create', 'update', 'delete'],
     invitation: ['create', 'cancel'],
-    integration: ['read', 'create', 'update', 'delete'],
-    source: ['read', 'create', 'update', 'delete', 'rotate'],
+    integration: ['read', 'create', 'update', 'delete', 'revoke'],
+    source: ['read', 'create', 'update', 'delete', 'rotate', 'revoke'],
     delivery: ['read', 'replay'],
     audit: ['read'],
     workspace: ['export', 'delete'],
@@ -31,7 +31,8 @@ export const roles = {
   member: ac.newRole({
     integration: ['read', 'create', 'update', 'delete'],
     // Members may create, list, rename and pause. Rotating a secret (instant outage for the
-    // sender) and deleting a source (destroys its chats) are admin-only.
+    // sender), revoking a credential (the same outage until it is re-entered) and deleting a source
+    // (destroys its chats) are admin-only.
     source: ['read', 'create', 'update'],
     delivery: ['read'],
   }),

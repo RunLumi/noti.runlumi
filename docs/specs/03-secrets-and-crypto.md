@@ -158,7 +158,7 @@ one invocation.
 
 ## F34 — Key storage boundary: Secrets Store holds keys, D1 holds ciphertext
 
-**Priority** P0 · **Status** 🟡 tier 2 only: KEKs are Worker secrets (`src/crypto/keyring-env.ts`), boot check of key config, never in D1. Not built: Secrets Store binding (none in `wrangler.jsonc`), staging/production KEK mismatch detection, scan-all-columns-for-KEK test · **Fixes** D6 (storage half)
+**Priority** P0 · **Status** 🟡 tier 2 only: KEKs are Worker secrets (`src/crypto/keyring-env.ts`), boot check at every entrypoint, never in D1; a per-environment KEK check value (`KEK_CHECK_V<n>`, `ENVIRONMENT_NAME`) makes a Worker with another environment's KEK refuse to serve (`kek_environment_mismatch`, `tests/platform/boot.test.ts`); `tests/security/secrets-not-stored.test.ts` scans every column, queue message and log line for the KEKs and secrets (ADR 0022). Not built: Secrets Store binding (none in `wrangler.jsonc`), no alert on the mismatch beyond the 503 and a log line · **Fixes** D6 (storage half)
 
 **Story** As a security engineer, I want the key that can read the database to live outside the
 database, so that read access to D1 is not equivalent to decryption access.
@@ -359,7 +359,7 @@ are eliminating.
 
 ## F37 — Key version and rotation, including the D6 migration
 
-**Priority** P0 · **Status** 🟡 KEK versions, open by envelope version only, chunked resumable v0 migration with quarantine and KEK rewrap job in cron (`src/pipeline/credentials.ts`, `src/index.ts`, ADR 0004, tests). Not built: audited key destruction, staging rotation rehearsal (never run) · **Fixes** D6 (rotation half) · **Fixes** D1 (the
+**Priority** P0 · **Status** 🟡 KEK versions, open by envelope version only, chunked resumable v0 migration with quarantine and KEK rewrap job in cron (`src/pipeline/credentials.ts`, `src/index.ts`, ADR 0004, tests); destroying a KEK version is blocked while rows remain and records an audited `key.destroy` event in one statement (`scripts/kek-destroy-check.mjs`, `tests/security/kek-destroy-check.test.ts`, ADR 0022). Not built: staging rotation rehearsal (never run), deleting the secret is still a manual step · **Fixes** D6 (rotation half) · **Fixes** D1 (the
 key-name half of it)
 
 **Story** As an operator, I want to change keys while the service is running, so that a key
@@ -533,7 +533,7 @@ One secret per connection, no exceptions, and a test asserts uniqueness across t
 
 ## F39 — Credential masking and one-time display
 
-**Priority** P0 · **Status** 🟡 secret returned once with `Cache-Control: no-store` on create and rotate for sources and custom webhooks; reads never return it (`src/api/sources.ts`, `src/api/integrations.ts`, `tests/sources/api.test.ts`). Not built: credential fingerprint column and display, `secret_last_shown_at`
+**Priority** P0 · **Status** 🟡 secret returned once with `Cache-Control: no-store` on create and rotate for sources and custom webhooks; reads never return it (`src/api/sources.ts`, `src/api/integrations.ts`, `tests/sources/api.test.ts`); `credential_fingerprint` (a tenant-keyed HMAC under the optional `FINGERPRINT_KEY`, not the spec's unsalted hash) is stored at seal time and returned as `credentialFingerprint` (`src/crypto/fingerprint.ts`, migration 0024, `tests/security/credential-lifecycle.test.ts`). Not built: dashboard display of the fingerprint, `secret_last_shown_at`, `secret_rotated_at` for integrations, fingerprint in exports and dead-letter views
 
 **Story** As a customer, I want to see that a credential is connected without being able to
 re-read it, so that a leaked screenshot or support session cannot hand over my webhook.
@@ -599,7 +599,7 @@ Any reviewer who sees it used as an access check should reject the change.
 
 ## F40 — Revocation and cryptographic deletion
 
-**Priority** P0 · **Status** 🟡 integration disable/delete stops routing: consumer reads only enabled, unquarantined rows (`src/pipeline/consumer.ts`); workspace purge deletes rows (PR #12). Not built: DEK destruction, `destination_revoked` state, drain-then-destroy order, `key_destroyed` audit
+**Priority** P0 · **Status** 🟡 integration disable/delete stops routing: consumer reads only enabled, unquarantined rows (`src/pipeline/consumer.ts`); workspace purge deletes rows (PR #12); admin `revoke-credentials` for integrations (quarantine reason `revoked`) and sources (disabled, `credentials_revoked_at`) is audited, stops all use and cannot be undone by re-entering the same credential or by a member (`src/api/revoke.ts`, `tests/platform/boot-api.test.ts`, `tests/security/credential-lifecycle.test.ts`); deleting a connection's row is proven to make its ciphertext unrecoverable even with the KEK (ADR 0022). Not built: drain-then-destroy order, `destination_revoked` as a consumer outcome, per-connection `key_destroyed` audit, revoke in the dashboard
 
 **Story** As a customer, I want to disconnect a destination and know it is unusable, so that a
 credential I no longer trust stops being a credential.
