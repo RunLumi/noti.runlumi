@@ -41,7 +41,7 @@ That is a spec-grade dedup contract, not advice. Two more rules shape the design
 
 ## F41 — Canonical envelope
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ no canonical envelope exists; ingress builds a bounded `DeliveryMessage` (`src/env.ts`) from the payload, not a CloudEvents-style envelope
 
 **Story** As a routing rule author, I want one stable field vocabulary, so that a filter on
 "which repository" works identically whether the event came from GitHub or GitLab.
@@ -121,7 +121,7 @@ short and makes it safe to log `orgid`/`connectionid`/`correlation_id` (F11).
 
 ## F42 — Closed event type catalog
 
-**Priority** P0 · **Status** not started · **Fixes** D12, D16
+**Priority** P0 · **Status** 🟡 closed GitHub catalog (`src/connectors/sources/github/catalog.ts`) enforced at write and ingress (PR #9, `tests/api/integrations.test.ts`); not built: provider-neutral type namespace, schema URIs, versions, cross-provider catalog · **Fixes** D12, D16
 
 **Story** As a user picking events in the UI, I want a finite list of checkboxes, so that I
 can find "pull request opened" instead of guessing a string format.
@@ -173,7 +173,7 @@ strings that become routing keys.
 
 ## F43 — Identity fields
 
-**Priority** P0 · **Status** 🟡 `actorIsBot` and `actorIsGhost` are extracted as routing facts, `null` when GitHub sends no sender type (slice 7, [ADR 0010](../adr/0010-routing-filters.md)); there is no canonical envelope
+**Priority** P0 · **Status** 🟡 `actorIsBot` and `actorIsGhost` are extracted as routing facts, `null` when GitHub sends no sender type (`src/connectors/sources/github/facts.ts`, ADR 0010); not built: canonical `data.actor` envelope, renderer ghost handling (F60)
 
 **Story** As a filter author, I want to say "not bots", so that I can route real humans'
 activity to a chat and machine activity to a ticketing system.
@@ -200,7 +200,7 @@ be length-capped and treated as plain text in every renderer.
 
 ## F44 — Outcome and state model
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `statusOf` maps workflow conclusions to success/failure/info (`src/connectors/sources/github/route.ts`) and resolution notices close failures (`src/routing/noise-store.ts`, ADR 0016); not built: success/failure/neutral enum, `rawOutcome`, `closesEventId`, check_run mapping
 
 **Story** As a user, I want CI failures coloured red and successes green everywhere,
 including in Slack and Teams, so that I can triage from a glance.
@@ -241,7 +241,7 @@ UI shows "resolved (original not retained)" rather than failing.
 
 ## F45 — Envelope size budget
 
-**Priority** P0 · **Status** not started · **Fixes** part of D15
+**Priority** P0 · **Status** 🟡 1 MiB body cap and bounded display fields (`SUMMARY_MAX_CHARS` 280, title 300 in `src/env.ts`, `route.ts`); the raw body is never stored; not built: 64 KiB envelope cap, `truncated` field list, R2 raw storage · **Fixes** part of D15
 
 **Story** As an operator, I want bounded envelopes, so that a comment-heavy event cannot
 blow up the queue, the database, or a 28 KB Teams limit.
@@ -280,7 +280,7 @@ under the policy in F184 and is never logged.
 
 ## F46 — Schema versioning and evolution
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ no schema versioning: no `dataschema`, no published JSON Schemas, no `providerApiVersion` capture; depends on the unbuilt envelope (F41)
 
 **Story** As a customer with a working integration, I want schema changes to be additive, so
 that my notifications never break because we renamed a field.
@@ -323,7 +323,7 @@ and marked `schema_unknown`, never rejected. Forward compatibility beats strictn
 
 ## F47 — Provider delivery ID mapping
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 GitHub `X-GitHub-Delivery` maps to a tenant-bound dedup key, so a redelivery is accepted once (`src/delivery/ids.ts`, `tests/delivery/ids.test.ts`, `tests/pipeline/reliability.test.ts`); not built: auditable mapping table, synthesized-id flag, Stripe semantic dedup
 
 **Story** As an operator, I want provider redelivery to be recognized as the same event, so
 that a user clicking "redeliver" in GitHub does not double-notify my team.
@@ -366,7 +366,7 @@ they are logged, never treated as authorization.
 
 ## F48 — Untrusted payload tolerance
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 unknown actions and event kinds are acknowledged without routing via the closed catalog (`src/connectors/sources/github/route.ts`) and summaries never use bodies; not built: `data.extra`, unmapped-events metric or view, no-payload surfacing, renderer purity tests
 
 **Story** As an engineer, I want an unexpected upstream change to degrade rather than
 break, so that a new GitHub action does not page us at 3am.
@@ -401,7 +401,7 @@ destination, and never interpolated into a template as markup (F92).
 
 ## F49 — Upstream rate limits and enrichment policy
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 ingress is payload-only: the GitHub handler makes no outbound API call (`src/connectors/sources/github/route.ts`); not built: opt-in enrichment, per-workspace budget, a test asserting no outbound calls (needs F66 tokens)
 
 **Story** As an operator, I want to know whether enriching an event is safe, so that a
 traffic spike does not exhaust our API budget.
@@ -436,7 +436,7 @@ variable (F12).
 
 ## F50 — Inbound response codes
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 202 on durable accept, 401 bad signature, 400 malformed, 413 oversize (`tests/pipeline/delivery-path.test.ts`), 429 plus Retry-After (`src/security/rate-limit.ts`); not built: duplicate returns 202 not 200, 415, 410, `correlation_id` in error bodies
 
 **Story** As an operator, I want our ack codes to match what providers expect, so that a
 correct receipt does not cause a provider to retry forever.
@@ -479,7 +479,7 @@ it in a support request.
 
 ## F51 — Event retention and payload storage
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 scheduled purge of terminal deliveries, outbox and audit rows by age (`src/pipeline/retention.ts`, `tests/pipeline/retention.test.ts`); not built: envelope and raw-body split, R2 prefix delete, the 30/30/90/365 day policy
 
 **Story** As a customer, I want my event data deleted on a schedule I can see, so that I can
 meet my own retention obligations.
@@ -511,7 +511,7 @@ a test that asserts the row is gone, not merely flagged.
 
 ## F52 — Event schema registry
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no event schema registry; depends on the unbuilt envelope (F41) and versioning (F46)
 
 **Story** As a customer integrating against us programmatically, I want a published schema
 I can validate against, so that my consumer breaks in CI rather than in a chat channel.
@@ -549,7 +549,7 @@ field names that reveal internal structure beyond what the event already exposes
 
 ## F53 — Ingress coalescing and backpressure
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no ingress coalescing or backpressure beyond the per-installation limiter (`src/security/rate-limit.ts`); P2
 
 **Story** As an operator, I want a burst of traffic to be absorbed rather than amplified, so
 that one busy repository cannot consume the whole delivery budget.
@@ -590,7 +590,7 @@ choose a key that exempts them.
 
 ## F54 — Normalization versioning and replay compatibility
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no normalization version stamp or replay-compatibility tests; depends on the envelope (F41) and replay tooling
 
 **Story** As a customer, I want old notifications to keep rendering correctly after we
 improve our parsing, so that my delivery history stays meaningful.

@@ -30,7 +30,7 @@ manual. Do not write it; do not rely on it either.
 
 ## F55 — GitHub App registration
 
-**Priority** P0 · **Status** 🟡 registration documented in docs/GITHUB_APP.md; amended by ADR 0008 (OAuth verify leg); no App registered yet
+**Priority** P0 · **Status** 🟡 registration documented in `docs/GITHUB_APP.md`, ADR 0008 (OAuth verify leg), and `app-config.ts` fails closed on placeholders; not built: no App registered, permissions unverified against a real App
 
 **Story** As a user, I want to connect Noti to GitHub with one click, so that I am not
 pasting webhook URLs and secrets into a form.
@@ -66,7 +66,7 @@ dashboard client, never included in an error.
 
 ## F56 — Install flow and tenant binding
 
-**Priority** P0 · **Status** ✅ verified binding via user token + PKCE, single-use states (PR #11, ADR 0008)
+**Priority** P0 · **Status** ✅ verified binding via user token + PKCE, single-use states (PR #11, ADR 0008, `tests/github/install-flow.test.ts`); real-App run not done
 
 **Story** As a user, I want to install Noti and land back in my own workspace, so that I do
 not have to re-find my account afterwards.
@@ -111,7 +111,7 @@ It requires an explicit, audited, owner-only action.
 
 ## F57 — Installation registry and lifecycle
 
-**Priority** P0 · **Status** ✅ registry, lifecycle status, no-rebind trigger (PR #11) · **This is the tenant key**
+**Priority** P0 · **Status** ✅ registry, lifecycle status, no-rebind trigger (PR #11, `migrations/0010_github_install_flow.sql`, `tests/github/install-flow.test.ts`) · **This is the tenant key**
 
 **Story** As an operator, I want every inbound event to resolve to exactly one workspace via
 its verified installation, so that no event can be routed using attacker-supplied data.
@@ -159,7 +159,7 @@ of the tenant-isolation tests required by `AGENTS.md` must exercise this lookup.
 
 ## F58 — Signature verification
 
-**Priority** P0 · **Status** partial (works, not hardened)
+**Priority** P0 · **Status** ✅ raw-bytes HMAC via `crypto.subtle.verify`, shape guard, UTF-8, no SHA-1 path (`src/connectors/sources/github/events.ts`, `tests/github.test.ts` incl. known-answer vector); gaps: bad or missing signature returns 401 not 403, no explicit SHA-1 or whitespace test
 
 **Story** As a security reviewer, I want GitHub deliveries verified against the raw bytes
 before anything else touches them, so that a forged event can never reach a tenant.
@@ -208,7 +208,7 @@ GitHub's model; per-installation isolation comes from F57, not from the secret.
 
 ## F59 — GitHub header contract
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 uses `X-GitHub-Delivery`, `X-GitHub-Event`, `X-Hub-Signature-256` via case-insensitive `Headers`, action from body (`route.ts`, `events.ts`); not built: header contract test, 400 on missing `X-GitHub-Event` (currently acked), hook-id logging
 
 **Story** As an operator, I want to see exactly which GitHub headers we rely on documented,
 so that a GitHub change breaks a test rather than production.
@@ -247,7 +247,7 @@ so that a GitHub change breaks a test rather than production.
 
 ## F60 — Actor trust and the ghost user
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `actorIsBot` and `actorIsGhost` facts (`facts.ts`, `tests/routing/filters.test.ts`); not built: canonical `isGhost`, renderers still show raw `sender.login` as actor (`route.ts`), ghost-never-a-person test
 
 **Story** As a user, I want notifications to attribute activity correctly, so that a bot or a
 system account is never presented as a colleague who broke the build.
@@ -281,7 +281,7 @@ display name. It is display data only.
 
 ## F61 — Event catalog and permission gating
 
-**Priority** P0 · **Status** 🟡 closed catalog enforced at write and ingress (PR #9); permission gating needs the App (3b)
+**Priority** P0 · **Status** 🟡 closed catalog of 18 types enforced at write and ingress (PR #9, `catalog.ts`); not built: check_run, check_suite, review_thread, repository events, permission gating needs a real App (3b)
 
 **Acceptance**
 - [ ] V1 subscribes to: `issues`, `issue_comment`, `pull_request`, `pull_request_review`,
@@ -336,7 +336,7 @@ is a supply-chain risk.
 
 ## F62 — Event normalization
 
-**Priority** P0 · **Status** partial (`classifyGithubEvent` returns unbounded strings)
+**Priority** P0 · **Status** 🟡 `classifyGithubEvent` maps into the closed catalog and `displayFields` builds bounded display fields (`events.ts`, `route.ts`, `tests/github.test.ts`); not built: canonical envelope normalization, adapter version, full per-event mapping tests
 
 **Acceptance**
 - [ ] Every subscribed event maps to the canonical envelope (F41) with
@@ -373,7 +373,7 @@ it can be diagnosed, and the event appears in the unmapped view.
 
 ## F63 — Payload caps and truncation semantics
 
-**Priority** P0 · **Status** not started · **Fixes** part of D15
+**Priority** P0 · **Status** 🟡 named 1 MiB cap checked streaming against header and bytes, 413 (`MAX_BODY_BYTES` in `route.ts`, `tests/pipeline/delivery-path.test.ts`); not built: `truncated` flag with dropped counts, push-cap handling, per-provider policy table · **Fixes** part of D15
 
 **Acceptance**
 - [ ] Documented upstream limits, all of which are **silent drops or partial data**, not
@@ -413,7 +413,7 @@ notice. This is a strong argument for keeping reconciliation in V1 rather than d
 
 ## F64 — Ack discipline
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 handler is verify, tenant, limit, scope, one D1 batch, 202, with dispatch in `waitUntil` and no outbound I/O (`route.ts`); not built: p99 SLO, tests for the 10 s budget, no-outbound and ack-after-durable-write
 
 **Story** As a user, I want a 2xx back within 10 seconds even when a destination is down, so
 that GitHub considers the event delivered and does not hold connections open.
@@ -451,7 +451,7 @@ Returning 5xx to GitHub achieves nothing, since **GitHub will not retry it**.
 
 ## F65 — Delivery-failure detection
 
-**Priority** P0 · **Status** not started · **New, from research**
+**Priority** P0 · **Status** ⛔ blocked by F66 (App JWT), F69 and a real GitHub App; no `GET /app/hook/deliveries` poller or ingress-gap record exists · **New, from research**
 
 **Story** As an operator, I want to know when GitHub could not reach us, so that a silent gap
 in a customer's notifications is caught rather than discovered weeks later.
@@ -488,7 +488,7 @@ than 3 days is unrecoverable and must be reported as such honestly, not hidden.
 
 ## F66 — Credential lifecycle and token caching
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ no App private key, JWT minting or installation-token cache exists; install flow uses only a short-lived user token (ADR 0008); needs a registered App for real validation
 
 **Story** As an operator, I want GitHub credentials cached correctly, so that a traffic spike
 does not get our GitHub App banned.
@@ -538,7 +538,7 @@ destination URLs.
 
 ## F67 — Repository selection enforcement
 
-**Priority** P0 · **Status** ✅ enforced at ingress and integration write (PR #11)
+**Priority** P0 · **Status** ✅ enforced at ingress and integration write (PR #11, `repositoryInScope` in `tenant.ts`, `tests/github/install-flow.test.ts`)
 
 **Story** As a customer, I expect Noti to respect "Only select repositories", so that a
 restricted installation cannot route events from repositories the customer excluded.
@@ -575,7 +575,7 @@ repos out of the wrong workspace.
 
 ## F68 — Lifecycle events as security events
 
-**Priority** P0 · **Status** ✅ lifecycle events applied immediately and audited (PR #11)
+**Priority** P0 · **Status** ✅ lifecycle events applied immediately and audited (PR #11, `lifecycle.ts`, `tests/github/install-flow.test.ts`); no real-App rehearsal
 
 **Story** As a security reviewer, I want App authorization changes treated as security
 incidents, so that a revoked customer loses access immediately and visibly.
@@ -613,7 +613,7 @@ customer to reinstall when the installation goes stale.
 
 ## F69 — Reconciliation and backfill
 
-**Priority** P0 · **Status** not started · **New, from research**
+**Priority** P0 · **Status** ⛔ blocked by F65, F66 (no installation tokens) and the envelope (F41); no reconciliation job exists · **New, from research**
 
 **Story** As a customer, I want gaps in my event stream to be filled, so that a transient
 ingress bug does not permanently lose a CI failure notification.
@@ -650,7 +650,7 @@ reconstructed, so they can never be confused with a real delivery for dedup purp
 
 ## F70 — Disconnect and data removal
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 uninstall or deletion events mark the installation `uninstalled` and stop delivery (`lifecycle.ts`), destination credentials untouched, workspace deletion purges installs (`src/pipeline/purge.ts`); not built: user-initiated disconnect, UI copy, token revocation (no tokens held)
 
 **Story** As a customer, I want to disconnect GitHub and have everything removed, so that I
 can satisfy a repo deletion request.
@@ -681,7 +681,7 @@ leaked token stays valid at GitHub.
 
 ## F71 — Connector contract conformance
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `SourceConnector` contract with verify-before-map and closed catalog exists for GitLab and Stripe (`src/connectors/sources/types.ts`, `registry.ts`); GitHub bypasses it with its own route, no parse/normalize/health, no shared conformance suite
 
 **Story** As a maintainer, I want every source to satisfy one interface, so that adding
 GitLab or Stripe does not mean re-learning the architecture.
@@ -723,7 +723,7 @@ enforced interface with a conformance suite is what stops it drifting.
 
 ## F72 — Fixture replay suite
 
-**Priority** P0 · **Status** not started · **Fixes** part of D13
+**Priority** P0 · **Status** ⛔ blocked by real GitHub deliveries: fixtures are hand-built in tests (`tests/github/install-flow.test.ts`, `tests/routing/ingress.test.ts`); no captured, sanitized or schema-validated fixtures, no capture procedure · **Fixes** part of D13
 
 **Story** As a maintainer, I want real captured provider payloads as fixtures, so that an
 upstream change breaks a test rather than a customer's channel.

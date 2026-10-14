@@ -22,6 +22,7 @@
     "verify:worker-bundle": "node scripts/verify_worker_bundle.mjs",
     "check": "npm run format:check && npm run lint && npm run verify",
     "audit:gate": "node scripts/audit-gate.mjs",
+    "docs:spec-status": "node scripts/spec-status.mjs",
     "schema:test": "python3 scripts/test_auth_schema.py"
   },
   "dependencies": {

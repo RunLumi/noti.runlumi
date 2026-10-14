@@ -61,7 +61,7 @@ A closed set. This is not a starting point for expansion.
 
 ## F243 — AI capability boundary and the deterministic-first contract
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** 🚫 deferred: AI is optional and later (`AGENTS.md`), a Non-goal in `docs/PRODUCT.md`, P3 in `docs/ROADMAP.md`; no model call, AI binding or AI setting exists in `src/` or `web/src/`, so every notification is deterministic today
 
 **Story** As a customer, I want AI to be an optional extra I turn on myself, so that my
 notifications never change because a model decided to.
@@ -162,7 +162,7 @@ the consent in F246 explicitly scopes.
 
 ## F244 — The hard rule: model output is never a source fact
 
-**Priority** P0 (of Part A) · **Status** not started
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A (no AI exists, so no model output can enter a source fact today); the rule is unenforced by any test or type until F243 is authorised; gated by G6 in F262
 
 **Story** As a customer, I want to know precisely which parts of a notification came from GitHub
 and which parts a machine wrote, so that I never act on an invention.
@@ -271,7 +271,7 @@ ping anyone — the summariser does not launder F94's protection.
 
 ## F245 — Provenance display in the delivered message
 
-**Priority** P1 (of Part A) · **Status** not started
+**Priority** P1 (of Part A) · **Status** 🚫 deferred with Part A: no AI-generated line exists to label; gated by G6 in F262
 
 **Story** As a customer, I want AI-written text to be visibly AI-written, so that I can weigh it
 differently from the facts beside it.
@@ -358,7 +358,7 @@ it cannot carry injected content. AI text inside it remains escaped (F244).
 
 ## F246 — Explicit, scoped, per-integration opt-in
 
-**Priority** P0 (of Part A) · **Status** not started
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A: no AI feature to opt in to; per-integration settings carry no AI flag (`src/db/schema.ts`); gated by G6 in F262
 
 **Story** As a customer, I want to choose exactly where AI runs, so that my private repository
 content is never sent anywhere I did not choose.
@@ -476,7 +476,7 @@ bytes are on a hard deny-list in addition to the allow-list.
 
 ## F247 — Budget controls and hard spend caps
 
-**Priority** P0 (of Part A) · **Status** not started
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A: no AI spend to cap; no AI meter or budget table exists; gated by G6 in F262
 
 **Story** As a customer paying for this, I want a hard ceiling on what AI can cost me, so that a
 noisy repository cannot produce an unexpected bill.
@@ -600,7 +600,7 @@ absorbed cost never appears as their spend.
 
 ## F248 — Deterministic fallback
 
-**Priority** P0 (of Part A) · **Status** not started · **This must always work**
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A: the product is wholly deterministic today, which is the fallback but is not a tested contract for an AI path; gated by G6 in F262 · **This must always work**
 
 **Story** As a customer, I want notifications to behave normally when the AI provider is down,
 so that an outage at someone else's company does not become an outage of my alerts.
@@ -698,7 +698,7 @@ discards the response entirely rather than shipping a fragment. Provider errors 
 
 ## F249 — Prompt-injection defence
 
-**Priority** P0 (of Part A) · **Status** not started
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A: no model prompt exists, so no injection defence or corpus; gated by G6 in F262
 
 **Story** As a customer whose repositories accept pull requests from strangers, I want to be
 sure that a malicious pull request cannot manipulate my notifications, so that my alerting cannot
@@ -825,7 +825,7 @@ Provider responses are redacted before storage (F12).
 
 ## F250 — Model output validation
 
-**Priority** P0 (of Part A) · **Status** not started
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A: no model output to validate; gated by G6 in F262
 
 **Story** As a customer, I want a broken or hostile model response to be discarded, so that a bad
 model answer can never reach my chat channel.
@@ -929,7 +929,7 @@ rendered to the user (F220).
 
 ## F251 — AI is never on the critical delivery path
 
-**Priority** P0 (of Part A) · **Status** not started
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A: no AI exists on the delivery path (the pipeline in `src/pipeline/` makes no model call); the no-AI-on-critical-path invariant has no enforcing test; gated by G6 in F262
 
 **Story** As a customer, I want notifications to be as reliable whether AI is switched on or
 off, so that an experimental feature cannot degrade the product it sits inside.
@@ -1020,7 +1020,7 @@ an existing row plus `ai_*` tables. Tenant scoping applies to every one of them 
 
 ## F252 — Workspace kill switch and AI disclosure
 
-**Priority** P0 (of Part A) · **Status** not started
+**Priority** P0 (of Part A) · **Status** 🚫 deferred with Part A: no workspace AI kill switch or disclosure exists because no AI exists; an unexercised kill switch fails G6 in F262
 
 **Story** As a customer, I want one switch that turns every AI feature off instantly, so that I
 can react to a concern without waiting for us.
@@ -1136,7 +1136,7 @@ events received, rules evaluated, or steps executed.**
 
 ## F253 — Usage metering on messages sent
 
-**Priority** P2 · **Status** not started · **Mandated by `11-grouping-and-noise.md`** (that file previously cited a stale `F233`, now corrected to point here)
+**Priority** P2 · **Status** ❌ no billing unit or usage meter exists; delivery rows (`deliveries`, ADR 0005) could back one but no `BillableUnit` view, reconciliation or invoice is built; gated by G7 in F262 · **Mandated by `11-grouping-and-noise.md`** (that file previously cited a stale `F233`, now corrected to point here)
 
 **Story** As a customer, I want to be charged for notifications I actually receive, so that
 reducing my own noise reduces my bill instead of increasing it.
@@ -1257,7 +1257,7 @@ leave D1.
 
 ## F254 — Billing and plans
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ⛔ blocked by G4 (onboarding proven, F226) and G7 (billing correctness, F253) and by a payment provider account and legal review; no plans, quotas or billing code exists
 
 **Story** As a customer, I want plans whose limits I can predict, so that I can choose without
 talking to sales.
@@ -1356,7 +1356,7 @@ unrecognised plan transition is refused rather than applied optimistically.
 
 ## F255 — Enterprise SSO and SCIM
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ not started: sign-in is Better Auth email/password and passkeys only (ADR 0003); no SAML, OIDC SSO or SCIM; blocked behind G1 to G3 in F262 and by an enterprise customer
 
 **Story** As an IT administrator, I want my team to sign in with our identity provider and be
 provisioned automatically, so that access is governed centrally.
@@ -1460,7 +1460,7 @@ is never an identity key** (F24/F25).
 
 ## F256 — Advanced RBAC
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ not started: three fixed roles with a capability table exist (`src/auth/permissions.ts`, `tests/auth/permissions.test.ts`, spec 02) but no custom roles, per-capability grants or `export:generate`
 
 **Story** As an IT administrator, I want fine-grained roles, so that a person can send
 notifications without being able to read everyone's or delete a workspace.
@@ -1575,7 +1575,7 @@ boundary crossing.
 
 ## F257 — Audit export
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** 🟡 browser-side CSV of the audit rows on screen with spreadsheet-formula neutralisation (`web/src/audit/csv.ts`, `web/src/audit/audit.test.tsx`, ADR 0019); not built: JSONL, versioned schema, server-side bounded export, signed expiring URL, separate capability, notification to security contacts
 
 **Story** As an IT administrator, I want to send our audit log to our compliance system, so that
 I don't have to check a browser tab to prove who changed what.
@@ -1658,7 +1658,7 @@ test. The projection contains no secret and no event payload.
 
 ## F258 — Data residency
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ not started: one Cloudflare account and one D1 database, no jurisdiction or residency choice; deferred until an enterprise customer requires it
 
 **Story** As a customer with a data-residency obligation, I want to know where my data is and
 whether I can choose, so that I can answer my own compliance questions.
@@ -1750,7 +1750,7 @@ current D1/Queues regional capabilities.
 
 ## F259 — Connector marketplace
 
-**Priority** P2 · **Status** not started · **Explicitly forbidden in V1**
+**Priority** P2 · **Status** 🚫 explicitly forbidden in V1 by this spec and `AGENTS.md` (no arbitrary code execution, not a Zapier clone); sources and destinations are first-party modules (`src/connectors/`) · **Explicitly forbidden in V1**
 
 **Story** As a customer, I want to add a source or destination that someone else has already
 built, so that I am not limited to the official catalogue.
@@ -1828,7 +1828,7 @@ contradicts `AGENTS.md` and `docs/SECURITY.md`'s threat model directly.
 
 ## F260 — Public API
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ not started: the JSON API is first-party and cookie-session authenticated with Origin checks (`docs/API.md`, `src/security/csrf.ts`); no API keys, OpenAPI document, versioning or per-key rate limits; spec makes G1 a precondition
 
 **Story** As a developer at a customer company, I want to manage notifications through an API,
 so that I can automate what the dashboard does.
@@ -1920,7 +1920,7 @@ cap. No error body, log line or rate-limit header contains a secret (F12).
 
 ## F261 — Connector expansion evidence gate
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** 🟡 evidence discipline applied informally: Sentry refused for lack of a safe push source (ADR 0015), GitLab and Stripe built to fixtures; not built: no per-connector evidence record (named demand, real-tenant acceptance, rollback rehearsal), GitLab and Stripe have no real-provider acceptance, and the stop/continue gate (F262) has not been decided
 
 **Story** As a maintainer, I want each new connector justified by evidence, so that the
 catalogue grows only where it is wanted.
@@ -2013,7 +2013,7 @@ catalogue is the product's trust surface and a broken entry is worse than a miss
 
 ## F262 — Stop and continue gates
 
-**Priority** P0 · **Status** not started · **This feature governs the roadmap it sits in**
+**Priority** P0 · **Status** 🟡 the gate text is in `docs/ROADMAP.md` and release gates in `docs/RELEASE_GATES.md`; not built: no ADR records a gate decision with named evidence and verifier, and neither condition is met (no real signed webhook to a real destination in staging, no 8/10 usability run, F226); G1 to G7 are not tracked as checklists · **This feature governs the roadmap it sits in**
 
 **Story** As a maintainer, I want the roadmap decided by evidence rather than by enthusiasm, so
 that we do not build the wrong thing confidently.

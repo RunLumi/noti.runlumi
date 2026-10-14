@@ -48,7 +48,7 @@ binding, and that reference is correct against this numbering.
 
 ## F33 — Envelope encryption core
 
-**Priority** P0 · **Status** ✅ implemented (PR #7, `src/crypto/envelope.ts`) · **Fixes** D6 (core half)
+**Priority** P0 · **Status** ✅ AES-256-GCM seal/open with versioned strict envelope, random IV, BLOB storage, size limits (PR #7, ADR 0004, `src/crypto/envelope.ts`, `tests/crypto/envelope.test.ts`) · **Fixes** D6 (core half)
 
 **Story** As a security engineer, I want every stored credential sealed by a single audited
 primitive, so that a database dump, a log line or a queue inspector yields no usable secret.
@@ -158,7 +158,7 @@ one invocation.
 
 ## F34 — Key storage boundary: Secrets Store holds keys, D1 holds ciphertext
 
-**Priority** P0 · **Status** 🟡 tier 2 (Worker secret) only (PR #7); Secrets Store binding open · **Fixes** D6 (storage half)
+**Priority** P0 · **Status** 🟡 tier 2 only: KEKs are Worker secrets (`src/crypto/keyring-env.ts`), boot check of key config, never in D1. Not built: Secrets Store binding (none in `wrangler.jsonc`), staging/production KEK mismatch detection, scan-all-columns-for-KEK test · **Fixes** D6 (storage half)
 
 **Story** As a security engineer, I want the key that can read the database to live outside the
 database, so that read access to D1 is not equivalent to decryption access.
@@ -227,7 +227,7 @@ never logged, never returned by an endpoint, and its loss is detectable: a KEK s
 
 ## F35 — Tenant-scoped key derivation
 
-**Priority** P0 · **Status** ✅ implemented (PR #7) · **Fixes** part of D6
+**Priority** P0 · **Status** ✅ per-connection DEK wrapped by KEK, HKDF info binds org id and purpose, wrapped key refuses a moved org or connection (PR #7, `src/crypto/envelope.ts`, `tests/crypto/envelope.test.ts`) · **Fixes** part of D6
 
 **Story** As a security engineer, I want keys separated by tenant *and* by purpose, so that
 defeating one column type's key does not silently open another.
@@ -299,7 +299,7 @@ to be correlated.
 
 ## F36 — AAD binding of ciphertext to its row
 
-**Priority** P0 · **Status** ✅ implemented (PR #7) · **Fixes** D6 (the security half of D6)
+**Priority** P0 · **Status** ✅ AAD binds org, connection, field and purpose so swapped rows and cross-field ciphertexts fail the tag check (PR #7, ADR 0004, `tests/crypto/envelope.test.ts`) · **Fixes** D6 (the security half of D6)
 
 **Story** As a security reviewer, I want a ciphertext to be useless anywhere but its own row, so
 that a database write primitive — not a cryptographic break — is required to send a notification
@@ -359,7 +359,7 @@ are eliminating.
 
 ## F37 — Key version and rotation, including the D6 migration
 
-**Priority** P0 · **Status** 🟡 versioning, rewrap and v0 migration shipped (PR #7); audited key destruction open · **Fixes** D6 (rotation half) · **Fixes** D1 (the
+**Priority** P0 · **Status** 🟡 KEK versions, open by envelope version only, chunked resumable v0 migration with quarantine and KEK rewrap job in cron (`src/pipeline/credentials.ts`, `src/index.ts`, ADR 0004, tests). Not built: audited key destruction, staging rotation rehearsal (never run) · **Fixes** D6 (rotation half) · **Fixes** D1 (the
 key-name half of it)
 
 **Story** As an operator, I want to change keys while the service is running, so that a key
@@ -455,7 +455,7 @@ destruction audit is what makes it evidence.
 
 ## F38 — Signing-secret generation for generic webhook sources
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 generic source: `whsec_` 32-byte CSPRNG secret, HMAC over `id.timestamp.body` on raw bytes, 5 min window, multi-signature header, sealed with AAD, tests (ADR 0012, `src/connectors/sources/generic/`, `tests/sources/signature.test.ts`). Not built: two live secrets (rotation kills old at once)
 
 **Story** As a customer with a non-GitHub source, I want a signing secret I can paste straight
 into my provider's webhook settings, so that my events are verified, not trusted.
@@ -533,7 +533,7 @@ One secret per connection, no exceptions, and a test asserts uniqueness across t
 
 ## F39 — Credential masking and one-time display
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 secret returned once with `Cache-Control: no-store` on create and rotate for sources and custom webhooks; reads never return it (`src/api/sources.ts`, `src/api/integrations.ts`, `tests/sources/api.test.ts`). Not built: credential fingerprint column and display, `secret_last_shown_at`
 
 **Story** As a customer, I want to see that a credential is connected without being able to
 re-read it, so that a leaked screenshot or support session cannot hand over my webhook.
@@ -599,7 +599,7 @@ Any reviewer who sees it used as an access check should reject the change.
 
 ## F40 — Revocation and cryptographic deletion
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 integration disable/delete stops routing: consumer reads only enabled, unquarantined rows (`src/pipeline/consumer.ts`); workspace purge deletes rows (PR #12). Not built: DEK destruction, `destination_revoked` state, drain-then-destroy order, `key_destroyed` audit
 
 **Story** As a customer, I want to disconnect a destination and know it is unusable, so that a
 credential I no longer trust stops being a credential.

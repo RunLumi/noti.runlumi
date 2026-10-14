@@ -42,7 +42,7 @@
 
 ## F01 — Reproducible toolchain
 
-**Priority** P0 · **Status** not started · **Fixes** D14
+**Priority** P0 · **Status** 🟡 lockfile + CI `npm ci` (`.github/workflows/ci.yml`); `format`, `format:check`, `lint`, `typecheck`, `test`, `test:coverage`, `verify`, `check` scripts in `package.json`; strict TS with `noUncheckedIndexedAccess`/`noImplicitOverride` (`tsconfig.json`); not built: `exactOptionalPropertyTypes` is off, no script named `build` (it is `build:web`), clean-clone run only proven by CI · **Fixes** D14
 
 **Story** As a maintainer, I want one command that reproduces the toolchain exactly, so that CI and my laptop disagree about nothing.
 
@@ -71,7 +71,7 @@ migrations so local and remote schema agree.
 
 ## F02 — CI gates
 
-**Priority** P0 · **Status** not started · **Fixes** D14
+**Priority** P0 · **Status** 🟡 CI on PR and `main`: `npm ci`, audit gate, format, lint, both typechecks, web build, tests, worker-bundle guard; concurrency cancel and read-only permissions asserted by `tests/security/config-guards.test.ts`; not built: no separate integration job, no coverage report or floor (`vitest.config.ts` has no threshold), merge-blocking is repository settings (unverified) · **Fixes** D14
 
 **Story** As a maintainer, I want every documented check enforced, so that "we ran the
 checks" cannot be a claim about something nobody runs.
@@ -107,7 +107,7 @@ full ANSI log.
 
 ## F03 — Environment separation
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ only `local` (`.dev.vars.example`) and one production-shaped `wrangler.jsonc` with `REPLACE_WITH_*` placeholders; no `env.staging`, no separate D1/queues/keys/GitHub App; needs a staging Cloudflare account (see `docs/RELEASE_GATES.md`)
 
 **Story** As an operator, I want three isolated environments, so that a staging test can
 never send a real customer a real notification.
@@ -138,7 +138,7 @@ Lark/Slack/Teams group**. Confirm nothing lands in the production groups.
 
 ## F04 — Configuration validation at boot
 
-**Priority** P0 · **Status** not started · **Fixes** D1
+**Priority** P0 · **Status** 🟡 `/health` returns 503 naming the misconfigured keyring binding, never a value (`src/index.ts`, `tests/pipeline/delivery-path.test.ts`); `.dev.vars.example` vs source drift tests (`tests/config.dev_vars.test.ts`); not built: no single `assertConfig(env)` over every required binding at every entrypoint, no `queue`/`scheduled` boot check · **Fixes** D1
 
 **Story** As a maintainer, I want the Worker to fail loudly and immediately when its
 configuration is wrong, so that a wrong secret name is a crash, not a silent 503.
@@ -178,7 +178,7 @@ material, which is a cheap regression guard against redaction rotting (F12).
 
 ## F05 — Migration discipline
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 22 numbered forward-only migrations applied from zero on every test run (`tests/support/d1.ts`, `tests/migrations.test.ts`, `tests/migration-00*.test.ts`); additive/expand-contract practice and per-migration reversibility table in `docs/RUNBOOK.md` (PR #7, ADR 0004); not built: no `wrangler d1 migrations apply --local` CI step, no immutability check, rollback never rehearsed
 
 **Story** As an operator, I want every schema change to be a reviewed, reversible,
 forward-only file, so that migrations are deploys rather than incidents.
@@ -215,7 +215,7 @@ release that touches `deliveries` or `event_receipts`.
 
 ## F06 — Tenant-sharded D1 topology
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🚫 deferred by design: V1 runs on one D1 database, there is no `dbFor(workspaceId)` and `env.DB` is used directly; every tenant table carries `organization_id` so sharding stays possible; the revisit signal (`overloaded` rate) is in `docs/RUNBOOK.md` and the SLI work (ADR 0011); no sharding ADR written
 
 **Story** As an operator, I want to escape the single-writer bottleneck before real
 customers feel it, so that growth does not require a database migration.
@@ -263,7 +263,7 @@ local D1 cannot reproduce contention.
 
 ## F07 — Queue topology split by failure domain
 
-**Priority** P0 · **Status** not started · **Fixes** D4 (topology half)
+**Priority** P0 · **Status** 🟡 queue messages carry ids plus display text and never a credential (PR #7, ADR 0004); `noti-deliveries` plus `noti-dead-letters` with a minimal DLQ consumer (`wrangler.jsonc`, `src/pipeline/dead-letter.ts`); not built: no `noti-ingress` (ingress persists synchronously via `db.batch`) or `noti-redeliver` queue, no message-schema allowlist test, 14-day DLQ retention depends on Workers Paid (unverified) · **Fixes** D4 (topology half)
 
 **Story** As an operator, I want ingestion never to queue behind a slow destination, so
 that one broken Lark webhook cannot stop GitHub ingestion.
@@ -307,7 +307,7 @@ cheap, high-value guard: it makes "a secret leaked into the queue" a test failur
 
 ## F08 — Consumer configuration and backoff
 
-**Priority** P0 · **Status** not started · **Fixes** D4 (retry half), D11
+**Priority** P0 · **Status** ✅ per-message `ack()`/`retry({delaySeconds})` with our own full-jitter backoff and 24 h cap, `Retry-After` honoured, exhausted deliveries reach terminal `dead_lettered` (`src/pipeline/consumer.ts`, `src/delivery/retry.ts`, `tests/delivery/retry.test.ts`, `tests/pipeline/reliability.test.ts`, ADR 0005); deviates from the spec table by design: one delivery queue, batch 5, queue retries 5 plus a 13-attempt ledger budget · **Fixes** D4 (retry half), D11
 
 **Story** As a user, I want a transient destination outage to be ridden out rather than
 turned into five duplicate notifications, so that I trust the channel.
@@ -356,7 +356,7 @@ truncated path only (F12).
 
 ## F09 — D1 write discipline
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 event, delivery and outbox rows are written in one `db.batch()` (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`) and no D1 `exec()` is used; not built: no `withD1Retry` wrapper for transient write errors (`overloaded`, `Network connection lost`), no bound-parameter static test (only per-site 75-param sizing in `src/connectors/sources/github/repos.ts`)
 
 **Story** As an operator, I want one round trip per event and a retry path for failed
 writes, so that D1's single-writer model does not become our throughput ceiling.
@@ -403,7 +403,7 @@ us or the event is silently lost.
 
 ## F10 — Health, readiness and diagnostics
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `GET /health` exists and 503s on keyring misconfiguration without leaking values (`src/index.ts`); not built: no `/health/ready`, no D1 or queue-binding probe, no per-dependency codes, and `/health` is not purely liveness; no test that health stays 200 when D1 is down
 
 **Story** As an operator, I want a health endpoint that distinguishes "process is up" from
 "dependencies work", so that an outage is diagnosable without shell access.
@@ -433,7 +433,7 @@ everywhere to unauthenticated callers while giving authenticated operators detai
 
 ## F11 — Correlation IDs and structured logging
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 correlation id minted at ingress, echoed as `x-request-id`, `cf-ray` captured, carried in every `log()` line through `AsyncLocalStorage` (`src/platform/correlation.ts`, `src/platform/log.ts`, `tests/platform/correlation.test.ts`, `tests/api/observability.test.ts`); not built: id is not stored on D1 rows, not carried in queue messages, not shown in the delivery detail view, fixed key set not asserted
 
 **Story** As a support engineer, I want one identifier to follow a notification from
 webhook receipt to destination, so that a user report can be answered without guessing.
@@ -466,7 +466,7 @@ log `correlation_missing` once rather than silently continuing.
 
 ## F12 — Redaction layer
 
-**Priority** P0 · **Status** not started · **Fixes** part of D6/RELEASE_GATES
+**Priority** P0 · **Status** ✅ `redact()` with word-level key denylist (including email, installation id, ciphertext), URL host-only scrubbing, token-format scrubbing, `[redacted]` never a prefix, error `name`/`code` kept, never throws (`src/platform/redact.ts`, `tests/platform/redact.test.ts`); every log line goes through it (`src/platform/log.ts`); static guards ban `console.log` and secret-bearing console calls (`tests/security/static-guards.test.ts`); no lint rule on `JSON.stringify` of provider responses · **Fixes** part of D6/RELEASE_GATES
 
 **Story** As a customer, I want my webhook URL and tokens to never be written to logs or
 error messages, so that a leaked log does not leak my credentials.
@@ -505,7 +505,7 @@ that fails to emit is worse than a log with gaps.
 
 ## F13 — Error taxonomy and classification
 
-**Priority** P0 · **Status** not started · **Fixes** D11
+**Priority** P0 · **Status** ✅ closed, versioned `ErrorCode` union with `retryable`, `user_actionable` and message per code, default `internal_error` (`src/platform/errors.ts`, `tests/platform/errors.test.ts`); provider classifiers map onto it (`src/connectors/destinations/*/classify.ts`, `src/delivery/classify.ts`, `tests/delivery/classify.test.ts`); dead letters record the terminal code (ADR 0005); free-text kept only as redacted diagnostic · **Fixes** D11
 
 **Story** As an operator, I want every failure mapped to a stable error code with a
 retry decision attached, so that permanent failures stop burning retries and users see an
@@ -560,7 +560,7 @@ code's `retryable` flag matches its class. Plus per-provider mapping fixtures.
 
 ## F14 — Architecture decision record process
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 19 ADRs in `docs/adr/` with Status/Context/Decision/Consequences sections, and a dated sources list and known-contradictions table in `docs/specs/README.md`; not built: the five decisions the spec lists (no Durable Objects, CloudEvents envelope, Secrets Store scope, at-least-once contract, single-D1) have no dedicated ADRs and ADR numbers differ, no CI check of ADR headings or of external-claim URLs
 
 **Story** As a maintainer, I want material decisions recorded with the alternatives and
 revisit triggers, so that the reasoning survives the person who made it.

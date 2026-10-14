@@ -33,7 +33,7 @@ attacker-chosen shape. F115 is the security feature; F116 and F117 are its conse
 
 ## F105 — Destination registry and plugin model
 
-**Priority** P0 · **Status** not started · **Enables** F91/F92/F93
+**Priority** P0 · **Status** ❌ not started: destinations are dispatched by closed exhaustive `switch (config.kind)` in `src/connectors/destinations/index.ts` and a `BY_KIND` table, `DestinationKind` is a hand-edited union (ADR 0014 lists this as not done). No registration surface, rollout stage, egress policy field, no-branch CI check or registry-driven limits · **Enables** F91/F92/F93
 
 **Story** As a maintainer, I want every destination registered through one table-driven
 registry, so that adding a destination touches no routing, queueing or UI code.
@@ -153,7 +153,7 @@ destination accidentally inheriting "fetch anything".
 
 ## F106 — Destination liveness and active health detection
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ not started: no scheduled probe, `degraded` state, last-probe line or probe budget. Only the manual send-a-test (F98, ADR 0018) exists; also depends on F98 gaps and the rate-limit budget (F187)
 
 **Story** As a customer, I want to know that my destination is actually working before real
 events depend on it, so that a silently broken integration is caught in minutes not weeks.
@@ -253,7 +253,7 @@ leaks into a shared channel leaks nothing.
 
 ## F107 — Discord destination
 
-**Priority** P2 · **Status** partial (slice 8a) — adapter, URL policy (`discord.com` only, optional `thread_id`), `wait=true`, `allowed_mentions` on every payload, classifier, end-to-end tests, wizard and setup copy; **not built:** message-id capture (so `canUpdate`/`canDelete`/`canReply`/identity are reported `false`, unlike the list below), programmatic webhook creation, `username`/`avatar_url`, threading toggle (a `?thread_id=` in the pasted URL is honoured). A malformed `200` body is `delivered`, not `destination_unavailable` (a retry would duplicate the message); see ADR 0014
+**Priority** P2 · **Status** 🟡 slice 8a, ADR 0014: adapter, `discord.com`-only URL policy with optional `thread_id`, `wait=true`, `allowed_mentions` on every payload, classifier, wizard and setup copy (`src/connectors/destinations/discord/`, `tests/destinations/discord.test.ts`). Not built: message-id capture (so update/delete/reply/identity report false), programmatic webhook creation, username/avatar, threading toggle. Not tried against a real server
 
 **Story** As a Discord community manager, I want GitHub events posted into my Discord channel,
 so that my contributors find out about CI failures where they already are.
@@ -343,7 +343,7 @@ supply, not values from the event body.
 
 ## F108 — Discord failure semantics and the shared-egress budget
 
-**Priority** P0 · **Status** partial (slice 8a) — `404`/`410` (and `401`/`403` carrying Discord code `10015`/`50027`) are permanent with zero retries and pause the integration with an `integration.auto_pause` audit event (same batch, tied to the credential used) so the next event makes no request; any other `401`/`403` retries at most once more and never pauses; `429` honours body `retry_after` then `Retry-After`. **Not built:** the global, persisted, cross-workspace breaker and customer notification, `X-RateLimit-*` pacing. **UNVERIFIED:** per-route numeric limit (none invented) · **This is the highest-consequence destination bug
+**Priority** P0 · **Status** 🟡 slice 8a: 404/410 and 401/403 with Discord code 10015/50027 are permanent with zero retries and auto-pause the integration with an `integration.auto_pause` audit (`src/connectors/destinations/discord/classify.ts`, `src/pipeline/consumer.ts`, `tests/destinations/discord.test.ts`); 429 honours body then header. Not built: global persisted cross-workspace breaker, customer notice, `X-RateLimit-*` pacing; per-route limit UNVERIFIED · **This is the highest-consequence destination bug
 available**
 
 **Story** As an operator, I want one customer's dead Discord webhook to not degrade everyone
@@ -444,7 +444,7 @@ and a generic "temporarily paused, retrying" message.
 
 ## F109 — Discord rendering
 
-**Priority** P2 · **Status** partial (slice 8a) — one embed always, limits at render time, mention neutralisation, content/markdown/plain ladder; **not built:** update-in-place by message id (F156), threading toggle
+**Priority** P2 · **Status** 🟡 slice 8a: one embed always, field limits and visible truncation, mention neutralisation, content/markdown/plain ladder (`src/connectors/destinations/discord/render.ts`, `tests/destinations/discord.test.ts`). Not built: update-in-place by message id (F156), threading toggle
 
 **Story** As a Discord user, I want a readable card with the CI result, so that I can triage
 from the channel without opening a browser.
@@ -533,7 +533,7 @@ attention, and it is set explicitly on every send without exception.
 
 ## F110 — Telegram: the architectural blocker
 
-**Priority** P2 · **Status** not started — **decision: do not build** (followed in slice 8a) · **Decision: do not build**
+**Priority** P2 · **Status** 🚫 decided against: Telegram not built, a bot token belongs to one workspace's bot and the shared-bot architecture is rejected (ADR 0014, followed in slice 8a) · **Decision: do not build**
 
 **Story** As a product owner, I want the reasons Telegram does not fit recorded in the spec,
 so that we do not ship it later on momentum.
@@ -617,7 +617,7 @@ is rejected on security grounds as well as product grounds.
 
 ## F111 — Telegram if the blocker ever clears
 
-**Priority** P2 · **Status** not started — conditional on F110, which is not met · **Not started · conditional on F110**
+**Priority** P2 · **Status** 🚫 deferred: conditional on F110 whose blocker is not cleared, nothing built (ADR 0014) · **Not started · conditional on F110**
 
 **Story** As a maintainer, I want the only viable Telegram design written down in advance, so
 that if the blocker clears we ship a correct integration rather than a rushed one.
@@ -701,7 +701,7 @@ only viable model; that is the whole security improvement over F110's rejected o
 
 ## F112 — Email destination: provider decision
 
-**Priority** P2 · **Status** not started (slice 8a decision: not built — needs a provider account per customer, a verified-recipient flow and an unsubscribe surface; see ADR 0014) · **Fixes** a contradiction in F32
+**Priority** P2 · **Status** 🚫 deferred: not built in slice 8a, needs a per-customer provider account, verified-recipient flow and an unsubscribe surface; Cloudflare Email Sending rejected for notifications (ADR 0014) · **Fixes** a contradiction in F32
 
 **Story** As a customer, I want email as a destination so that a notification reaches someone
 who is not in a chat tool.
@@ -844,7 +844,7 @@ F150 (sticky one-click unsubscribe) and is a legal requirement, not a feature.
 
 ## F113 — Email rendering and honest delivery semantics
 
-**Priority** P2 · **Status** not started (not built; see F112)
+**Priority** P2 · **Status** 🚫 deferred: not built because the email destination is not built (F112, ADR 0014)
 
 **Story** As a customer, I want to know whether an email actually arrived, so that I do not
 assume a notification succeeded when it was only accepted.
@@ -930,7 +930,7 @@ someone else's notifications.
 
 ## F114 — Inbound email as a reply-to-webhook source
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ not started: no `email()` handler or inbound source; depends on the email destination decision (F112, deferred in ADR 0014) and is P2
 
 **Story** As a customer, I want to reply to a notification email and have that reply become an
 actionable event, so that on-call engineers can respond without leaving their inbox.
@@ -1041,7 +1041,7 @@ security reviewer can see exactly what was trusted and what was not.
 
 ## F115 — Generic customer webhook: URL policy and SSRF
 
-**Priority** P0 · **Status** partial (slice 8a) — shape policy in one function used at save and at send, save-time DNS-over-HTTPS check with a private-range table, no redirects, port 443, own-domain block; **not built:** the per-workspace host allowlist, periodic re-resolution and recorded addresses. **DNS rebinding is not defeated** (AR-30). **UNVERIFIED:** whether Workers egress reaches metadata or RFC 1918 addresses (assumed reachable) · **Fixes** the customer-URL part of D9
+**Priority** P0 · **Status** 🟡 slice 8a: one URL-shape policy at save and send, save-time DNS-over-HTTPS check against a private-range table, no redirects, port 443, own-domain block (`src/connectors/destinations/url-policy.ts`, `dns-check.ts`, `tests/destinations/generic-webhook.test.ts`). Not built: per-workspace host allowlist, periodic re-resolution, recorded addresses; DNS rebinding not defeated (AR-30). Off by default (ADR 0014) · **Fixes** the customer-URL part of D9
 
 **Story** As a security engineer, I want a customer's webhook URL to be impossible to point at
 anything but the public internet, so that a connection cannot be used to read our internals or
@@ -1165,7 +1165,7 @@ duplicated policy is a divergent policy, and the divergence is always the hole.
 
 ## F116 — Generic customer webhook: outbound delivery semantics
 
-**Priority** P2 · **Status** partial (slice 8a) — Standard Webhooks `v1` signing (`webhook-id` = delivery id, stable across retries), canonical JSON envelope, never unsigned, one-time server-generated secret sealed with the envelope crypto; **not built:** payload template, secret rotation overlap, `x-noti-event-id`/`x-noti-correlation-id`, send-a-test, per-destination request budget beyond the 64,000-byte cap and 10 s timeout
+**Priority** P2 · **Status** 🟡 slice 8a: Standard Webhooks v1 signing with stable `webhook-id`, canonical JSON envelope, never unsigned, one-time sealed secret (`src/connectors/destinations/generic-webhook/`, `tests/destinations/generic-webhook.test.ts`). Not built: payload template, secret rotation overlap, `x-noti-event-id` and correlation headers, send-a-test, per-destination request budget
 
 **Story** As a customer with an internal service, I want Noti to sign what it sends me, so that
 my endpoint can verify each notification really came from us.
@@ -1285,7 +1285,7 @@ a customer-supplied header is a header-injection vector.
 
 ## F117 — Generic customer webhook: response classification
 
-**Priority** P2 · **Status** partial (slice 8a) — total status-code mapping, `Retry-After`, unknown 4xx permanent and flagged, body never read; **not built:** configurable success statuses (deliberately: see ADR 0014 decision 16), response-body excerpt, breaker/banner
+**Priority** P2 · **Status** 🟡 slice 8a: total status mapping, `Retry-After`, unknown 4xx permanent and flagged, body never read (`src/connectors/destinations/generic-webhook/classify.ts`, `tests/destinations/generic-webhook.test.ts`). Not built: configurable success statuses (deliberate, ADR 0014 decision 16), response-body excerpt, breaker or banner
 
 **Story** As a customer, I want to know exactly why my endpoint failed, so that I can fix it
 instead of guessing.
@@ -1381,7 +1381,7 @@ message into the dashboard.
 
 ## F118 — Destination disable, deprecation and removal
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 only fragments: pause and resume via PATCH `enabled` (audited), Discord auto-pause with audit, credential quarantine hides rows from delivery (`src/api/integrations.ts`, `src/pipeline/consumer.ts`). Not built: four-state model (degraded, retired), pause reason, three-consecutive-failure auto-disable, customer notice, deprecation process, retired banner
 
 **Story** As a customer, I want to know when a destination has been paused or is going away,
 so that a silent stop never looks like "nothing happened".
@@ -1499,7 +1499,7 @@ revoked rather than merely forgotten.
 
 ## F119 — P2 destination conformance and fixture suite
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 Discord and generic webhook run in the shared conformance suite and golden capability table (`tests/destinations/conformance.test.ts`, `discord.test.ts`, `generic-webhook.test.ts`). Not built: limits recorded in a registry (F105), per-credential-mode resolution, captured real-payload fixture corpus (F79), Email and Telegram (not built)
 
 **Story** As a maintainer, I want every P2 destination to pass the same conformance and
 fixture bar as Lark and Slack, so that "it mostly works" is impossible to ship.
@@ -1589,7 +1589,7 @@ destination use `https://example.invalid` hosts and never a routable address.
 
 ## F120 — Customer-facing capability matrix
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ not started: no generated `docs/CAPABILITIES.md` and no UI capability matrix; depends on F105 registry data and F92 per-mode capabilities
 
 **Story** As a customer choosing where my notifications go, I want to know what each
 destination can actually do before I choose it, so that I pick based on my needs.
