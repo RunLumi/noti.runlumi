@@ -21,6 +21,7 @@
     "preview": "cd web && vite preview",
     "typecheck:web": "tsc -p web/tsconfig.json --noEmit",
     "verify": "npm run typecheck && npm run typecheck:web && npm run test && npm run build:web && npm run verify:worker-bundle",
+    "check:stale": "vitest run --config vitest.stale.config.ts",
     "verify:worker-bundle": "node scripts/verify_worker_bundle.mjs",
     "check": "npm run format:check && npm run lint && npm run verify",
     "audit:gate": "node scripts/audit-gate.mjs",

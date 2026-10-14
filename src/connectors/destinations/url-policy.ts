@@ -1,3 +1,4 @@
+import { hostLabelOf, isAllowedHost, registryEntryFor } from './provider-registry';
 import type { DestinationKind } from './types';
 
 /**
@@ -41,20 +42,7 @@ interface HostRule {
   readonly hostRejection?: (hostname: string, options: UrlPolicyOptions) => UrlRejectionRule | undefined;
 }
 
-// A Map, not an object literal: `'constructor' in {}` is true, and `constructor` is a valid
-// single-label hostname.
-const LARK_HOSTS: ReadonlyMap<string, LarkDomain> = new Map([
-  ['open.larksuite.com', 'larksuite'],
-  ['open.feishu.cn', 'feishu'],
-]);
-
 const DNS_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-
-function isSubdomainOf(hostname: string, suffix: string): boolean {
-  if (!hostname.endsWith('.' + suffix)) return false;
-  const labels = hostname.slice(0, -(suffix.length + 1)).split('.');
-  return labels.every((label) => DNS_LABEL.test(label));
-}
 
 // --- Customer-chosen hosts (generic webhook destination, F115) --------------------------
 // This is the one destination where the customer picks the host, so an allowlist is not
@@ -184,18 +172,22 @@ const HOST_RULES: { readonly [K in DestinationKind]: HostRule } = {
   // confirm against a real OAuth install before relying on this prefix for OAuth URLs.
   // `/services/T…/B…/<token>`: workspace id, webhook id, secret — three non-empty segments.
   slack: {
-    matches: (h) => h === 'hooks.slack.com',
-    pathPrefix: '/services/',
+    matches: (h) => isAllowedHost('slack', h),
+    pathPrefix: registryEntryFor('slack').pathPrefixes[0],
     pathPattern: /^\/services\/T[A-Z0-9]+\/B[A-Z0-9]+\/[A-Za-z0-9]+$/,
   },
   // The Workflows trigger URL is opaque ("The callback URL of the trigger will be displayed
-  // to you when you save the flow"), so the rule is host-pattern only (F104).
+  // to you when you save the flow"), so the rule is host-pattern only (F104). Hosts, prefixes
+  // and their citations live in `provider-registry.ts` (F229); this table adds the shape rules.
   // UNVERIFIED: Power Automate may issue trigger URLs on hosts other than
   // `*.logic.azure.com`; the reference records only that pattern. Re-check
   // learn.microsoft.com/connectors/teams before widening it.
-  teams: { matches: (h) => isSubdomainOf(h, 'logic.azure.com') },
+  teams: { matches: (h) => isAllowedHost('teams', h) },
   // https://open.larksuite.com/document/client-docs/bot-v3/add-custom-bot
-  lark: { matches: (h) => LARK_HOSTS.has(h), pathPrefix: '/open-apis/bot/v2/hook/' },
+  lark: {
+    matches: (h) => isAllowedHost('lark', h),
+    pathPrefix: registryEntryFor('lark').pathPrefixes[0],
+  },
   // https://discord.com/developers/docs/resources/webhook (DESTINATION_API_REFERENCE.md section 4):
   // `https://discord.com/api/webhooks/{id}/{token}`; the versioned form `/api/v10/webhooks/…` is
   // what the docs show for Execute Webhook, so both are accepted.
@@ -203,8 +195,8 @@ const HOST_RULES: { readonly [K in DestinationKind]: HostRule } = {
   // the reference, so they are rejected rather than guessed. The id/token character classes
   // and lengths are not documented either, so they are deliberately loose.
   discord: {
-    matches: (h) => h === 'discord.com',
-    pathPrefix: '/api/',
+    matches: (h) => isAllowedHost('discord', h),
+    pathPrefix: registryEntryFor('discord').pathPrefixes[0],
     pathPattern: /^\/api\/(?:v\d{1,2}\/)?webhooks\/\d{15,25}\/[A-Za-z0-9._-]{1,256}$/,
     queryAllowed: discordQueryAllowed,
   },
@@ -269,5 +261,6 @@ export function checkDestinationUrl(
 
 /** Which Lark deployment a validated Lark URL belongs to. The two are not interchangeable. */
 export function larkDomainOf(url: URL): LarkDomain | undefined {
-  return LARK_HOSTS.get(url.hostname);
+  const label = hostLabelOf('lark', url.hostname);
+  return label === 'larksuite' || label === 'feishu' ? label : undefined;
 }

@@ -157,7 +157,8 @@ export const NOT_MEASURABLE: readonly NotMeasurable[] = [
   },
   {
     sli: 'unmapped_provider_errors',
-    reason: 'The adapters flag unmapped responses per attempt but the flag is not persisted in the ledger.',
+    reason:
+      'Each unmapped attempt emits an `unmapped_provider_response` log event (kind and status class), but the flag is not persisted in the ledger, so the app cannot aggregate it.',
   },
   { sli: 'end_user_received', reason: 'Not observable: the destination is not ours to instrument (F197).' },
 ];

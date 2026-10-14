@@ -80,6 +80,7 @@ async function lookup(hostname: string, type: 'A' | 'AAAA', fetcher: DnsFetcher)
 /** Resolve `hostname` (A and AAAA) and refuse it if any address is private or reserved. */
 export async function checkResolvedHost(
   hostname: string,
+  // EGRESS-ALLOWED: fixed resolver endpoint (DOH_ENDPOINT); only the query name varies (F228).
   fetcher: DnsFetcher = (input, init) => fetch(input, init),
   options: UrlPolicyOptions = {},
 ): Promise<HostCheck> {

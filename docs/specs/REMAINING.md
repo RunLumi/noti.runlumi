@@ -50,7 +50,7 @@ Buildable now, without external access.
 
 | # | Slice | Features | Gap | Size |
 | --- | --- | --- | --- | --- |
-| 1.19 | Egress proofs: static test that one module performs outbound fetch, typed provider-domain registry with `verifiedOn` and a 180-day staleness test, unmapped-response metric | F228, F229, F230 | Mechanism exists (`src/connectors/destinations/`), the proofs do not | S |
+| 1.19 | Egress proofs, remainder. Built (ADR 0026): AST regression guard on the outbound surface (aliasing not followed), typed registry with `docsUrl`, `verifiedOn`, a weekly 180-day staleness check and a written wildcard reason, `unmapped_provider_response` log event. Left: the credential-host binding test, reconnect prompt when a host is removed, a human re-read of the provider pages (the date is the reference's, 2026-10-13), persisting the unmapped flag in the ledger | F228 (remainder), F229 (remainder), F98 | Proofs exist; the reconnect surface and a re-verification do not | S |
 | 1.21 | Abuse controls: outbound provider bucket (with 1.8), quota ledger, abuse alerts, coarse pre-filter | F231 | Ingress limiter is wired; nothing else | L |
 | 1.22 | Retention matrix and enforcement: matrix doc, per-workspace setting, per-job staleness alert, resolve ledger retention against the spec (ledger purged at 90 days) | F237 | Purge job is tested; the matrix and setting are not | M |
 | 1.23 | Audit of unknown-installation 403s, and decide whether EVERY cross-tenant probe must be audited (today recording is capped at 20 a minute per user); the staging drill (`scripts/tenant-isolation-drill.mjs`, unrun) and Time Travel re-drill are group 3 | F233 | Static query test and the fake-D1 drill are done | S |
