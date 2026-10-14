@@ -6,11 +6,15 @@
  * dropped, and every value is length-bounded and stripped of control and bidi characters.
  * `ip` and `user_agent` are stored for incident response but are not part of this view.
  */
-import { AUDIT_ACTIONS, type AuditAction } from '../audit/actions';
+import { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction } from '../audit/actions';
+import { DIFF_KEYS, MAX_DIFF_LIST } from '../audit/diff';
+import { sanitiseCorrelationId } from '../platform/correlation-id';
 import { decodeCursor, parseBound } from './delivery-view';
 
 export const AUDIT_DEFAULT_PAGE = 25;
 export const AUDIT_MAX_PAGE = 100;
+/** The total is counted up to this many matches; past it the answer is "at least this many". */
+export const AUDIT_TOTAL_CAP = 10_000;
 
 export type SummaryValue = string | number | boolean | readonly string[];
 export interface SummaryItem {
@@ -84,6 +88,7 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
     removed: 'list',
   },
   'github.repository.out_of_scope': NONE,
+  'github.webhook.refused': { reason: 'string' },
   'workspace.export': NONE,
   'workspace.deletion.request': { purgeAfter: 'string', disabledIntegrations: 'number' },
   'workspace.deletion.cancel': { restoredIntegrations: 'number' },
@@ -169,6 +174,69 @@ export function summarise(action: string, metadataJson: string): readonly Summar
   });
 }
 
+/**
+ * One field an update changed, rebuilt from the diff keys the writer stored (`src/audit/diff.ts`). Only a
+ * closed set of non-secret fields has one; everything else stays in the plain "changed" list.
+ */
+export type FieldChange =
+  | {
+      readonly field: 'enabled' | 'repo';
+      readonly kind: 'value';
+      readonly before: string | boolean;
+      readonly after: string | boolean;
+    }
+  | {
+      readonly field: 'eventTypes';
+      readonly kind: 'list';
+      readonly added: readonly string[];
+      readonly removed: readonly string[];
+    };
+
+const DIFF_ACTIONS: ReadonlySet<string> = new Set(['integration.update', 'source.update']);
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((v): v is string => typeof v === 'string')
+        .slice(0, MAX_DIFF_LIST)
+        .map((v) => safeText(v, 80))
+    : [];
+}
+
+/**
+ * The before and after of the fields an update changed. A change is shown only when BOTH sides are
+ * known and well typed: a row written before this existed, a malformed value or an unknown action gives
+ * none, never a guess. The after value is the one the row already recorded (`enabled`, `repo`).
+ */
+export function changesOf(action: string, metadataJson: string): readonly FieldChange[] {
+  if (!DIFF_ACTIONS.has(action)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(metadataJson);
+  } catch {
+    return [];
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return [];
+  const m = parsed as Record<string, unknown>;
+  const own = (key: string): unknown => (Object.hasOwn(m, key) ? m[key] : undefined);
+  const out: FieldChange[] = [];
+  const before = own(DIFF_KEYS.previousEnabled);
+  const after = own('enabled');
+  if (typeof before === 'boolean' && typeof after === 'boolean' && before !== after)
+    out.push({ field: 'enabled', kind: 'value', before, after });
+  const previousRepo = own(DIFF_KEYS.previousRepo);
+  const repo = own('repo');
+  if (action === 'integration.update' && typeof previousRepo === 'string' && typeof repo === 'string')
+    out.push({ field: 'repo', kind: 'value', before: safeText(previousRepo), after: safeText(repo) });
+  if (action === 'integration.update') {
+    const added = stringList(own(DIFF_KEYS.eventTypesAdded));
+    const removed = stringList(own(DIFF_KEYS.eventTypesRemoved));
+    if (added.length > 0 || removed.length > 0)
+      out.push({ field: 'eventTypes', kind: 'list', added, removed });
+  }
+  return out;
+}
+
 export type AuditActor =
   | { readonly kind: 'member'; readonly name: string }
   | { readonly kind: 'system' }
@@ -179,6 +247,9 @@ export type AuditActor =
 
 export interface AuditRowRecord {
   id: string;
+  /** Read back so the route can refuse a row that is not this workspace's, whatever the query did. */
+  organization_id: string | null;
+  correlation_id: string | null;
   action: string;
   subject_type: string;
   subject_id: string | null;
@@ -200,6 +271,10 @@ export interface AuditEventView {
   readonly outcome: 'success' | 'denied';
   readonly actor: AuditActor;
   readonly summary: readonly SummaryItem[];
+  /** The request this change was made in; null for rows written before it was recorded or by a job. */
+  readonly correlationId: string | null;
+  /** Before and after of the non-secret fields an update changed; empty when none were recorded. */
+  readonly changes: readonly FieldChange[];
 }
 
 /**
@@ -227,12 +302,25 @@ export function toAuditView(row: AuditRowRecord): AuditEventView {
     outcome: row.outcome === 'denied' ? 'denied' : 'success',
     actor: actorOf(row),
     summary: summarise(row.action, row.metadata_json),
+    correlationId: sanitiseCorrelationId(row.correlation_id),
+    changes: changesOf(row.action, row.metadata_json),
   };
 }
 
 export interface AuditFilters {
   readonly action: AuditAction | null;
   readonly outcome: 'success' | 'denied' | null;
+  /**
+   * A CURRENT member's user id, or `system` for events no person took. Anyone else (an outsider whose
+   * probe was recorded here, a former member) matches nothing, so the filter cannot be used to ask
+   * whether a given user id ever touched this workspace.
+   */
+  readonly actor: string | null;
+  /** The id of the thing the event is about (an integration, a source, a delivery, a capability). */
+  readonly target: string | null;
+  readonly targetType: (typeof AUDIT_SUBJECT_TYPES)[number] | null;
+  /** The request id of one request, as quoted from an error body or a delivery. */
+  readonly correlationId: string | null;
   readonly from: string | null;
   readonly to: string | null;
   readonly cursor: { readonly updatedAt: string; readonly id: string } | null;
@@ -243,10 +331,29 @@ export type AuditFilterResult =
   | { readonly ok: true; readonly value: AuditFilters }
   | { readonly ok: false; readonly fields: readonly { field: string; message: string }[] };
 
+/** Opaque ids: letters, numbers, `_` and `-`, as Better Auth and our own ids are. */
+const ACTOR_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/** Printable text, no controls: a subject id can be `owner/repo` or a capability like `delivery.replay`. */
+const validTarget = (value: string): boolean =>
+  value.length >= 1 &&
+  value.length <= 200 &&
+  Array.from(value).every((ch) => {
+    const code = ch.codePointAt(0) ?? 0;
+    return code > 0x1f && code !== 0x7f;
+  });
+export const SYSTEM_ACTOR = 'system';
+
+const isSubjectType = (v: string): v is (typeof AUDIT_SUBJECT_TYPES)[number] =>
+  (AUDIT_SUBJECT_TYPES as readonly string[]).includes(v);
+
 export function parseAuditFilters(query: (name: string) => string | undefined): AuditFilterResult {
   const fields: { field: string; message: string }[] = [];
   const action = query('action');
   const outcome = query('outcome');
+  const actor = query('actor');
+  const target = query('target');
+  const targetType = query('targetType');
+  const correlationId = query('correlationId');
   const from = query('from');
   const to = query('to');
   const cursor = query('cursor');
@@ -255,6 +362,13 @@ export function parseAuditFilters(query: (name: string) => string | undefined): 
   if (action && !isAuditAction(action)) fields.push({ field: 'action', message: 'Unknown action.' });
   if (outcome && outcome !== 'success' && outcome !== 'denied')
     fields.push({ field: 'outcome', message: 'Use success or denied.' });
+  if (actor && !ACTOR_ID.test(actor)) fields.push({ field: 'actor', message: 'Not a valid member id.' });
+  if (target && !validTarget(target)) fields.push({ field: 'target', message: 'Not a valid id.' });
+  if (targetType && !isSubjectType(targetType))
+    fields.push({ field: 'targetType', message: 'Unknown kind of thing.' });
+  const correlation = correlationId ? sanitiseCorrelationId(correlationId) : null;
+  if (correlationId && correlation === null)
+    fields.push({ field: 'correlationId', message: 'Not a valid request id.' });
   const lower = from ? parseBound(from, 'start') : null;
   if (from && lower === null) fields.push({ field: 'from', message: 'Use a date like 2026-10-13.' });
   const upper = to ? parseBound(to, 'end') : null;
@@ -270,6 +384,10 @@ export function parseAuditFilters(query: (name: string) => string | undefined): 
     value: {
       action: action && isAuditAction(action) ? action : null,
       outcome: outcome === 'success' || outcome === 'denied' ? outcome : null,
+      actor: actor || null,
+      target: target || null,
+      targetType: targetType && isSubjectType(targetType) ? targetType : null,
+      correlationId: correlation,
       from: lower,
       to: upper,
       cursor: parsedCursor,
@@ -278,11 +396,16 @@ export function parseAuditFilters(query: (name: string) => string | undefined): 
   };
 }
 
-export function buildAuditQuery(
-  orgId: string,
-  f: AuditFilters,
-): { readonly sql: string; readonly values: readonly (string | number)[] } {
-  const where = ['e.organization_id = ?'];
+type Built = { readonly sql: string; readonly values: readonly (string | number)[] };
+
+/**
+ * The shared narrowing terms, each an `AND ...` clause with `?` placeholders only (no value is ever
+ * written into the SQL). EVERY query below starts with `e.organization_id = ?`, and these only narrow
+ * inside it; the cursor is the only term left out of the count. `values[0]` is the workspace.
+ */
+function whereOf(orgId: string, f: AuditFilters, withCursor: boolean) {
+  // The tenant comparison is written out in each query below; these are the optional narrowing terms.
+  const where: string[] = [];
   const values: (string | number)[] = [orgId];
   if (f.action) {
     where.push('e.action = ?');
@@ -292,6 +415,27 @@ export function buildAuditQuery(
     where.push('e.outcome = ?');
     values.push(f.outcome);
   }
+  if (f.actor === SYSTEM_ACTOR) {
+    where.push('e.actor_id IS NULL');
+  } else if (f.actor) {
+    // A person who belongs to THIS workspace now; the membership lookup repeats the tenant predicate.
+    where.push(
+      'e.actor_id = ? AND EXISTS (SELECT 1 FROM member m WHERE m.user_id = e.actor_id AND m.organization_id = e.organization_id)',
+    );
+    values.push(f.actor);
+  }
+  if (f.target) {
+    where.push('e.subject_id = ?');
+    values.push(f.target);
+  }
+  if (f.targetType) {
+    where.push('e.subject_type = ?');
+    values.push(f.targetType);
+  }
+  if (f.correlationId) {
+    where.push('e.correlation_id = ?');
+    values.push(f.correlationId);
+  }
   if (f.from) {
     where.push('e.created_at >= ?');
     values.push(f.from);
@@ -300,20 +444,39 @@ export function buildAuditQuery(
     where.push('e.created_at <= ?');
     values.push(f.to);
   }
-  if (f.cursor) {
+  if (withCursor && f.cursor) {
     where.push('(e.created_at < ? OR (e.created_at = ? AND e.id < ?))');
     values.push(f.cursor.updatedAt, f.cursor.updatedAt, f.cursor.id);
   }
+  return { terms: where, values };
+}
+
+export function buildAuditQuery(orgId: string, f: AuditFilters): Built {
+  const { terms, values } = whereOf(orgId, f, true);
+  const filters = terms.map((t) => ` AND ${t}`).join('');
   return {
     // The member join repeats the tenant predicate: a name is read only for someone who
     // belongs to THIS workspace now. `ip`, `user_agent` and the actor's email are not selected.
-    sql: `SELECT e.id, e.action, e.subject_type, e.subject_id, e.outcome, e.metadata_json, e.created_at,
-            e.actor_id, u.name AS actor_name, (m.id IS NOT NULL) AS actor_is_member
+    sql: `SELECT e.id, e.organization_id, e.action, e.subject_type, e.subject_id, e.outcome, e.metadata_json, e.created_at,
+            e.correlation_id, e.actor_id, u.name AS actor_name, (m.id IS NOT NULL) AS actor_is_member
           FROM audit_events e
           LEFT JOIN member m ON m.user_id = e.actor_id AND m.organization_id = e.organization_id
           LEFT JOIN "user" u ON u.id = m.user_id
-          WHERE ${where.join(' AND ')}
+          WHERE e.organization_id = ?${filters}
           ORDER BY e.created_at DESC, e.id DESC LIMIT ?`,
     values: [...values, f.limit + 1],
+  };
+}
+
+/**
+ * How many events match, ignoring the page cursor, counted up to {@link AUDIT_TOTAL_CAP} so a workspace
+ * with a long log cannot make the first page scan it all. The inner `LIMIT` is what bounds the work.
+ */
+export function buildAuditCountQuery(orgId: string, f: AuditFilters): Built {
+  const { terms, values } = whereOf(orgId, f, false);
+  const filters = terms.map((t) => ` AND ${t}`).join('');
+  return {
+    sql: `SELECT COUNT(*) AS n FROM (SELECT 1 FROM audit_events e WHERE e.organization_id = ?${filters} LIMIT ?)`,
+    values: [...values, AUDIT_TOTAL_CAP + 1],
   };
 }

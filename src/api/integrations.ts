@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { auditStatement, requestOrigin, type AuditMetadata } from '../audit/audit';
+import { diffMetadata } from '../audit/diff';
 import { authorize, isFailure, type Resolved } from '../auth/workspace';
 import type { Capability } from '../auth/permissions';
 import { eventCatalogFor } from '../connectors/sources/registry';
@@ -651,6 +652,7 @@ integrations.patch('/:id', async (c) => {
   const changed = Object.keys(input)
     .filter((k) => k !== 'credentials')
     .map((k) => (k === 'sourceEventTypes' ? 'eventTypes' : k));
+  const nextEvents = input.eventTypes ?? input.sourceEventTypes;
   if (changed.length) {
     statements.push(
       audit(c, who, 'integration.update', id, {
@@ -659,6 +661,19 @@ integrations.patch('/:id', async (c) => {
         ...(input.eventTypes ? { eventTypes: input.eventTypes } : {}),
         ...(input.sourceEventTypes ? { eventTypes: input.sourceEventTypes } : {}),
         ...(input.repo ? { repo: input.repo } : {}),
+        // Before values for the few non-secret fields that have one (F222, ADR 0030).
+        ...diffMetadata(
+          {
+            enabled: existing.enabled === 1,
+            repo: existing.repo,
+            eventTypes: eventTypesOf(existing.event_types),
+          },
+          {
+            ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+            ...(input.repo !== undefined ? { repo: input.repo } : {}),
+            ...(nextEvents !== undefined ? { eventTypes: nextEvents } : {}),
+          },
+        ),
         ...(input.filters ? { filters: changedFilterIds(currentFilters(existing), input.filters) } : {}),
         ...(input.noise !== undefined ? { noise: activeNoiseFeatures(input.noise) } : {}),
       }),

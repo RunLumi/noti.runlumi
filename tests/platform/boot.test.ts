@@ -347,7 +347,11 @@ describe('what a configuration fault stops (H3, M3)', () => {
     ]) {
       const res = await post(path, env, path.startsWith('/api') ? 'GET' : 'POST');
       expect(res.status, path).toBe(503);
-      expect(await res.json()).toEqual({ error: 'Service unavailable' });
+      // A webhook sender also gets our correlation id (F50); the API's 503 body is unchanged.
+      expect(await res.json()).toEqual({
+        error: 'Service unavailable',
+        ...(path.startsWith('/webhooks') ? { correlation_id: res.headers.get('x-request-id') } : {}),
+      });
       expect(res.headers.get('content-security-policy')).toContain("default-src 'none'");
       expect(res.headers.get('x-request-id')).toBeTruthy();
     }

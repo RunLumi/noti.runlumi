@@ -399,6 +399,7 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
 
 /**
  * Entries of `app.routes` that are middleware, not handlers: `app.use('*', ...)` and
- * `app.use('/api/*', requireSameOrigin)`. They are asserted present, not listed as routes.
+ * `app.use('/api/*', requireSameOrigin)` and `app.use('/webhooks/*', ingressErrorBodies)`. They are asserted
+ * present, not listed as routes.
  */
-export const MIDDLEWARE_PATHS: readonly string[] = ['/*', '/api/*'];
+export const MIDDLEWARE_PATHS: readonly string[] = ['/*', '/api/*', '/webhooks/*'];

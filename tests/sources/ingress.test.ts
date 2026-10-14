@@ -257,7 +257,7 @@ describe('verification', () => {
       }),
     ];
     for (const r of responses) expect(r.status).toBe(401);
-    const bodies = await Promise.all(responses.map((r) => r.text()));
+    const bodies = await Promise.all(responses.map(async (r) => (await r.json<{ error: string }>()).error));
     expect(new Set(bodies)).toEqual(new Set(['Unauthorized']));
     expect(deliveries()).toBe(0);
   });
@@ -373,14 +373,15 @@ describe('unknown, malformed and disabled endpoints', () => {
   async function snapshot(res: Response) {
     return {
       status: res.status,
-      body: await res.text(),
+      // Everything about the refusal is identical but the per-request id (F50).
+      body: (await res.text()).replace(/"correlation_id":"[^"]*"/, '"correlation_id":"-"'),
       headers: [...(res.headers as unknown as Iterable<[string, string]>)]
         .filter(([k]) => k !== 'x-correlation-id' && k !== 'x-request-id')
         .sort(),
     };
   }
 
-  it('answers every non-live endpoint with one identical 404, signed or not', async () => {
+  it('answers every unknown or malformed endpoint with one identical 404, signed or not; a disabled one is 410', async () => {
     const live = await createSource();
     const disabled = await createSource('alice', 'Off');
     await call('PATCH', `/api/sources/${disabled.id}`, { as: 'alice', body: { enabled: false } });
@@ -395,7 +396,6 @@ describe('unknown, malformed and disabled endpoints', () => {
             : live.endpointId.toLowerCase(),
         secret: live.secret,
       },
-      disabled,
     ];
     const results = [];
     for (const v of variants) {
@@ -407,6 +407,12 @@ describe('unknown, malformed and disabled endpoints', () => {
     }
     for (const r of results) expect(r).toEqual(results[0]);
     expect(results[0]?.status).toBe(404);
+    // A disabled endpoint is 410 Gone (F50, ADR 0030), signed or not, and nothing is queued.
+    for (const opts of [{}, { sign: false }]) {
+      const gone = await post(disabled, EVENT, opts);
+      expect(gone.status).toBe(410);
+      expect((await gone.json<{ correlation_id: string }>()).correlation_id).toBeTruthy();
+    }
     expect(deliveries()).toBe(0);
     // And a disabled source never touches the flood counter.
     expect(count('SELECT COUNT(*) AS n FROM api_rate_limits WHERE key LIKE ?', 'ingress:%')).toBe(0);
@@ -427,7 +433,7 @@ describe('unknown, malformed and disabled endpoints', () => {
 });
 
 describe('idempotency', () => {
-  it('accepts a repeated webhook-id once: the retry is a 202 duplicate with nothing new queued', async () => {
+  it('accepts a repeated webhook-id once: the retry is a 200 duplicate (F50) with nothing new queued', async () => {
     const src = await createSource();
     await route('alice', src.id);
     expect(await (await post(src, EVENT, { id: 'evt_1' })).json()).toEqual({ accepted: true, persisted: 1 });
@@ -443,6 +449,14 @@ describe('idempotency', () => {
         .get(),
     ).toMatchObject({ suppressed_reason: 'duplicate' });
     expect(count('SELECT hit_count AS n FROM event_dedup')).toBe(1);
+    // Accounting (F29, ADR 0030): one accepted event and one duplicate, for this workspace and source.
+    expect(
+      h.db.raw
+        .prepare(
+          'SELECT organization_id AS o, source, events_accepted AS a, events_duplicate AS d, events_rate_limited AS r FROM ingress_usage',
+        )
+        .all(),
+    ).toEqual([{ o: 'org-a', source: 'generic', a: 1, d: 1, r: 0 }]);
   });
 
   it('keeps the first event when a webhook-id is reused with a different body (the reuse is refused)', async () => {
@@ -519,7 +533,7 @@ describe('credential faults', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const res = await post(src, EVENT);
     expect(res.status).toBe(500);
-    expect(await res.text()).toBe('Temporarily unavailable');
+    expect((await res.json<{ error: string }>()).error).toBe('Temporarily unavailable');
     const logged = err.mock.calls.map((c) => String(c[0])).join('\n');
     expect(logged).toContain('generic_source_secret_unavailable');
     expect(logged).not.toContain(src.secret);
@@ -630,7 +644,7 @@ describe('webhook-id reuse (M3)', () => {
     const view = await call('GET', `/api/sources/${src.id}`, { as: 'alice' });
     expect((await view.json<{ source: { reusedIdRejections: number } }>()).source.reusedIdRejections).toBe(1);
     const same = await post(src, EVENT, { id: 'evt_dup' });
-    expect(same.status).toBe(202);
+    expect(same.status).toBe(200);
     expect(await same.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
   });
 

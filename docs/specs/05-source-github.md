@@ -208,7 +208,7 @@ GitHub's model; per-installation isolation comes from F57, not from the secret.
 
 ## F59 — GitHub header contract
 
-**Priority** P0 · **Status** ✅ header contract pinned (`tests/github/ingress-contract.test.ts`): missing event or delivery is 400, opaque delivery id, action from the body, case-insensitive, SHA-1 refused, target headers unused; the route does not gate on `Content-Type`
+**Priority** P0 · **Status** ✅ header contract pinned (`tests/github/ingress-contract.test.ts`): missing event or delivery is 400, opaque delivery id, action from the body, case-insensitive, SHA-1 refused, target headers unused; a body that is not `application/json` (GitHub's form-encoded option) is 415 before anything is read (ADR 0030, `tests/github/ingress-codes.test.ts`)
 
 **Story** As an operator, I want to see exactly which GitHub headers we rely on documented,
 so that a GitHub change breaks a test rather than production.

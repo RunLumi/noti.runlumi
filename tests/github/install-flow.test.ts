@@ -664,6 +664,7 @@ describe('lifecycle and repository scope', () => {
         method: 'POST',
         body: JSON.stringify({ action: 'deleted', installation: installationBlock }),
         headers: {
+          'content-type': 'application/json',
           'x-github-event': 'installation',
           'x-github-delivery': 'x',
           'x-hub-signature-256': 'sha256=00',

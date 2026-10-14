@@ -34,6 +34,7 @@ function filesUnder(dir: string, ext: string): string[] {
  */
 const ALLOWED_FRAGMENTS: Readonly<Record<string, string>> = {
   guard: 'a fixed WHERE clause chosen by a boolean (audit.ts, provenance.ts)',
+  filters: "fixed ' AND ...' clauses with ? placeholders, one per filter that is set (audit-view.ts whereOf)",
   keyset: 'a fixed cursor clause chosen by whether a cursor exists (provenance.ts)',
   notLegacy: 'a fixed NOT EXISTS clause (github route)',
   suspended: "either 'CURRENT_TIMESTAMP' or 'NULL' (lifecycle.ts)",
@@ -98,6 +99,7 @@ const REVIEWED_PARAMETERS: ReadonlySet<string> = new Set([
 /** Non-literal SQL arguments that are reviewed query builders or constants. */
 const ALLOWED_ARGUMENTS: ReadonlySet<string> = new Set([
   'query.sql',
+  'count.sql',
   'claim.sql',
   'sql',
   'latencySql(valueSql)',

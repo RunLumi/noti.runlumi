@@ -1,14 +1,16 @@
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import { IconFilterOff } from '@tabler/icons-react';
 import { Button, Input } from '../components/ui';
 import { t } from '../i18n';
 import { useLocale } from '../i18n/LocaleProvider';
 import { AUDIT_ACTIONS, isAuditAction } from './api';
 import { actionLabel, outcomeLabel } from './copy';
-import { hasAuditFilters, type AuditSearch } from './search';
+import type { AuditMember } from './hooks';
+import { hasAuditFilters, isValidRequestId, isValidTarget, type AuditSearch } from './search';
 
 interface AuditFiltersProps {
   readonly search: AuditSearch;
+  readonly members: readonly AuditMember[];
   readonly onChange: (next: AuditSearch) => void;
 }
 
@@ -16,17 +18,76 @@ interface AuditFiltersProps {
 function without(search: AuditSearch, key: keyof AuditSearch): AuditSearch {
   const rest: Record<string, unknown> = { ...search };
   delete rest[key];
+  // The kind of thing only means something next to its id.
+  if (key === 'target') delete rest.targetType;
   return rest;
 }
 
-export function AuditFilters({ search, onChange }: AuditFiltersProps) {
+interface TextFilterProps {
+  readonly id: string;
+  readonly label: string;
+  readonly hint: string;
+  readonly invalidMessage: string;
+  readonly value: string;
+  readonly isValid: (value: string) => boolean;
+  readonly onCommit: (value: string) => void;
+}
+
+/**
+ * A free-text filter that asks the server once a value is settled (Enter or leaving the field), not on
+ * every keystroke. An id that cannot be valid is flagged and never sent. It is remounted (keyed) when
+ * the URL changes the value, so a "show events about this" click is reflected in the field.
+ */
+function TextFilter({ id, label, hint, invalidMessage, value, isValid, onCommit }: TextFilterProps) {
+  useLocale();
+  const [draft, setDraft] = useState(value);
+  const trimmed = draft.trim();
+  const invalid = trimmed !== '' && !isValid(trimmed);
+  const commit = () => {
+    if (trimmed === value) return;
+    if (trimmed === '' || isValid(trimmed)) onCommit(trimmed);
+  };
+  return (
+    <div className="filter">
+      <label className="field-label" htmlFor={id}>
+        {label}
+      </label>
+      <Input
+        id={id}
+        type="text"
+        value={draft}
+        autoComplete="off"
+        spellCheck={false}
+        maxLength={200}
+        aria-invalid={invalid || undefined}
+        aria-describedby={`${id}-hint`}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            commit();
+          }
+        }}
+      />
+      <p id={`${id}-hint`} className={invalid ? 'field-error' : 'field-hint'}>
+        {invalid ? invalidMessage : hint}
+      </p>
+    </div>
+  );
+}
+
+export function AuditFilters({ search, members, onChange }: AuditFiltersProps) {
   useLocale();
   const base = useId();
   const set = (key: keyof AuditSearch, value: string) =>
     onChange(value ? { ...search, [key]: value } : without(search, key));
+  // A member who left is still the actor of old rows, but cannot be chosen: only current members.
+  const knownActor =
+    search.actor === undefined || search.actor === 'system' || members.some((m) => m.userId === search.actor);
   return (
     <form
-      className="filters card"
+      className="filters card audit-filters"
       role="search"
       aria-label={t('audit.filters.label')}
       onSubmit={(e) => e.preventDefault()}
@@ -50,6 +111,30 @@ export function AuditFilters({ search, onChange }: AuditFiltersProps) {
         </select>
       </div>
       <div className="filter">
+        <label className="field-label" htmlFor={`${base}-actor`}>
+          {t('audit.filter.actor')}
+        </label>
+        <select
+          id={`${base}-actor`}
+          className="input"
+          value={search.actor ?? ''}
+          aria-describedby={`${base}-actor-hint`}
+          onChange={(e) => set('actor', e.target.value)}
+        >
+          <option value="">{t('audit.filter.actor.all')}</option>
+          <option value="system">{t('audit.actor.system')}</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.name}
+            </option>
+          ))}
+          {!knownActor && <option value={search.actor}>{search.actor}</option>}
+        </select>
+        <p id={`${base}-actor-hint`} className="field-hint">
+          {t('audit.filter.actor.hint')}
+        </p>
+      </div>
+      <div className="filter">
         <label className="field-label" htmlFor={`${base}-outcome`}>
           {t('audit.filter.outcome')}
         </label>
@@ -66,6 +151,26 @@ export function AuditFilters({ search, onChange }: AuditFiltersProps) {
           <option value="denied">{outcomeLabel('denied')}</option>
         </select>
       </div>
+      <TextFilter
+        key={`target:${search.target ?? ''}`}
+        id={`${base}-target`}
+        label={t('audit.filter.target')}
+        hint={t('audit.filter.target.hint')}
+        invalidMessage={t('audit.filter.target.invalid')}
+        value={search.target ?? ''}
+        isValid={isValidTarget}
+        onCommit={(v) => set('target', v)}
+      />
+      <TextFilter
+        key={`request:${search.correlationId ?? ''}`}
+        id={`${base}-request`}
+        label={t('audit.filter.requestId')}
+        hint={t('audit.filter.requestId.hint')}
+        invalidMessage={t('audit.filter.requestId.invalid')}
+        value={search.correlationId ?? ''}
+        isValid={isValidRequestId}
+        onCommit={(v) => set('correlationId', v)}
+      />
       <div className="filter">
         <label className="field-label" htmlFor={`${base}-from`}>
           {t('audit.filter.from')}
@@ -101,7 +206,9 @@ export function AuditFilters({ search, onChange }: AuditFiltersProps) {
           {t('audit.filter.clear')}
         </Button>
       </div>
-      <p className="field-hint filters-hint">{t('audit.filter.dateHint')}</p>
+      <p className="field-hint filters-hint">
+        {t('audit.filter.dateHint')} {t('audit.filter.apply')}
+      </p>
     </form>
   );
 }

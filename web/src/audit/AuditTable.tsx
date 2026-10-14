@@ -1,9 +1,11 @@
 import { IconCircleCheck, IconShieldX } from '@tabler/icons-react';
+import { Button } from '../components/ui';
 import { t } from '../i18n';
 import { useLocale } from '../i18n/LocaleProvider';
 import { Time } from '../deliveries/Time';
-import type { AuditEvent } from './api';
-import { actionLabel, actorLabel, detailPairs, outcomeLabel, subjectTypeLabel } from './copy';
+import { isAuditSubjectType, type AuditEvent } from './api';
+import { actionLabel, actorLabel, changePairs, detailPairs, outcomeLabel, subjectTypeLabel } from './copy';
+import type { AuditSearch } from './search';
 
 function Outcome({ outcome }: { readonly outcome: AuditEvent['outcome'] }) {
   useLocale();
@@ -18,10 +20,8 @@ function Outcome({ outcome }: { readonly outcome: AuditEvent['outcome'] }) {
   );
 }
 
-function Details({ event }: { readonly event: AuditEvent }) {
+function Pairs({ pairs }: { readonly pairs: readonly { label: string; text: string }[] }) {
   useLocale();
-  const pairs = detailPairs(event);
-  if (pairs.length === 0) return <span className="cell-sub">{t('audit.noDetails')}</span>;
   return (
     <dl className="audit-details">
       {pairs.map((p) => (
@@ -34,11 +34,56 @@ function Details({ event }: { readonly event: AuditEvent }) {
   );
 }
 
+interface DetailsProps {
+  readonly event: AuditEvent;
+  readonly onFilter: (patch: AuditSearch) => void;
+}
+
+/** The recorded facts, then what an update changed, then the request it was made in. */
+function Details({ event, onFilter }: DetailsProps) {
+  useLocale();
+  const pairs = detailPairs(event);
+  const changes = changePairs(event);
+  if (pairs.length === 0 && changes.length === 0 && event.correlationId === null)
+    return <span className="cell-sub">{t('audit.noDetails')}</span>;
+  return (
+    <div className="audit-detail-stack">
+      {pairs.length > 0 && <Pairs pairs={pairs} />}
+      {changes.length > 0 && (
+        <section className="audit-changes" aria-label={t('audit.changes.heading')}>
+          <p className="audit-changes-title">{t('audit.changes.heading')}</p>
+          <Pairs pairs={changes} />
+        </section>
+      )}
+      {event.correlationId !== null && (
+        <div className="audit-request">
+          <span className="cell-sub">
+            {t('audit.detail.requestId')}: <code>{event.correlationId}</code>
+          </span>
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={() => onFilter({ correlationId: event.correlationId ?? '' })}
+          >
+            {t('audit.showRequest')}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface AuditTableProps {
+  readonly rows: readonly AuditEvent[];
+  /** Replace the filters with this one, so "events about this" and "this request" are one click. */
+  readonly onFilter: (patch: AuditSearch) => void;
+}
+
 /**
  * Explicit ARIA roles on a div-less table: the narrow layout turns rows into stacked cards with
  * CSS `display`, which would otherwise drop table semantics in some browsers.
  */
-export function AuditTable({ rows }: { readonly rows: readonly AuditEvent[] }) {
+export function AuditTable({ rows, onFilter }: AuditTableProps) {
   useLocale();
   return (
     <div className="table-wrap card delivery-table-wrap">
@@ -81,13 +126,30 @@ export function AuditTable({ rows }: { readonly rows: readonly AuditEvent[] }) {
                 <div>
                   <span className="cell-main">{subjectTypeLabel(event.subjectType)}</span>
                   {event.subjectId && <span className="cell-sub">{event.subjectId}</span>}
+                  {event.subjectId && (
+                    <Button
+                      variant="ghost"
+                      type="button"
+                      aria-label={t('audit.showAbout.label', {
+                        subject: `${subjectTypeLabel(event.subjectType)} ${event.subjectId}`,
+                      })}
+                      onClick={() =>
+                        onFilter({
+                          target: event.subjectId ?? '',
+                          ...(isAuditSubjectType(event.subjectType) ? { targetType: event.subjectType } : {}),
+                        })
+                      }
+                    >
+                      {t('audit.showAbout')}
+                    </Button>
+                  )}
                 </div>
               </td>
               <td role="cell" data-label={t('audit.col.result')}>
                 <Outcome outcome={event.outcome} />
               </td>
               <td role="cell" data-label={t('audit.col.details')}>
-                <Details event={event} />
+                <Details event={event} onFilter={onFilter} />
               </td>
             </tr>
           ))}

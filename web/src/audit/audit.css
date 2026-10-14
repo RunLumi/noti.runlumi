@@ -29,6 +29,57 @@
   overflow-wrap: anywhere;
 }
 
+/* Text filters carry a hint or an error under the field, so the row aligns to the top, not the bottom. */
+.audit-filters {
+  align-items: start;
+}
+
+.audit-filters .filter-actions {
+  align-self: end;
+}
+
+.audit-detail-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.audit-changes {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: var(--border-archival);
+  border-radius: var(--radius-control);
+  background: var(--color-paper-white);
+}
+
+.audit-changes-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-soft-slate);
+}
+
+.audit-request {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+
+.audit-request code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* A text-style action inside a cell: left aligned with the text above it, still a 44px target. */
+.audit-table .btn-ghost {
+  justify-content: flex-start;
+  padding-inline: 0;
+  text-align: left;
+}
+
 .audit-table td:last-child {
   max-width: 28rem;
 }

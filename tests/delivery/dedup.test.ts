@@ -49,7 +49,7 @@ describe('suppression is recorded, not silent (F185)', () => {
     const original = h.db.raw.prepare("SELECT id FROM deliveries WHERE state='pending'").get() as {
       id: string;
     };
-    expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toEqual({ status: 202, persisted: 0 });
+    expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toEqual({ status: 200, persisted: 0 });
 
     const suppressed = h.db.raw
       .prepare(
@@ -180,7 +180,7 @@ describe('suppression is recorded, not silent (F185)', () => {
     await purgeEventDedup(h.db.d1, later);
     expect(dedupRows(h)).toEqual([]);
     setNow(new Date(later).toISOString());
-    expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toEqual({ status: 202, persisted: 0 });
+    expect(await postGithub(h, 'issue_comment', comment(7), 'gh-1')).toEqual({ status: 200, persisted: 0 });
     expect(count(h, 'notification_outbox')).toBe(1);
     expect(count(h, 'deliveries', "state = 'suppressed'")).toBe(1);
     expect(dedupRows(h)).toMatchObject([{ hit_count: 1 }]);

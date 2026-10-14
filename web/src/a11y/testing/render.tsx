@@ -269,7 +269,14 @@ export function installFetch(state: ApiState): void {
       return Promise.resolve(
         auditRows === 'error'
           ? json({ error: 'boom' }, 500)
-          : json({ organizationId: org, events: auditRows, nextCursor: null, retentionDays: 365 }),
+          : json({
+              organizationId: org,
+              events: auditRows,
+              nextCursor: null,
+              total: auditRows.length,
+              totalCapped: false,
+              retentionDays: 365,
+            }),
       );
     }
     if (method === 'GET') {

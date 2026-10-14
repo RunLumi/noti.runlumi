@@ -166,6 +166,11 @@ const SCENARIOS: readonly Scenario[] = [
     ready: () => screen.findByRole('table', { name: /Audit events|Các sự kiện kiểm toán/ }),
   },
   {
+    name: 'audit log (actor, target and request filters, with a field diff)',
+    path: '/audit?actor=user_9&target=int_1&targetType=integration&correlationId=req_8f3a2c91',
+    ready: () => screen.findByRole('table', { name: /Audit events|Các sự kiện kiểm toán/ }),
+  },
+  {
     name: 'audit log empty',
     path: '/audit',
     options: { api: { audit: [] } },

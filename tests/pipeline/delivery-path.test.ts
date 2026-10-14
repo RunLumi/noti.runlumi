@@ -381,7 +381,8 @@ describe('ingress tenant isolation', () => {
     await integration('int-a', 'org-a', LARK_A);
     await postWebhook(issueEvent(100), 'same');
     const again = await postWebhook(issueEvent(100), 'same');
-    expect(await again.json()).toEqual({ accepted: true, persisted: 0 });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
     expect(sent).toHaveLength(1);
   });
 
@@ -393,7 +394,7 @@ describe('ingress tenant isolation', () => {
     // Retention drops dispatched outbox rows after 7 days while the delivery row lives on.
     db.raw.prepare('DELETE FROM notification_outbox').run();
     const again = await postWebhook(issueEvent(100), 'purged');
-    expect(await again.json()).toEqual({ accepted: true, persisted: 0 });
+    expect(await again.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get()).toEqual({ n: 0 });
     expect(sent).toHaveLength(1);
   });
@@ -413,7 +414,11 @@ describe('ingress tenant isolation', () => {
         method: 'POST',
         body: stream,
         duplex: 'half',
-        headers: { 'x-github-event': 'issues', 'x-github-delivery': 'chunked' },
+        headers: {
+          'content-type': 'application/json',
+          'x-github-event': 'issues',
+          'x-github-delivery': 'chunked',
+        },
       } as RequestInit),
       env,
       { waitUntil: () => undefined } as unknown as ExecutionContext,

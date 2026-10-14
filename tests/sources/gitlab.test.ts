@@ -397,7 +397,7 @@ describe('ingress end to end', () => {
     await connect(src);
     expect((await signedPost(src, 'Push Hook', PUSH, { id: 'msg_retry' })).status).toBe(202);
     const again = await signedPost(src, 'Push Hook', PUSH, { id: 'msg_retry' });
-    expect(again.status).toBe(202);
+    expect(again.status).toBe(200);
     expect(await again.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
     expect(count('deliveries', "state != 'suppressed'")).toBe(1);
     expect(count('deliveries', "state = 'suppressed'")).toBe(1);
@@ -454,7 +454,7 @@ describe('ingress end to end', () => {
     expect(byIntegration).toHaveLength(3);
   });
 
-  it('unknown, disabled and wrong-kind endpoints are one identical 404', async () => {
+  it('unknown, malformed and wrong-kind endpoints are one identical 404; a disabled one is 410', async () => {
     const src = await createProviderSource('gitlab', newSigningToken(), { authMode: 'signing_token' });
     const body = JSON.stringify(PUSH);
     const headers = { 'x-gitlab-event': 'Push Hook', ...gitlabSignHeaders(src.secret, body) };
@@ -463,9 +463,14 @@ describe('ingress end to end', () => {
     const unknown = await postTo(`/webhooks/gitlab/${'A'.repeat(24)}`, body, headers);
     const malformed = await postTo('/webhooks/gitlab/short', body, headers);
     const wrongKind = await postTo(`/webhooks/stripe/${src.endpointId}`, body, headers);
-    for (const r of [disabled, unknown, malformed, wrongKind]) expect(r.status).toBe(404);
+    for (const r of [unknown, malformed, wrongKind]) expect(r.status).toBe(404);
+    expect(disabled.status).toBe(410);
     expect(
-      new Set(await Promise.all([disabled, unknown, malformed, wrongKind].map((r) => r.text()))),
+      new Set(
+        await Promise.all(
+          [unknown, malformed, wrongKind].map(async (r) => (await r.json<{ error: string }>()).error),
+        ),
+      ),
     ).toEqual(new Set(['Not found']));
   });
 

@@ -5,7 +5,7 @@ import { newLeaseToken } from '../../../delivery/claim';
 import { dedupStatements } from '../../../delivery/dedup';
 import { dedupKey, deliveryId as deriveDeliveryId, toHex } from '../../../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../../../env';
-import { readBodyCapped } from '../../../lib/body';
+import { isJsonContentType, readBodyCapped } from '../../../lib/body';
 import { correlationField, currentCorrelationId } from '../../../platform/correlation';
 import { log } from '../../../platform/log';
 import { ingressBatch } from '../../../db/retry';
@@ -13,6 +13,7 @@ import { dispatchOutbox } from '../../../pipeline/outbox';
 import { createNoisePlanner } from '../../../routing/noise-ingress';
 import { decisionStatement } from '../../../routing/provenance';
 import { sourceIngressLimiter } from '../../../security/rate-limit';
+import { recordIngressUsage } from '../../../security/ingress-usage';
 import { displayOf } from '../../../events/canonical';
 import { validateCanonicalEvent } from '../../../events/validate';
 import { boundedEventId } from '../../../events/id';
@@ -38,13 +39,9 @@ const ENDPOINT_ID = /^[A-Za-z0-9_-]{22,64}$/;
 
 type SourceRow = SourceCredentialRow & { enabled: number };
 
-/** One shape for every "no such live endpoint" outcome: unknown, malformed id, disabled. */
+/** One shape for every "no such endpoint" outcome: unknown or malformed id. */
 function notFound(c: Context<{ Bindings: Bindings }>): Response {
   return c.text('Not found', 404);
-}
-
-function isJson(contentType: string | undefined): boolean {
-  return /^application\/json\s*(;|$)/i.test(contentType ?? '');
 }
 
 // A fixed throwaway key so the unknown/disabled path performs the same HMAC work over the
@@ -54,7 +51,7 @@ export const DECOY_MAX_BODY_BYTES = 16 * 1024;
 const DECOY_KEY = new Uint8Array(new ArrayBuffer(32)).fill(0x5a);
 
 export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promise<Response> {
-  if (!isJson(c.req.header('content-type'))) return c.text('Expected application/json', 415);
+  if (!isJsonContentType(c.req.header('content-type'))) return c.text('Expected application/json', 415);
   // Counts bytes as they arrive, so a chunked or lying request is cut off at the cap instead
   // of being buffered first (review M1).
   const read = await readBodyCapped(c.req.raw, MAX_BODY_BYTES);
@@ -77,7 +74,10 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
         .bind(endpointId)
         .first<SourceRow>()
     : null;
-  if (!source || source.enabled !== 1) {
+  // F50/F76: a disabled endpoint is 410 Gone, which tells a well-behaved sender to stop and disable its
+  // webhook. It needs the unguessable endpoint id, so it reveals nothing to someone without it (ADR 0030).
+  if (source && source.enabled !== 1) return c.text('Gone', 410);
+  if (!source) {
     // Timing parity is best effort and only worth its CPU for ordinary bodies: above the
     // threshold the decoy is skipped so an unauthenticated 256 KiB body costs one D1 read
     // and no HMAC (review M2, ADR 0012).
@@ -104,8 +104,10 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
 
   // After verification, so an unauthenticated caller cannot burn this source's budget.
   const limit = await sourceIngressLimiter(c.env, source.id, nowMs);
-  if (limit.limited)
+  if (limit.limited) {
+    await recordIngressUsage(c.env.DB, source.organization_id, 'generic', { rateLimited: 1 }, nowMs);
     return c.text('Too many requests', 429, { 'retry-after': String(limit.retryAfterSeconds) });
+  }
 
   let parsedJson: unknown;
   try {
@@ -279,13 +281,22 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
 
   if (queued > 0)
     c.executionCtx.waitUntil(dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }));
+  // F50: an exact duplicate is 200, not 202 and never 4xx.
+  const duplicate = rows.results.length > 0 && queued === 0 && held === 0;
+  await recordIngressUsage(
+    c.env.DB,
+    organizationId,
+    'generic',
+    duplicate ? { duplicate: 1 } : queued + held > 0 ? { accepted: 1 } : {},
+    nowMs,
+  );
   return c.json(
     {
       accepted: true,
       persisted: queued,
       ...(held > 0 ? { held } : {}),
-      ...(rows.results.length > 0 && queued === 0 && held === 0 ? { duplicate: true } : {}),
+      ...(duplicate ? { duplicate: true } : {}),
     },
-    202,
+    duplicate ? 200 : 202,
   );
 }

@@ -494,4 +494,29 @@ export const AUDIT_EVENTS = [
     actor: { kind: 'other' },
     summary: [{ key: 'reason', value: 'not_a_member' }],
   },
+  {
+    id: 'au_5',
+    createdAt: '2026-10-12T20:15:00Z',
+    action: 'integration.update',
+    subjectType: 'integration',
+    subjectId: 'int_1',
+    outcome: 'success',
+    actor: { kind: 'member', name: 'Linh Nguyen' },
+    summary: [
+      { key: 'fields', value: ['enabled', 'repo', 'eventTypes'] },
+      { key: 'enabled', value: false },
+      { key: 'repo', value: 'acme/shop' },
+    ],
+    correlationId: 'req_8f3a2c91',
+    changes: [
+      { field: 'enabled', kind: 'value', before: true, after: false },
+      { field: 'repo', kind: 'value', before: 'acme/website', after: 'acme/shop' },
+      {
+        field: 'eventTypes',
+        kind: 'list',
+        added: ['workflow_run.timed_out'],
+        removed: ['pull_request.opened'],
+      },
+    ],
+  },
 ] as const;

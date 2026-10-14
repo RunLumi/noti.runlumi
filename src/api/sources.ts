@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { auditStatement, requestOrigin, type AuditMetadata } from '../audit/audit';
+import { diffMetadata } from '../audit/diff';
 import { authorize, isFailure, type Resolved } from '../auth/workspace';
 import type { Capability } from '../auth/permissions';
 import { connectorFor, isProviderKind } from '../connectors/sources/registry';
@@ -408,6 +409,9 @@ sources.patch('/:id', async (c) => {
     audit(c, who, 'source.update', id, {
       fields: changed,
       ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
+      ...(typeof body.enabled === 'boolean'
+        ? diffMetadata({ enabled: current.enabled === 1 }, { enabled: body.enabled })
+        : {}),
     }),
   ]);
   if (results[0]?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);

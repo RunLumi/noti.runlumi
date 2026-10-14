@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { recordDenial, requestOrigin } from '../audit/audit';
+import { log } from '../platform/log';
 import { hit } from '../security/rate-limit';
 import { createAuth, type AuthBindings } from './better-auth';
 import { can, type Capability } from './permissions';
@@ -303,8 +304,15 @@ workspace.get('/team', async (c) => {
   return c.json({ organizationId: resolved.orgId, members });
 });
 
-/** Probes recorded per person per minute; a scan of organization ids must not fill the log. */
-const PROBES_RECORDED_PER_MINUTE = 20;
+/**
+ * Probes recorded per person per minute; a scan of organization ids must not fill the log.
+ *
+ * Decision (ADR 0030, REMAINING 1.23): NOT every cross-tenant probe is recorded, and the cap is what
+ * keeps this log usable. Past it the response is unchanged and the loss is not silent: the FIRST
+ * suppressed probe in a window writes one `probe_audit_capped` row (no workspace, so an operator reads
+ * it from D1, never a tenant) and a warning goes to the log, each once per person per minute.
+ */
+export const PROBES_RECORDED_PER_MINUTE = 20;
 
 /**
  * Record a request for a workspace the caller is not a member of. It is written against that
@@ -320,7 +328,23 @@ async function recordProbe(c: WorkspaceContext, raw: string | null, capability: 
     const limit = await hit(c.env.DB, `probe-audit:${s.user.id}`, PROBES_RECORDED_PER_MINUTE, 60_000).catch(
       () => null,
     );
-    if (limit?.limited) return;
+    if (limit?.limited) {
+      // Exactly the first hit over the cap: one marker per person per window, never one per probe.
+      if (limit.count === PROBES_RECORDED_PER_MINUTE + 1) {
+        log('warn', 'probe_audit_capped', { limit: PROBES_RECORDED_PER_MINUTE });
+        await recordDenial(c.env.DB, {
+          organizationId: null,
+          actorId: s.user.id,
+          action: 'access.denied',
+          subjectType: 'organization',
+          subjectId: null,
+          outcome: 'denied',
+          ...requestOrigin(c.req.raw.headers),
+          metadata: { capability, reason: 'probe_audit_capped' },
+        });
+      }
+      return;
+    }
   }
   const exists =
     requested && requested !== '(invalid)'

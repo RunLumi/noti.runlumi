@@ -661,7 +661,7 @@ describe('ids and legacy rows (F170, F184, D10)', () => {
       .run();
     enqueue('gh-legacy:int-a', 'int-a', 'org-a', 'sent');
     const res = await postGithub('gh-legacy');
-    expect(await res.json()).toEqual({ accepted: true, persisted: 0 });
+    expect(await res.json()).toEqual({ accepted: true, persisted: 0, duplicate: true });
   });
 
   it('legacy-id rows are still dispatched, delivered and updated', async () => {

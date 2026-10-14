@@ -14,9 +14,9 @@ import './audit.css';
 import type { AuditEvent } from './api';
 import { AuditFilters } from './AuditFilters';
 import { AuditTable } from './AuditTable';
-import { actionLabel, actorLabel, detailPairs, outcomeLabel } from './copy';
+import { actionLabel, actorLabel, changePairs, detailPairs, outcomeLabel } from './copy';
 import { toCsv } from './csv';
-import { useAuditList } from './hooks';
+import { useAuditList, useAuditMembers } from './hooks';
 import { hasAuditFilters, toAuditFilters, type AuditSearch } from './search';
 
 /** A byte-order mark, so Excel reads the file as UTF-8 (Vietnamese names and labels). */
@@ -36,6 +36,7 @@ export function eventsToCsv(rows: readonly AuditEvent[]): string {
       t('audit.csv.header.subjectType'),
       t('audit.csv.header.subjectId'),
       t('audit.csv.header.details'),
+      t('audit.csv.header.requestId'),
     ],
     rows.map((e) => [
       e.createdAt,
@@ -44,9 +45,8 @@ export function eventsToCsv(rows: readonly AuditEvent[]): string {
       actorLabel(e.actor),
       e.subjectType,
       e.subjectId ?? '',
-      detailPairs(e)
-        .map((p) => `${p.label}: ${p.text}`)
-        .join('; '),
+      [...detailPairs(e), ...changePairs(e)].map((p) => `${p.label}: ${p.text}`).join('; '),
+      e.correlationId ?? '',
     ]),
   );
 }
@@ -117,6 +117,7 @@ export function AuditPage() {
   const search: AuditSearch = useSearch({ from: '/audit' });
   const navigate = useNavigate({ from: '/audit' });
   const list = useAuditList(orgId, toAuditFilters(search), isAdmin);
+  const members = useAuditMembers(orgId, isAdmin);
   const setSearch = useCallback(
     (next: AuditSearch) => void navigate({ search: next, replace: true }),
     [navigate],
@@ -124,6 +125,8 @@ export function AuditPage() {
 
   const rows = list.data?.pages.flatMap((p) => p.events) ?? [];
   const retentionDays = list.data?.pages[0]?.retentionDays ?? null;
+  const firstPage = list.data?.pages[0];
+  const total = firstPage?.total ?? null;
   const filtered = hasAuditFilters(search);
 
   return (
@@ -150,7 +153,7 @@ export function AuditPage() {
           {retentionDays !== null && (
             <p className="delivery-model">{t('audit.retention', { days: retentionDays })}</p>
           )}
-          <AuditFilters search={search} onChange={setSearch} />
+          <AuditFilters search={search} members={members.data ?? []} onChange={setSearch} />
           {list.isPending ? (
             <ListSkeleton />
           ) : list.isError && rows.length === 0 ? (
@@ -171,10 +174,17 @@ export function AuditPage() {
             <section aria-labelledby="audit-count">
               {list.isError && <Notice kind="warning">{t('audit.error.stale')}</Notice>}
               <p id="audit-count" className="list-count" aria-live="polite">
+                {total !== null && (
+                  <>
+                    {firstPage?.totalCapped
+                      ? t('audit.total.capped', { count: total })
+                      : tp('audit.total', total)}{' '}
+                  </>
+                )}
                 {tp('audit.count', rows.length)}{' '}
                 {list.hasNextPage ? t('audit.count.more') : t('audit.count.end')}
               </p>
-              <AuditTable rows={rows} />
+              <AuditTable rows={rows} onFilter={setSearch} />
               <p className="field-hint">{t('audit.export.hint')}</p>
               {list.hasNextPage && (
                 <div className="load-more">

@@ -1678,3 +1678,30 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
 - Branch coverage floor 83.5 (0.11 margin was too thin); the floor is CI-only (`npm run check` does not run coverage).
 - **Verified:** unit tests, the full suite, the integration test locally. **Not verified:** the new CI jobs have not run on the CI host; branch protection (required checks, code-owner review) is NOT enabled and is an open operator action; no
   deliberately red PR per gate; required-check settings; any rollback on a real D1.
+
+## Slices 1.17, 1.23, 1.32 (read side), 2.4: ingress contract, refused-tenant audit, audit read side (ADR 0030)
+
+- **Ingress (F50, F59, F76):** an exact duplicate is `200 {accepted, persisted: 0, duplicate: true}` on every source (GitHub said 202 with no flag);
+  GitHub answers `415` for a body that is not `application/json` before reading it; a paused, revoked or disabled generic/GitLab/Stripe
+  endpoint is `410 Gone` (unknown and malformed stay one 404 with the decoy HMAC; the earlier "disabled looks unknown" property is
+  deliberately given up for this case, reasoning in the ADR); every non-2xx webhook body carries our `correlation_id` (one middleware around
+  `/webhooks/*`, `src/platform/ingress-errors.ts`). F50 is now ✅ in the ledger; F59's note changed; F76 keeps hashed keys and two live keys (2.11).
+- **Accounting (F29):** `ingress_usage` (migration 0030) counts accepted, duplicate and rate-limited events per workspace, UTC day and source,
+  apart from the abuse counters, best effort after durable acceptance (it can under-count, it is not a billing meter). Retention 400 days, in
+  the retention matrix and the purge. The full-route GitHub 429 is a test.
+- **Audit of refused tenants (F233):** `github.webhook.refused` for a signed event to an unknown or suspended installation (hourly per
+  installation, 30 a minute platform-wide, no workspace for an unknown one). Decision recorded: not every probe is audited; past 20 a minute per
+  person one `probe_audit_capped` marker and a log line make the loss visible; object-level misses are not audited by construction.
+- **Audit read side (F222, F28):** `audit_events.correlation_id` stamped from the request; filters for actor (current members or system only),
+  target and request id; a total capped at 10,000; a before/after diff for `enabled`, `repo` and subscribed updates (never a secret field);
+  reads fail closed (503, no events, tenant check on every row). Dashboard: Who, About (id) and Request ID filters, match count, one-click
+  related-event links, "What changed" block, request id, CSV columns; English and Vietnamese; axe on the new states.
+- **Migration:** `0030_ingress_usage_audit_read.sql` plus its seal. 0028 and 0029 belong to other slices, so the seal check's contiguity rule
+  fails until they merge (it passed locally only with throwaway stub files for 0028 and 0029, which are NOT in this change).
+- Tests changed on purpose (202 to 200, 404 to 410, text to JSON bodies, 415 where a GitHub request had no content type): listed in the ADR.
+- **Verified (locally, with stub 0028/0029 present):** `npm run format && npm run check` (168 files, 4290 tests, typecheck, web typecheck,
+  lint, build, worker bundle), `npm run test:coverage` (floor held), `npm run test:integration` (the real `wrangler d1 migrations apply
+  --local` chain including 0030, 36 tests), `npm run docs:spec-status`, `npm run docs:retention`.
+- **Not verified:** any real GitHub, GitLab or Stripe reaction to 200, 410 or 415; 0030 on a real D1; the CI jobs on the CI host; a screen reader,
+  a 320 px device and the Vietnamese copy by a person; the dashboard against a real server (only the mocked API in the component tests);
+  `ingress_usage` is not reconciled with `deliveries` and is not shown in the dashboard.

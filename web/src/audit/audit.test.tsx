@@ -14,6 +14,7 @@ import { csvCell, toCsv } from './csv';
 import { eventsToCsv } from './AuditPage';
 import { validateAuditSearch } from './search';
 import { parseAuditEvent } from './api';
+import { changePairs } from './copy';
 
 afterEach(cleanup);
 beforeEach(clearRequests);
@@ -85,6 +86,71 @@ describe('search in the URL', () => {
   });
 });
 
+describe('search in the URL: actor, target and request id', () => {
+  it('keeps well-formed ones and drops the rest, so nothing odd reaches the server', () => {
+    expect(
+      validateAuditSearch({
+        actor: 'user_9',
+        target: 'acme/website',
+        targetType: 'repository',
+        correlationId: 'req_8f3a2c91',
+      }),
+    ).toEqual({
+      actor: 'user_9',
+      target: 'acme/website',
+      targetType: 'repository',
+      correlationId: 'req_8f3a2c91',
+    });
+    expect(
+      validateAuditSearch({ actor: 'a b', target: 'x\u0000y', targetType: 'nope', correlationId: "x'; --" }),
+    ).toEqual({});
+    expect(validateAuditSearch({ actor: 'a'.repeat(65), correlationId: 'ab' })).toEqual({});
+  });
+});
+
+describe('field diff and request id', () => {
+  const update = () => parseAuditEvent(AUDIT_EVENTS.find((e) => e.id === 'au_5'));
+
+  it('parses the changes and the request id, and tolerates a row without them', () => {
+    const event = update();
+    expect(event.correlationId).toBe('req_8f3a2c91');
+    expect(event.changes).toHaveLength(3);
+    const old = parseAuditEvent({ ...AUDIT_EVENTS[0], correlationId: undefined, changes: undefined });
+    expect(old.correlationId).toBeNull();
+    expect(old.changes).toEqual([]);
+    // A malformed change is dropped, never rendered.
+    const odd = parseAuditEvent({ ...AUDIT_EVENTS[0], changes: [{ field: 'x' }, { kind: 'list' }, 5] });
+    expect(odd.changes).toEqual([]);
+  });
+
+  it('writes the diff as plain before-and-after lines', () => {
+    expect(changePairs(update()).map((p) => `${p.label}: ${p.text}`)).toEqual([
+      'Turned on: from Yes to No',
+      'Repository: from acme/website to acme/shop',
+      'Updates added: workflow_run.timed_out',
+      'Updates removed: pull_request.opened',
+    ]);
+  });
+
+  it('shows what an update changed, and the request it was made in', async () => {
+    await renderApp('/audit');
+    const table = await screen.findByRole('table', { name: 'Audit events, newest first' });
+    expect(within(table).getByText('Turned on')).toBeTruthy();
+    expect(within(table).getByText('from Yes to No')).toBeTruthy();
+    expect(within(table).getByText('from acme/website to acme/shop')).toBeTruthy();
+    expect(within(table).getByText('workflow_run.timed_out')).toBeTruthy();
+    expect(within(table).getByText('req_8f3a2c91')).toBeTruthy();
+  });
+
+  it('includes the diff and the request id in the CSV, still without addresses', () => {
+    const text = eventsToCsv(AUDIT_EVENTS.map(parseAuditEvent));
+    expect(text).toContain('Request ID');
+    expect(text).toContain('req_8f3a2c91');
+    expect(text).toContain('Turned on: from Yes to No');
+    expect(text).not.toMatch(/@|\bip\b/i);
+  });
+});
+
 describe('audit log page', () => {
   it('lists events with plain-language labels, names only, and the retention note', async () => {
     await renderApp('/audit');
@@ -92,7 +158,7 @@ describe('audit log page', () => {
     const rows = within(table).getAllByRole('row');
     expect(rows).toHaveLength(AUDIT_EVENTS.length + 1);
     expect(within(table).getByText('Integration created')).toBeTruthy();
-    expect(within(table).getByText('Linh Nguyen')).toBeTruthy();
+    expect(within(table).getAllByText('Linh Nguyen').length).toBe(2);
     expect(within(table).getByText('Noti (automatic)')).toBeTruthy();
     expect(within(table).getByText('Outside user')).toBeTruthy();
     expect(within(table).getAllByText('Refused').length).toBe(2);
@@ -128,6 +194,76 @@ describe('audit log page', () => {
     await user.selectOptions(screen.getByLabelText('Result'), 'denied');
     await waitFor(() => expect(rendered.router.state.location.search).toMatchObject({ outcome: 'denied' }));
     await waitFor(() => expect(requests.some((r) => r.includes('outcome=denied'))).toBe(true));
+  });
+
+  it('shows how many events match, and asks for the member list by workspace', async () => {
+    await renderApp('/audit');
+    await screen.findByRole('table');
+    expect(screen.getByText(/\d+ events match\./)).toBeTruthy();
+    expect(requests.some((r) => r === `GET /api/workspace/team?org=${ORG_ID}`)).toBe(true);
+    const actor = screen.getByLabelText<HTMLSelectElement>('Who');
+    expect([...actor.options].map((o) => o.textContent)).toEqual(
+      expect.arrayContaining(['Anyone', 'Noti (automatic)', 'Linh Nguyen', 'Minh Tran']),
+    );
+    // Names only: no member's email is on the page.
+    const form = screen.getByRole('search', { name: 'Filter audit events' });
+    expect(form.textContent).not.toMatch(/@/);
+  });
+
+  it('asks the server with the actor, target and request id from the URL', async () => {
+    await renderApp('/audit?actor=user_9&target=int_1&targetType=integration&correlationId=req_8f3a2c91');
+    await screen.findByRole('table');
+    const asked = requests.find((r) => r.startsWith('GET /api/audit'));
+    const params = new URL(asked ?? '', 'http://x').searchParams;
+    expect(Object.fromEntries(params)).toEqual({
+      org: ORG_ID,
+      actor: 'user_9',
+      target: 'int_1',
+      targetType: 'integration',
+      correlationId: 'req_8f3a2c91',
+    });
+    expect(screen.getByLabelText<HTMLInputElement>('About (id)').value).toBe('int_1');
+    expect(screen.getByLabelText<HTMLInputElement>('Request ID').value).toBe('req_8f3a2c91');
+    expect(screen.getByLabelText<HTMLSelectElement>('Who').value).toBe('user_9');
+  });
+
+  it('applies a text filter on Enter, not on every keystroke, and refuses an invalid id', async () => {
+    const user = userEvent.setup();
+    const rendered = await renderApp('/audit');
+    await screen.findByRole('table');
+    const field = screen.getByLabelText('Request ID');
+    await user.type(field, 'req_8f3a');
+    expect(rendered.router.state.location.search).toEqual({});
+    await user.type(field, '2c91{Enter}');
+    await waitFor(() =>
+      expect(rendered.router.state.location.search).toMatchObject({ correlationId: 'req_8f3a2c91' }),
+    );
+    await waitFor(() => expect(requests.some((r) => r.includes('correlationId=req_8f3a2c91'))).toBe(true));
+    // An id that cannot be valid is explained and never sent.
+    const request = screen.getByLabelText('Request ID');
+    await user.clear(request);
+    await user.type(request, 'no{Enter}');
+    expect(screen.getByText(/A request ID is 4 to 64 letters/)).toBeTruthy();
+    expect(request.getAttribute('aria-invalid')).toBe('true');
+    expect(rendered.router.state.location.search).toMatchObject({ correlationId: 'req_8f3a2c91' });
+    const { blocking } = await audit();
+    expect(blocking, describeViolations(blocking)).toEqual([]);
+  });
+
+  it('"Show events about this" and "Show events from this request" set one filter in a click', async () => {
+    const user = userEvent.setup();
+    const rendered = await renderApp('/audit');
+    const table = await screen.findByRole('table', { name: 'Audit events, newest first' });
+    const about = within(table).getAllByRole('button', { name: /Show events about Integration int_1/ });
+    await user.click(about[0]);
+    await waitFor(() =>
+      expect(rendered.router.state.location.search).toEqual({ target: 'int_1', targetType: 'integration' }),
+    );
+    await user.click(await screen.findByRole('button', { name: 'Show events from this request' }));
+    await waitFor(() =>
+      expect(rendered.router.state.location.search).toEqual({ correlationId: 'req_8f3a2c91' }),
+    );
+    expect(screen.getByLabelText<HTMLInputElement>('Request ID').value).toBe('req_8f3a2c91');
   });
 
   it('is for admins only: a member sees why, and no request is made', async () => {

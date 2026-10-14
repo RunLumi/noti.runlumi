@@ -138,12 +138,29 @@ describe('recorded probes are rate limited per person', () => {
       const res = await call('GET', `/api/integrations?org=org-nope-${i}`, 'solo');
       expect(res.status).toBe(404);
     }
-    const rows = db.raw
-      .prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='access.denied'")
-      .get() as {
-      n: number;
-    };
-    expect(rows.n).toBe(20);
+    const count = (where: string) =>
+      (
+        db.raw
+          .prepare(`SELECT COUNT(*) AS n FROM audit_events WHERE action='access.denied' AND ${where}`)
+          .get() as { n: number }
+      ).n;
+    // 20 recorded probes, then ONE marker that the rest were not recorded (ADR 0030): the loss is visible.
+    expect(count(`metadata_json LIKE '%not_a_member%'`)).toBe(20);
+    expect(count(`metadata_json LIKE '%probe_audit_capped%'`)).toBe(1);
+    expect(count('1=1')).toBe(21);
+    // The marker names no workspace, so no tenant's admin can read it.
+    expect(count(`metadata_json LIKE '%probe_audit_capped%' AND organization_id IS NULL`)).toBe(1);
+  });
+
+  it('logs the cap once a minute and never changes what the caller is told', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const statuses = new Set<number>();
+    for (let i = 0; i < 40; i++)
+      statuses.add((await call('GET', `/api/integrations?org=org-nope-${i}`, 'solo')).status);
+    expect([...statuses]).toEqual([404]);
+    const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('probe_audit_capped'));
+    expect(lines).toHaveLength(1);
+    warn.mockRestore();
   });
 
   it('records a refused switch the same way, against a workspace that exists', async () => {

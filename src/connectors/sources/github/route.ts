@@ -2,7 +2,7 @@ import type { Context } from 'hono';
 import { SUMMARY_MAX_CHARS, type Bindings, type DeliveryMessage } from '../../../env';
 import { displayOf, routingFactsOf } from '../../../events/canonical';
 import { validateCanonicalEvent } from '../../../events/validate';
-import { readBodyCapped } from '../../../lib/body';
+import { isJsonContentType, readBodyCapped } from '../../../lib/body';
 import { asRecord, str } from '../../../lib/json';
 import { newLeaseToken } from '../../../delivery/claim';
 import { dedupStatements } from '../../../delivery/dedup';
@@ -30,6 +30,8 @@ import {
 } from '../../../routing/noise-store';
 import { githubNoiseFacts, isWorkflowFailure } from './noise';
 import { ingressLimiter } from '../../../security/rate-limit';
+import { recordIngressUsage } from '../../../security/ingress-usage';
+import { recordWebhookProbe } from './probe';
 
 /** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
 export const MAX_BODY_BYTES = 1024 * 1024;
@@ -79,6 +81,12 @@ function resolvedDisplay(d: DisplayFields): DisplayFields {
 
 export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise<Response> {
   if (!c.env.GITHUB_WEBHOOK_SECRET) return c.text('Not configured', 503);
+
+  // F50/F59: GitHub can be configured to send `application/x-www-form-urlencoded`, which wraps the
+  // JSON in a `payload=` field. We read JSON only, so that configuration is refused up front and
+  // honestly (415, which GitHub shows as a failed delivery) instead of failing later as a bad
+  // signature or a "malformed" 400 that points at the wrong cause. Cheap and before any body read.
+  if (!isJsonContentType(c.req.header('content-type'))) return c.text('Expected application/json', 415);
 
   // Size is checked against the declared header AND the encoded body; a header alone is
   // attacker-controlled and may be absent or wrong.
@@ -139,12 +147,25 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   switch (tenant.kind) {
     case 'ok':
       break;
+    case 'unknown-installation':
+      // Signed by GitHub but bound to no workspace: there is no tenant to show it to, so it is
+      // recorded as a bounded platform row, never as one row per event (ADR 0030, 1.23).
+      await recordWebhookProbe(c.env.DB, {
+        organizationId: null,
+        installationId: tenant.installationId,
+        reason: tenant.kind,
+      });
+      return c.text('Unknown installation', 403);
     case 'no-installation':
     case 'app-mismatch':
-    case 'unknown-installation':
       return c.text('Unknown installation', 403);
     case 'not-active':
       // Suspended or uninstalled. Must stop delivery immediately (05-source-github.md F68).
+      await recordWebhookProbe(c.env.DB, {
+        organizationId: tenant.organizationId,
+        installationId: tenant.installationId,
+        reason: tenant.kind,
+      });
       return c.text('Installation not active', 403);
   }
   const organizationId = tenant.organizationId;
@@ -156,6 +177,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   try {
     const decision = await ingressLimiter(c.env, Number(asRecord(event.installation)?.id));
     if (decision.limited) {
+      await recordIngressUsage(c.env.DB, organizationId, 'github', { rateLimited: 1 });
       return c.text('Too many events; retry later', 429, {
         'retry-after': String(decision.retryAfterSeconds),
       });
@@ -216,6 +238,8 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   });
   let queued = 0;
   let held = 0;
+  // Integrations this event reached the store for. Reaching it with none of them new is a duplicate.
+  let candidates = 0;
   // Facts are extracted and folded at most once, and each distinct stored filters document is
   // parsed and compiled at most once per request. They are the only part of the payload routing
   // reads, and are never stored (ADR 0010).
@@ -329,6 +353,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
         ]),
       );
     }
+    candidates++;
     if (plan.action === 'hold') {
       // Durable before the 2xx, exactly like a delivery. Nothing is dropped: it has a release time.
       const results = await c.env.DB.batch([
@@ -413,5 +438,14 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // safe together because each row's claim is atomic (F172).
   if (queued > 0)
     c.executionCtx.waitUntil(dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }));
+  // F50: an exact duplicate is answered 200 (already accepted, stop retrying), never 202 and never 4xx.
+  const duplicate = candidates > 0 && queued === 0 && held === 0;
+  await recordIngressUsage(
+    c.env.DB,
+    organizationId,
+    'github',
+    duplicate ? { duplicate: 1 } : queued + held > 0 ? { accepted: 1 } : {},
+  );
+  if (duplicate) return c.json({ accepted: true, persisted: 0, duplicate: true }, 200);
   return c.json({ accepted: true, persisted: queued, ...(held > 0 ? { held } : {}) }, 202);
 }

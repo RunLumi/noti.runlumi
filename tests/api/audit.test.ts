@@ -48,26 +48,29 @@ interface Seed {
   at: string;
   metadata?: unknown;
   subject?: string | null;
+  subjectType?: string;
+  correlation?: string | null;
 }
 
 function event(e: Seed): void {
   db.raw
     .prepare(
-      `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json,created_at)
-       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json,created_at,correlation_id)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     .run(
       e.id,
       e.org,
       e.actor ?? null,
       e.action ?? 'integration.update',
-      'integration',
+      e.subjectType ?? 'integration',
       e.subject === undefined ? 'int-1' : e.subject,
       e.outcome ?? 'success',
       '203.0.113.9',
       'Mozilla/5.0 (X11) Probe/1.0',
       JSON.stringify(e.metadata ?? {}),
       e.at,
+      e.correlation ?? null,
     );
 }
 

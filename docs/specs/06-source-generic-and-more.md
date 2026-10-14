@@ -292,7 +292,7 @@ is not configurable to 0. Stripe documents the same trap: *"Don't use a toleranc
 
 ## F76 — Unguessable tenant key in the URL path
 
-**Priority** P0 · **Status** 🟡 144-bit random endpoint id, tenant taken from the source row, identical 404 (`src/connectors/sources/generic/route.ts`, `tests/sources/ingress.test.ts`); not built: hashed key storage, two live keys with overlap, `ingress_keys` table, 410 for disabled · **Fixes** part of D3
+**Priority** P0 · **Status** 🟡 144-bit random endpoint id, tenant taken from the source row, identical 404 for an unknown or malformed id and 410 Gone for a paused or revoked endpoint (`src/connectors/sources/generic/route.ts`, `tests/sources/ingress.test.ts`, ADR 0030); not built: hashed key storage, two live keys with overlap, `ingress_keys` table · **Fixes** part of D3
 
 **Story** As a customer, I want my webhook URL to be unguessable and rotatable, so that
 nobody can inject events into my workspace or discover my endpoint.
