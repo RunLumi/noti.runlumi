@@ -1,0 +1,10 @@
+# Review is required from these owners for the files that make the gates mean something. A CODEOWNERS file only
+# blocks a merge when branch protection enables "Require review from Code Owners"; see docs/RELEASE_GATES.md (open
+# operator action). Nothing in this repository can switch that on.
+/.github/ @streamentry @lumi-alpha
+/.github/workflows/ @streamentry @lumi-alpha
+/migrations/ @streamentry @lumi-alpha
+/scripts/migration-seal.mjs @streamentry @lumi-alpha
+/scripts/lib/migration-seal.mjs @streamentry @lumi-alpha
+/vitest.config.ts @streamentry @lumi-alpha
+/tsconfig.json @streamentry @lumi-alpha

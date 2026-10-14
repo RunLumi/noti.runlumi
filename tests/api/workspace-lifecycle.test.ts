@@ -53,7 +53,7 @@ async function call(method: string, path: string, as: string, body?: unknown): P
     new Request(`${ORIGIN}${path}`, {
       method,
       headers: { 'x-test-user': as, origin: ORIGIN, 'content-type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? null : JSON.stringify(body),
     }),
     env,
     { waitUntil: () => undefined, passThroughOnException: () => undefined } as unknown as ExecutionContext,

@@ -16,7 +16,7 @@ export function permanent(reason: FailureReason, providerCode?: string): Classif
 
 export function retryable(
   reason: FailureReason,
-  extra: { readonly retryAfterMs?: number; readonly providerCode?: string } = {},
+  extra: { readonly retryAfterMs?: number | undefined; readonly providerCode?: string | undefined } = {},
 ): ClassifiedResponse {
   return {
     outcome: 'retryable',

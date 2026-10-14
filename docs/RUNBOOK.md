@@ -866,6 +866,16 @@ act are the operator's (docs/DSAR.md).
 `Expires` 90 days ahead, so there is nothing to renew. Check on each release that the Contact URL still
 opens a private advisory form and that private vulnerability reporting is enabled for the repository (not
 verified from here).
+## Adding a migration
+
+1. Create `migrations/NNNN_snake_case.sql` with NNNN one above the highest on `origin/main` (rebase first; a number at or
+   below it fails the base check). Keep every compound SELECT to 4 terms and never touch an `_old` table.
+2. `npm run migrations:seal` writes `migrations/NNNN_snake_case.sql.sha256`. Commit both. Never edit either afterwards: a
+   correction is a new migration. If you change the SQL before it merges, delete its sidecar and seal again.
+3. `npm run migrations:check` (and, to see what CI will see, `node scripts/migration-seal.mjs --check --base origin/main`).
+4. If a parallel PR merged a migration with the same number, renumber yours (rename both files, delete the sidecar, seal).
+   Remember the gate only blocks a merge once branch protection requires CI (RELEASE_GATES 1b).
+
 ## Applying migration 0026 (tenant contract)
 
 `migrations/0026_tenant_contract.sql` rebuilds six tables to add `organization_id NOT NULL` plus a

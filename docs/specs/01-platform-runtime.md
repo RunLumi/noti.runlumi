@@ -42,7 +42,7 @@
 
 ## F01 — Reproducible toolchain
 
-**Priority** P0 · **Status** 🟡 lockfile + CI `npm ci` (`.github/workflows/ci.yml`); `format`, `format:check`, `lint`, `typecheck`, `test`, `test:coverage`, `verify`, `check` scripts in `package.json`; strict TS with `noUncheckedIndexedAccess`/`noImplicitOverride` (`tsconfig.json`); not built: `exactOptionalPropertyTypes` is off, no script named `build` (it is `build:web`), clean-clone run only proven by CI · **Fixes** D14
+**Priority** P0 · **Status** 🟡 lockfile + CI `npm ci` (`.github/workflows/ci.yml`); `format`, `format:check`, `lint`, `typecheck`, `test`, `test:coverage`, `verify`, `check` scripts in `package.json`; strict TS with `noUncheckedIndexedAccess`/`noImplicitOverride`/`exactOptionalPropertyTypes` (`tsconfig.json`, ADR 0027, asserted by `tests/platform/gates.test.ts`); not built: no script named `build` (it is `build:web`), clean-clone run only proven by CI · **Fixes** D14
 
 **Story** As a maintainer, I want one command that reproduces the toolchain exactly, so that CI and my laptop disagree about nothing.
 
@@ -71,7 +71,7 @@ migrations so local and remote schema agree.
 
 ## F02 — CI gates
 
-**Priority** P0 · **Status** 🟡 CI on PR and `main`: `npm ci`, audit gate, format, lint, both typechecks, web build, tests, worker-bundle guard; concurrency cancel and read-only permissions asserted by `tests/security/config-guards.test.ts`; not built: no separate integration job, no coverage report or floor (`vitest.config.ts` has no threshold), merge-blocking is repository settings (unverified) · **Fixes** D14
+**Priority** P0 · **Status** 🟡 CI on PR and `main`: `npm ci`, audit gate, format, lint, both typechecks, web build, tests, worker-bundle guard; concurrency cancel and read-only permissions asserted by `tests/security/config-guards.test.ts`; separate `integration` job (real `wrangler d1 migrations apply --local`) and a coverage floor in `vitest.config.ts` (ADR 0027); not built: a deliberately red PR per gate has not been run, merge-blocking is repository settings (unverified) · **Fixes** D14
 
 **Story** As a maintainer, I want every documented check enforced, so that "we ran the
 checks" cannot be a claim about something nobody runs.
@@ -178,7 +178,7 @@ material, which is a cheap regression guard against redaction rotting (F12).
 
 ## F05 — Migration discipline
 
-**Priority** P0 · **Status** 🟡 22 numbered forward-only migrations applied from zero on every test run (`tests/support/d1.ts`, `tests/migrations.test.ts`, `tests/migration-00*.test.ts`); additive/expand-contract practice and per-migration reversibility table in `docs/RUNBOOK.md` (PR #7, ADR 0004); not built: no `wrangler d1 migrations apply --local` CI step, no immutability check, rollback never rehearsed
+**Priority** P0 · **Status** 🟡 22 numbered forward-only migrations applied from zero on every test run (`tests/support/d1.ts`, `tests/migrations.test.ts`, `tests/migration-00*.test.ts`); additive/expand-contract practice and per-migration reversibility table in `docs/RUNBOOK.md` (PR #7, ADR 0004); `wrangler d1 migrations apply --local` from zero in the CI `integration` job and a per-migration SHA-256 sidecar seal (`migrations/*.sql.sha256`, compared with the base branch on PRs; ADR 0027; a check only, blocking once branch protection requires it, which is an open operator action); not built: rollback never rehearsed
 
 **Story** As an operator, I want every schema change to be a reviewed, reversible,
 forward-only file, so that migrations are deploys rather than incidents.

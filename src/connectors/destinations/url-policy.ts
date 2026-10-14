@@ -33,7 +33,7 @@ export type UrlPolicyResult =
 interface HostRule {
   matches(hostname: string): boolean;
   /** Required path prefix, or `undefined` when the provider documents the URL as opaque. */
-  readonly pathPrefix?: string;
+  readonly pathPrefix?: string | undefined;
   /** Optional exact shape of the whole path, checked after the prefix. */
   readonly pathPattern?: RegExp;
   /** When set, the query string must satisfy it; when absent any query is allowed. */

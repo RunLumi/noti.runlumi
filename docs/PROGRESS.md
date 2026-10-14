@@ -1665,3 +1665,16 @@ runbook SQL) and `tests/migration-0026-d1.test.ts` running the real `wrangler d1
 `wrangler d1 execute --local`. `PRAGMA legacy_alter_table=OFF` first (sqlite3 shell default ON let empty copies be swapped in); the snapshot is always populated and recover
 falls back to the live tables' DDL. finalize refuses an empty live table over a non-empty original, lists ids, and needs `--ack-changed` separately from `--ack-drift`;
 `/health/ready` also warns on a leftover `_gate_0026_poison`. Still UNVERIFIED on a remote D1: see the RUNBOOK list and the mandatory throwaway-D1 rehearsal.
+
+## Slice 1.15: platform gates (ADR 0027)
+
+- `exactOptionalPropertyTypes` is on (27 errors fixed at the source, none silenced). Web project unchanged.
+- Coverage floor in `vitest.config.ts` (statements 89, branches 84, functions 85, lines 91; measured 89.99 / 84.11 / 85.38 / 91.58);
+  CI runs `npm run test:coverage`.
+- `integration` CI job (`npm run test:integration`): the real `wrangler d1 migrations apply --local` from zero plus the 0026 scripts.
+- Migration seal: one `migrations/NNNN_name.sql.sha256` sidecar per migration (`npm run migrations:seal` / `migrations:check`), disjoint
+  files so parallel migration PRs cannot conflict; duplicate numbers, unlisted gaps (only 0023), and on PRs any change versus the base
+  branch fail; an unresolvable base ref is exit 2. Tested as a real process in a temp git repo. `.github/CODEOWNERS` added.
+- Branch coverage floor 83.5 (0.11 margin was too thin); the floor is CI-only (`npm run check` does not run coverage).
+- **Verified:** unit tests, the full suite, the integration test locally. **Not verified:** the new CI jobs have not run on the CI host; branch protection (required checks, code-owner review) is NOT enabled and is an open operator action; no
+  deliberately red PR per gate; required-check settings; any rollback on a real D1.

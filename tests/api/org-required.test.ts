@@ -38,7 +38,7 @@ function call(method: string, path: string, as: string) {
     new Request(`${ORIGIN}${path}`, {
       method,
       headers: { 'x-test-user': as, origin: ORIGIN, 'content-type': 'application/json' },
-      body: method === 'GET' || method === 'DELETE' ? undefined : '{}',
+      body: method === 'GET' || method === 'DELETE' ? null : '{}',
     }),
     env,
     { waitUntil: () => undefined, passThroughOnException: () => undefined } as unknown as ExecutionContext,

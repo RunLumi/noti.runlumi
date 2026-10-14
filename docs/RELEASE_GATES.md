@@ -25,6 +25,17 @@ needs a named owner, a written rationale and an entry in the register in
 | Rollback rehearsal | Deploy, migrate, roll back, executed | not done | Migrations are additive and the v0 credential columns are kept for rollback (ADR 0004); per-migration reversibility is tabulated in `RUNBOOK.md` (some steps are not reversible). A rehearsal has not been performed |
 | Migration 0026 (tenant contract) rehearsal | On a real D1: `scripts/migration-0026-preflight.sql` and `.mjs`, `MAINTENANCE_MODE` freeze, Time Travel bookmark, apply, the verification queries in `docs/RUNBOOK.md`, a deliberately tripped run (foreign keys off, a leftover `_old`) to confirm the tripwires and gates, `scripts/migration-0026-recover.mjs` from a killed run, `scripts/migration-0026-finalize.mjs` (check, then apply), `wrangler queues pause-delivery` on both queues as the freeze, and a Time Travel restore | **BLOCKING, not done** | Never applied to a real D1. The file no longer drops anything (the originals stay as `<table>_old` until finalize), but D1's behaviour on a file that fails part way (transaction, abort or carry on), `pragma_foreign_keys` / `pragma_legacy_alter_table` / `CREATE VIEW` in the migration connection, the poison-view gate, and what a paused queue does to in-flight batches are **UNVERIFIED**: Cloudflare's migrations, best-practices and limits pages do not state them. Do not apply to production until this passes on staging and on a throwaway remote D1 (checklist in `docs/RUNBOOK.md`, "UNVERIFIED on a production (remote) D1") |
 
+### 1b. Open operator actions for the CI gates (ADR 0027)
+
+Nobody has done these; the repository cannot do them for you. Until they are done the CI gates are advisory.
+
+- [ ] Branch protection on `main`: require the `verify` and `integration` checks, require branches to be up to date, disallow
+      bypass for administrators.
+- [ ] Branch protection: require review from Code Owners (`.github/CODEOWNERS` names the owners of the workflows, migrations,
+      seal scripts and the coverage and compiler configuration).
+- [ ] After the seal sidecars are on `main`, add `--require-base` to the migration seal step in `.github/workflows/ci.yml`.
+- [ ] Run one deliberately red PR per gate (spec 01 F02) and confirm each blocks the merge.
+
 ## 2. Carried over from the PR #1 list
 
 | Item | Status | Note |

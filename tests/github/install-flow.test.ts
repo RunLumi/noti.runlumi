@@ -176,7 +176,7 @@ beforeEach(() => {
       github.calls.push({
         method: init?.method ?? 'GET',
         url: url.toString(),
-        body: init?.body as string | undefined,
+        ...(init?.body !== undefined && init.body !== null && { body: init.body as string }),
       });
       if (url.hostname === 'github.com' && url.pathname === '/login/oauth/access_token')
         return Promise.resolve(

@@ -158,7 +158,7 @@ function subscriptionUpdated(
       eventType: 'customer.subscription.updated',
       title: `Subscription ${before ? `${before.replaceAll('_', ' ')} → ` : 'now '}${status.replaceAll('_', ' ')}`,
       url: '',
-      status: subscriptionStatusKind(status),
+      ...statusField(subscriptionStatusKind(status)),
       summary: subscriptionBase(obj),
     };
   }
@@ -221,4 +221,9 @@ export function mapStripe(input: MapInput): MapResult {
   return mapped
     ? { outcome: 'deliver', display: mapped, eventId }
     : { outcome: 'ignore', reason: 'update_not_notable' };
+}
+
+/** `exactOptionalPropertyTypes`: an absent status is omitted, never written as `undefined`. */
+function statusField(status: Display['status']): { status?: NonNullable<Display['status']> } {
+  return status === undefined ? {} : { status };
 }

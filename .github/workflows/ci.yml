@@ -25,6 +25,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Full history so the migration seal can read the base branch's migrations.
+          fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
@@ -41,10 +43,38 @@ jobs:
       - run: npm run typecheck
       - run: npm run typecheck:web
       - run: npm run build:web
-      - run: npm test
+      # Migrations are immutable once merged (F05): an edited, deleted, unsealed or duplicate-numbered file fails
+      # here. On a pull request the tree is also compared with the base branch (content, sidecars, numbering), so
+      # rewriting a file together with its sidecar fails too, and an unresolvable base ref is an error. Once main
+      # carries the sidecars, add `--require-base` here. This only blocks a merge if branch protection requires
+      # this job (docs/RELEASE_GATES.md).
+      - run: npm run migrations:check
+      - if: github.event_name == 'pull_request'
+        run: node scripts/migration-seal.mjs --check --base "origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+      # Runs every test and enforces the coverage floor in vitest.config.ts (F02).
+      - run: npm run test:coverage
       # Guards the deployed Worker artifact against the pure-JS scrypt fallback, whose
       # digest comparison is not constant-time. Must run after install; see the script.
       - run: npm run verify:worker-bundle
+
+  integration:
+    # Separate from `verify` (F02): it runs the real `wrangler d1 migrations apply --local` (workerd) over the
+    # whole chain from an empty database, then the 0026 finalize and recover scripts. No secrets, no network
+    # and no Cloudflare account. It does not prove D1 overload or queue-concurrency behaviour, which local
+    # mode does not emulate; those need the staging drill in docs/RELEASE_GATES.md.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+      - run: npm ci --no-audit --no-fund
+      - run: npm run test:integration
 
   dependency-review:
     # Blocks a PR that introduces a dependency with a known high or critical advisory.
