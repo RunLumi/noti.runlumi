@@ -99,6 +99,18 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
   'account.delete': NONE,
   // Platform-level (no workspace), so it never appears in a workspace's audit view.
   'key.destroy': NONE,
+  // The invitee's address is a third party's data and is never recorded.
+  'member.invite': { role: 'string' },
+  'member.invite.accept': { role: 'string' },
+  'member.invite.reject': NONE,
+  'member.invite.cancel': { role: 'string' },
+  'member.role.change': { role: 'string', previousRole: 'string' },
+  'member.remove': { role: 'string', self: 'boolean' },
+  // Session events have no workspace (a session belongs to a person), so they are in the person's own
+  // account export, not a workspace's audit view.
+  'session.revoke': NONE,
+  'session.revoke_others': { revoked: 'number' },
+  'session.revoke_all': { revoked: 'number', reason: 'string' },
 };
 
 export const MAX_TEXT = 120;

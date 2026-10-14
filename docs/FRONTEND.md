@@ -335,6 +335,20 @@ Node examples and checks their output with the Worker's verifier. **Not verified
 pass at desktop and 320 px, keyboard and screen-reader walkthrough, contrast and Vietnamese
 rendering of the new screens; they were checked only through types, lint and unit tests.
 
+## Sessions panel (`web/src/account/`, ADR 0030)
+
+Settings shows "Where you are signed in" between the passkeys and the workspace-data panels: `SessionsPanel.tsx` over
+`GET /api/workspace/me/sessions`, one row per session with a device name made from the user agent (`device.ts`, a label to
+help a person recognise their own device, never a fact; an unrecognised agent is "Unknown device"), "This device" on the
+session in use, the sign-in and last-active times, and a shortened address. Each other session has a "Sign out {device}"
+button; "Sign out all other devices" ends the rest and is disabled when there are none. There is no confirmation step: the
+worst outcome is signing in again. Results are announced (`role="status"`), errors assertively. The text states both limits
+(30 days idle, 90 days absolute) from the server's own constants (`src/auth/session-policy.ts`), so it cannot drift. Strings
+are `web/src/i18n/messages.sessions.{en,vi}.ts`; audit labels for the new actions are in `messages.audit.*`. Controls use
+`.btn` (44 px); metadata is 13 px; below 480 px the button drops under the text. Verified: jsdom with axe in English and
+Vietnamese (`sessions.test.tsx`), the stylesheet and hard-coded-string tests. **Not verified:** a real browser at 320 px, a
+screen reader, and a native-speaker review of the Vietnamese.
+
 ## Current truth
 
 Signup, sign-in, verify, forgot/reset, sign-out, `/me`, onboarding, invitations and team

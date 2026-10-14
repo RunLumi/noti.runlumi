@@ -160,7 +160,7 @@ Not machine-checked. The retention of these is set by Cloudflare or by account c
 ## Notes per store
 
 - `user`: Accounts whose email was never verified are not purged by any job and cannot use the erasure route (it needs a verified session); they stay until an operator deletes them (gap).
-- `session`: The session expires 30 days after its last refresh (refreshed at most daily).
+- `session`: The session expires 30 days after its last refresh (refreshed at most daily) and 90 days after sign-in at the latest, whichever comes first (ADR 0030). The person can list and end their sessions (`/api/workspace/me/sessions`).
 - `verification`: Each record carries its own expiry (UNVERIFIED: the exact lifetimes are Better Auth defaults). Rows still valid at the time of an account deletion survive until they expire.
 - `member`: A database trigger refuses to remove the last admin of a workspace outside a started purge.
 - `invitation`: Erasing an account hands the pending invitations the person sent to another admin of the same workspace, so the invitee can still accept; sent invitations that are not pending (accepted, declined, expired) go with the cascade on the inviter. Invitations addressed TO the erased email address are deleted. A person whose email is not yet verified cannot use the erasure route (gap).

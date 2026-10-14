@@ -7,6 +7,7 @@ import { ledgerVi } from './messages.ledger.vi';
 import { noiseVi } from './messages.noise.vi';
 import { providersVi } from './messages.providers.vi';
 import { setupVi } from './messages.setup.vi';
+import { sessionsVi } from './messages.sessions.vi';
 import { sourcesVi } from './messages.sources.vi';
 
 /**
@@ -32,6 +33,7 @@ export const vi = {
   ...sourcesVi,
   ...providersVi,
   ...destinationsVi,
+  ...sessionsVi,
 
   // --- Integrations list --------------------------------------------------
   'integrations.eyebrow': 'KẾT NỐI',

@@ -24,7 +24,7 @@
 | Who is the user, how sessions are stored | spec 02 F16, F20 | Better Auth, mounted at `/api/auth/*` | Better Auth schema migrated; session expiry configured |
 | Roles and capabilities | spec 02 F24 | `src/auth/permissions.ts` (`can()`) | `tests/auth/permissions.test.ts`, and the generated table below |
 | Which organization a request acts on | spec 02 F15, F26 | `authorize()` in `src/auth/workspace.ts`: membership resolved server-side, non-member is 404 | `tests/api/integrations.test.ts`, `tests/api/workspace-active.test.ts`, `tests/drill/` |
-| Session lifetime and revocation | spec 02 F18, F20, F23 | Better Auth | partly built (REMAINING 1.24, 2.2) |
+| Session lifetime and revocation | spec 02 F18, F20, F23 | Better Auth | `src/api/sessions.ts` (list, revoke one, revoke others, own sessions only), `tests/api/sessions.test.ts`; ADR 0030 |
 | CSRF and origin policy | spec 02 F23 | `requireSameOrigin` on every `/api/*` mutation, repeated in handlers | `tests/security/static-guards.test.ts` |
 | Webhook ingress authentication | spec 05 F58, F59, F64 | signature over the raw bytes, then tenant from our row | provider route tests; `tests/tenant-resolution.test.ts` |
 | Domain data isolation | spec 02 F25, F26; spec 15 F233 | schema contract + query predicates + the route policy below | `tests/migration-0026.test.ts`, `tests/security/`, `tests/drill/` |
@@ -74,6 +74,9 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `DELETE /api/workspace/deletion` | capability `workspace.delete` | `src/api/workspace-lifecycle.ts` |
 | `GET /api/workspace/export` | capability `workspace.export` | `src/api/workspace-lifecycle.ts` |
 | `GET /api/workspace/me/data-export` | the caller's own account (user id from the verified session) | `src/api/account.ts` |
+| `GET /api/workspace/me/sessions` | the caller's own account (user id from the verified session) | `src/api/sessions.ts` |
+| `POST /api/workspace/me/sessions/revoke-others` | the caller's own account (user id from the verified session) | `src/api/sessions.ts` |
+| `POST /api/workspace/me/sessions/:id/revoke` | the caller's own account (user id from the verified session) | `src/api/sessions.ts` |
 | `DELETE /api/workspace/me` | the caller's own account (user id from the verified session) | `src/api/account.ts` |
 | `GET /api/integrations` | capability `integration.read` | `src/api/integrations.ts` |
 | `GET /api/integrations/:id` | capability `integration.read` | `src/api/integrations.ts` |

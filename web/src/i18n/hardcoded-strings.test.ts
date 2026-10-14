@@ -25,6 +25,7 @@ const ALLOWLIST: Readonly<Record<string, string>> = {};
  */
 const INTERNAL = 'Internal error text; users see describeError() output chosen by status.';
 const TS_ALLOWLIST: Readonly<Record<string, string>> = {
+  'account/device.ts::Samsung Internet': 'A browser’s product name, shown as written; it is not translated.',
   'integrations/errors.ts::Missing capability': 'Compared with the server’s error text; never displayed.',
   'lib/api.ts::Network request failed': INTERNAL,
   'lib/api.ts::Request failed': INTERNAL,

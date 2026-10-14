@@ -25,6 +25,13 @@ needs a named owner, a written rationale and an entry in the register in
 | Rollback rehearsal | Deploy, migrate, roll back, executed | not done | Migrations are additive and the v0 credential columns are kept for rollback (ADR 0004); per-migration reversibility is tabulated in `RUNBOOK.md` (some steps are not reversible). A rehearsal has not been performed |
 | Migration 0026 (tenant contract) rehearsal | On a real D1: `scripts/migration-0026-preflight.sql` and `.mjs`, `MAINTENANCE_MODE` freeze, Time Travel bookmark, apply, the verification queries in `docs/RUNBOOK.md`, a deliberately tripped run (foreign keys off, a leftover `_old`) to confirm the tripwires and gates, `scripts/migration-0026-recover.mjs` from a killed run, `scripts/migration-0026-finalize.mjs` (check, then apply), `wrangler queues pause-delivery` on both queues as the freeze, and a Time Travel restore | **BLOCKING, not done** | Never applied to a real D1. The file no longer drops anything (the originals stay as `<table>_old` until finalize), but D1's behaviour on a file that fails part way (transaction, abort or carry on), `pragma_foreign_keys` / `pragma_legacy_alter_table` / `CREATE VIEW` in the migration connection, the poison-view gate, and what a paused queue does to in-flight batches are **UNVERIFIED**: Cloudflare's migrations, best-practices and limits pages do not state them. Do not apply to production until this passes on staging and on a throwaway remote D1 (checklist in `docs/RUNBOOK.md`, "UNVERIFIED on a production (remote) D1") |
 
+### 1a. Session revocation after a restore (ADR 0030)
+
+- [ ] Run `scripts/revoke-all-sessions.mjs` against a throwaway remote D1 and confirm `wrangler d1 execute --file` applies the
+      three statements (delete sessions, delete verifications, the `session.revoke_all` event), and that a session created before
+      it is refused afterwards. Never run against a real D1; **UNVERIFIED**.
+- [ ] Time Travel restore rehearsal: restore, confirm an ended session comes back, run the script, confirm it does not.
+
 ### 1b. Open operator actions for the CI gates (ADR 0027)
 
 Nobody has done these; the repository cannot do them for you. Until they are done the CI gates are advisory.

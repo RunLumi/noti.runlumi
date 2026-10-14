@@ -701,14 +701,20 @@ type SetupProgress = {
 
 While a deletion is pending, integration and source mutations and `POST /api/github/install` return `409`.
 
-## Your own data and account (any signed-in member)
+## Your own data, sessions and account (any signed-in member)
 
 These act on the caller's own identity only (the id comes from the session, never from the
 request) and do not resolve a workspace, so `?org=` is ignored. Scope, decisions and limits are in
-[`DSAR.md`](DSAR.md).
+[`DSAR.md`](DSAR.md); the session routes are ADR 0030. Better Auth's own `list-sessions`, `revoke-session`,
+`revoke-sessions` and `revoke-other-sessions` answer `404` through the Worker: they return session tokens, so they
+are closed in favour of the audited routes below. Password reset ends every session; an absolute 90-day
+lifetime from sign-in applies however often a session is used.
 
 | Method and path | Result |
 | --- | --- |
+| `GET /api/workspace/me/sessions` | `200 {sessions: [{id, current, createdAt, lastActiveAt, expiresAt, ip, userAgent}]}`, newest activity first, at most 100, expired sessions left out, `Cache-Control: no-store`. `current` marks the session making the request. **No token or cookie value is ever returned**; `id` is an opaque handle that names only this person's sessions. `ip` is shortened (`203.0.113.x`). `lastActiveAt` is `updated_at`, which Better Auth moves at most daily. 120 a minute per person (`429`). `401` when signed out. |
+| `POST /api/workspace/me/sessions/:id/revoke` | `Origin` required. Ends that one session at once and records `session.revoke` in the same D1 batch: `200 {revoked: 1}`. `404` for an id that does not exist, is malformed, or belongs to someone else (indistinguishable); `409 {error: "current_session"}` for the session making the request (that is signing out). 30 a minute per person with `revoke-others` (`429`). |
+| `POST /api/workspace/me/sessions/revoke-others` | `Origin` required. Ends every session of the caller except the one making the request: `200 {revoked: n}` with the exact count. Records `session.revoke_others` only when `n > 0`. |
 | `GET /api/workspace/me/data-export` | `200` JSON attachment, `format: "lumi-noti-account-export/v1"`, `credentialsIncluded: false`, `Cache-Control: no-store`. Contains the caller's user record, memberships, session metadata (no token), sign-in methods (provider and date only), passkey metadata (no keys), invitations they sent (no invitee address) and audit rows where they are the actor (IP address and user agent, no subject or metadata), at most 2,000 audit rows (`truncated` says if more exist). Limited to 5 per hour per user (`429` with `Retry-After`). A request the browser marks `Sec-Fetch-Site: cross-site` or `same-site` is refused (`403`). Audited as `account.export`. |
 | `DELETE /api/workspace/me` | Body `{confirm: "<your account email>"}`, `Origin` and `application/json` required. `200 {deleted: true}` and `Clear-Site-Data: "cookies"`. `403 {error: "reauth_required"}` unless the session was created in the last 10 minutes (sign in again, then retry; nothing changes). The typed email is a misclick guard only. An email notice goes to the address on file before the delete. `422` on a wrong confirmation. `500` for a database fault (nothing deleted). `409` with `blockers: [{workspaceId, workspaceName, otherMembers, action: "transfer_admin_role" \| "delete_workspace"}]` while the caller is the only admin of any workspace; nothing is changed. `429` after 5 attempts an hour. Deletes the user, sessions, sign-in methods, passkeys and memberships, invitations addressed to their email and sent invitations that are not pending; pending invitations they sent are handed to another admin of the same workspace. There is no undo. Never deletes a workspace or any other member's data. Audited as `account.delete` in each workspace the person left. |
 

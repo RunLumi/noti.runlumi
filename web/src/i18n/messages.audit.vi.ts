@@ -128,6 +128,15 @@ export const auditVi = {
   'audit.action.workspace.purged': 'Đã xóa dữ liệu không gian làm việc',
   'audit.action.account.export': 'Đã xuất dữ liệu tài khoản',
   'audit.action.account.delete': 'Một thành viên đã xóa tài khoản của họ',
+  'audit.action.member.invite': 'Đã gửi lời mời',
+  'audit.action.member.invite.accept': 'Đã chấp nhận lời mời',
+  'audit.action.member.invite.reject': 'Đã từ chối lời mời',
+  'audit.action.member.invite.cancel': 'Đã hủy lời mời',
+  'audit.action.member.role.change': 'Đã đổi vai trò thành viên',
+  'audit.action.member.remove': 'Thành viên bị gỡ hoặc đã rời đi',
+  'audit.action.session.revoke': 'Một thiết bị đã bị đăng xuất',
+  'audit.action.session.revoke_others': 'Tất cả thiết bị khác đã bị đăng xuất',
+  'audit.action.session.revoke_all': 'Mọi thiết bị đã bị đăng xuất',
   'audit.action.key.destroy': 'Đã cho phép hủy một phiên bản khóa mã hóa',
   'audit.action.unknown': 'Sự kiện khác',
 
@@ -139,6 +148,9 @@ export const auditVi = {
   'audit.subject.github_installation': 'Bản cài đặt GitHub',
   'audit.subject.repository': 'Repository',
   'audit.subject.key': 'Khóa mã hóa',
+  'audit.subject.member': 'Thành viên',
+  'audit.subject.invitation': 'Lời mời',
+  'audit.subject.session': 'Phiên đăng nhập',
 
   'audit.detail.repo': 'Repository',
   'audit.detail.sourceId': 'Nguồn',
@@ -181,4 +193,7 @@ export const auditVi = {
   'audit.detail.purgeAfter': 'Dữ liệu bị xóa sau',
   'audit.detail.disabledIntegrations': 'Tích hợp đã tạm dừng',
   'audit.detail.restoredIntegrations': 'Tích hợp đã bật lại',
+  'audit.detail.previousRole': 'Vai trò trước đó',
+  'audit.detail.revoked': 'Thiết bị đã đăng xuất',
+  'audit.detail.self': 'Tự rời đi',
 } as const satisfies Record<keyof typeof auditEn, string | PluralMessage>;

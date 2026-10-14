@@ -35,6 +35,7 @@ import {
   ORG_ID,
   PASSKEYS,
   ROUTING_LOG,
+  SESSIONS,
   SETUP_PROGRESS,
   SOURCES,
   TEST_DELIVERY_ID,
@@ -108,6 +109,8 @@ function buildRouter(initialPath: string) {
   });
 }
 
+type DeviceSessionRow = { id: string; current: boolean } & Record<string, unknown>;
+
 // --- Mock API -------------------------------------------------------------------------------
 
 export interface ApiState {
@@ -119,6 +122,10 @@ export interface ApiState {
   githubConfigured: boolean;
   members: unknown[];
   passkeys: unknown[];
+  /** `GET /api/workspace/me/sessions`; the revoke routes remove rows from it. `'error'` makes the list fail. */
+  sessions: DeviceSessionRow[] | 'error';
+  /** Make `POST .../sessions/:id/revoke` answer with this status. */
+  revokeStatus?: 404 | 429 | 500;
   deletion: unknown;
   /** `GET /api/setup/progress`; `'error'` makes it fail. */
   setup: unknown;
@@ -155,6 +162,7 @@ export const defaultApi = (): ApiState => ({
   githubConfigured: true,
   members: [...MEMBERS],
   passkeys: [...PASSKEYS],
+  sessions: SESSIONS.map((s) => ({ ...s })),
   deletion: { scheduled: false },
   setup: SETUP_PROGRESS,
   testSend: 'ok',
@@ -204,6 +212,28 @@ export function installFetch(state: ApiState): void {
         return Promise.resolve(json({ error: 'You are the only admin', blockers: [] }, 409));
       if (mode === 'wrong') return Promise.resolve(json({ error: 'wrong email' }, 422));
       return Promise.resolve(json({ deleted: true }));
+    }
+    if (path === '/api/workspace/me/sessions' && method === 'GET')
+      return Promise.resolve(
+        state.sessions === 'error' ? json({ error: 'boom' }, 500) : json({ sessions: state.sessions }),
+      );
+    if (
+      path === '/api/workspace/me/sessions/revoke-others' &&
+      method === 'POST' &&
+      state.sessions !== 'error'
+    ) {
+      const others = state.sessions.filter((s) => !s.current);
+      state.sessions = state.sessions.filter((s) => s.current);
+      return Promise.resolve(json({ revoked: others.length }));
+    }
+    const revokeOne = /^\/api\/workspace\/me\/sessions\/([^/]+)\/revoke$/.exec(path);
+    if (revokeOne && method === 'POST' && state.sessions !== 'error') {
+      if (state.revokeStatus) return Promise.resolve(json({ error: 'nope' }, state.revokeStatus));
+      const before = state.sessions.length;
+      state.sessions = state.sessions.filter((s) => s.id !== revokeOne[1] || s.current);
+      return Promise.resolve(
+        state.sessions.length < before ? json({ revoked: 1 }) : json({ error: 'Not found' }, 404),
+      );
     }
     if (method === 'POST' && path === '/api/workspace/active' && state.failActivate)
       return Promise.resolve(json({ error: 'boom' }, 500));

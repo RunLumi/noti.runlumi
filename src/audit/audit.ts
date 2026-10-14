@@ -44,23 +44,32 @@ export function auditStatement(
   db: D1Database,
   entry: AuditEntry,
   ifIntegrationExists?: { id: string; organizationId: string },
-  options: { readonly onlyIfPreviousStatementChangedRows?: boolean } = {},
+  options: {
+    readonly onlyIfPreviousStatementChangedRows?: boolean;
+    /**
+     * Record the previous statement's row count as `{ <key>: n }` in the metadata, computed by SQLite in the
+     * same batch so it is exact. Implies the changed-rows guard. `key` is a fixed identifier, never input.
+     */
+    readonly changesAs?: string;
+  } = {},
 ): D1PreparedStatement {
+  if (options.changesAs !== undefined && !/^[a-z][A-Za-z]{0,31}$/.test(options.changesAs))
+    throw new Error('changesAs must be a plain identifier');
+  const metadataColumn = options.changesAs === undefined ? '?' : 'json_object(?, changes())';
+  const guardRows = options.onlyIfPreviousStatementChangedRows || options.changesAs !== undefined;
   // `changes()` is the row count of the statement just before this one in the batch: put the
   // audit row right after the INSERT it describes and it exists only if that insert did.
-  const guard = options.onlyIfPreviousStatementChangedRows
+  const guard = guardRows
     ? ' WHERE changes() > 0'
     : ifIntegrationExists
       ? ' WHERE EXISTS (SELECT 1 FROM integrations WHERE id=? AND organization_id=?)'
       : '';
   const guardValues =
-    ifIntegrationExists && !options.onlyIfPreviousStatementChangedRows
-      ? [ifIntegrationExists.id, ifIntegrationExists.organizationId]
-      : [];
+    ifIntegrationExists && !guardRows ? [ifIntegrationExists.id, ifIntegrationExists.organizationId] : [];
   return db
     .prepare(
       `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json,correlation_id)
-       SELECT ?,?,?,?,?,?,?,?,?,?,?${guard}`,
+       SELECT ?,?,?,?,?,?,?,?,?,${metadataColumn},?${guard}`,
     )
     .bind(
       crypto.randomUUID(),
@@ -72,7 +81,7 @@ export function auditStatement(
       entry.outcome,
       entry.ip ?? null,
       entry.userAgent ? entry.userAgent.slice(0, MAX_USER_AGENT) : null,
-      serialiseMetadata(entry.metadata),
+      options.changesAs ?? serialiseMetadata(entry.metadata),
       // The request this change was made in (F222), so a support quote of the id finds it. Null in a
       // cron job or queue consumer with no request; never a sender-supplied value.
       sanitiseCorrelationId(currentCorrelationId()),
@@ -82,6 +91,41 @@ export function auditStatement(
 
 export async function recordAudit(db: D1Database, entry: AuditEntry): Promise<void> {
   await auditStatement(db, entry).run();
+}
+
+/** `ops_state` key counting audit rows that could not be written; surfaced as a readiness warning. */
+export const AUDIT_FAILURE_KEY = 'audit_write_failures';
+/** A failure this recent makes `/health/ready` warn. */
+export const AUDIT_FAILURE_WINDOW_MS = 60 * 60 * 1000;
+
+/** Count a failed audit write. Best effort: a failure to count is itself swallowed. */
+export async function noteAuditFailure(
+  db: Pick<D1Database, 'prepare'>,
+  nowMs: number = Date.now(),
+): Promise<void> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO ops_state(key,value,updated_at) VALUES(?1,'1',?2)
+         ON CONFLICT(key) DO UPDATE SET value=CAST(CAST(value AS INTEGER)+1 AS TEXT), updated_at=excluded.updated_at`,
+      )
+      .bind(AUDIT_FAILURE_KEY, nowMs)
+      .run();
+  } catch {
+    // Nothing more can be done; the log line is the signal of last resort.
+  }
+}
+
+/** The number of failed audit writes if one happened within the window, else 0. */
+export async function recentAuditFailures(
+  db: Pick<D1Database, 'prepare'>,
+  nowMs: number = Date.now(),
+): Promise<number> {
+  const row = await db
+    .prepare('SELECT value, updated_at FROM ops_state WHERE key=?1')
+    .bind(AUDIT_FAILURE_KEY)
+    .first<{ value: string; updated_at: number }>();
+  return row && nowMs - Number(row.updated_at) < AUDIT_FAILURE_WINDOW_MS ? Number(row.value) || 0 : 0;
 }
 
 const DENIAL_DEDUPE_SECONDS = 60;
@@ -124,6 +168,7 @@ export async function recordDenial(
     if (!recent && (options.gate ? await options.gate() : true)) await recordAudit(db, entry);
   } catch {
     console.error(JSON.stringify({ event: 'audit_write_failed', action: entry.action }));
+    await noteAuditFailure(db);
   }
 }
 

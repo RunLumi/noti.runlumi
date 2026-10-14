@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono';
+import { APIError } from 'better-auth/api';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
@@ -7,6 +8,7 @@ import { log } from '../platform/log';
 import { hit } from '../security/rate-limit';
 import { createAuth, type AuthBindings } from './better-auth';
 import { can, type Capability } from './permissions';
+import { sessionPastAbsoluteLife } from './session-policy';
 
 const workspace = new Hono<{ Bindings: AuthBindings }>();
 
@@ -39,8 +41,14 @@ async function current(c: WorkspaceContext) {
   // the same isolate. Module-scope caching would widen that blast radius. With the
   // Drizzle adapter the schema check is local, so this is not an expensive rebuild.
   const auth = createAuth(c.env, c.executionCtx);
-  const s = await auth.api.getSession({ headers: c.req.raw.headers });
-  return s?.user.emailVerified ? s : null;
+  // The absolute-lifetime hook throws 401 for a session past its end; that is "not signed in", not a fault.
+  const s = await auth.api.getSession({ headers: c.req.raw.headers }).catch((error: unknown) => {
+    if (error instanceof APIError && error.statusCode === 401) return null;
+    throw error;
+  });
+  if (!s?.user.emailVerified) return null;
+  // The absolute lifetime (ADR 0030): daily use extends a session's idle expiry, never this bound.
+  return sessionPastAbsoluteLife(s.session.createdAt) ? null : s;
 }
 
 export type Selection =

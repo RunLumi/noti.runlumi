@@ -2,7 +2,8 @@
  * Expired authentication records (docs/specs/15 F237, docs/DATA_RETENTION.md).
  *
  * Four stores hold short-lived authentication data that nothing deleted once it expired:
- *  - `session`: expired sessions (token, IP address, user agent), unusable once `expires_at` has passed;
+ *  - `session`: expired sessions (token, IP address, user agent), unusable once `expires_at` has passed, and
+ *    sessions older than the absolute lifetime (`SESSION_ABSOLUTE_SECONDS`, ADR 0030) however recently used;
  *  - `verification`: one-time verification and reset records, unusable once `expires_at` has passed;
  *  - `github_auth_states`: single-use install/OAuth states (10-minute TTL), kept one day past expiry
  *    so a support question about a failed install can still be answered;
@@ -24,6 +25,7 @@
  *
  * UNVERIFIED: `meta.changes` for DELETE was exercised only through the Node SQLite fake, not real D1.
  */
+import { SESSION_ABSOLUTE_SECONDS } from '../auth/session-policy';
 import { log } from '../platform/log';
 
 export const EXPIRED_BATCH = 500;
@@ -44,6 +46,8 @@ type Db = Pick<D1Database, 'prepare'>;
 export interface ExpiredAuthReport {
   readonly skipped: boolean;
   readonly sessions: number;
+  /** Sessions removed for outliving the absolute lifetime although still being used. */
+  readonly overAgeSessions: number;
   readonly verifications: number;
   readonly authStates: number;
   readonly authRateLimits: number;
@@ -58,6 +62,8 @@ function boundedDelete(table: string, column: string): string {
 }
 
 export const PURGE_EXPIRED_SESSIONS_SQL = boundedDelete('session', 'expires_at');
+/** `?1` is `now - SESSION_ABSOLUTE_SECONDS`: a session signed in before it has reached its absolute end. */
+export const PURGE_OVER_AGE_SESSIONS_SQL = boundedDelete('session', 'created_at');
 export const PURGE_EXPIRED_VERIFICATIONS_SQL = boundedDelete('verification', 'expires_at');
 export const PURGE_EXPIRED_AUTH_STATES_SQL = boundedDelete('github_auth_states', 'expires_at');
 export const PURGE_STALE_AUTH_RATE_LIMITS_SQL = boundedDelete('rate_limit', 'last_request');
@@ -126,8 +132,23 @@ async function findAnomaly(db: Db, nowMs: number): Promise<Anomaly | null> {
     if (wrongUnit > 0)
       return { table, reason: 'expiry_not_milliseconds', total: wrongUnit, expired: wrongUnit };
   }
+  // The over-age delete compares `created_at`, so it needs the same unit check.
+  const createdWrongUnit = await countRows(
+    db,
+    'SELECT COUNT(*) AS n FROM session WHERE created_at < ?1',
+    UNIT_CANARY_MS,
+  );
+  if (createdWrongUnit > 0)
+    return {
+      table: 'session',
+      reason: 'expiry_not_milliseconds',
+      total: createdWrongUnit,
+      expired: createdWrongUnit,
+    };
   const total = await countRows(db, 'SELECT COUNT(*) AS n FROM session');
   if (total >= MAJORITY_FLOOR) {
+    // Only idle-expired rows count. A cohort signing in together reaches its absolute end together, and that
+    // is the policy working, not a unit mix-up; the `created_at` canary above still catches a wrong unit.
     const expired = await countRows(db, 'SELECT COUNT(*) AS n FROM session WHERE expires_at < ?1', nowMs);
     if (expired * 2 > total) return { table: 'session', reason: 'majority_expired', total, expired };
   }
@@ -140,6 +161,7 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
     return {
       skipped: true,
       sessions: 0,
+      overAgeSessions: 0,
       verifications: 0,
       authStates: 0,
       authRateLimits: 0,
@@ -153,6 +175,7 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
     return {
       skipped: false,
       sessions: 0,
+      overAgeSessions: 0,
       verifications: 0,
       authStates: 0,
       authRateLimits: 0,
@@ -161,6 +184,11 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
     };
   }
   const sessions = await drain(db, PURGE_EXPIRED_SESSIONS_SQL, nowMs);
+  const overAgeSessions = await drain(
+    db,
+    PURGE_OVER_AGE_SESSIONS_SQL,
+    nowMs - SESSION_ABSOLUTE_SECONDS * 1000,
+  );
   const verifications = await drain(db, PURGE_EXPIRED_VERIFICATIONS_SQL, nowMs);
   const authStates = await drain(db, PURGE_EXPIRED_AUTH_STATES_SQL, nowMs - AUTH_STATE_GRACE_MS);
   const authRateLimits = await drain(
@@ -168,11 +196,13 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
     PURGE_STALE_AUTH_RATE_LIMITS_SQL,
     nowMs - AUTH_RATE_LIMIT_MAX_AGE_MS,
   );
-  const more = sessions.more || verifications.more || authStates.more || authRateLimits.more;
+  const more =
+    sessions.more || overAgeSessions.more || verifications.more || authStates.more || authRateLimits.more;
   if (!more) await markRun(db, nowMs);
   return {
     skipped: false,
     sessions: sessions.n,
+    overAgeSessions: overAgeSessions.n,
     verifications: verifications.n,
     authStates: authStates.n,
     authRateLimits: authRateLimits.n,

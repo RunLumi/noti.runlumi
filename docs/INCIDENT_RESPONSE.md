@@ -56,7 +56,7 @@ Every S1 and S2 triggers a review of the risk register in `docs/THREAT_MODEL.md`
 | Rotate KEK | Versioned `KEK_V<n>` secrets, `KMS_ACTIVE_VERSION`, cron rewrap | `docs/IMPLEMENTATION.md` "Key rotation (KEK)" |
 | Rotate a source signing secret | `POST /api/sources/:id/rotate`; the previous secret is invalid at once | `docs/API.md` |
 | Rotate a destination credential | `PATCH /api/integrations/:id` with a new `webhookUrl` (fresh key material), audited as `integration.credentials.rotate` | `docs/API.md` |
-| End sessions | Better Auth revokes all sessions on password reset (`revokeSessionsOnPasswordReset`); operator break-glass below. No session list or revoke-others screen yet (AR-1) | `src/auth/better-auth.ts` |
+| End sessions | A person ends one or all other sessions in Settings (`/api/workspace/me/sessions`, audited); a password reset ends every session; after a restore or a suspected leak the operator runs `scripts/revoke-all-sessions.mjs` (AR-1) | `docs/RUNBOOK.md` "After a restore", ADR 0030 |
 | Account erasure | `DELETE /api/workspace/me` | `docs/DSAR.md` |
 
 ## Playbooks
@@ -116,8 +116,9 @@ Each lists first actions only. Add the facts you learn to the incident record.
 
 ### Sessions: `BETTER_AUTH_SECRET` or session tokens exposed
 
-1. One person: remove their sessions (break-glass, name it in the record):
-   `DELETE FROM "session" WHERE user_id='<id>';`. Everyone: delete all rows. The person signs in again.
+1. Everyone: `node scripts/revoke-all-sessions.mjs --database <name> --remote --reason incident --apply` (maintenance mode on;
+   it records `session.revoke_all`). One person: break-glass, name it in the record:
+   `DELETE FROM "session" WHERE user_id='<id>';`. The person signs in again.
 2. Rotating `BETTER_AUTH_SECRET` should invalidate signed cookies (UNVERIFIED for the installed
    Better Auth version; verify on staging). It is not a substitute for deleting rows while tokens
    are stored in clear.

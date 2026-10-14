@@ -31,9 +31,11 @@ import { purgeEventDedup } from './delivery/dedup';
 import { purgeExpiredRecords } from './pipeline/retention';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { existingLegacyTables, purgeDueWorkspace } from './pipeline/purge';
+import { recentAuditFailures } from './audit/audit';
 import { pruneRateLimits, RATE_LIMIT_RETENTION_MS } from './security/rate-limit';
 import { purgeExpiredAuthRecords } from './pipeline/expired-records';
 import account from './api/account';
+import sessions from './api/sessions';
 import { purgeRoutingDecisions } from './routing/provenance';
 import { purgeNoiseRecords, releaseHeldEvents } from './pipeline/noise-release';
 import { sweepStaleClaims } from './pipeline/sweep';
@@ -89,7 +91,22 @@ app.use('*', async (c, next) => {
   return c.json({ error: 'Service unavailable' }, 503, { 'retry-after': '30', 'cache-control': 'no-store' });
 });
 
-app.all('/api/auth/*', (c) => createAuth(c.env, c.executionCtx).handler(c.req.raw));
+/**
+ * Better Auth's own session-management routes return each session's token and act on a token the caller
+ * supplies, so they cannot be audited as one change. Session management is `src/api/sessions.ts` (ADR 0030);
+ * these four are closed so there is a single audited path.
+ */
+const CLOSED_AUTH_ROUTES: ReadonlySet<string> = new Set([
+  '/api/auth/list-sessions',
+  '/api/auth/revoke-session',
+  '/api/auth/revoke-sessions',
+  '/api/auth/revoke-other-sessions',
+]);
+app.all('/api/auth/*', (c) => {
+  if (CLOSED_AUTH_ROUTES.has(c.req.path.replace(/\/+$/, ''))) return c.json({ error: 'Not found' }, 404);
+  return createAuth(c.env, c.executionCtx).handler(c.req.raw);
+});
+app.route('/api/workspace/me/sessions', sessions);
 app.route('/api/workspace/me', account);
 app.route('/api/workspace', workspace);
 app.route('/api/workspace', workspaceLifecycle);
@@ -154,6 +171,8 @@ async function readyWarnings(db: D1Database): Promise<string[]> {
       .prepare("SELECT 1 AS present FROM sqlite_master WHERE type='view' AND name='_gate_0026_poison'")
       .first<{ present: number }>();
     if (gate) warnings.push('migration_0026_gate_view_present');
+    // An audit row that could not be written in the last hour (the Better Auth rows are not atomic with their change).
+    if ((await recentAuditFailures(db)) > 0) warnings.push('audit_write_failed_recently');
     return warnings;
   } catch {
     return [];
@@ -295,7 +314,12 @@ async function purgeNoiseState(env: Bindings): Promise<JobReport> {
 /** Expired sessions, one-time tokens, install states and auth rate-limit rows (F237); hourly, bounded. */
 async function purgeExpiredAuth(env: Bindings): Promise<JobReport> {
   const purged = await purgeExpiredAuthRecords(env.DB, Date.now());
-  const total = purged.sessions + purged.verifications + purged.authStates + purged.authRateLimits;
+  const total =
+    purged.sessions +
+    purged.overAgeSessions +
+    purged.verifications +
+    purged.authStates +
+    purged.authRateLimits;
   if (total > 0) log('info', 'expired_auth_records_purged', { ...purged });
   return { counters: { purged: total } };
 }
