@@ -161,6 +161,15 @@ the existing tenant triggers and indexes. **Deploy order:** apply the migration 
 **Rollback:** the previous Worker ignores the new columns and tables; it stops writing attempts and
 dedup rows and stops honouring the breaker.
 
+## Cross-tenant statements (for the tenant-query-scope allowlist)
+
+These delete or read across workspaces on purpose (retention by age, not by tenant). The tenant-contract PR
+should allowlist them with these reasons: `PURGE_EVENT_DEDUP_SQL` (`src/delivery/dedup.ts`, expiry sweep),
+`PURGE_ATTEMPTS_SQL` (`src/pipeline/retention.ts`, age-driven; its `EXISTS` on `deliveries` joins on
+`organization_id`), `PURGE_DESTINATION_HEALTH_SQL` (retention.ts, closed quiet rows), and the `NOT EXISTS`
+on `delivery_attempts` inside `PURGE_DELIVERIES_SQL` and `PURGE_DELIVERIES_NO_CREATED_SQL` (joined on
+`organization_id`). `RECORD_STALE_ATTEMPT_SQL` and the sweep selects are keyed by id and organization.
+
 ## Consequences
 
 - Every delivery log now has rows that are not deliveries to a destination (`suppressed`). The

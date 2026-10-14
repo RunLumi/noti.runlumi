@@ -43,7 +43,8 @@ const ALLOWED_FRAGMENTS: Readonly<Record<string, string>> = {
   predicate: 'built in noise-release.ts from fixed clauses with ? placeholders',
   sql: 'a builder-local string assembled from constants (noise-release.ts, retention.ts, setup-progress.ts)',
   "sets.join(',')": 'column=? assignments whose column names come from code (integrations.ts, sources.ts)',
-  "where.join(' AND ')": 'clauses with ? placeholders built by buildListQuery (delivery-queries.ts)',
+  "where.join(' AND ')":
+    'clauses with ? placeholders built by buildListQuery (delivery-queries.ts) and queriesOf (bulk-replay.ts)',
   q: 'the numeric percentile parameter of pct(), called with 50 and 95 (slis.ts)',
   'pct(50)': 'integer percentile arithmetic over a numeric literal (slis.ts)',
   'pct(95)': 'integer percentile arithmetic over a numeric literal (slis.ts)',

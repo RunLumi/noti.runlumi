@@ -57,8 +57,11 @@ export interface BulkPlan {
   readonly token: string;
 }
 
-function whereOf(orgId: string, f: BulkFilter): { where: string; values: (string | number)[] } {
-  const clauses = [
+function queriesOf(
+  orgId: string,
+  f: BulkFilter,
+): { ids: { sql: string }; count: { sql: string }; values: (string | number)[] } {
+  const where = [
     'd.organization_id = ?',
     "d.state IN ('dead_lettered','failed')",
     // A failed test notification is not a notification anyone is waiting for.
@@ -78,18 +81,24 @@ function whereOf(orgId: string, f: BulkFilter): { where: string; values: (string
   ];
   const values: (string | number)[] = [orgId];
   if (f.integrationId) {
-    clauses.push('d.integration_id = ?');
+    where.push('d.integration_id = ?');
     values.push(f.integrationId);
   }
   if (f.from) {
-    clauses.push('d.updated_at >= ?');
+    where.push('d.updated_at >= ?');
     values.push(f.from);
   }
   if (f.to) {
-    clauses.push('d.updated_at <= ?');
+    where.push('d.updated_at <= ?');
     values.push(f.to);
   }
-  return { where: clauses.join(' AND '), values };
+  return {
+    ids: { sql: `SELECT d.id FROM deliveries d WHERE ${where.join(' AND ')} ORDER BY d.id LIMIT ?` },
+    count: {
+      sql: `SELECT COUNT(*) AS n FROM (SELECT 1 FROM deliveries d WHERE ${where.join(' AND ')} LIMIT ?)`,
+    },
+    values,
+  };
 }
 
 async function tokenOf(orgId: string, f: BulkFilter, ids: readonly string[]): Promise<string> {
@@ -106,19 +115,24 @@ async function tokenOf(orgId: string, f: BulkFilter, ids: readonly string[]): Pr
 
 /** Read-only. The set is ordered by id, so the same backlog always yields the same plan and token. */
 export async function planBulkReplay(db: D1Database, orgId: string, f: BulkFilter): Promise<BulkPlan> {
-  const { where, values } = whereOf(orgId, f);
-  const [idRows, countRow] = await Promise.all([
-    db
-      .prepare(`SELECT d.id FROM deliveries d WHERE ${where} ORDER BY d.id LIMIT ?`)
+  const listIds = async (): Promise<string[]> => {
+    const { ids: query, values } = queriesOf(orgId, f);
+    const rows = await db
+      .prepare(query.sql)
       .bind(...values, BULK_REPLAY_MAX)
-      .all<{ id: string }>(),
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM deliveries d WHERE ${where} LIMIT ?)`)
+      .all<{ id: string }>();
+    return rows.results.map((r) => r.id);
+  };
+  const countAll = async (): Promise<number> => {
+    const { count: query, values } = queriesOf(orgId, f);
+    const row = await db
+      .prepare(query.sql)
       .bind(...values, BULK_COUNT_CAP)
-      .first<{ n: number }>(),
-  ]);
-  const ids = idRows.results.map((r) => r.id);
-  const total = Math.max(countRow?.n ?? 0, ids.length);
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  };
+  const [ids, counted] = await Promise.all([listIds(), countAll()]);
+  const total = Math.max(counted, ids.length);
   return { ids, total, totalCapped: total >= BULK_COUNT_CAP, token: await tokenOf(orgId, f, ids) };
 }
 
