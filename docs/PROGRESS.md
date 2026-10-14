@@ -1584,3 +1584,22 @@ staging drill and Time Travel re-drill, audit of unknown-installation 403s, type
 - Rebased over #47 and #51: renumbered 0023 to 0026; carries 0024's `integrations.credential_fingerprint`;
   `route-policy` gained the two revoke routes and `/health/ready`; the retention matrix has a row for the quarantine.
   Rebased again over #53 (0025): the rebuild also carries `deliveries.duplicate_of`, `suppressed_reason`, `possible_duplicate` and `provider_message_id`; the three new ledger tables need no rebuild; the routes `/api/deliveries/replay-plan` and `/replay` are in the registry and the drill; three retention statements (`PURGE_EVENT_DEDUP_SQL`, `PURGE_ATTEMPTS_SQL`, `PURGE_DESTINATION_HEALTH_SQL`) are allowlisted with reasons; the scanner accepts an outer row picked by equality with a scoped subquery. The legacy seed now holds rows with the new columns.
+
+## Slice 6f: setup flow, shell and navigation, state gates (ADR 0025)
+
+- **Server model.** `GET /api/setup/progress` v2: seven steps, five states, `blockedBy`, `nextAction`, `resume`.
+  Derived from `github_installations`, `sources`, `integrations` and the delivery ledger; "GitHub App not configured"
+  is a real `blocked` state from `githubAppConfig(env)`. `tests/api/setup-progress.test.ts`: 38 tests (pure table,
+  API, tenant isolation, index-driven plans).
+- **`/setup/:step`** (`web/src/setup/`): GitHub, repository, destination (creates the integration through the normal
+  `POST /api/integrations`), events (optional), test, done. State comes from the server on every load; the only
+  client state is the in-memory draft of the step in progress.
+- **Shell.** `web/src/shell/route-guard.ts` (rows, not an array of exact paths), shell 404, breadcrumbs, `returnTo`
+  validated by `safeReturnTo`, Activity nav link for failed deliveries.
+- **Settings.** Section order per F217, `RepairPanel`, `HealthSection`, `HistorySection`.
+- **States.** `Skeleton`, `EmptyState`, `ErrorPanel` (what, why, what to do, how to get help); banned-phrase test over
+  both catalogues; four filler messages rewritten.
+- **Verified:** unit, jsdom and axe tests (see the PR). Browser pass against `npm run dev`: see the PR description for
+  exactly what was and was not driven by hand.
+- **Not done:** real-provider validation of the GitHub connect round trip, Slack OAuth, Teams auth capture, screenshots
+  pipeline, screen-reader and device matrix, usability test (F226).

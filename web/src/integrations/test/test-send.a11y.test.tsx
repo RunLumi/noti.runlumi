@@ -4,7 +4,7 @@ import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { audit, describeViolations } from '../../a11y/testing/axe';
-import { INTEGRATIONS, SETUP_PROGRESS } from '../../a11y/testing/fixtures';
+import { INTEGRATIONS, SETUP_BLOCKED, SETUP_DONE } from '../../a11y/testing/fixtures';
 import { renderApp, type RenderOptions } from '../../a11y/testing/render';
 
 /**
@@ -221,39 +221,55 @@ describe('create wizard: the optional "Test it" step', () => {
 });
 
 describe('setup progress on the Overview', () => {
-  it('lists the steps from the server, marks done ones with words, and offers only the next action', async () => {
+  it('lists the steps from the server, says each state in words, and links only the next action', async () => {
     await renderApp('/');
     const card = (await screen.findByRole('heading', { name: 'Finish setting up' })).closest('section');
     if (!card) throw new Error('no card');
-    expect(within(card).getByText('2 of 4 steps done')).toBeTruthy();
+    // Six steps after the always-done workspace; "skipped" counts as settled.
+    expect(within(card).getByText('4 of 6 steps done')).toBeTruthy();
     const steps = within(card).getAllByRole('listitem');
-    expect(steps).toHaveLength(4);
+    expect(steps).toHaveLength(6);
     expect(within(steps[0]).getByText(/Done/)).toBeTruthy();
-    expect(within(steps[2]).getByText(/Next/)).toBeTruthy();
-    expect(within(steps[3]).getByText(/Not done yet/)).toBeTruthy();
-    const action = within(card).getByRole('link', { name: 'Send a test' });
-    expect(action.getAttribute('href')).toBe('/integrations');
-    // Only the next step carries a button.
-    expect(within(card).getAllByRole('link')).toHaveLength(1);
+    expect(within(steps[3]).getByText(/Optional · Skipped/)).toBeTruthy();
+    expect(within(steps[4]).getByText(/Next/)).toBeTruthy();
+    expect(within(steps[5]).getByText(/To do/)).toBeTruthy();
+    // The step title and the one primary button both lead to the next step.
+    const actions = within(card).getAllByRole('link', { name: 'Send a test' });
+    expect(actions.map((a) => a.getAttribute('href'))).toEqual(['/setup/test', '/setup/test']);
     await expectClean('setup progress');
   });
 
-  it('reports an accepted-only destination as accepted, not done', async () => {
+  it('says why a step is blocked, from the server’s reason', async () => {
+    await renderApp('/', { api: { setup: SETUP_BLOCKED, githubConfigured: false, installations: [] } });
+    const card = (await screen.findByRole('heading', { name: 'Finish setting up' })).closest('section');
+    if (!card) throw new Error('no card');
+    expect(within(card).getAllByText(/Blocked because:/).length).toBeGreaterThan(0);
+    expect(within(card).getAllByText(/no GitHub App configured/).length).toBeGreaterThan(0);
+    expect(within(card).getAllByRole('link', { name: 'Connect GitHub' }).length).toBeGreaterThan(0);
+    await expectClean('setup blocked');
+  });
+
+  it('reports an accepted-only destination as accepted, not as confirmed', async () => {
     await renderApp('/', {
       api: {
         setup: {
-          ...SETUP_PROGRESS,
-          steps: SETUP_PROGRESS.steps.map((s) =>
-            s.id === 'destination_verified' ? { ...s, status: 'accepted', since: '2026-10-02T09:00:00Z' } : s,
+          ...SETUP_DONE,
+          complete: false,
+          next: 'activated',
+          nextAction: 'trigger_real_event',
+          steps: SETUP_DONE.steps.map((s) =>
+            s.id === 'test_delivered'
+              ? { ...s, verification: 'accepted' }
+              : s.id === 'activated'
+                ? { ...s, state: 'todo', done: false, since: null }
+                : s,
           ),
         },
       },
     });
     const card = (await screen.findByRole('heading', { name: 'Finish setting up' })).closest('section');
     if (!card) throw new Error('no card');
-    expect(within(card).getByText(/Accepted, not confirmed/)).toBeTruthy();
     expect(within(card).getByText(/does not confirm it was shown/)).toBeTruthy();
-    expect(within(card).getByText('2 of 4 steps done')).toBeTruthy();
     await expectClean('setup accepted');
   });
 
@@ -263,19 +279,28 @@ describe('setup progress on the Overview', () => {
     await expectClean('setup progress (vi)');
   });
 
-  it('disappears when every step is done', async () => {
+  it('shrinks to one honest line when setup is complete but no real event has come', async () => {
     await renderApp('/', {
       api: {
         setup: {
-          ...SETUP_PROGRESS,
-          steps: SETUP_PROGRESS.steps.map((s) => ({ ...s, done: true, status: 'done', nextAction: 'none' })),
-          complete: true,
-          next: null,
+          ...SETUP_DONE,
+          next: 'activated',
+          nextAction: 'trigger_real_event',
+          steps: SETUP_DONE.steps.map((s) =>
+            s.id === 'activated' ? { ...s, state: 'todo', done: false, since: null } : s,
+          ),
         },
       },
     });
+    await screen.findByRole('heading', { name: 'Setup is complete' });
+    expect(screen.queryByRole('heading', { name: 'Finish setting up' })).toBeNull();
+  });
+
+  it('disappears when every step is done', async () => {
+    await renderApp('/', { api: { setup: SETUP_DONE } });
     await screen.findByText(/Get started/);
     expect(screen.queryByRole('heading', { name: 'Finish setting up' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Setup is complete' })).toBeNull();
   });
 
   it('renders nothing, and no alert, if the progress cannot be read', async () => {

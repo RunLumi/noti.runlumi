@@ -14,7 +14,7 @@ const STATUS_LABEL = {
   uninstalled: 'github.status.uninstalled',
 } as const;
 
-function Installation({ orgId, installation }: { orgId: string; installation: GithubInstallation }) {
+export function Installation({ orgId, installation }: { orgId: string; installation: GithubInstallation }) {
   useLocale();
   const { account, status } = installation;
   const scope =

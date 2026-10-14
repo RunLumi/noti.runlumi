@@ -641,30 +641,47 @@ eligible and replays nothing; two identical concurrent requests create each repl
 
 ## Setup progress
 
-`GET /api/setup/progress` (`delivery.read`) is derived from real rows on every request; nothing is
-stored and the browser holds no step state ([ADR 0018](adr/0018-test-send.md)).
+`GET /api/setup/progress` (`delivery.read`), **version 2** ([ADR 0025](adr/0025-setup-and-shell-ux.md), supersedes
+the four-step model of [ADR 0018](adr/0018-test-send.md)). Derived from real rows on every request; nothing is
+stored and the browser holds no step state, so a refresh, a second device and a shared link agree.
 
 ```ts
 type SetupProgress = {
+  version: 2;
   organizationId: string;
   steps: {
-    id: 'source_connected' | 'integration_created' | 'destination_verified' | 'first_event_received';
-    done: boolean;              // true only for status 'done'
-    status: 'done' | 'accepted' | 'todo';  // 'accepted': the destination accepted a message and never confirmed it
-    since: string | null;       // ISO instant of the earliest evidence; null when not done
-    nextAction: 'connect_source' | 'create_integration' | 'send_test' | 'trigger_real_event' | 'none';
+    id: 'workspace_created' | 'github_connected' | 'repositories_selected' | 'destination_connected'
+      | 'events_chosen' | 'test_delivered' | 'activated';
+    state: 'todo' | 'doing' | 'done' | 'blocked' | 'skipped';
+    done: boolean;                       // true only for state 'done'
+    optional: boolean;                   // events_chosen and activated never keep `complete` false
+    verification: 'confirmed' | 'accepted' | null;   // test_delivered only
+    since: string | null;                // ISO instant of the earliest evidence
+    nextAction: 'connect_github' | 'pick_repository' | 'choose_destination' | 'refine_events' | 'send_test'
+      | 'repair_integration' | 'resume_integration' | 'trigger_real_event' | 'none';
+    blockedBy: 'github_app_not_configured' | 'github_not_connected' | 'credentials_quarantined'
+      | 'integration_paused' | null;
   }[];
-  complete: boolean;
-  next: string | null;          // the first step not done
+  complete: boolean;                     // every required step is done or skipped
+  next: StepId | null;                   // first step still todo, doing or blocked
+  nextAction: NextAction;                // the next step's action
+  resume: { step: StepId; integrationId: string | null; point: string };   // where a returning person lands
   verifiedWindowDays: 30;
 };
 ```
 
-`source_connected`: an active GitHub installation or any **enabled** generic, GitLab or Stripe source.
-`integration_created`: any integration. `destination_verified`: a `sent` delivery (`done`) or, failing
-that, an `accepted` one (`accepted`) within 30 days, test or real, to an integration that still exists, is
-enabled and not quarantined. `complete` means no step is `todo`. `first_event_received`: any non-test delivery, in any state. Reads
-are limited to 120 per minute per user (`429` with `Retry-After`).
+- `github_connected`: `done` with an **active** GitHub installation; `skipped` with none but another enabled
+  source; `blocked` (`github_app_not_configured`) when this server has no GitHub App credentials.
+- `repositories_selected` and `destination_connected` flip together when an integration exists (it is created in one
+  request); the destination is `blocked` (`credentials_quarantined`) while its credentials are quarantined.
+- `events_chosen` (optional): `done` when the newest integration has events other than the quiet default
+  (`workflow_run.failure`, `workflow_run.timed_out`), filters, noise settings or a generic source; else `skipped`.
+- `test_delivered`: a `sent` delivery (`confirmed`) or an `accepted` one (`accepted`, not confirmed shown) within 30
+  days, test or real, to an integration that exists, is enabled and not quarantined. `blocked` when the newest
+  integration is paused or quarantined.
+- `activated` (optional): any non-test delivery, in any state.
+- Exactly one step is `doing` when `next` is a `todo` step; a `blocked` next step stays `blocked`. `resume.point`
+  changes when the resume point does. Reads are limited to 120 per minute per user (`429` with `Retry-After`).
 
 ## Workspace export and deletion (admin)
 

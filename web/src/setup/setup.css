@@ -68,3 +68,182 @@
   margin: var(--space-4) 0 0;
   font-size: 14px;
 }
+
+.setup-step-blocked .setup-mark {
+  border-color: var(--color-risk-red);
+  background: var(--color-red-soft);
+  color: var(--color-risk-red);
+}
+
+.setup-step-skipped .setup-mark {
+  border-style: dashed;
+}
+
+.setup-blocked {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-amber-soft);
+  border-left: 3px solid var(--color-signal-amber);
+  border-radius: var(--radius-compact);
+  overflow-wrap: anywhere;
+}
+
+.setup-card-complete .setup-summary {
+  margin-bottom: var(--space-3);
+}
+
+/* --- The /setup flow (ADR 0025): the wizard's frame, with links in the step list ------------- */
+.setup-flow .setup-nav {
+  min-width: 0;
+}
+
+.stepper-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch-target);
+  color: inherit;
+  text-decoration: none;
+}
+
+.stepper-item:has(.stepper-link) {
+  padding: 0;
+}
+
+.stepper-link:hover .stepper-title {
+  text-decoration: underline;
+}
+
+.stepper-item .stepper-link {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+}
+
+.setup-state-word {
+  display: block;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--color-soft-slate);
+}
+
+.setup-actions-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+.setup-connected,
+.setup-done {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.setup-wrong-account {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: var(--border-hairline);
+  justify-items: start;
+}
+
+.setup-wrong-account h4,
+.setup-done h3 {
+  margin: 0;
+}
+
+.setup-done h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-success-green);
+}
+
+.setup-verified {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-green-soft);
+  border-left: 3px solid var(--color-success-green);
+  border-radius: var(--radius-compact);
+}
+
+/* --- What a destination can show ------------------------------------------------------------ */
+.ability-summary {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-paper-white);
+  border: var(--border-archival);
+  border-radius: var(--radius-control);
+}
+
+.ability-summary h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.ability-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ability {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  overflow-wrap: anywhere;
+}
+
+.ability-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-chip);
+  border: 1px solid var(--color-border-strong);
+}
+
+.ability-yes .ability-mark {
+  border-color: var(--color-success-green);
+  color: var(--color-success-green);
+}
+
+.ability-no .ability-mark {
+  border-style: dashed;
+  color: var(--color-soft-slate);
+}
+
+/* --- Repository picker: scope lines and the way to change access on GitHub ------------------- */
+.repo-access {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.repo-scope-list,
+.repo-help-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .setup-flow .setup-nav {
+    display: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .setup-blocked,
+  .setup-verified,
+  .ability-summary {
+    border: 1px solid CanvasText;
+  }
+}

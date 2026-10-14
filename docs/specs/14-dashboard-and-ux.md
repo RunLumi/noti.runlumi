@@ -70,7 +70,7 @@ billing-on-messages-sent, which lives outside both of this session's ranges and 
 
 ## F205 — Information architecture and navigation
 
-**Priority** P0 · **Status** 🟡 shell with workspace switcher and admin-only Audit entry (`web/src/pages.tsx`, ADR 0019); not built: breadcrumbs, 404 inside the shell (route guard is still an exact-match `privatePaths` array), `returnTo` handoff, `/setup` route space, Destinations health item; admins see seven nav items, over the six-item cap
+**Priority** P0 · **Status** 🟡 slice 6f, ADR 0025: declarative route guard (`web/src/shell/route-guard.ts`), 404 inside the shell, breadcrumbs, same-origin `returnTo`, `/setup` route space, admin-only Audit hidden from members, failed-deliveries nav link; not built: Destinations health item, six-item nav cap for admins
 
 **Story** As a person who does not work with developer tools, I want to find the one thing I
 came for, so that I never have to guess where something is.
@@ -292,7 +292,7 @@ the type it accepts omits it (F97). Redaction at render time is a fallback, not 
 
 ## F207 — Setup progress model
 
-**Priority** P0 · **Status** 🟡 slice 6d, ADR 0018: `GET /api/setup/progress` derives four steps from real rows (`src/api/setup-progress.ts`, `tests/api/setup-progress.test.ts`) and the Overview card shows them (`web/src/setup/`); not built: seven-step `StepId` set, two state machines, current and blocked status, blocking_reason, why_this_step, server titles and hrefs, repo and event steps, `/api/workspace/setup-state` path
+**Priority** P0 · **Status** 🟡 slice 6f, ADR 0025: `GET /api/setup/progress` v2 returns seven steps with todo, doing, done, blocked, skipped, `nextAction`, `resume` and `blockedBy` from real rows (`src/api/setup-progress.ts`); not built: `setup_progress` table, `skip_test` recorded choice, second state machine for additional integrations
 
 **Story** As someone who got interrupted, I want to be told exactly what to do next, so that I
 can finish what I started without remembering what I did.
@@ -1286,7 +1286,7 @@ unredacted payload at all.
 
 ## F216 — Setup wizard shell and step navigation
 
-**Priority** P0 · **Status** 🟡 create wizard with optional seventh Test it step (`web/src/integrations/wizard/`, slice 6d); not built: `/setup/...` route space (wizard is `/integrations/new` component state), server-driven steps, resume of an interrupted wizard, per-step deep links · **Referenced by `07:F98`, `00-current-state.md:N3`**
+**Priority** P0 · **Status** 🟡 slice 6f, ADR 0025: `/setup/:step` route space (`web/src/setup/`), resume from the server, deep links, Back and Forward, prerequisite notices, honest blocked state, optional steps skippable; not built: sticky next-step bar, "manage your connection" mode, admin-approval waits · **Referenced by `07:F98`, `00-current-state.md:N3`**
 
 **Story** As a new user, I want one guided path from nothing to a notification that works, so
 that I never have to work out the order myself.
@@ -1380,7 +1380,7 @@ never logged in full (F208). All writes are tenant-scoped and audited where F222
 
 ## F217 — Integration settings
 
-**Priority** P0 · **Status** 🟡 `/integrations/:id` with status, test send, details form with unsaved-changes blocker, filters, noise, write-only credentials with rotate, typed-name delete (`web/src/integrations/settings/`, ADR 0007); not built: stable nine-section order, destination cards, health and history sections, pause consequence copy with counts, disconnect-source, delete impact counts, repair panel
+**Priority** P0 · **Status** 🟡 slice 6f, ADR 0025: stable section order (status, source, filters, destination, test, noise, credentials, health, history, danger), repair panel, health from the delivery ledger, history links; not built: pause consequence counts, delete impact counts, disconnect-source
 
 **Story** As an administrator, I want one screen per connection where I can see and change
 everything about it, so that I never hunt through menus to turn something off.

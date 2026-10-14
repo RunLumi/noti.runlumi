@@ -252,13 +252,38 @@ the browser has it). Design decisions, so they are reviewable:
   the new fieldsets and read-outs, native time-picker behaviour on phones, Vietnamese
   diacritics) and a screen-reader pass.
 
-## Setup progress (`web/src/setup/`)
+## Setup flow, shell and state components (`web/src/setup/`, `web/src/shell/`, `web/src/components/`)
 
-Decisions: [ADR 0018](adr/0018-test-send.md). `SetupProgressCard` on the Overview lists the four
-derived steps from `GET /api/setup/progress`, with the next action as the only button, linking to
-existing routes. It disappears when every step is done and renders nothing (no alert) while loading
-or on error. The result of a test is announced through a polite `role="status"` region that exists
-before the click; focus stays on the button. Test rows in the delivery log carry a "Test" badge.
+Decisions: [ADR 0025](adr/0025-setup-and-shell-ux.md) (supersedes the setup part of ADR 0018).
+
+- **`/setup` and `/setup/:step`** (`github`, `repository`, `destination`, `events`, `test`, `done`). `SetupResume` asks
+  `GET /api/setup/progress` where the workspace left off and replaces its history entry with that step; `SetupFlow`
+  renders the page with the step list (`aria-current="step"`, each state spelled in words, hidden below 900px where
+  the heading says "Step n of 6"). Done-ness is never remembered in the browser. The one thing held client-side is the
+  draft of the step in progress (repository, destination, webhook address), in memory, guarded by a leave
+  confirmation only when it leaves `/setup`. Pages reuse the wizard's `SourceStep`, `DestinationStep`, `WebhookStep`,
+  `EventPicker`, `TestSend` and `EnabledSwitch`; the integration is created by the normal `POST /api/integrations`.
+- **Blocked states** come from the server's `blockedBy` (`blocked.ts`): a server without a GitHub App says so, says
+  whose move it is, and offers the signed-webhook source instead of a button that cannot work.
+- **Overview card** (`SetupProgressCard`): the six steps with their states, blocked reasons, and one button into the
+  next step; one honest line once setup is complete but no real event has arrived; nothing when all is done.
+- **GitHub return.** GitHub always returns to `/integrations?github=<status>`; a trip started in setup sets a
+  `sessionStorage` hint (a hint to resume, never state) and `GithubReturnStatus` forwards to `/setup/github`.
+- **Shell.** `shell/route-guard.ts` lists routes as rows (`public`, `authenticated`, `admin`); an address with no row
+  gets the 404 page inside the shell when signed in (`RootNotFound`, also the router's `notFoundComponent`). Sign-in
+  `returnTo` goes through `safeReturnTo` (relative, same origin only). Breadcrumbs (`Breadcrumbs`, `crumbs.ts`) on
+  integration settings, the create wizard and setup steps; delivery detail and source detail are not routes. A
+  failed-deliveries link appears under Activity when the server counts failed deliveries.
+- **Destination abilities** (`CapabilitySummary`, `abilities.ts`): static client facts, compared field by field to
+  `src/connectors/destinations/capabilities.ts` by `setup.test.ts`.
+- **Integration settings order**: status (+ repair panel), source and updates, filters, destination, test, quiet
+  hours, credentials, health, history, delete. Health and the repair panel read `/api/deliveries?integration=`.
+- **Shared states**: `Skeleton`, `EmptyState`, `ErrorPanel` (what happened, why, what to do, how to get help). The
+  ErrorPanel is chosen by the kind of failure, never by server text. `error-copy.test.ts` bans filler phrases in both
+  catalogues. No support address exists in the product yet, so help says "tell your workspace admin" plus the
+  reference.
+- The result of a test is announced through a polite `role="status"` region that exists before the click; focus stays
+  on the button. Test rows in the delivery log carry a "Test" badge.
 
 ## Sources feature (`web/src/sources/`)
 
@@ -371,6 +396,8 @@ Set the custom domain, origin policy, secure cookies, D1, Queue and outbound tra
 before public use. Rollback: see ADR 0017.
 
 ## Not yet verified
+
+- Slice 6f (setup flow, shell, settings sections): see the browser record in `docs/adr/0025-setup-and-shell-ux.md`. Not exercised anywhere: the GitHub connect round trip with a real App, a real provider accepting a test from the setup flow, screen readers, Safari and Firefox, a real 320px run in CI.
 
 - Slice 6d (test send, setup progress): no screenshot was taken and no real provider accepted a test; the success, accepted and failed panels, the wizard's "Test it" step, keyboard order and contrast have only jsdom and axe coverage. See `docs/PROGRESS.md`, "Slice 6d: browser verification".
 

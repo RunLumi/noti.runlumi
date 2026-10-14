@@ -7,6 +7,7 @@
  */
 import { auditEn } from './messages.audit.en';
 import { destinationsEn } from './messages.destinations.en';
+import { flowEn } from './messages.flow.en';
 import { filtersEn } from './messages.filters.en';
 import { ledgerEn } from './messages.ledger.en';
 import { noiseEn } from './messages.noise.en';
@@ -21,6 +22,7 @@ export const en = {
   ...noiseEn,
   ...ledgerEn,
   ...setupEn,
+  ...flowEn,
   ...providersEn,
   ...destinationsEn,
 
@@ -287,7 +289,7 @@ export const en = {
   'error.rateLimitedFor':
     'That was a lot of changes in a short time. Wait {seconds} seconds, then try again.',
   'error.tooLarge': 'That is more than Noti accepts in one request. Shorten the longest field.',
-  'error.server': 'Something went wrong on our side. Reload to see what was saved.',
+  'error.server': 'Noti hit a problem on its own side. Reload to see what was saved.',
   'error.validation': 'Some fields need attention.',
   'error.reference': 'Reference for support: HTTP {status}',
 
@@ -349,7 +351,7 @@ export const en = {
     'This Noti server has no GitHub App configured, so GitHub can’t be connected yet.',
   'github.return.signin_required': 'Sign in to Noti, then choose Connect GitHub again.',
   'github.return.unexpected_error':
-    'Something went wrong while connecting GitHub, and nothing was connected. Try again; if it keeps happening, contact support.',
+    'Noti couldn’t finish connecting GitHub, and nothing was connected. Try again; if it keeps happening, tell your workspace admin.',
 
   // --- Repository picker ----------------------------------------------------
   'repo.picker': 'GitHub repository',
@@ -531,7 +533,7 @@ export const en = {
   'errors.config_invalid':
     'This integration has a setting Noti can’t read. Open its settings and save them again.',
   'errors.internal_error':
-    'Something went wrong on Noti’s side. Your notification was not lost and can be redelivered.',
+    'Noti hit a problem on its own side. Your notification was not lost and can be redelivered.',
 
   // --- Workspace data and deletion (Settings) ---------------------------------
   'workspace.export.title': 'Export workspace data',

@@ -13,6 +13,9 @@ import { AppShell, Overview, Activity, Team, Settings, AuthPage, VerifyPage, Res
 import { OnboardingPage, InvitePage } from '../../onboarding';
 import { IntegrationsPage } from '../../integrations/IntegrationsPage';
 import { SourcesPage } from '../../sources/SourcesPage';
+import { SetupFlow } from '../../setup/SetupFlow';
+import { SetupResume } from '../../setup/SetupResume';
+import { RootNotFound } from '../../shell/NotFound';
 import { CreateWizard } from '../../integrations/wizard/CreateWizard';
 import { IntegrationSettings } from '../../integrations/settings/IntegrationSettings';
 import { validateActivitySearch } from '../../deliveries/search';
@@ -48,6 +51,8 @@ export const ROUTE_PATHS = [
   '/integrations',
   '/integrations/new',
   '/integrations/$id',
+  '/setup',
+  '/setup/$step',
   '/sources',
   '/onboarding',
   '/invite',
@@ -63,7 +68,7 @@ export const ROUTE_PATHS = [
 ] as const;
 
 function buildRouter(initialPath: string) {
-  const root = createRootRoute({ component: AppShell });
+  const root = createRootRoute({ component: AppShell, notFoundComponent: RootNotFound });
   const route = (path: string, component: () => ReactNode) =>
     createRoute({ getParentRoute: () => root, path, component });
   const tree = root.addChildren([
@@ -71,6 +76,8 @@ function buildRouter(initialPath: string) {
     route('/integrations', IntegrationsPage),
     route('/integrations/new', CreateWizard),
     route('/integrations/$id', IntegrationSettings),
+    route('/setup', SetupResume),
+    route('/setup/$step', SetupFlow),
     route('/sources', SourcesPage),
     route('/onboarding', OnboardingPage),
     route('/invite', InvitePage),

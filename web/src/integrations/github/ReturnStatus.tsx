@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useRouter } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Notice } from '../../components/ui';
+import { SETUP_RETURN_KEY } from './ConnectGithubButton';
 import { t, type MessageId } from '../../i18n';
 import { useLocale } from '../../i18n/LocaleProvider';
 
@@ -24,6 +26,23 @@ const RETURN_MESSAGES = {
   unexpected_error: 'github.return.unexpected_error',
 } as const satisfies Record<string, MessageId>;
 
+/** True if the install trip was started from the setup flow (a hint, cleared once acted on). */
+function cameFromSetup(): boolean {
+  try {
+    return window.sessionStorage.getItem(SETUP_RETURN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function clearSetupHint(): void {
+  try {
+    window.sessionStorage.removeItem(SETUP_RETURN_KEY);
+  } catch {
+    // Nothing to clear if storage is unavailable.
+  }
+}
+
 export type ReturnStatusCode = keyof typeof RETURN_MESSAGES;
 
 export function returnMessage(code: string | null): { id: MessageId; ok: boolean } | null {
@@ -39,26 +58,55 @@ export function returnMessage(code: string | null): { id: MessageId; ok: boolean
  * Reads `?github=<status>` once, explains it in plain words, and removes it from the address
  * bar (`history.replaceState`) so a reload or a shared link does not repeat it.
  */
-export function GithubReturnStatus({ orgId }: { orgId: string }) {
+export function GithubReturnStatus({
+  orgId,
+  next = '/integrations/new',
+  resumeSetup = false,
+}: {
+  orgId: string;
+  /** Where "next" leads after a successful connection. */
+  next?: '/integrations/new' | '/setup/repository';
+  /** On Integrations: if the trip began in setup, go back there with the same status. */
+  resumeSetup?: boolean;
+}) {
   useLocale();
   const qc = useQueryClient();
+  const router = useRouter();
   const [message] = useState(() => returnMessage(new URLSearchParams(window.location.search).get('github')));
+  const [fromSetup] = useState(() => resumeSetup && cameFromSetup());
   useEffect(() => {
     if (!message) return;
+    if (fromSetup) {
+      // GitHub always returns to Integrations; a trip that began in setup continues there.
+      clearSetupHint();
+      void router.navigate({
+        to: '/setup/$step',
+        params: { step: 'github' },
+        search: { github: new URLSearchParams(window.location.search).get('github') ?? undefined },
+        replace: true,
+      });
+      return;
+    }
     const url = new URL(window.location.href);
     url.searchParams.delete('github');
     window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
     void qc.invalidateQueries({ queryKey: ['github', orgId] });
-  }, [message, qc, orgId]);
+  }, [message, qc, orgId, fromSetup, router]);
   if (!message) return null;
   return (
     <Notice kind={message.ok ? 'success' : 'error'}>
       <p>{t(message.id)}</p>
       {message.ok && (
         <p>
-          <Link to="/integrations/new" className="text-link">
-            {t('github.return.next')}
-          </Link>
+          {next === '/setup/repository' ? (
+            <Link to="/setup/$step" params={{ step: 'repository' }} className="text-link">
+              {t('setup.flow.github.next')}
+            </Link>
+          ) : (
+            <Link to="/integrations/new" className="text-link">
+              {t('github.return.next')}
+            </Link>
+          )}
         </p>
       )}
     </Notice>

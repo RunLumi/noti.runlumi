@@ -12,20 +12,47 @@ export interface UserError {
   readonly reference: string | null;
 }
 
-function idFor(status: number, serverMessage: string): MessageId {
-  if (status === 0) return 'error.network';
-  if (status === 401) return 'error.session';
+/** What kind of failure a request had; copy is chosen from this, never from server text. */
+export type ErrorKind =
+  | 'network'
+  | 'session'
+  | 'forbidden'
+  | 'blocked'
+  | 'notFound'
+  | 'quota'
+  | 'rateLimited'
+  | 'tooLarge'
+  | 'validation'
+  | 'server';
+
+export function errorKind(error: unknown): ErrorKind {
+  if (!(error instanceof ApiError)) return 'server';
+  const { status } = error;
+  if (status === 0) return 'network';
+  if (status === 401) return 'session';
   // 403 is either a missing capability or the Origin check; only the first is about the role.
-  if (status === 403)
-    return serverMessage.startsWith('Missing capability') ? 'error.forbidden' : 'error.blocked';
-  if (status === 404) return 'error.notFound';
-  if (status === 409) return 'error.quota';
-  if (status === 413) return 'error.tooLarge';
-  if (status === 429) return 'error.rateLimited';
-  if (status === 415 || status === 400) return 'error.blocked';
-  if (status === 422) return 'error.validation';
-  return 'error.server';
+  if (status === 403) return error.message.startsWith('Missing capability') ? 'forbidden' : 'blocked';
+  if (status === 404) return 'notFound';
+  if (status === 409) return 'quota';
+  if (status === 413) return 'tooLarge';
+  if (status === 429) return 'rateLimited';
+  if (status === 415 || status === 400) return 'blocked';
+  if (status === 422) return 'validation';
+  return 'server';
 }
+
+const KIND_MESSAGE: Readonly<Record<ErrorKind, MessageId>> = {
+  network: 'error.network',
+  session: 'error.session',
+  forbidden: 'error.forbidden',
+  blocked: 'error.blocked',
+  notFound: 'error.notFound',
+  quota: 'error.quota',
+  rateLimited: 'error.rateLimited',
+  tooLarge: 'error.tooLarge',
+  validation: 'error.validation',
+  server: 'error.server',
+};
 
 export function describeError(error: unknown): UserError {
   if (error instanceof ApiError) {
@@ -35,7 +62,7 @@ export function describeError(error: unknown): UserError {
         reference: t('error.reference', { status: '429' }),
       };
     return {
-      message: t(idFor(error.status, error.message)),
+      message: t(KIND_MESSAGE[errorKind(error)]),
       reference: error.status > 0 ? t('error.reference', { status: String(error.status) }) : null,
     };
   }

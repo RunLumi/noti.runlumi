@@ -9,14 +9,14 @@ import { WorkspaceDataPanel } from './workspace/WorkspaceDataPanel';
 import { DeleteAccountPanel } from './account/DeleteAccountPanel';
 import { WorkspaceSwitcher } from './workspace/WorkspaceSwitcher';
 import { WorkspaceDriftBanner } from './workspace/drift';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { Link, Outlet, useNavigate, useRouter, useRouterState } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   IconActivity,
+  IconAlertTriangle,
   IconArrowRight,
   IconBell,
-  IconChevronRight,
   IconHistory,
   IconLayoutDashboard,
   IconLogout,
@@ -30,23 +30,16 @@ import {
 } from '@tabler/icons-react';
 import { authApi } from './lib/api';
 import { Badge, Button, Card, Input, Notice } from './components/ui';
-import { t } from './i18n';
+import { t, tp } from './i18n';
 import { LocaleSwitcher } from './i18n/LocaleSwitcher';
 import { RouteA11y } from './a11y/RouteA11y';
 import { SkipLink } from './a11y/SkipLink';
-import { routeTitleId } from './a11y/route-titles';
+import { Breadcrumbs } from './shell/Breadcrumbs';
+import { accessFor, isShellRoute, visibleNav } from './shell/route-guard';
+import { returnToFor, safeReturnTo } from './shell/return-to';
+import { useDeliverySummary } from './deliveries/hooks';
 import { roleLabel } from './lib/role-label';
 import { useLocale } from './i18n/LocaleProvider';
-const privatePaths = [
-  '/',
-  '/integrations',
-  '/sources',
-  '/activity',
-  '/audit',
-  '/team',
-  '/settings',
-  '/onboarding',
-];
 /** `/integrations/new` and `/integrations/:id` live under the Integrations section. */
 const sectionOf = (pathname: string) => '/' + (pathname.split('/')[1] ?? '');
 function Logo() {
@@ -67,33 +60,70 @@ export function AppShell() {
     </>
   );
 }
+const NAV_ICONS = {
+  '/': IconLayoutDashboard,
+  '/integrations': IconWebhook,
+  '/sources': IconPlugConnected,
+  '/activity': IconActivity,
+  '/team': IconUsers,
+  '/audit': IconHistory,
+  '/settings': IconSettings,
+} as const;
+/** Failed deliveries are the thing a person most needs to find; the count is the server's, never guessed. */
+function FailedNavLink({ orgId }: { orgId: string }) {
+  useLocale();
+  const summary = useDeliverySummary(orgId);
+  const failed = summary.data?.dead_lettered ?? 0;
+  if (failed === 0) return null;
+  return (
+    <Link to="/activity" search={{ state: 'dead_lettered' }} className="nav-link nav-sublink">
+      <IconAlertTriangle size={16} aria-hidden="true" />
+      {tp('nav.failed', failed)}
+    </Link>
+  );
+}
+function CenterLoading() {
+  useLocale();
+  return (
+    <div className="center-screen">
+      <Logo />
+      <p>{t('shell.loading')}</p>
+    </div>
+  );
+}
 function ShellContent() {
   useLocale();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const section = sectionOf(pathname);
-  const isPrivate = privatePaths.includes(section);
-  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, retry: false, enabled: isPrivate });
+  const searchStr = useRouterState({ select: (s) => s.location.searchStr });
+  const access = accessFor(pathname);
+  const inShell = isShellRoute(pathname);
+  // An address nothing declares is answered with the 404 page, inside the shell when signed in.
+  const unknown = access === null;
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me, retry: false, enabled: inShell || unknown });
   const nav = useNavigate();
   useEffect(() => {
-    if (!isPrivate || me.isPending) return;
+    if (!inShell || me.isPending) return;
     if (me.isError) {
-      void nav({ to: '/signin' });
+      // Bring the person back to this exact page after signing in (same-origin paths only).
+      const back = returnToFor({ pathname, search: searchStr });
+      void nav(back ? { to: '/signin', search: { returnTo: back } } : { to: '/signin' });
       return;
     }
     if (me.data && !me.data.user.org_id && pathname !== '/onboarding') {
       void nav({ to: '/onboarding' });
       return;
     }
-  }, [isPrivate, me.isPending, me.isError, me.data, pathname, nav]);
-  if (!isPrivate) return <Outlet />;
-  if (me.isPending)
+  }, [inShell, me.isPending, me.isError, me.data, pathname, searchStr, nav]);
+  if (access === 'public') return <Outlet />;
+  if (me.isPending) return <CenterLoading />;
+  if (unknown && (me.isError || !me.data?.user.org_id))
     return (
-      <div className="center-screen">
-        <Logo />
-        <p>{t('shell.loading')}</p>
-      </div>
+      <main className="center-screen" id="main-content" tabIndex={-1}>
+        <Outlet />
+      </main>
     );
-  if (me.isError) return null;
+  if (me.isError || !me.data) return null;
+  const role = me.data.user.role;
   return (
     <div className="app">
       <SkipLink />
@@ -103,29 +133,25 @@ function ShellContent() {
         </Link>
         <WorkspaceSwitcher user={me.data.user} />
         <nav aria-label={t('shell.navLabel')}>
-          {[
-            { to: '/', icon: IconLayoutDashboard, label: t('nav.overview') },
-            { to: '/integrations', icon: IconWebhook, label: t('nav.integrations') },
-            { to: '/sources', icon: IconPlugConnected, label: t('sources.nav') },
-            { to: '/activity', icon: IconActivity, label: t('nav.activity') },
-            { to: '/team', icon: IconUsers, label: t('nav.team') },
-            // The audit log is admin-only (`audit.read`); a member is not shown a dead link.
-            ...(me.data.user.role === 'admin'
-              ? [{ to: '/audit', icon: IconHistory, label: t('nav.audit') }]
-              : []),
-            { to: '/settings', icon: IconSettings, label: t('nav.settings') },
-          ].map((item) => (
-            <Link
-              key={item.to}
-              to={item.to as '/'}
-              activeOptions={{ exact: true }}
-              aria-current={pathname === item.to ? 'page' : undefined}
-              className={'nav-link ' + (section === item.to ? 'selected' : '')}
-            >
-              <item.icon size={18} aria-hidden="true" />
-              {item.label}
-            </Link>
-          ))}
+          {visibleNav(role).map((item) => {
+            const Icon = NAV_ICONS[item.to];
+            return (
+              <Fragment key={item.to}>
+                <Link
+                  to={item.to}
+                  activeOptions={{ exact: true }}
+                  aria-current={pathname === item.to ? 'page' : undefined}
+                  className={'nav-link ' + (sectionOf(pathname) === item.to ? 'selected' : '')}
+                >
+                  <Icon size={18} aria-hidden="true" />
+                  {t(item.label)}
+                </Link>
+                {item.to === '/activity' && me.data.user.org_id && (
+                  <FailedNavLink orgId={me.data.user.org_id} />
+                )}
+              </Fragment>
+            );
+          })}
         </nav>
         <div className="sidebar-locale">
           <LocaleSwitcher />
@@ -142,10 +168,7 @@ function ShellContent() {
       </aside>
       <main className="main" id="main-content" tabIndex={-1}>
         <header className="topbar">
-          <span>
-            {t('shell.breadcrumbRoot')} <IconChevronRight size={14} aria-hidden="true" />{' '}
-            {t(routeTitleId(section))}
-          </span>
+          <Breadcrumbs />
           <Badge variant="neutral">{t('shell.preview')}</Badge>
         </header>
         <div className="content">
@@ -349,6 +372,7 @@ function AuthFrame({
 export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
   useLocale();
   const nav = useNavigate();
+  const router = useRouter();
   const qc = useQueryClient();
   const [email, setEmail] = useState(''),
     [password, setPassword] = useState(''),
@@ -373,8 +397,12 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
       } else {
         await authApi.signin(email, password);
         await qc.invalidateQueries({ queryKey: ['me'] });
-        const back = new URLSearchParams(window.location.search).get('returnTo');
-        if (back?.startsWith('/invite?id=')) window.location.assign(back);
+        // Only a same-origin, path-relative address is followed; anything else lands on Overview.
+        const back = safeReturnTo(
+          new URLSearchParams(window.location.search).get('returnTo'),
+          window.location.origin,
+        );
+        if (back) router.history.push(back);
         else await nav({ to: '/' });
       }
     } catch (e) {

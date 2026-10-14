@@ -53,7 +53,7 @@ export const appEn = {
   'route.title.forgot': 'Reset your password',
   'route.title.verify': 'Email verification',
   'route.title.reset': 'Choose a new password',
-  'route.title.unknown': 'Lumi Noti',
+  'route.title.unknown': 'Page not found',
 
   // --- Language switcher -------------------------------------------------------------
   'locale.label': 'Language',
@@ -133,7 +133,7 @@ export const appEn = {
   'auth.signinLink': 'Sign in',
   'auth.backToSignin': 'Back to sign in',
   'auth.passkeyNote': 'Passkeys are available after registering one in Settings on a verified account.',
-  'auth.error.generic': 'Something went wrong',
+  'auth.error.generic': 'Noti couldn’t complete that. Check your details and try again.',
   'auth.error.passkey': 'Passkey sign-in failed',
   'auth.signup.sent':
     'Check your email for a verification link. Then sign in to create or join your workspace.',

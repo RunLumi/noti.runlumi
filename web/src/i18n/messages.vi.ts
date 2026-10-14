@@ -1,6 +1,7 @@
 import type { en, PluralMessage } from './messages.en';
 import { auditVi } from './messages.audit.vi';
 import { destinationsVi } from './messages.destinations.vi';
+import { flowVi } from './messages.flow.vi';
 import { filtersVi } from './messages.filters.vi';
 import { ledgerVi } from './messages.ledger.vi';
 import { noiseVi } from './messages.noise.vi';
@@ -27,6 +28,7 @@ export const vi = {
   ...noiseVi,
   ...ledgerVi,
   ...setupVi,
+  ...flowVi,
   ...sourcesVi,
   ...providersVi,
   ...destinationsVi,
@@ -295,7 +297,7 @@ export const vi = {
   'error.rateLimitedFor':
     'Bạn vừa thực hiện quá nhiều thay đổi trong thời gian ngắn. Hãy đợi {seconds} giây rồi thử lại.',
   'error.tooLarge': 'Yêu cầu này lớn hơn mức Noti chấp nhận trong một lần. Hãy rút ngắn ô dài nhất.',
-  'error.server': 'Đã có sự cố ở phía chúng tôi. Hãy tải lại trang để xem những gì đã được lưu.',
+  'error.server': 'Noti gặp sự cố ở phía mình. Hãy tải lại trang để xem những gì đã được lưu.',
   'error.validation': 'Một số ô cần bạn chú ý.',
   'error.reference': 'Mã tham chiếu cho bộ phận hỗ trợ: HTTP {status}',
 
@@ -357,7 +359,7 @@ export const vi = {
   'github.return.not_configured': 'Máy chủ Noti này chưa cấu hình GitHub App, nên chưa thể kết nối GitHub.',
   'github.return.signin_required': 'Hãy đăng nhập vào Noti, rồi chọn Kết nối GitHub lần nữa.',
   'github.return.unexpected_error':
-    'Đã có sự cố khi kết nối GitHub và chưa có gì được kết nối. Hãy thử lại; nếu vẫn lặp lại, hãy liên hệ bộ phận hỗ trợ.',
+    'Noti chưa kết nối xong GitHub và chưa có gì được kết nối. Hãy thử lại; nếu vẫn lặp lại, hãy báo quản trị viên không gian làm việc.',
 
   // --- Repository picker ----------------------------------------------------
   'repo.picker': 'Repository GitHub',
@@ -535,7 +537,8 @@ export const vi = {
   'errors.render_failed': 'Noti không dựng được từ sự kiện này một tin nhắn mà nơi nhận chấp nhận.',
   'errors.config_invalid':
     'Tích hợp này có một cài đặt mà Noti không đọc được. Hãy mở phần cài đặt và lưu lại.',
-  'errors.internal_error': 'Đã có sự cố ở phía Noti. Thông báo của bạn không bị mất và có thể được gửi lại.',
+  'errors.internal_error':
+    'Noti gặp sự cố ở phía mình. Thông báo của bạn không bị mất và có thể được gửi lại.',
 
   // --- Workspace data and deletion --------------------------------------------------
   'workspace.export.title': 'Xuất dữ liệu không gian làm việc',
