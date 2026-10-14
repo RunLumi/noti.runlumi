@@ -70,7 +70,7 @@ billing-on-messages-sent, which lives outside both of this session's ranges and 
 
 ## F205 — Information architecture and navigation
 
-**Priority** P0 · **Status** partial (slice 6e: a workspace switcher in the shell for people in several workspaces, an admin-only Audit log entry; the rest of the information architecture is not started)
+**Priority** P0 · **Status** 🟡 shell with workspace switcher and admin-only Audit entry (`web/src/pages.tsx`, ADR 0019); not built: breadcrumbs, 404 inside the shell (route guard is still an exact-match `privatePaths` array), `returnTo` handoff, `/setup` route space, Destinations health item; admins see seven nav items, over the six-item cap
 
 **Story** As a person who does not work with developer tools, I want to find the one thing I
 came for, so that I never have to guess where something is.
@@ -153,7 +153,7 @@ handoff is the cheapest account-takeover path in a product with email invites; o
 
 ## F206 — Design system, and the no-fake-anything rule
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 Tabler icons, real Lumi logo and self-hosted Geist per ADR 0002; `Notice` exported from `web/src/components/ui.tsx`; glass limited to nav and scrim with opaque fallbacks (`web/src/a11y/stylesheet.test.ts`); not built: `tokens.ts` transcription, token-drift, no-hardcoded-colour and no-fake-number tests, Skeleton, EmptyState, Toast, Tooltip, DataTable components, state matrix, brand-variant test
 
 **Story** As a user, I want the interface to tell me the truth about what exists, so that I
 never act on a promise the product has not kept.
@@ -292,7 +292,7 @@ the type it accepts omits it (F97). Redaction at render time is a fallback, not 
 
 ## F207 — Setup progress model
 
-**Priority** P0 · **Status** partial (slice 6d, ADR 0018: `GET /api/setup/progress` derives four steps from real rows (source connected, integration created, destination verified in the last 30 days, first real event) with `since` and a closed next-action key; the Overview card shows them and disappears when done. **Not done:** the seven-step `StepId` set, the two machines (`workspace_setup`, `integration_setup`), `status` of `current`/`blocked`, `blocking_reason`, `why_this_step`, server-supplied titles and hrefs, repository and event selection as steps, and the endpoint path `/api/workspace/setup-state`)
+**Priority** P0 · **Status** 🟡 slice 6d, ADR 0018: `GET /api/setup/progress` derives four steps from real rows (`src/api/setup-progress.ts`, `tests/api/setup-progress.test.ts`) and the Overview card shows them (`web/src/setup/`); not built: seven-step `StepId` set, two state machines, current and blocked status, blocking_reason, why_this_step, server titles and hrefs, repo and event steps, `/api/workspace/setup-state` path
 
 **Story** As someone who got interrupted, I want to be told exactly what to do next, so that I
 can finish what I started without remembering what I did.
@@ -409,7 +409,7 @@ hatch — it is size-capped and rendered as text only.
 
 ## F208 — GitHub App install flow UI
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 "Connect GitHub" button, full-page redirect, GitHub panel, 15 plain-language return statuses (`web/src/integrations/github/`, ADR 0008, PR #11); not built: connected-as login display and wrong-account "Not you?" switch, three-part callback screen, copyable ask-your-admin fallback with App slug, permission list from the manifest, flow live region; real GitHub App needed to validate
 
 **Story** As a repository owner, I want to connect my GitHub account in a few clicks and come
 back to the right screen, so that I never end up lost on a GitHub page.
@@ -506,7 +506,7 @@ it is never logged in full (F12) and its `state` is single-use.
 
 ## F209 — Repository selection UI
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 repository picker over installation repositories with all-repos coverage hint and stale-selection warning (`web/src/integrations/github/RepoPicker.tsx`), server scope enforcement F67 (`src/api/repo-scope.ts`); not built: all-vs-selected first choice, search and pagination for 500+ repos, new-repo diff prompt, private-repo warning, zero-repo dead-end copy, why-cant-I-see-it help, remove-as-stop confirmation
 
 **Story** As a repository owner, I want to pick which repositories notify my team, so that I
 control exactly what leaves my GitHub account.
@@ -597,7 +597,7 @@ visible only to members of the organisation, and this API is member-only and ten
 
 ## F210 — Event selection and preset step
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no preset radios, previewed diff, volume estimate or Failures-only default; precursors only: grouped raw event checklist (`web/src/integrations/EventPicker.tsx`) and per-integration filters editor (`web/src/integrations/filters/`); depends on the F154/F155 preset library, which is not built
 
 **Story** As someone who does not know what a "workflow run" is, I want to pick from named
 choices with a recommendation attached, so that I get useful notifications without configuring
@@ -684,7 +684,7 @@ rendered in the picker — only counts, which are already tenant-scoped aggregat
 
 ## F211 — Destination setup flow
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 paste-URL setup for Lark, Slack, Teams, Discord and custom webhook with write-only password field, where/what copy, warning and per-provider steps (`web/src/integrations/WebhookFields.tsx`, `destinations.ts`, ADR 0007, ADR 0014); not built: Slack OAuth zero-paste path, Teams trigger-auth mode capture, disabled-with-reason capability options, Add another channel, send-test inside the destination step
 
 **Story** As a team administrator, I want to connect the channel my team already uses, so that
 notifications arrive where I will actually see them.
@@ -790,7 +790,7 @@ treated as a permanent failure; amended 2026-10-13, [ADR 0006](../adr/0006-desti
 
 ## F212 — Destination setup instructions and the verified-screenshot pipeline
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 numbered written steps plus official-docs links per destination (`web/src/integrations/destinations.ts`, `WebhookFields.tsx`), deliberately no provider screenshots; not built: capture contract, `.meta.json`, CI check on captures, locale-aware pipeline; real captures need real Lark, Slack and Teams tenants, so the screenshot half is blocked on external access
 
 **Story** As a non-technical user, I want pictures of the exact screen the provider is showing
 me, so that I can find the button without understanding the provider's product.
@@ -951,7 +951,7 @@ records what was removed. No customer tenant is ever used for capture.
 
 ## F213 — Delivery log
 
-**Priority** P0 · **Status** partial (slice 6b: Activity page over `GET /api/deliveries` with outcome, integration and date filters, cursor "load more", detail dialog and honest at-least-once copy. Not built: free-text search, event-type filter, saved filters, per-attempt rows, export of the log; see ADR 0009) · **Referenced by `07:F100`, `07:F149`, `11:F164`,
+**Priority** P0 · **Status** 🟡 slice 6b, ADR 0009: Activity page over `GET /api/deliveries` with outcome, integration and date filters, cursor load-more, detail dialog and honest at-least-once copy (`web/src/deliveries/`, `tests/api/deliveries.test.ts`); not built: free-text search, event-type filter, saved filters, per-attempt rows, log export · **Referenced by `07:F100`, `07:F149`, `11:F164`,
 `11:F185`**
 
 **Story** As a customer, I want to see every notification we tried to send and what happened to
@@ -1081,7 +1081,7 @@ audited and rate-limited.
 
 ## F214 — Event log and single-event trace
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no event log surface, API or trace view; precursor only: per-integration routing-decision list (`GET /api/integrations/:id/routing-log` in `src/api/routing.ts`, `web/src/integrations/filters/RoutingLog.tsx`) which shows sent or skipped decisions but not the fan-out tree, provider ids, installation or signature verdict
 
 **Story** As a user, I want to see what arrived from GitHub even when nothing was delivered, so
 that "I got nothing" has an answer.
@@ -1180,7 +1180,7 @@ through an error tracker or an analytics event — `docs/SECURITY.md` requires t
 
 ## F215 — Test-delivery screen
 
-**Priority** P0 · **Status** partial (slice 6d, ADR 0018: a "Send a test notification" section on integration settings and a per-row button, a result panel that polls the real delivery and explains sent, accepted (Teams), failed with fix and docs links, retrying, timed out and rate limited, announced through a live region. **Not done:** a dedicated screen, rendered payload preview, HTTP status and latency, onboarding before an event type is chosen as a separate step) · **UI for F98**
+**Priority** P0 · **Status** 🟡 slice 6d, ADR 0018: send-a-test section on integration settings plus per-row button, result panel polling the real delivery with sent, accepted (Teams), failed, retrying, timed-out and rate-limited copy in a live region (`web/src/integrations/test/`, `tests/api/test-send.test.ts`); not built: dedicated screen, rendered payload preview, HTTP status and latency · **UI for F98**
 
 **Story** As someone who has never used this product, I want to prove it works before I trust
 it, so that I know the setup was worth finishing.
@@ -1286,7 +1286,7 @@ unredacted payload at all.
 
 ## F216 — Setup wizard shell and step navigation
 
-**Priority** P0 · **Status** partial (slice 6d: the create wizard gained an optional seventh step, "Test it", after the integration is saved; it can be skipped. The steps are not driven by the server-side setup model, and nothing resumes an interrupted wizard) · **Referenced by `07:F98`, `00-current-state.md:N3`**
+**Priority** P0 · **Status** 🟡 create wizard with optional seventh Test it step (`web/src/integrations/wizard/`, slice 6d); not built: `/setup/...` route space (wizard is `/integrations/new` component state), server-driven steps, resume of an interrupted wizard, per-step deep links · **Referenced by `07:F98`, `00-current-state.md:N3`**
 
 **Story** As a new user, I want one guided path from nothing to a notification that works, so
 that I never have to work out the order myself.
@@ -1380,7 +1380,7 @@ never logged in full (F208). All writes are tenant-scoped and audited where F222
 
 ## F217 — Integration settings
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 `/integrations/:id` with status, test send, details form with unsaved-changes blocker, filters, noise, write-only credentials with rotate, typed-name delete (`web/src/integrations/settings/`, ADR 0007); not built: stable nine-section order, destination cards, health and history sections, pause consequence copy with counts, disconnect-source, delete impact counts, repair panel
 
 **Story** As an administrator, I want one screen per connection where I can see and change
 everything about it, so that I never hunt through menus to turn something off.
@@ -1463,7 +1463,7 @@ audited (F222).
 
 ## F218 — Dead-letter queue and replay UI
 
-**Priority** P0 · **Status** partial (slice 6b: failed deliveries open a detail dialog with a plain-language cause and an admin-only, confirmed Redeliver; no bulk replay, no health-check banner, no dedicated DLQ page) · **UI for F181/F182**
+**Priority** P0 · **Status** 🟡 slice 6b: failed deliveries open a detail dialog with plain-language cause and admin-only confirmed Redeliver (`web/src/deliveries/RedeliverPanel.tsx`, `POST /api/deliveries/:id/replay`, `tests/api/deliveries.test.ts`); not built: bulk replay, health-check banner, dedicated dead-letter page · **UI for F181/F182**
 
 **Story** As a customer whose notifications stopped, I want to see what failed and retry it
 myself, so that I do not have to wait for you to notice.
@@ -1565,7 +1565,7 @@ workspace's destination, and the destination used is resolved from the delivery'
 
 ## F219 — Notification preferences UI
 
-**Priority** P1 · **Status** not started · **UI for F147/F148/F150**
+**Priority** P1 · **Status** ❌ no notification-preferences screen or API; only the per-integration noise-control section (quiet hours, grouping, digests; ADR 0016, `web/src/integrations/noise/`); depends on the F147-F150 preferences backend, which is not built · **UI for F147/F148/F150**
 
 **Story** As a person receiving notifications, I want to control what reaches me without
 asking an administrator, so that a noisy integration does not become something I have to
@@ -1643,7 +1643,7 @@ and *the rule that produced it*, never another member's personal choice.
 
 ## F220 — Plain-language error message system
 
-**Priority** P0 · **Status** not started · **Referenced (as "F20") by `01:F13`**
+**Priority** P0 · **Status** 🟡 status-to-copy catalogue and delivery-failure cause copy with the status only as a secondary reference (`web/src/integrations/errors.ts`, `web/src/deliveries/copy.ts`), hard-coded-string test (`web/src/i18n/hardcoded-strings.test.ts`); not built: four-part structure, banned-phrase CI test, collapsed Details-for-support with correlation id, full taxonomy-to-copy coverage, non-author copy test · **Referenced (as "F20") by `01:F13`**
 
 **Story** As a user, I want errors to tell me what happened and what to do, so that I can fix
 them without reading a log.
@@ -1748,7 +1748,7 @@ of reflected-content bug.
 
 ## F221 — Accessibility
 
-**Priority** P0 · **Status** partial (slice 6c, ADR 0013: axe-core scans every route, wizard step, dialog and error state in the tests and in one real-browser pass, failing the build on serious or critical violations; palette contrast test; skip link; route title, announcement and focus; focus contract for dialogs; stylesheet checks for reduced motion, reduced transparency, increased contrast and forced colours. **Not done:** no screen-reader pass; the preference modes were not seen in a browser; no sticky-bar 2.4.11 test (no sticky bar); two non-text contrast gaps accepted and pinned (switch track 1.55:1, warning rail 2.03:1); no conformance claim)
+**Priority** P0 · **Status** 🟡 slice 6c, ADR 0013: axe-core over every route, wizard step, dialog and error state in jsdom (`web/src/a11y/pages.a11y.test.tsx`, `dialogs.a11y.test.tsx`), palette contrast test, skip link, route title and focus, stylesheet preference checks; not done: screen-reader pass, preference modes unseen in a browser, rendered contrast only a one-off manual pass, two accepted non-text gaps, no conformance claim
 
 **Story** As a person who uses a keyboard or a screen reader, I want the whole product to work
 without a mouse and without sighted assistance, so that I am not locked out of my own alerts.
@@ -1871,7 +1871,7 @@ building a feature ("it's fine, it's a preview").
 
 ## F222 — Audit trail and change history
 
-**Priority** P0 · **Status** partial (slice 6e, ADR 0019: admin-only `/audit` read side over `GET /api/audit` with filters by action, result and date in the URL, plain-language English and Vietnamese labels, allow-listed details, retention stated, no export-before-delete flow. **Not done:** filters by actor/target/correlation id, a stated total, target links, a field diff, member/session/installation-initiated actors, an email beside the name (excluded by decision), "audit write failure fails the action") · **Referenced by `05:F68` as the write trigger for
+**Priority** P0 · **Status** 🟡 slice 6e, ADR 0019: admin-only `/audit` over `GET /api/audit` with action, result and date filters, en/vi labels, allow-listed details, stated retention (`web/src/audit/`, `tests/api/audit.test.ts`); not built: actor, target and correlation filters, total count, target links, field diff, non-admin actors, audit-failure-fails-action, export-before-delete · **Referenced by `05:F68` as the write trigger for
 installation lifecycle events**
 
 **Story** As an administrator, I want to see who changed what in my workspace, so that I can
@@ -1970,7 +1970,7 @@ webhook URL, a token, or a raw event payload.
 
 ## F223 — Responsive and mobile UX
 
-**Priority** P0 · **Status** partial (slice 6c: no horizontal scroll and no sub-44px control at 320 px on the shell, overview, integrations, wizard, activity, team, settings and sign-in, and an emulated 200% zoom of the wizard, in a real browser; wizard review and destination cards fixed for 700-1100 px. Not verified: real devices, touch, Safari/Firefox, the other screens in F223's list, orientation, safe areas)
+**Priority** P0 · **Status** 🟡 slice 6c: jsdom tests plus a manual real-browser pass (not repeatable in CI, no Playwright in repo) found no horizontal scroll or sub-44px control at 320 px on the main screens; stylesheet size checks in `web/src/a11y/stylesheet.test.ts`; not verified: real devices, touch, Safari or Firefox, remaining screens, orientation, safe areas
 
 **Story** As someone who reads notifications on my phone between meetings, I want the dashboard
 to work on a small screen, so that I can check whether my alerts are working from anywhere.
@@ -2060,7 +2060,7 @@ fixture would breach that by accident).
 
 ## F224 — Internationalisation and translated-ready strings
 
-**Priority** P1 · **Status** partial (slice 6c, ADR 0013: Vietnamese catalogue with a language switcher, saved choice, `<html lang>`, `Intl` dates/numbers/plurals, `:lang(vi)` display type, Geist Vietnamese subset asserted; tests for catalogue drift and hard-coded strings. **Not done:** locale in the URL, localised server-supplied errors, `lang` on inline provider text, the locale-aware screenshot pipeline, ICU `{count, plural}` syntax (a per-message `one`/`other` object is used instead); the Vietnamese copy has had no native-speaker review)
+**Priority** P1 · **Status** 🟡 slice 6c, ADR 0013: Vietnamese catalogue, language switcher, saved choice, `<html lang>`, `Intl` formatting, `:lang(vi)` type, drift and hard-coded-string tests (`web/src/i18n/`); not done: locale in URL, localised server errors, lang on provider text, locale-aware screenshot pipeline, ICU plurals, native-speaker review of Vietnamese copy
 
 **Story** As a user who does not read English, I want the product in my language, so that setup
 does not require an interpreter.
@@ -2177,7 +2177,7 @@ by the template layer, not by the translator.
 
 ## F225 — Loading, skeleton, empty and error states
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 per-page aria-busy skeleton cards and loading, empty and error states on integrations, activity, audit, sources and settings (e.g. `web/src/integrations/IntegrationsPage.tsx`, `web/src/deliveries/DeliveryLogPage.tsx`); not built: shared Skeleton and EmptyState components, 10 s and 30 s loading limits, filter-empty and time-window empty rules, onboarding empty-state table, tests enforcing three-part empty states
 
 **Story** As a user, I want every screen to tell me what is happening, so that I never sit
 staring at a blank page wondering whether something broke.
@@ -2278,7 +2278,7 @@ client never displays a server-provided string.
 
 ## F226 — Usability test plan
 
-**Priority** P0 · **Status** not started · **This is the gate, not the report**
+**Priority** P0 · **Status** ⛔ gate not run: needs ten recruited participants and a real Slack and GitHub path to test against, and the preset, wizard and destination screens (F210, F211, F212, F216) are unfinished; no study plan artifact, consent form or metric definitions exist in `docs/`; no setup-time claim may be made · **This is the gate, not the report**
 
 **Story** As the product owner, I want the onboarding measured against real non-technical users
 before we add connectors, so that we spend effort on observed friction rather than opinions.

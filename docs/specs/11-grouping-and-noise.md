@@ -42,7 +42,7 @@ evaluated. Any pricing model that charges for suppression will make this product
 
 ## F141 — Grouping key
 
-**Priority** P1 · **Status** 🟡 key derived from normalised fields, organization first, hashed to 32 hex; `group_by` is NOT user-configurable (a fixed subject per event kind: PR/issue number, run id, branch, deployment, release tag) (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 SHA-256 key, organization first, 32 hex (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); `group_by` is not user-configurable, subject fixed per event kind
 
 **Story** As a user, I want related events combined, so that 40 comments on one PR produce one
 notification instead of 40.
@@ -82,7 +82,7 @@ structurally impossible rather than merely filtered.
 
 ## F142 — Group window
 
-**Priority** P1 · **Status** 🟡 Off / 1 / 5 / 15 / 60 minutes, default off, plain-language preview; "Send at least every" is not built (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 Off/1/5/15/60 min window, default off, computed preview (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); not built: "Send at least every" maximum wait
 
 **Story** As a user, I want a window I can reason about, so that grouping is predictable.
 
@@ -116,7 +116,7 @@ knobs are correct and opaque; ours ship as four labelled choices.
 
 ## F143 — Collapse into one message
 
-**Priority** P1 · **Status** 🟡 one message with the newest item, a count and a capped list that says what is not shown; Slack top-level `text` and Discord URL rules are not separately tested (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 one message with newest item, count and capped list saying what is not shown (`src/routing/noise-render.ts`, `tests/noise/render.test.ts`, ADR 0016); Slack `text` and Discord URL rules not separately tested
 
 **Story** As a user, I want one message listing related events, so that I can scan rather than
 scroll.
@@ -144,7 +144,7 @@ scroll.
 
 ## F144 — Digest scheduling
 
-**Priority** P1 · **Status** 🟡 hourly and daily at a local time, empty digest sends nothing, retry follows the normal ladder; weekly is not built (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 hourly and daily digests at local time, empty digest sends nothing, normal retry (`src/pipeline/noise-release.ts`, `tests/noise/release.test.ts`, ADR 0016); not built: weekly, per-user digests
 
 **Story** As a user, I want low-value chatter batched into a scheduled summary, so that my
 chat is quiet but I still know what happened.
@@ -175,7 +175,7 @@ the same machinery with a different trigger.
 
 ## F145 — Digest content model
 
-**Priority** P1 · **Status** 🟡 failures first then newest first, same-key entries collapsed with a count, text markers, capped with "N more not shown"; not grouped by category and repository, no link to an in-app view (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 failures first then newest, same-key collapsed with count, capped with "N more not shown", split into up to 3 parts (`src/routing/noise-render.ts`, `tests/noise/render.test.ts`); not built: category/repository grouping, in-app view link
 
 **Story** As a user, I want a digest that is actually readable, so that I scan it in ten
 seconds.
@@ -205,7 +205,7 @@ That division is what lets the digest stay small without losing information.
 
 ## F146 — Quiet hours
 
-**Priority** P1 · **Status** 🟡 per-integration (not per-workspace) window with a time zone, critical bypass, held updates released as one digest and visible as "N waiting"; no separate emergency override beyond the critical rule (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 per-integration window with time zone, DST-tested, critical bypass, held updates released as digest and shown as waiting (`src/routing/noise-time.ts`, `tests/noise/time.test.ts`, ADR 0016); not built: per-workspace or per-user hours, emergency override
 
 **Story** As a user, I want non-urgent notifications held while I sleep, so that I am not
 woken by a routine build.
@@ -237,7 +237,7 @@ Ours must show **"3 notifications were held during quiet hours"**.
 
 ## F147 — Three-level preferences
 
-**Priority** P1 · **Status** not started · **Decide before V1 — retrofitting is a migration**
+**Priority** P1 · **Status** ❌ no workspace/integration/user preference levels; noise settings are one per-integration JSON column `noise_json` (migration `0021`). Retrofitting is a migration · **Decide before V1 — retrofitting is a migration**
 
 **Story** As a user, I want to control notification volume per channel, so that I can turn
 down chat noise without losing email.
@@ -276,7 +276,7 @@ user-controlled input.
 
 ## F148 — Critical-event lock
 
-**Priority** P1 · **Status** 🟡 a FIXED critical rule (failed workflow runs, generic `error`/`critical`, provider failures) bypasses quiet hours, digests and grouping; no admin-configurable critical flag, no member-mute explanation (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 fixed critical rule (failed status or `security.` events) bypasses quiet hours, digest and grouping (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); not built: admin-configurable lock, member-mute explanation
 
 **Story** As a workspace admin, I want to guarantee that failures always reach someone, so
 that a member cannot mute an alert into oblivion.
@@ -310,7 +310,7 @@ failure.
 
 ## F149 — "Why did I get this?"
 
-**Priority** P1 · **Status** not started · **Highest value / lowest cost**
+**Priority** P1 · **Status** 🟡 integration page lists recent routing decisions with reason codes and delivery log shows `heldReason`/`groupedCount` (`src/routing/provenance.ts`, `src/api/delivery-view.ts`); not built: per-notification "Why did I get this?" for delivered events, rule attribution · **Highest value / lowest cost**
 
 **Story** As a user receiving a notification I did not expect, I want to know which rule sent
 it, so that I can fix the cause instead of muting the symptom.
@@ -344,7 +344,7 @@ notification" rather than nothing.
 
 ## F150 — Sticky one-click unsubscribe
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no unsubscribe link or one-click mute in messages; no per-user subscription model to attach it to. Depends on F147
 
 **Story** As a user whose chat is too noisy, I want to mute it from the message I am looking
 at, so that I stop asking anyone to fix it.
@@ -382,7 +382,7 @@ chat client. Each action must carry an unguessable, single-use, short-lived toke
 
 ## F151 — Bot and self-generated suppression
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 `actor` filter can exclude bots or allow only bots, ghost exempt (`src/routing/filters.ts`, `tests/routing/filters.test.ts`); not built: suppression of Noti's own or self-generated events, bot presets
 
 **Story** As a user, I want to filter automated noise differently from human activity, so
 that I can keep the signal.
@@ -415,7 +415,7 @@ does not populate the field, and catastrophically wrong for `ghost`.
 
 ## F152 — Resolution notices
 
-**Priority** P1 · **Status** 🟡 GitHub workflow failure then success on the same repository, workflow and branch, default OFF, run attempts not in the key, no "no longer retained" wording (slice 8, [ADR 0016](../adr/0016-noise-control.md)) · **Differentiator**
+**Priority** P1 · **Status** 🟡 GitHub workflow failure then success on same repository, workflow and branch sends Resolved, default OFF (`src/pipeline/noise-release.ts`, `tests/noise/ingress.test.ts`, ADR 0016); not built: run attempts in key, retention wording, other providers · **Differentiator**
 
 **Story** As a user, I want to know when a failure resolved, so that I can stop holding it in
 my head.
@@ -447,7 +447,7 @@ correlation there is nothing to resolve, and no amount of UI fixes it.
 
 ## F153 — Per-destination noise budget
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no per-destination messages-per-hour ceiling; only a 500-update per-integration hold cap (`HELD_CAPACITY` in `src/routing/noise.ts`) that fails toward delivering
 
 **Story** As an operator, I want each destination to have its own volume policy, so that a
 high-volume destination cannot saturate a channel the team depends on.
@@ -479,7 +479,7 @@ digest or to a visible "held" state.
 
 ## F154 — Preset library
 
-**Priority** P1 · **Status** not started · **Biggest available differentiator**
+**Priority** P1 · **Status** ❌ no preset library; noise and filters are configured field by field. Depends on F121 and F155 · **Biggest available differentiator**
 
 **Story** As a non-technical user, I want sensible defaults I can pick rather than configure,
 so that I get good notification behaviour without reading documentation.
@@ -526,7 +526,7 @@ that target is met on the noise axis.
 
 ## F155 — Preset definitions
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no declarative preset definitions or previewed diffs. Depends on F154
 
 **Story** As a maintainer, I want presets defined in data, so that adding one is a reviewable
 change rather than a code edit.
@@ -560,7 +560,7 @@ rather than serving a broken preset.
 
 ## F156 — Correlated state updates
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no in-place message update on state change; resolution is a separate Resolved message (F152)
 
 **Story** As a user, I want the CI card for a workflow to update in place rather than adding a
 new message, so that the channel tells the story instead of accumulating fragments.
@@ -599,7 +599,7 @@ blind write.
 
 ## F157 — Entity correlation
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no entity correlation table beyond the open-failure key in `noise_open_failures` (migration `0021`)
 
 **Story** As a user, I want a workflow's events to be recognised as the same thing, so that
 its status updates in one place.
@@ -628,7 +628,7 @@ impossible.
 
 ## F158 — Thread strategy
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no thread strategy; every notification is a new top-level message
 
 **Story** As a user, I want related notifications in a thread rather than scattered, so that
 the conversation stays readable.
@@ -652,7 +652,7 @@ the conversation stays readable.
 
 ## F159 — Severity and priority
 
-**Priority** P1 · **Status** 🟡 only a derived critical rule and failure-first ordering in digests; no `neutral`/unknown-outcome metric (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 derived critical rule and failure-first digest ordering only (`src/routing/noise.ts`, `src/routing/noise-render.ts`); not built: severity field, `neutral`/unknown outcome metric, per-rule priority
 
 **Story** As a user, I want failures to sort above comments, so that triage starts at the top.
 
@@ -676,7 +676,7 @@ the conversation stays readable.
 
 ## F160 — Escalation (minimal)
 
-**Priority** P2 · **Status** not started · **Deliberately narrow**
+**Priority** P2 · **Status** ❌ no escalation of repeated or unacknowledged failures · **Deliberately narrow**
 
 **Story** As a team lead, I want an undelivered critical alert to escalate to a second
 destination, so that one broken channel does not swallow an outage.
@@ -707,7 +707,7 @@ independently.
 
 ## F161 — Narrow inhibition subset
 
-**Priority** P2 · **Status** not started · **Hard-coded, not a rule UI**
+**Priority** P2 · **Status** ❌ no inhibition subset (for example suppressing a failure while a related one is open) · **Hard-coded, not a rule UI**
 
 **Story** As a user, I want a failure alert not to be buried under its own retries and
 follow-up events, so that the important one is visible.
@@ -745,7 +745,7 @@ inhibition".
 
 ## F162 — Mute and silence
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no mute or silence object; quiet hours (F146) is the only way to hold updates
 
 **Story** As a user, I want to silence a noisy repository for an hour, so that a migration
 does not bury everything.
@@ -772,7 +772,7 @@ does not bury everything.
 
 ## F163 — Per-repository overrides
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no per-repository noise overrides; settings are per integration only
 
 **Story** As a user, I want different rules for a noisy repo, so that one project does not set
 the policy for the rest.
@@ -799,7 +799,7 @@ disagree.
 
 ## F164 — Noise reporting
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no noise report; counts by reason exist only as `routing_decisions` rows and the per-integration noise status (`GET /api/integrations/:id/noise-status`)
 
 **Story** As a user, I want to know what I am being sent and what I am not, so that I can
 tune rather than guess.
@@ -830,7 +830,7 @@ was lost.
 
 ## F165 — Grouping safety invariants
 
-**Priority** P0 · **Status** 🟡 organization is the first component of the key and every held-event query is organization-scoped; the primary key is the deterministic delivery id, not `(organization, key)`; two-organization test exists (slice 8, [ADR 0016](../adr/0016-noise-control.md)) · **Reliability, not feature**
+**Priority** P0 · **Status** 🟡 organization is first key component and held queries are organization-scoped; two-organization tests (`tests/noise/ingress.test.ts`, `tests/noise/release.test.ts`, ADR 0016); primary key is the delivery id, not `(organization, key)` · **Reliability, not feature**
 
 **Story** As a security reviewer, I want grouping to be structurally incapable of crossing a
 tenant boundary, so that a merge bug cannot become a data leak.
@@ -862,7 +862,7 @@ boundary. It must be designed so the mistake is impossible rather than merely un
 
 ## F166 — Grouping observability
 
-**Priority** P1 · **Status** 🟡 log lines only (`noise_release`, `noise_hold_capacity`, `noise_settings_unusable`); no metrics store (slice 8, [ADR 0016](../adr/0016-noise-control.md))
+**Priority** P1 · **Status** 🟡 log lines only (`noise_release`, `noise_hold_capacity`, `noise_settings_unusable`) and a per-integration noise status; no metrics store or group metrics (ADR 0016)
 
 **Acceptance**
 - [ ] Metrics: group size distribution, time-to-first-delivery, digest size, suppression
@@ -882,7 +882,7 @@ boundary. It must be designed so the mistake is impossible rather than merely un
 
 ## F167 — Anti-feature: no user-authored routing language
 
-**Priority** P1 · **Status** not started · **Deliberate non-feature**
+**Priority** P1 · **Status** 🟡 filter schema is closed and rejects unknown or regex options (`src/routing/filter-input.ts`, `tests/routing/filter-input.test.ts`, ADR 0010); not built: the non-goal entry in `docs/ROADMAP.md` · **Deliberate non-feature**
 
 **Story** As a maintainer, I want to refuse a feature request for user-authored routing rules,
 so that we do not inherit Alertmanager's migration problem.
@@ -908,7 +908,7 @@ Anything requiring computation is a product conversation, not a config change.
 
 ## F168 — Noise tuning feedback
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no "too noisy" feedback control or tuning suggestions
 
 **Story** As a product owner, I want to know which presets work, so that I can improve them
 rather than guess.

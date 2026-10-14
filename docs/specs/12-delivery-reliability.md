@@ -37,7 +37,7 @@ The only destination with true server-side idempotency is **Lark's app API**, wh
 
 ## F169 — Durable acceptance before acknowledgement
 
-**Priority** P0 · **Status** partial · **Fixes** part of D4
+**Priority** P0 · **Status** 🟡 Batch-then-202 holds: delivery and outbox rows commit in one `db.batch()` before the 202 (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`); `waitUntil` wraps only the awaited-send dispatcher. Not built: tests for ack ordering and batch rollback, the no-queue-send-in-waitUntil lint rule, the dedup-claim step. · **Fixes** part of D4
 
 **Story** As a customer, I want every event I was told was accepted to actually be stored, so
 that an `AGENTS.md`-compliant "acknowledge only after durable acceptance" is real.
@@ -76,7 +76,7 @@ quote. Never silently `202`.
 
 ## F170 — Deduplication key derivation
 
-**Priority** P0 · **Status** partial (slice 4: key derived per F170 and stored on `deliveries.dedup_key`; no `event_dedup` table)
+**Priority** P0 · **Status** ✅ `dedupKey()` in `src/delivery/ids.ts` is SHA-256 over 0x00-separated org, connection, source and id, full digest stored in `deliveries.dedup_key`, used by all source routes; `tests/delivery/ids.test.ts` covers injectivity and tenant separation. No `event_dedup` table (hit_count, outcome): that is F171.
 
 **Story** As a customer, I want GitHub's redelivery button to not spam my team, so that I can
 use it for debugging.
@@ -136,7 +136,7 @@ would be a **data leak**, hence `orgid` in the derivation and in the primary key
 
 ## F171 — Deduplication storage and TTL
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ No `event_dedup` or `semantic_dedup` table, no dedup TTL, hit_count or dedup purge job, no per-connection TTL. Duplicate suppression today is the unique delivery id on `deliveries`, so its window is delivery retention (`src/pipeline/retention.ts`), not a deliberate 7-day TTL. Needs the F192 job runner.
 
 **Story** As an operator, I want duplicate suppression to be bounded and self-cleaning, so
 that the dedup table does not grow without limit.
@@ -174,7 +174,7 @@ that the dedup table does not grow without limit.
 
 ## F172 — Atomic outbox claim
 
-**Priority** P0 · **Status** implemented (slice 4) · **Fixes** the core of D4
+**Priority** P0 · **Status** ✅ Conditional `UPDATE ... RETURNING` claim with lease token and lease reclaim in `src/delivery/claim.ts` and `src/pipeline/outbox.ts`; `tests/delivery/claim.test.ts` and `tests/pipeline/reliability.test.ts` cover concurrent dispatchers, crashed-claim reclaim and fencing (ADR 0005). · **Fixes** the core of D4
 
 **Story** As an operator, I want an outbox row dispatched exactly once, so that a cron tick
 and a `waitUntil` kick cannot both enqueue the same event.
@@ -216,7 +216,7 @@ racing is the design working.
 
 ## F173 — Outbox pump
 
-**Priority** P0 · **Status** partial (slice 4: claim-then-send, ids-only messages; `outbox_stalled` alert not built)
+**Priority** P0 · **Status** ✅ `src/pipeline/outbox.ts` claims then awaits `DELIVERY_QUEUE.send` (never waitUntil-wrapped), marks dispatched or releases the row; ids plus display text only, no credentials (`tests/pipeline/delivery-path.test.ts`). `outbox_stalled` is a log-only signal in `src/observability/stall.ts`; nobody is paged (F200).
 
 **Acceptance**
 - [ ] `queue.send()` is **awaited**, never `waitUntil`-wrapped (F169).
@@ -252,7 +252,7 @@ backlog) is a transient pump failure; record and retry.
 
 ## F174 — Outbox reconciler
 
-**Priority** P0 · **Status** partial (slice 4: per-workspace reconciler, lease reclaim, scheduled retries; reconciler-failure alert not built)
+**Priority** P0 · **Status** 🟡 Per-workspace reconciler with lease reclaim and scheduled retries runs every minute (`src/index.ts` `reconcileOutbox`, `src/pipeline/sweep.ts`; `tests/pipeline/reliability.test.ts`). Not built: an alert on reconciler failure or staleness (only a `cron_job_failed` log and a heartbeat nobody reads); no `job_runs`.
 
 **Story** As an operator, I want a scheduled sweeper, so that an event which reached the outbox
 is eventually dispatched even if every prompt path failed.
@@ -289,7 +289,7 @@ failure mode is now: crash-after-enqueue-before-mark (F172 handles) and pump-dow
 
 ## F175 — Idempotent consumer
 
-**Priority** P0 · **Status** implemented (slice 4: the claim is a conditional UPDATE on the ledger row, not a separate `delivery_claims` table)
+**Priority** P0 · **Status** ✅ Consumer claims the ledger row with a conditional UPDATE fenced by a claim token (`src/delivery/ledger.ts`, `src/pipeline/consumer.ts`); duplicate, terminal and crashed-claim cases tested in `tests/pipeline/reliability.test.ts`. No separate `delivery_claims` table by design (ADR 0005).
 
 **Story** As a customer, I want a duplicate queue message to not become a duplicate
 notification, so that a crash never costs me a spam wave.
@@ -331,7 +331,7 @@ collision is a leak and is tested.
 
 ## F176 — Per-message acknowledgement
 
-**Priority** P0 · **Status** implemented (slice 4: per-message ack/retry; delivery `max_batch_size` 5) · **Fixes** part of D8
+**Priority** P0 · **Status** ✅ Per-message ack/retry in `consumeDeliveries` with `max_batch_size` 5 in `wrangler.jsonc`; `tests/pipeline/reliability.test.ts` asserts the batch size and per-message retry on a ledger failure (ADR 0005). · **Fixes** part of D8
 
 **Story** As a customer, I want one bad message not to re-send nine good ones, so that a
 single poison event does not multiply into spam.
@@ -370,7 +370,7 @@ message will not melt the concurrency budget either.
 
 ## F177 — Retry policy: two-tier backoff
 
-**Priority** P0 · **Status** implemented (slice 4) · **Fixes** part of D4/D11
+**Priority** P0 · **Status** ✅ Pure `decideRetry` in `src/delivery/retry.ts`: Full Jitter tier 1, fixed ladder tier 2, 13 attempts, long waits parked on the D1 schedule; `tests/delivery/retry.test.ts`. The ladder sums to about 10.8 days, not 7 (test says so). Per-connection policy is a function parameter only, not stored or editable. · **Fixes** part of D4/D11
 
 **Story** As an operator, I want a transient outage ridden out and a chronic one given up on
 predictably, so that retries neither hammer a recovering destination nor give up too early.
@@ -410,7 +410,7 @@ RNG.
 
 ## F178 — `Retry-After` handling
 
-**Priority** P0 · **Status** partial (slice 4: RFC 9110 header parsed and honoured; Discord body, `x-ratelimit-*` and Lark 400 throttle not parsed)
+**Priority** P0 · **Status** 🟡 RFC 9110 seconds and HTTP-date parsed, clamped to 1 hour, overrides backoff (`src/connectors/destinations/retry-after.ts`, `tests/delivery/retry.test.ts`); Discord body `retry_after` and Lark 400 with `99991400` and `x-ogw-ratelimit-reset` are also handled and tested. Not built: `x-ratelimit-remaining: 0` on a 2xx as a throttle signal, per-method Slack cooldown.
 
 **Story** As an operator, I want a rate-limited destination to tell us when to come back, so
 that we stop making a throttle worse.
@@ -449,7 +449,7 @@ it as standardized.
 
 ## F179 — Error classification
 
-**Priority** P0 · **Status** partial (slice 4: generic HTTP + F179 Lark codes; Slack API, Teams and Discord adapters are slice 5; unmapped errors are logged, no metric) · **Fixes** D11 · **Extends** F13
+**Priority** P0 · **Status** 🟡 Table-driven classification for Slack webhook, Lark codes, Discord (404 terminal, 401/403 gated on body code) and Teams (`src/connectors/destinations/*/classify.ts`, `tests/destinations/*.test.ts`). Not built: Slack Web API codes (no app adapter), `message_limit_exceeded` copy, disabling every destination on 410 (only Discord auto-pauses), a metric for unmapped errors (log field only). · **Fixes** D11 · **Extends** F13
 
 **Story** As an operator, I want permanent failures to stop burning retries, so that a
 revoked webhook does not cost me 13 attempts.
@@ -494,7 +494,7 @@ punitive action against a shared IP.
 
 ## F180 — Dead-letter queue
 
-**Priority** P0 · **Status** partial (slice 4: terminal `dead_lettered` state with taxonomy code; DLQ consumer marks stranded rows; no consumer-attached health check, no attempt-log table) · **Fixes** part of D11
+**Priority** P0 · **Status** 🟡 Terminal `dead_lettered` state with taxonomy code; `noti-dead-letters` has a consumer that marks stranded rows (`src/pipeline/dead-letter.ts`, asserted in `tests/pipeline/reliability.test.ts`). Not built: runtime health check that the DLQ consumer is attached, per-attempt log (no `delivery_attempts`), spec's `max_retries` 8 (config is 5), Free-plan 24h retention note. · **Fixes** part of D11
 
 **Story** As an operator, I want exhausted deliveries to land somewhere I can see, so that
 they are never silently dropped.
@@ -533,7 +533,7 @@ how a notification product becomes untrustworthy.
 
 ## F181 — Dead-letter inspection
 
-**Priority** P0 · **Status** partial (slice 6b: tenant-scoped list/detail API with state, attempts, taxonomy code and user-facing copy, plus a dashboard Activity page. The persisted ledger holds one row per delivery, so there is no per-attempt history, no `Retry-After` display and no payload preview; those need F184's attempts table)
+**Priority** P0 · **Status** 🟡 Tenant-scoped list/detail API with state, attempts, taxonomy code and user copy, plus the Activity page (`src/api/deliveries.ts`, `web/src/deliveries/`, `tests/api/deliveries.test.ts`). Not built: per-attempt history, `Retry-After` display, rendered-payload preview, correlation id, grouped 'N failures' view (needs the F184 attempts table).
 
 **Story** As a support engineer, I want to see why a notification failed, so that I can tell a
 customer something better than "it didn't work".
@@ -566,7 +566,7 @@ redacted exactly as F98 does for the test preview.
 
 ## F182 — Manual replay
 
-**Priority** P0 · **Status** partial (slice 4: idempotent tenant-scoped service. Slice 6b: `POST /api/deliveries/:id/replay`, admin-only, CSRF-checked, rate-limited, refused while workspace deletion is pending, audited as `delivery.replay`; dashboard Redeliver button. The replay is refused when its integration is deleted, paused or quarantined, and its audit row is atomic with it. Not built: bulk replay, replay after the outbox payload is purged)
+**Priority** P0 · **Status** 🟡 `POST /api/deliveries/:id/replay` is admin-only (`delivery.replay`), CSRF-checked, rate-limited, audited in the same batch, refused for successful or non-replayable rows, with `replay_of` and fresh attempts (`src/delivery/redeliver.ts`, `tests/api/deliveries.test.ts`). Not built: bulk or per-destination replay with dry-run count, replay after outbox purge.
 
 **Story** As a customer, I want to retry a failed notification myself, so that I do not have
 to wait for you to notice.
@@ -602,7 +602,7 @@ explicit capability, not just membership.
 
 ## F183 — Circuit breaker
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ No per-destination circuit breaker, half-open probe or user-visible breaker state. Only adjacent: a Discord-only audited auto-pause of one integration on a dead webhook (`src/pipeline/consumer.ts`), which pauses rather than breaks and conflicts with the spec's never-auto-disable rule.
 
 **Story** As an operator, I want a broken destination to stop being hammered, so that a bad
 webhook cannot trigger punitive limits against our shared IP.
@@ -640,7 +640,7 @@ holding Worker invocations open costs real money.
 
 ## F184 — Delivery ledger
 
-**Priority** P0 · **Status** partial (slice 4: hashed `(dedup_key, destination)` id and new ledger columns; no `delivery_attempts` table)
+**Priority** P0 · **Status** 🟡 Hashed `(dedup_key, destination)` delivery id, state machine, attempts, error code and replay columns on `deliveries` (`src/delivery/ids.ts`, migration 0009, `tests/delivery/ids.test.ts`). Not built: `delivery_attempts` table, `provider_message_id`, `error_detail_redacted` column (minted diagnostic only); `suppressed` is never written.
 
 **Story** As a support engineer, I want one row per notification attempt, so that a customer
 question can be answered from data rather than guesswork.
@@ -679,7 +679,7 @@ every query (F24).
 
 ## F185 — Honest duplicate surface
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 Delivery log and detail show the at-least-once sentence (`deliveries.model` in `web/src/i18n/`; `web/src/deliveries/deliveries.test.ts` bans exactly-once wording in the en catalogue). Not built: writing `suppressed` rows (ingress duplicates vanish via INSERT OR IGNORE), possible-duplicate flag, customer docs or marketing guard.
 
 **Story** As a customer, I want to be told when a duplicate was possible, so that I can judge
 the reliability of my channel myself.
@@ -716,7 +716,7 @@ difference between trust and blame.
 
 ## F186 — Client-side deduplication window
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ No client-side dedup window per destination; duplicate suppression exists only at ingress by delivery id (F170). Depends on F188 and the F171 dedup storage.
 
 **Story** As a customer, I want a retry storm not to become a message flood, so that a
 recovering destination is not buried.
@@ -750,7 +750,7 @@ rather than a guarantee.
 
 ## F187 — Outbound rate limiting per destination
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ No outbound token bucket or delay-based shaping per provider account; the consumer only reacts to 429s. `src/security/rate-limit.ts` is inbound API only. The Discord cap on 401/403 retries in `src/pipeline/consumer.ts` is the sole related guard.
 
 **Story** As an operator, I want to stay inside each destination's real limit, so that we
 are never the reason a customer's other integrations fail.
@@ -797,7 +797,7 @@ is what keeps this compatible with the 30 s CPU / 15 min wall-clock limits.
 
 ## F188 — Provider-native idempotency
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 `larkMessageUuid()` derives a stable 50-char key from the delivery id (`src/delivery/ids.ts`, `tests/delivery/ids.test.ts`) but is not wired: no Lark app-mode adapter exists (only custom bot), so no `uuid` is ever sent. Blocked on a Lark app adapter.
 
 **Story** As a customer, I want the one destination that can guarantee no duplicates to
 actually use it, so that CI status cards are reliable.
@@ -831,7 +831,7 @@ the delivery id so that cannot happen.
 
 ## F189 — Outbound request budget
 
-**Priority** P0 · **Status** partial (slice 4: 10 s `AbortSignal.timeout`, `redirect: 'manual'` with 3xx classified permanent; response bodies not size-capped)
+**Priority** P0 · **Status** ✅ 10 s `AbortSignal.timeout`, `redirect: 'manual'` with 3xx permanent, response body read capped at 2 KB, consumer sends serially so no fan-out past 6 connections (`src/connectors/destinations/send.ts`, `tests/destinations/conformance.test.ts`). Gaps: no fan-out test, unmapped-shape flag is logged, not a metric.
 
 **Story** As an operator, I want outbound calls bounded, so that a slow destination cannot
 exhaust a Worker invocation.
@@ -871,7 +871,7 @@ redirect into a network `TypeError` that cannot be told apart from a transient f
 
 ## F190 — Scheduled job fleet
 
-**Priority** P0 · **Status** partial
+**Priority** P0 · **Status** 🟡 One cron Worker runs heartbeat, stall detection, outbox reconcile, noise release, credential maintenance, retention purge (hourly gate) and other purges, each isolated (`src/index.ts`, `src/observability/cron.ts`, `tests/pipeline/retention.test.ts`). Not built: dedup purge, GitHub failure poll, reconciliation, destination health check, token refresh, cursors, staleness alerts.
 
 **Story** As an operator, I want our background work to be visible and bounded, so that a
 long-running job cannot quietly exhaust the cron budget.

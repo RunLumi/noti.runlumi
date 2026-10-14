@@ -19,7 +19,7 @@ unsupported feature **visible to the user** instead of silently degraded.
 
 ## F91 — Destination adapter contract
 
-**Priority** P0 · **Status** partial — contract, adapters and conformance suite in `src/connectors/destinations/` (ADR 0006; Discord and the customer webhook added in ADR 0014, and `buildRequest` gained an optional `DeliveryMeta` argument); `validateConfig` is synchronous; the consumer re-validates and renders through the adapters (wired; fixture tests only, no real-provider test) · **Fixes** D8
+**Priority** P0 · **Status** ✅ adapter contract (kind, capabilities, validateConfig, render, buildRequest, classifyResponse; I/O in `send.ts`) for all five kinds in `src/connectors/destinations/`, consumer wired, conformance suite `tests/destinations/conformance.test.ts` (ADR 0006, ADR 0014). Deviations: validateConfig is sync, send is a shared function; no real-provider test · **Fixes** D8
 
 **Story** As a maintainer, I want one interface every destination implements, so that
 Slack stops being an inline string and starts being an adapter like Lark.
@@ -76,7 +76,7 @@ depth) because a row can be edited by migration or by an admin tool.
 
 ## F92 — Capability contract
 
-**Priority** P0 · **Status** partial — per-mode capability declarations with a golden-table test (now five kinds: Discord reports what the adapter does, not what the provider could do; see ADR 0014); no UI surface yet
+**Priority** P0 · **Status** 🟡 per-mode capability table with golden test (`src/connectors/destinations/capabilities.ts`, `tests/destinations/conformance.test.ts`; ADR 0014). Not built: per-configured-destination resolution (one constant per kind), any UI surface for capabilities (nothing in `web/src` reads them), save-time visible state for false capabilities
 
 **Story** As a user, I want the UI to tell me what a destination can actually do, so that I
 choose it based on what I need rather than what a logo suggests.
@@ -140,7 +140,7 @@ if a documented provider limit changes without a spec update.
 
 ## F93 — Honest degradation ladder
 
-**Priority** P0 · **Status** partial — card → markdown → plain ladder reports the rung used and the rungs skipped; not yet stored on the delivery row; no save-time feature validation
+**Priority** P0 · **Status** 🟡 card, markdown, plain ladder in `src/connectors/destinations/render.ts` reports rung used and skipped, tested (`tests/destinations/conformance.test.ts`). Not built: rung stored on the delivery row or shown in delivery detail, save-time feature validation, disabled setup options, `capability_unavailable` record; update and reply degradations have no feature behind them
 
 **Story** As a user, I want to know when a feature I enabled is not available on my
 destination, so that I am not surprised that my CI card did not update in place.
@@ -179,7 +179,7 @@ rejected at save time with an explanation.
 
 ## F94 — Rendering safety
 
-**Priority** P0 · **Status** partial — per-dialect escaping/neutralisation, mentions off, https + length-capped links, visible `…` truncation for Slack/Teams/Lark/Discord (Discord: backslash-escapes in content and descriptions, neutralisation in titles, `allowed_mentions` always empty); `truncated_fields` not persisted
+**Priority** P0 · **Status** 🟡 per-dialect escaping, mention neutralisation, Discord `allowed_mentions` empty, https and length-capped links, visible truncation (`src/connectors/destinations/markup.ts`, `tests/destinations/markup.test.ts`, `tests/destinations/discord.test.ts`). Not built: `truncated_fields` recording, Telegram MarkdownV2 (decided against, F110)
 
 **Story** As a customer, I want a malicious commit message or branch name to be displayed as
 text, so that a `PR titled "@here fix login"` does not ping my entire team.
@@ -219,7 +219,7 @@ content is untrusted user input, full stop.
 
 ## F95 — Body size budget per destination
 
-**Priority** P0 · **Status** partial — renderers respect `maxBodyBytes` (over-cap → `payload_too_large`); Slack top-level `text` always present; elision not yet logged
+**Priority** P0 · **Status** 🟡 renderers honour `maxBodyBytes` with `payload_too_large`, Slack top-level `text` always set, Discord emits one embed (`src/connectors/destinations/render.ts`, `tests/destinations/slack.test.ts`, `tests/destinations/discord.test.ts`). Not built: logging or surfacing of elision; Lark app and Telegram caps (modes not built)
 
 **Story** As an operator, I want rendering to respect each destination's real limit, so that
 a chatty event never dead-letters on Teams at 28 KB.
@@ -261,7 +261,7 @@ the same repo would collapse. Never rely on multiple embeds.
 
 ## F96 — Credential validation at write time
 
-**Priority** P0 · **Status** done in code — `validateDestinationConfig` is the single validator for the integrations API, the consumer (before every send) and `sendRequest`; the duplicate allowlist is removed. Not exercised against real providers · **Fixes** D9
+**Priority** P0 · **Status** ✅ one validator `validateDestinationConfig` used by the integrations API (create and credential change), the consumer before every send and `sendRequest` (`src/connectors/destinations/config.ts`, `src/pipeline/consumer.ts`, `tests/destinations/url-policy.test.ts`, `tests/destinations/conformance.test.ts`). Gap: a PATCH leaving credentials unchanged does not re-run policy (send time does). No real-provider test · **Fixes** D9
 
 **Story** As a security engineer, I want an invalid or malicious destination rejected when it
 is saved, so that a hostile URL is never persisted in the first place.
@@ -298,7 +298,7 @@ may be logged or shown to another workspace member.
 
 ## F97 — Destination credential storage and rotation
 
-**Priority** P0 · **Status** partial
+**Priority** P0 · **Status** ✅ envelope encryption sealed before D1 with AAD binding and per-row `kek_version` (`src/crypto/envelope.ts`, `src/pipeline/credentials.ts`, `tests/crypto/envelope.test.ts`, ADR 0004); rotation via PATCH issues fresh key material, reads return host only, disable and delete stop delivery at once (`tests/api/integrations.test.ts`). Gap: no alert on decrypt failure beyond quarantine
 
 **Acceptance**
 - [ ] Credential material is encrypted **before** D1, never after.
@@ -328,7 +328,7 @@ never retried blindly, because a wrong key will never become right.
 
 ## F98 — Destination health and verification
 
-**Priority** P0 · **Status** partial (slice 6d, ADR 0018: `POST /api/integrations/:id/test` sends a labelled test through the real outbox, queue, consumer, URL policy and adapters, with sent versus accepted preserved, the closed error taxonomy, rate limits and an audit row; excluded from the SLIs and the overview counts. **Not done:** `test: true` on a canonical envelope (a delivery column and event type `test` are used instead), a rendered payload preview, HTTP status, latency and provider response code in the result, a per-destination report of what the test could not verify beyond the Teams `accepted` explanation, scheduled health checks, billing exclusion (no billing exists))
+**Priority** P0 · **Status** 🟡 slice 6d, ADR 0018: `POST /api/integrations/:id/test` sends a labelled test through the real outbox, queue, consumer and adapters (`src/api/test-send.ts`, `tests/api/test-send.test.ts`); excluded from SLIs. Not built: `test: true` envelope (uses delivery column), payload preview, HTTP status, latency, provider code in result, per-destination can-not-verify report, scheduled health checks
 
 **Story** As a user setting up for the first time, I want to press "send a test" and know it
 worked, so that I trust the connection before real events depend on it.
@@ -366,7 +366,7 @@ Lark/Slack webhook URL is a bearer secret that appears inside some card payloads
 
 ## F99 — Delivery result normalisation
 
-**Priority** P0 · **Status** partial — classifiers return `{outcome, reason, retryAfterMs?}` with RFC 9110 `Retry-After`; wired into the retry policy and ledger via `src/delivery/classify.ts`; only the F13 code and a minted diagnostic are persisted, not the adapter `reason` · **Fixes** part of D11
+**Priority** P0 · **Status** 🟡 classifiers return outcome, reason and `retryAfterMs` (RFC 9110 `Retry-After` both forms), wired to retry and ledger via `src/delivery/classify.ts`, `tests/delivery/classify.test.ts`, `tests/destinations/*.test.ts`; Teams 202 is accepted. Not built: `providerMessageId`/`providerTs` capture, persisted adapter `reason` or redacted `detail` (only F13 code stored) · **Fixes** part of D11
 
 **Story** As an operator, I want every provider's response normalised into one result shape,
 so that the dashboard and retry policy do not special-case Slack forever.
@@ -410,7 +410,7 @@ prove. `AGENTS.md` is explicit: *"No fabricated benchmarks... No silent loss."* 
 
 ## F100 — Provider acknowledgement semantics in the UI
 
-**Priority** P1 · **Status** partial — classifiers distinguish `accepted` (Teams 202, Discord 204, customer webhook 202) from `delivered` (Discord `wait=true` 200); UI not started
+**Priority** P1 · **Status** ✅ built modes distinguish accepted (Teams 202, Discord 204, webhook 202) from delivered; UI shows Accepted with its own label and meaning, never Delivered (`web/src/deliveries/StateChip.tsx`, `web/src/deliveries/deliveries.test.ts`, `tests/destinations/teams.test.ts`); Discord always `wait=true` (`tests/destinations/discord.test.ts`). Lark app, Slack API and Telegram rows not applicable (modes unbuilt)
 
 **Story** As a customer, I want the delivery log to tell me the truth about whether my
 notification arrived, so that I can trust it enough to delete my own alerting.
@@ -445,7 +445,7 @@ notification arrived, so that I can trust it enough to delete my own alerting.
 
 ## F101 — Lark dual-mode credentials
 
-**Priority** P1 · **Status** partial — custom-bot mode stores the domain and sets `config.summary.content`; app-bot mode not started
+**Priority** P1 · **Status** 🟡 custom-bot mode only: domain (`larksuite`/`feishu`) stored and enforced by URL policy, `config.summary.content` set (`src/connectors/destinations/url-policy.ts`, `lark/render.ts`, `tests/destinations/lark.test.ts`). Not built: app-bot credential mode, `update_multi`, uuid idempotency, distinct data-model credential types, guided annotated setup flow
 
 **Story** As a Lark customer, I want a zero-setup webhook option and a powerful app option,
 so that I can start now and upgrade when I need message editing.
@@ -490,7 +490,7 @@ migration a single-mode design would force.
 
 ## F102 — Lark DLP and rate-limit handling
 
-**Priority** P1 · **Status** partial — DLP masking, `230028` permanent, throttling classified by code not status, unmapped codes flagged; per-mode rate limiters and hour offset not started · **New, from research**
+**Priority** P1 · **Status** 🟡 DLP masking of emails and phones in the renderer, `230028` permanent, throttling classified by code and `x-ogw-ratelimit-reset` not HTTP status, unmapped codes flagged in logs (`src/connectors/destinations/redact.ts`, `lark/classify.ts`, `tests/destinations/lark.test.ts`). Not built: separate custom-bot and app-bot rate limiters, hour and half-hour offset, `redacted_fields` recorded, unmapped-code metric persisted · **New, from research**
 
 **Story** As a GitHub→Lark customer, I want my CI notifications to actually arrive, so that
 I can rely on them.
@@ -538,7 +538,7 @@ author emails are personal data.
 
 ## F103 — Slack dual-mode credentials
 
-**Priority** P0 · **Status** partial — incoming-webhook adapter (Block Kit + text fallback, classifier); OAuth install and Web API mode not started · **Fixes** D8
+**Priority** P0 · **Status** 🟡 incoming-webhook adapter with Block Kit and text fallback, classifier, no identity override (`src/connectors/destinations/slack/`, `tests/destinations/slack.test.ts`). Not built: Slack OAuth install with `incoming-webhook` scope (the preferred path), Web API `chat.postMessage` mode, bearer-secret UI warning. Real Slack app needed to validate · **Fixes** D8
 
 **Story** As a Slack customer, I want a one-click "Add to Slack" button, so that I am not
 copying webhook URLs out of Slack settings.
@@ -591,7 +591,7 @@ proxy logs, browser history and support screenshots. The UI must warn about this
 
 ## F104 — Teams Workflows as the only MVP path
 
-**Priority** P0 · **Status** partial — Workflows adapter (Adaptive Cards only, host-pattern allowlist, `anyone` auth only, 28 KB budget); end to end in code (API `teams`, `triggerAuth`, migration 0012, ledger `accepted`) but never tried against a real tenant; orphan-flow surfacing not started
+**Priority** P0 · **Status** 🟡 Workflows-only adapter: Adaptive Cards, host-pattern allowlist, `anyone` auth only, 28 KB budget, 202 reported accepted (`src/connectors/destinations/teams/`, `tests/destinations/teams.test.ts`, `tests/api/integrations.test.ts`, migration 0012). Not built: orphan-flow warning and owner health check, other trigger auth modes. Never tried against a real tenant
 
 **Story** As a Microsoft 365 customer, I want a Teams destination that a non-technical
 administrator can set up, so that notifications actually reach my team.

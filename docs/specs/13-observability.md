@@ -56,7 +56,7 @@ a count says whether it is exact or estimated.
 
 ## F191 — Analytics Engine metrics pipeline
 
-**Priority** P1 · **Status** not started · **Referenced by F166, F168**
+**Priority** P1 · **Status** ❌ No Analytics Engine binding in `wrangler.jsonc`, no typed metric writer, datasets, sampling config or datapoint budget. ADR 0011 defers it; SLIs come from D1 only (`src/observability/slis.ts`). · **Referenced by F166, F168**
 
 **Story** As a product owner, I want product metrics that survive three months and cost nothing
 to query, so that I can understand how the product is used without building a warehouse.
@@ -204,7 +204,7 @@ tenants, analytics, AI providers or error trackers"*).
 
 ## F192 — Scheduled job runner and job health
 
-**Priority** P0 · **Status** not started · **Referenced by F51, F171, F174, F190**
+**Priority** P0 · **Status** 🟡 Only `runCronJobs` in `src/observability/cron.ts`: per-job isolation, a failure log and a heartbeat row in `ops_state` that nothing reads (`tests/observability/cron.test.ts`). Not built: `runJob` wrapper, `job_runs` and `job_cursors` tables, leases, cursors, cpu_ms, `job_stale` or `job_never_ran` alerts, cadence table. · **Referenced by F51, F171, F174, F190**
 
 **Story** As an operator, I want every background job to report whether it ran, how much it did
 and how fresh it is, so that a job which quietly stopped is indistinguishable from a job with
@@ -337,7 +337,7 @@ deletes ciphertext without decrypting it.
 
 ## F193 — Correlation id propagation
 
-**Priority** P0 · **Status** partial (slice 9: our id minted at ingress, `external_request_id` and `cf_ray` captured, `x-request-id` echoed, id attached to every log line inside a request; NOT propagated to the queue message, `deliveries`/outbox rows or the consumer's log lines, no `X-Noti-Correlation-Id` storage, no lookup by id) · **Extends F11 — does not redefine it**
+**Priority** P0 · **Status** 🟡 Our UUID is minted at ingress before parsing, `external_request_id` and `cf_ray` captured, `x-request-id` echoed, id on every in-request log line (`src/platform/correlation.ts`, `tests/platform/correlation.test.ts`). Not built: propagation to the queue message, `deliveries` or outbox rows and consumer logs, `X-Noti-Correlation-Id` storage, lookup by id. · **Extends F11 — does not redefine it**
 
 **Story** As a support engineer, I want one identifier that survives the whole path from webhook
 receipt to rendered message, so that a customer can quote it and I can find the exact event.
@@ -438,7 +438,7 @@ the caller is not a member, so the endpoint does not confirm that an id exists.
 
 ## F194 — Structured log event catalogue
 
-**Priority** P0 · **Status** partial (slice 9: `log()` adds `correlation_id`, `external_request_id`, `cf_ray` inside a request; the full key set and the catalogue are not enforced) · **Extends F11's key set — does not duplicate it**
+**Priority** P0 · **Status** 🟡 `log()` in `src/platform/log.ts` emits one redacted JSON line with `correlation_id`, `external_request_id` and `cf_ray` inside a request (`tests/platform/log.test.ts`). Not built: closed `msg` catalogue or typed key set (msg is a free string), per-invocation byte budget, invocation logs off for the consumer; a few raw `console.error` calls bypass `log()`. · **Extends F11's key set — does not duplicate it**
 
 **Story** As an engineer debugging at 2am, I want every log line to have the same shape and to
 name a known event, so that I can filter without reading.
@@ -577,7 +577,7 @@ review gate we want for a place where a secret would be invisible.
 
 ## F195 — Redaction enforcement points
 
-**Priority** P0 · **Status** not started · **Enforces F12 — does not redefine it**
+**Priority** P0 · **Status** 🟡 `redact()` runs on every `log()` line and delivery diagnostics are minted codes only (`src/platform/redact.ts`, `tests/platform/redact.test.ts`). Not built: console-call lint rule, site-to-test one-to-one check, property test over provider bodies, Analytics Engine and support-bundle exits (do not exist yet), redaction-failure drop-fields test. · **Enforces F12 — does not redefine it**
 
 **Story** As a customer, I want the redaction guarantee to hold at every place data leaves our
 process, not just in logs, so that adding a new feature cannot quietly reintroduce a leak.
@@ -679,7 +679,7 @@ evidence, not a certification, and this file makes no claim beyond that.
 
 ## F196 — Observability cost control under the 2026-12-01 pricing change
 
-**Priority** P1 · **Status** not started · **Date-driven: 7 weeks from this spec**
+**Priority** P1 · **Status** ❌ No log sampling, ingestion estimate, per-environment budget, degraded mode or observability block in `wrangler.jsonc`; the cost-control ADR is not written (ADR 0011 defers it). Date-driven: Cloudflare pricing changes 2026-12-01. · **Date-driven: 7 weeks from this spec**
 
 **Story** As an operator, I want observability spend bounded by design rather than discovered on
 a bill, so that the December pricing change cannot turn a traffic spike into a surprise.
@@ -814,7 +814,7 @@ two have different audit requirements.
 
 ## F197 — Delivery SLIs: accepted is not delivered
 
-**Priority** P0 · **Status** partial (slice 9: confirmed-delivery/success ratio, retry rate and dead-letter counts per workspace from the D1 ledger via `GET /api/observability/summary`, Teams reported as accepted; acceptance, routing and duplicate rates are `not measurable yet`; no publication gate, no UI) · **The most honesty-sensitive feature in this file**
+**Priority** P0 · **Status** 🟡 Per-workspace confirmed-delivery ratio, retry rate and dead-letter counts from D1 with numerator, denominator, window and null on empty; Teams reported as accepted (`src/observability/slis.ts`, `src/api/observability.ts`, `tests/observability/slis.test.ts`). Not built: acceptance, routing and duplicate rates (listed as notMeasurable), publication gate, any UI. · **The most honesty-sensitive feature in this file**
 
 **Story** As a customer, I want the reliability number to mean what the word means, so that I can
 decide whether to keep my own alerting or delete it.
@@ -944,7 +944,7 @@ repository names.
 
 ## F198 — Latency, queue depth and reliability measurement
 
-**Priority** P1 · **Status** partial (slice 9: exact end-to-end and queue-delay p50/p95 from `deliveries` timestamps at one-second resolution, backlog AGE from D1; ack and attempt latency are not recorded, no `delivery_attempts` table, no Analytics Engine)
+**Priority** P1 · **Status** 🟡 Exact end-to-end and queue-delay p50/p95 from `deliveries` timestamps at one-second resolution plus backlog age from D1, no averages (`src/observability/slis.ts`, `tests/observability/slis.test.ts`). Not built: ack and attempt latency, `delivery_attempts`, Analytics Engine percentiles, UI.
 
 **Story** As an operator, I want to know where time is going between "GitHub sent it" and "the
 message appeared", so that a slow channel is diagnosed rather than guessed at.
@@ -1046,7 +1046,7 @@ prohibits; if repository-level latency is ever needed it is hashed first (F196's
 
 ## F199 — Product analytics views
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ No product analytics views: no events table, 'this month in one sentence' buckets, top rules or suppression breakdown. Only adjacent: delivery summary counts on the Overview (`GET /api/deliveries/summary`) and the F197 SLI API. Needs an events/ingress ledger first.
 
 **Story** As a user, I want to see what I am being sent and what I am not, in words rather than
 numbers, so that I can tune my setup instead of guessing.
@@ -1168,7 +1168,7 @@ D1 under the tenant predicate, not from a shared dataset.
 
 ## F200 — Alerting on our own failure modes
 
-**Priority** P0 · **Status** partial (slice 9: `outbox_stalled`/`consumer_lag`-style stall detection from D1 with transition-based logging via `ops_state`; it logs, it does not page; no `alert_state` table, `job_runs`, or the other alerts)
+**Priority** P0 · **Status** 🟡 Stall detection from D1 (`outbox_stalled`, stale claims, overdue retries) with transition-based logging via `ops_state` (`src/observability/stall.ts`, `tests/observability/stall.test.ts`). It logs and does not page. Not built: `alert_state`, `job_runs`, any destination for pages, and the other 13 alerts (`dlq_growth`, `d1_overloaded`, `ingress_gap`, `job_stale`, and so on).
 
 **Story** As an on-call engineer, I want to be told when the system is losing notifications
 before a customer tells me, so that the first report is our apology rather than our discovery.
@@ -1303,7 +1303,7 @@ Thresholds and suppression policy are configuration changes and are audited (F28
 
 ## F201 — Incident response runbook
 
-**Priority** P1 · **Status** partial (slice 9: `docs/RUNBOOK.md` with the delivery model, severity table and procedures tied to real tables; not generated from the alert table, no test ties alerts to entries, never rehearsed)
+**Priority** P1 · **Status** 🟡 `docs/RUNBOOK.md` states the delivery model and no-audit caveat, with severity table and procedures tied to real tables, plus an incident template. Not built: entry per F200 alert, customer-message and capability fields, a test tying alerts to entries, any rehearsal (the runbook lists itself as unrehearsed).
 
 **Story** As an on-call engineer at 3am, I want the runbook to tell me what to check first, so
 that I act on evidence rather than on hunches while a customer's alerts are missing.
@@ -1434,7 +1434,7 @@ administrative surface only.
 
 ## F202 — Support evidence bundle
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ No support bundle, no lookup by correlation id, no `observability.bundle` capability, no bundle expiry job. Blocked on F193 propagation into rows and queue messages.
 
 **Story** As a support engineer, I want to gather everything about one notification into a
 single redacted artifact, so that I stop asking customers for screenshots and logs.
@@ -1543,7 +1543,7 @@ third parties; a bundle is tenant-scoped, access-logged and time-boxed for exact
 
 ## F203 — What we deliberately do not measure
 
-**Priority** P1 · **Status** not started · **A specification of refusals**
+**Priority** P1 · **Status** 🟡 Scattered guards only: `web/src/deliveries/deliveries.test.ts` bans exactly-once wording in the en catalogue, `src/observability/slis.ts` lists `notMeasurable` SLIs, and the runbook states the model. Not built: the normative refusal table, a banned-string test over docs, dashboard and marketing, a release review record. · **A specification of refusals**
 
 **Story** As a maintainer, I want the metrics we refuse to compute written down, so that nobody
 later "improves" the dashboard by inventing one.
@@ -1651,7 +1651,7 @@ prohibition it enforces.
 
 ## F204 — Operator capability gates for recovery actions
 
-**Priority** P0 · **Status** not started · **Implements the `replay` capability referenced by F182**
+**Priority** P0 · **Status** 🟡 `delivery.replay` is admin-only via `authorize()`; the 403 names the capability and denials are audited (`src/auth/permissions.ts`, `src/auth/workspace.ts`, `tests/api/deliveries.test.ts`). Not built: `slis.publish`, `rule.rollback`, `observability.bundle`, `retention.purge`, `incident.declare`, replay dry-run count and per-hour bounds. · **Implements the `replay` capability referenced by F182**
 
 **Story** As a workspace admin, I want recovery actions to be restricted to people who should
 have them, so that a routine mistake cannot be repeated at scale by someone who meant well.

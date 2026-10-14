@@ -60,7 +60,7 @@ disablement detection, and no source may claim the inbound at-least-once propert
 
 ## F73 — Source ranking and the admission bar
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** 🟡 ranking table and verdicts are written in this spec and the Sentry refusal is enforced by `tests/sources/provider-api.test.ts`; not built: the admission-axes test, the review stamp and the stale-row CI check.
 
 **Story** As a maintainer, I want every source addition to clear one written bar, so that we
 ship fewer connectors and ship them honestly.
@@ -130,7 +130,7 @@ requirement (F90), not just a token check.
 
 ## F74 — Standard Webhooks verification core
 
-**Priority** P0 · **Status** implemented (slice 10a)
+**Priority** P0 · **Status** ✅ `src/connectors/sources/generic/signature.ts` with `tests/sources/signature.test.ts` and `tests/sources/ingress.test.ts` (ADR 0012); deviations: webhook-id cap is 128 not 255, v1a is ignored but not declared unsupported in the UI.
 
 **Story** As a security reviewer, I want any standards-compliant webhook to be verifiable with
 one code path, so that adding a new producer costs no new crypto.
@@ -219,7 +219,7 @@ echoes the presented signature.
 
 ## F75 — Replay window and idempotency key
 
-**Priority** P0 · **Status** partly implemented (slice 10a)
+**Priority** P0 · **Status** 🟡 fixed 5-minute seconds-only window and dedup on webhook-id in `src/connectors/sources/generic/signature.ts` and `route.ts`, tested in `tests/sources/ingress.test.ts`; not built: per-connection tolerance, `clock_skew_suspected`, `providerIdStability`, semantic key.
 
 **Story** As a customer, I want a replayed webhook to be ignored, so that a captured request
 cannot replay my CI failures into a channel forever.
@@ -292,7 +292,7 @@ is not configurable to 0. Stripe documents the same trap: *"Don't use a toleranc
 
 ## F76 — Unguessable tenant key in the URL path
 
-**Priority** P0 · **Status** partly implemented (slice 10a) · **Fixes** part of D3
+**Priority** P0 · **Status** 🟡 144-bit random endpoint id, tenant taken from the source row, identical 404 (`src/connectors/sources/generic/route.ts`, `tests/sources/ingress.test.ts`); not built: hashed key storage, two live keys with overlap, `ingress_keys` table, 410 for disabled · **Fixes** part of D3
 
 **Story** As a customer, I want my webhook URL to be unguessable and rotatable, so that
 nobody can inject events into my workspace or discover my endpoint.
@@ -381,7 +381,7 @@ unknown key is rate-limited on a bucket keyed by its own hash rather than being 
 
 ## F77 — Zero-downtime secret rotation
 
-**Priority** P0 · **Status** partly implemented: cutover only (slice 10a)
+**Priority** P0 · **Status** 🟡 sealed secret with AAD binding and admin rotation as cutover (`src/connectors/sources/generic/secret.ts`, `tests/sources/api.test.ts`); not built: dual active secrets, overlap rotation wizard, `secret_id_used`.
 
 **Story** As a customer whose signing secret leaked, I want to rotate without losing events,
 so that I never have to choose between a compromised credential and a broken integration.
@@ -480,7 +480,7 @@ material is destroyed on revoke, not merely disabled.
 
 ## F78 — Generic source mapping and schema contract
 
-**Priority** P0 · **Status** partly implemented: fixed envelope, no mapping (slice 10a)
+**Priority** P0 · **Status** 🟡 strictly validated fixed envelope, JSON-object only, 256 KiB cap, 415/413 (`src/connectors/sources/generic/event.ts`, `tests/sources/event.test.ts`); not built: per-connection field mapping, CloudEvents detection, `data.extra`, 1 MiB cap, `adapterVersion`.
 
 **Story** As a user with an internal system, I want to map a JSON payload onto Noti's event
 model without writing code, so that my deploy tool can page my team.
@@ -583,7 +583,7 @@ credential, or an organisation.
 
 ## F79 — Fixture corpus gate
 
-**Priority** P0 · **Status** partly implemented (slice 10a) · **Fixes** part of D13
+**Priority** P0 · **Status** 🟡 GitLab and Stripe fixtures in `tests/sources/fixtures/` drive verify, map and render tests with synthetic secrets; not built: captured real payloads, capture-date and adapter-version stamps, denylist CI grep, per-destination replay, skip-fails-CI gate · **Fixes** part of D13
 
 **Story** As a maintainer, I want a real captured payload per source and per event type, so
 that an upstream change breaks a test instead of a customer's channel.
@@ -651,7 +651,7 @@ documents that the working copy is as sensitive as the repository.
 
 ## F80 — Source onboarding wizard
 
-**Priority** P0 · **Status** partly implemented: Sources page only (slice 10a)
+**Priority** P0 · **Status** 🟡 Sources page with one-time secret reveal, per-provider guidance and connect-a-chat with event selection (`web/src/sources/`, `web/src/sources/providers.test.tsx`); not built: stepwise wizard, send-test step for sources, abandon cleanup, capabilities-driven steps.
 
 **Story** As a non-technical administrator, I want a wizard that gets me from "connect
 GitLab" to a working notification in minutes, so that I never have to read a webhook
@@ -732,7 +732,7 @@ analytics, and never included in a support-bundle export (F30's export omits cre
 
 ## F81 — GitLab signature verification
 
-**Priority** P1 · **Status** partly implemented: GitLab.com, one credential per source (slice 10b)
+**Priority** P1 · **Status** 🟡 GitLab.com signing token (shared Standard Webhooks verifier) or X-Gitlab-Token, one credential per source, no fallback (`src/connectors/sources/gitlab/`, `tests/sources/gitlab.test.ts`, ADR 0015); not built: both credentials at once, self-managed, Idempotency-Key drift metric.
 
 **Story** As a GitLab customer, I want my GitLab webhook verified against the documented
 scheme, so that a forged event cannot enter my workspace.
@@ -816,7 +816,7 @@ migrated knows why their integration is weaker than the one next to it.
 
 ## F82 — GitLab lifecycle, auto-disable and limits
 
-**Priority** P1 · **Status** partly implemented: floods absorbed with 2xx; no health model (slice 10b)
+**Priority** P1 · **Status** 🟡 flood absorbed with 2xx and a dropped-events counter shown on the card (`src/connectors/sources/provider-route.ts`, `migrations/0020_source_dropped_events.sql`, `tests/sources/gitlab.test.ts`); not built: health model, 72 h silence prompt, plan tiers, disable inference.
 
 **Story** As a GitLab customer, I want to know when GitLab has stopped sending me events, so
 that a silent outage does not look like "nothing happened".
@@ -934,7 +934,7 @@ a GitLab personal access token for this source.
 
 ## F83 — GitLab event catalog and silent drops
 
-**Priority** P1 · **Status** partly implemented: 11-type catalogue (slice 10b)
+**Priority** P1 · **Status** 🟡 closed 11-type catalogue with unlisted events acknowledged and ignored (`src/connectors/sources/gitlab/`, `tests/sources/gitlab.test.ts`); not built: Note, Job, Release, Wiki hooks, `data.extra`, a visible silent-drop log.
 
 **Story** As a GitLab customer, I want a finite list of GitLab events mapped onto Noti's
 model, so that my filter list is the same shape as my GitHub one.
@@ -1019,7 +1019,7 @@ never rendered.
 
 ## F84 — Stripe signature verification
 
-**Priority** P1 · **Status** partly implemented: snapshot events (slice 10b)
+**Priority** P1 · **Status** ✅ `src/connectors/sources/stripe/verify.ts` with `tests/sources/stripe.test.ts` (string key, v0 ignored, several v1, 5-minute window, opposite-of-Standard-Webhooks test, test/live separate sources, ADR 0015); tolerance fixed not per-connection; doc-derived fixtures only.
 
 **Story** As a Stripe customer, I want Stripe events verified exactly as Stripe documents
 them, so that a forged `invoice.paid` cannot mark an invoice as settled.
@@ -1102,7 +1102,7 @@ reminder with a direct link to the rotation action.
 
 ## F85 — Stripe snapshot vs thin, and the enrichment budget
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** 🟡 only livemode routing exists (other mode acknowledged 200 and ignored, a deliberate deviation from 401; `tests/sources/stripe.test.ts`); not built: thin events (ignored), enrichment fetch and budget, snapshot-staleness note, order independence tests.
 
 **Story** As a Stripe customer, I want to receive the event format I chose, so that a thin
 payload does not silently arrive as an empty notification.
@@ -1192,7 +1192,7 @@ silently re-routed.
 
 ## F86 — Stripe deduplication and retry horizon
 
-**Priority** P1 · **Status** partly implemented: transport dedup only (slice 10b)
+**Priority** P1 · **Status** 🟡 transport dedup on event id, retry with new signature is one notification (`tests/sources/stripe.test.ts`); not built: semantic dedup table, 7-day TTL assertion, reconciliation via GET /v1/events, documented manual-resend horizon.
 
 **Story** As a Stripe customer, I want Stripe's three-day retry window covered exactly once,
 so that I get one `invoice.paid` notification and not five.
@@ -1293,7 +1293,7 @@ same normalizer and renderer.
 
 ## F87 — Linear signature verification and replay window
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no Linear connector exists (not in `src/connectors/sources/registry.ts`); needs the F73 bar re-run and the 60 s replay window decision.
 
 **Story** As a Linear customer, I want my Linear webhook verified and its timestamp checked,
 so that a captured request cannot replay issue notifications into my channel.
@@ -1384,7 +1384,7 @@ tighter than GitHub's 10 seconds and tighter than GitLab's 10 seconds.
 
 ## F88 — Linear OAuth programmatic onboarding
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ not started; depends on F87 and on storing Linear OAuth credentials (needs a real Linear workspace and OAuth app).
 
 **Story** As a Linear workspace admin, I want to install Noti from Linear without pasting a
 URL, so that setup is one click instead of a configuration exercise.
@@ -1469,7 +1469,7 @@ the local flag, or a leaked token stays valid at Linear.
 
 ## F89 — Sentry: pull-based, and honest about the webhook
 
-**Priority** P2 · **Status** resolved as a refusal, re-verified 2026-10-13 (slice 10b) · **Decision: no push source without real evidence**
+**Priority** P2 · **Status** 🚫 refused: no Sentry source, API returns 422 and `tests/sources/provider-api.test.ts` fails if one is registered (ADR 0015 decision 8, re-verified 2026-10-13) · **Decision: no push source without real evidence**
 
 **Story** As a security reviewer, I want us to refuse to ship a webhook source whose
 authentication we cannot verify, so that no Sentry customer has an unverified endpoint
@@ -1574,7 +1574,7 @@ fleet's scheduled-job budget.
 
 ## F90 — Cloudflare Alerts: the weakest auth we ship
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no Cloudflare Alerts connector exists (not in `src/connectors/sources/registry.ts`); needs the static-bearer weak-auth UI labelling and untrusted-payload rules built first.
 
 **Story** As a Cloudflare customer, I want to receive my alerts in Noti, so that I know about a
 DDoS without living in the Cloudflare dashboard.

@@ -24,7 +24,7 @@ F233 is the release gate and not a peer.
 
 ## F227 — Threat model
 
-**Priority** P0 · **Status** 🟡 `docs/THREAT_MODEL.md` written (STRIDE per entry point, assets, adversaries, boundaries, "not defended" list); the F227 CI test that every referenced control ID exists is not built
+**Priority** P0 · **Status** 🟡 `docs/THREAT_MODEL.md` has assets, adversaries, trust boundaries, STRIDE per entry point and a not-defended list; not built: the CI check that every control ID referenced exists in `docs/specs/`; `docs/SECURITY.md` was not replaced by the model (it links to it); own analysis, not an audit
 
 **Story** As a security reviewer, I want one written model of who attacks what and which control
 is supposed to stop them, so that new features are checked against a threat instead of against
@@ -73,7 +73,7 @@ adversary classes imply, and it is not published to customers.
 
 ## F228 — Egress policy is ours, not the platform's
 
-**Priority** P0 · **Status** not started · **Fixes** part of D9
+**Priority** P0 · **Status** 🟡 one send path `sendRequest` in `src/connectors/destinations/send.ts` re-checks the URL policy, uses `redirect: 'manual'` with 3xx classified `destination_redirected`, timeout and bounded body (`tests/destinations/conformance.test.ts`, `tests/pipeline/destinations.test.ts`, ADR 0006, AR-2 in `docs/THREAT_MODEL.md`); not built: the static only-one-module-calls-fetch test · **Fixes** part of D9
 
 **Story** As a security engineer, I want every outbound request to pass through one policy
 function in our code, so that we never assume Cloudflare is filtering egress when it is not.
@@ -146,7 +146,7 @@ never a reason to weaken the application-layer check.
 
 ## F229 — Allowed provider domains, and how that list is maintained
 
-**Priority** P0 · **Status** not started · **Fixes** part of D9
+**Priority** P0 · **Status** 🟡 per-kind exact-host and path-prefix rules with doc-URL comments and lookalike-host tests (`src/connectors/destinations/url-policy.ts`, `tests/destinations/url-policy.test.ts`); not built: typed registry with `docsUrl` and `verifiedOn`, 180-day staleness CI test, written reason for wildcard-style hosts (Teams `*.logic.azure.com`, AR-15), reconnect prompt when a host is removed · **Fixes** part of D9
 
 **Story** As an operator, I want one reviewable list of the exact hosts we will send to, so that
 adding a destination is a reviewed change with a cited source rather than a regex edit.
@@ -220,7 +220,7 @@ asked".
 
 ## F230 — Send-time egress enforcement and what we cannot enforce
 
-**Priority** P0 · **Status** not started · **Fixes** D9 (send-time half)
+**Priority** P0 · **Status** ✅ URL policy re-run before every send with no network call on rejection (`src/connectors/destinations/send.ts`); IP literals, userinfo, port, fragment, path and length rejected (`tests/destinations/url-policy.test.ts`, `tests/pipeline/extended-destinations.test.ts`); DNS rebinding accepted as AR-3; bounded body; gap: unmapped-response flag in `classify.ts` raises no metric · **Fixes** D9 (send-time half)
 
 **Story** As a security engineer, I want the URL checked again at the moment we send, and an
 honest list of the attacks that a URL string check cannot stop.
@@ -292,7 +292,7 @@ message may be logged or read by another workspace member, and a dead-letter vie
 
 ## F231 — Rate limiting, quotas and abuse
 
-**Priority** P0 · **Status** 🟡 D1 limiter helper and per-installation `ingressLimiter` shipped and tested, **not wired into the route**; the other three families, abuse alerting and coarse pre-filter not built
+**Priority** P0 · **Status** 🟡 D1 fixed-window limiter (`src/security/rate-limit.ts`) wired into GitHub ingress, generic and provider sources and the dashboard APIs with 429 plus Retry-After (`tests/security/rate-limit.test.ts`, `tests/pipeline/delivery-path.test.ts`); Better Auth limits use database storage; not built: outbound provider token bucket (F187), per-workspace quota ledger, abuse alerting, Workers binding pre-filter
 
 **Story** As an operator, I want floods, abuse and runaway tenants bounded by policy rather than
 by quota exhaustion, so that one customer's mistake cannot take the platform down.
@@ -365,7 +365,7 @@ which is single-threaded and therefore at least globally consistent (F06).
 
 ## F232 — Authentication and authorization: what is decided elsewhere
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ pointer table with release evidence and the static every-mutating-route-maps-to-a-capability check are not written; underlying controls exist: role-by-capability table test (`tests/auth/permissions.test.ts`), static Origin guard on mutating routes (`tests/security/static-guards.test.ts`), 404 for other workspaces (`tests/api/integrations.test.ts`)
 
 **Story** As a security reviewer, I want one page that says where the authentication and
 authorization decisions live and what evidence each one needs, so that I review the right file
@@ -409,7 +409,7 @@ the highest-value cheap check in the whole file.
 
 ## F233 — Tenant isolation is the release gate
 
-**Priority** P0 · **Status** ❌ not started · **Fixes** D2, D3 · **Contributes to** N6
+**Priority** P0 · **Status** 🟡 tenant comes only from the verified installation, queries are scoped, tenant columns and immutability triggers in migrations, cross-workspace 404 tests (`tests/tenant-resolution.test.ts`, `tests/api/integrations.test.ts`, `tests/api/deliveries.test.ts`, PRs #6 #9 #11); not built: static every-query-filters-by-org test, staging drill, Time Travel re-drill, audit rows for unknown-installation 403s · **Fixes** D2, D3 · **Contributes to** N6
 
 **Story** As a customer, I want my events and my credentials to be unreachable from another
 customer's account, so that I can trust the product with private repository activity.
@@ -475,7 +475,7 @@ fatigue.
 
 ## F234 — Accepted risk: Better Auth stores session tokens in a cleartext column
 
-**Priority** P0 · **Status** accepted, mitigations required · **Relates to** D7, N1
+**Priority** P0 · **Status** 🟡 accepted as AR-1 in `docs/THREAT_MODEL.md`; in place: 30-day expiry with daily refresh and password-reset revocation (`src/auth/better-auth.ts`), `cookieCache` off asserted in `tests/security/config-guards.test.ts`, retired `auth_tokens` guard (`tests/retired-schema.test.ts`); not built: session list and revoke-others, revoke-all after a restore, installed-version check of token storage, no-token-in-response test · **Relates to** D7, N1
 
 **Story** As a security reviewer, I want the session-token storage risk written down plainly with
 its mitigations, so that nobody later discovers it, or claims we fixed it.
@@ -542,7 +542,7 @@ unexpired session for every user. Detection depends on Cloudflare access logs, n
 
 ## F235 — Cloudflare Email Sending: platform constraints we did not choose
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ the limits table is not recorded outside this spec and no email-failure handling is built; auth mail goes through a `send_email` binding with a server-controlled sender (`src/auth/email.ts`) with no suppression list, quota handling or send-failure tests; DKIM and SPF requirements remain unverified
 
 **Story** As a product owner, I want the email channel's hard limits written down with their
 consequences, so that a design decision is not silently re-litigated at 3,000 emails a month.
@@ -607,7 +607,7 @@ included in a DSAR export (F238) on request.
 
 ## F236 — Audit events: completeness, immutability, access
 
-**Priority** P1 · **Status** not started · **Complements** `02` F28
+**Priority** P1 · **Status** 🟡 audit rows are written with the change in one batch, typed primitives-only size-capped metadata, admin-only `audit.read` reads, tenant-scoped (`src/audit/audit.ts`, `src/api/audit.ts`, `tests/api/audit.test.ts`); not built: static no-UPDATE-or-DELETE test (retention purge deletes by age), audit of audit reads, completeness heartbeat, fail-closed destructive actions, F12 redaction of metadata · **Complements** `02` F28
 
 **Story** As a support engineer, I want to answer "who did what, when" from records I did not
 write, so that a customer dispute does not end in a guess.
@@ -658,7 +658,7 @@ passes through F12 before storage.
 
 ## F237 — Retention matrix and its enforcement
 
-**Priority** P0 · **Status** not started · **Fixes** D15 (the magic-number half)
+**Priority** P0 · **Status** 🟡 age-based chunked, resumable, throttled purge of terminal deliveries (default 90 days) and audit events (default 365 days) from deployment vars (`src/pipeline/retention.ts`, `tests/pipeline/retention.test.ts`); not built: single retention-matrix doc, per-workspace downward setting and UI, staleness alert per job, doc-matches-default test; ledger is purged at 90 days, unlike the spec's workspace lifetime · **Fixes** D15 (the magic-number half)
 
 **Story** As a customer, I want to know how long you keep each kind of my data and to be able to
 ask for it to be kept for less, so that retention is a setting rather than a surprise.
@@ -721,7 +721,7 @@ new store is added.
 
 ## F238 — Data-subject requests
 
-**Priority** P1 · **Status** ❌ blocked by N3
+**Priority** P1 · **Status** 🟡 workspace-level export without credentials and two-phase deletion with bounded purge and dashboard screens (`src/api/workspace-lifecycle.ts`, `tests/api/workspace-lifecycle.test.ts`, PR #12); N3 is resolved so no longer blocked; not built: per-user access and erasure flows, account deletion, DSR rate-limit and audit tests, erasure-limits wording, legal review of roles and deadlines
 
 **Story** As a user, I want to see and delete my personal data, so that I can exercise the rights
 my jurisdiction gives me without emailing support.
@@ -788,7 +788,7 @@ of destructive intent, rate limiting, and audit.
 
 ## F239 — Dependency and supply-chain hygiene
 
-**Priority** P1 · **Status** 🟡 `npm ci`, audit gate with dated exceptions, SHA-pinned actions, read-only permissions, Dependabot, dependency review (non-blocking for now), dev-vars drift test; `npm audit signatures`, install-script review and OIDC not done · **Contributes to** D14
+**Priority** P1 · **Status** 🟡 `npm ci`, audit gate with dated exceptions (`scripts/audit-gate.mjs`, `tests/security/audit-gate.test.ts`), SHA-pinned actions, read-only permissions, Dependabot, dev-vars drift test (`tests/config.dev_vars.test.ts`, `tests/security/config-guards.test.ts`), dependency review non-blocking; not done: `npm audit signatures`, install-script review, OIDC · **Contributes to** D14
 
 **Story** As a maintainer, I want the third-party surface small, pinned and continuously checked,
 so that a compromised transitive package is a blocked PR rather than a production incident.
@@ -845,7 +845,7 @@ requires.
 
 ## F240 — Security release checklist
 
-**Priority** P0 · **Status** 🟡 `docs/RELEASE_GATES.md` restructured as a living checklist naming the four gates; every gate is partly done or not done
+**Priority** P0 · **Status** 🟡 `docs/RELEASE_GATES.md` is a living checklist naming the four gates, asserted by `tests/security/config-guards.test.ts`; every gate is partly done or not done: no real-provider run, no staging tenant-isolation drill, no KEK rotation rehearsal, no rollback rehearsal
 
 **Story** As a maintainer, I want one checklist that decides whether a release may be called
 secure, so that "production-ready" is earned by evidence rather than asserted.
@@ -896,7 +896,7 @@ we ran".
 
 ## F241 — Known-accepted-risk register
 
-**Priority** P0 · **Status** 🟡 register lives in `docs/THREAT_MODEL.md` §7 (AR-1 to AR-16, statuses reconciled with the code); CI check that every referenced `AR-n` exists is in `tests/security/config-guards.test.ts`
+**Priority** P0 · **Status** ✅ register is `docs/THREAT_MODEL.md` section 7 with owner and review trigger per row, and a CI check that every referenced AR id exists (`tests/security/config-guards.test.ts`); gaps: no 180-day review dates recorded, no privacy-policy link, some listed compensating controls are themselves unbuilt
 
 **Story** As a customer, an investor or a reviewer, I want to see what we know is risky and why we
 chose it, so that trust is based on disclosure rather than on absence of bad news.
@@ -943,7 +943,7 @@ stopped thinking about.
 
 ## F242 — Incident response and disclosure
 
-**Priority** P1 · **Status** 🟡 root `SECURITY.md` (GitHub private vulnerability reporting, no invented address); runbooks, postmortem template and `security.txt` not done
+**Priority** P1 · **Status** 🟡 root `SECURITY.md` with GitHub private vulnerability reporting (no invented address) and scope; `docs/RUNBOOK.md` has severity levels, an incident record template and availability runbooks; not done: S1-S4 security runbooks, postmortem template, `security.txt`, evidence-preservation rule against retention purge; no incident exercise run
 
 **Story** As a customer whose data or credentials were affected, I want a fast, honest and
 documented response, so that an incident costs me less than silence would.

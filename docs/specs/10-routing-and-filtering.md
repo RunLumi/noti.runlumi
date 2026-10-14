@@ -52,7 +52,7 @@
 
 ## F121 — Routing rule model
 
-**Priority** P0 · **Status** 🟡 only a closed filter set stored on each integration (slice 7, [ADR 0010](../adr/0010-routing-filters.md)); no rule object · **Fixes** D3
+**Priority** P0 · **Status** ❌ no rule object: only a closed per-integration filter set in `integrations.filters_json` (`src/routing/filters.ts`, ADR 0010); rules need the canonical envelope, not built · **Fixes** D3
 
 **Story** As a user, I want one object that says which events, under which conditions, go where
 and in what format, so that I can understand and change my setup as a whole rather than as a
@@ -153,7 +153,7 @@ references are resolved server-side — the client never supplies a URL.
 
 ## F122 — Rule persistence, tenancy and audit
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ no rules table, versions or rule audit; filters are one JSON column on `integrations` (migration `0015`), changes audited only as integration updates
 
 **Story** As a support engineer, I want to see what a customer's routing configuration was at
 any past moment, so that "it worked yesterday" is a question I can answer.
@@ -246,7 +246,7 @@ fact. No query interpolates a user string.
 
 ## F123 — Condition groups: `all` / `any`
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ no `all`/`any` condition groups; filters are a fixed implicit AND of five typed filters (`src/routing/filters.ts`)
 
 **Story** As a user, I want to say "send me pull requests **and** only ones that are **either**
 failures **or** on the release branch", so that I can express the routing I actually mean
@@ -345,7 +345,7 @@ this path. That property is the security argument, and it is asserted by a test,
 
 ## F124 — Comparison semantics and three-valued logic
 
-**Priority** P0 · **Status** 🟡 three-valued evaluation for the five shipped filters (slice 7); no general comparison engine
+**Priority** P0 · **Status** 🟡 three-valued fail-closed evaluation for the five shipped filters, `unknown_fact` reason (`src/routing/filters.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: general operators or comparison engine
 
 **Story** As a user, I want "is not a bot" to behave correctly when the source never told us
 whether someone is a bot, so that my alerts do not silently disappear.
@@ -437,7 +437,7 @@ so no ReDoS surface exists.
 
 ## F125 — Filter field registry
 
-**Priority** P0 · **Status** 🟡 five filters in a typed, versioned registry (slice 7); not the general field registry · **Blocks** every other feature in this file
+**Priority** P0 · **Status** 🟡 typed, versioned registry of 5 filters with `appliesTo` and evaluate (`src/routing/filters.ts`, `tests/routing/filters.test.ts`); not built: general field registry, operator metadata, nullability or help text · **Blocks** every other feature in this file
 
 **Story** As a user, I want the filter list to be short, typed and honest about what each field
 means, so that I can pick the right one without documentation.
@@ -540,7 +540,7 @@ used to reach `constructor` or `__proto__`.
 
 ## F126 — Repository filter capability
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ no repository filter capability; an integration is bound to one repository or source (`src/api/repo-scope.ts`), so there is no per-rule repo allow or deny
 
 **Story** As a user in an agency, I want to route a client repository to that client's channel
 and nothing else, so that one client's alerts can never reach another client's chat.
@@ -619,7 +619,7 @@ lookup first, which is an independent, tested path.
 
 ## F127 — Branch filter capability
 
-**Priority** P0 · **Status** 🟡 `*`/`**` globs and allow/deny lists with a linear matcher (slice 7); no separate `eq`/`in`/`not_in` operators
+**Priority** P0 · **Status** 🟡 allow/deny glob filters on head and base branch, bounded linear matcher, no RegExp (`src/routing/glob.ts`, `tests/routing/glob.test.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: `eq`/`in`/`not_in` operators
 
 **Story** As a user, I want "only the release branch" and "not the sandbox branch", so that
 routine work on experimental branches does not page me.
@@ -707,7 +707,7 @@ is bounded too.
 
 ## F128 — Label filter capability
 
-**Priority** P1 · **Status** 🟡 label include/exclude shipped (slice 7); no picker from observed labels
+**Priority** P1 · **Status** 🟡 label include/exclude filter, unknown labels fail closed (`src/routing/filters.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: picker from observed labels
 
 **Story** As a user, I want "only things labelled bug" so that the triage channel stays about
 bugs.
@@ -775,7 +775,7 @@ They are capped, escaped per destination (F94), and never used as a storage key 
 
 ## F129 — Path pattern filter capability
 
-**Priority** P1 · **Status** not started · **⚠️ has a documented upstream failure mode**
+**Priority** P1 · **Status** ❌ no path pattern filter; changed-file paths are not extracted into facts. Depends on F121 and the canonical envelope · **⚠️ has a documented upstream failure mode**
 
 **Story** As a user, I want "only when files under `src/` change", so that documentation-only
 pull requests do not wake my team.
@@ -868,7 +868,7 @@ as an R2 key, and never rendered as markup.
 
 ## F130 — Pull request / issue number filter capability
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no PR/issue number filter; `extractGithubFacts` does not carry the number as a filterable fact
 
 **Story** As a user triaging one thread, I want "only PR 482", so that I can follow a single
 conversation without a rule that fires on every number.
@@ -946,7 +946,7 @@ cross-repository firing pattern that a user can mistake for a targeted rule.
 
 ## F131 — Event type selection and outcome conditions
 
-**Priority** P0 · **Status** not started · **Fixes** part of D12, D16
+**Priority** P0 · **Status** 🟡 event types selectable from a closed catalog in the wizard and settings (`web/src/integrations/EventPicker.tsx`, `web/src/integrations/events.ts`); workflow_run is split by conclusion; not built: rule-level event selection or outcome conditions · **Fixes** part of D12, D16
 
 **Story** As a user, I want to pick "CI failed" from a list of checkboxes rather than type a
 string format, so that I can tell the difference between "no match" and "I misspelled it".
@@ -1035,7 +1035,7 @@ exactly the unbounded key space this feature removes. Free text in this field is
 
 ## F132 — Rule priority, evaluation order, fan-out and conflict resolution
 
-**Priority** P0 · **Status** not started
+**Priority** P0 · **Status** ❌ no rule priority, first-match or conflict resolution; fan-out exists only as several independent integrations per repository, each filtered on its own
 
 **Story** As a user with a specific exception, I want my exception to beat my general rule, so
 that "everything from Alice goes to the triage channel" is not swallowed by "everything goes to
@@ -1141,7 +1141,7 @@ since-deleted destination fails closed rather than delivering to a recycled id.
 
 ## F133 — Format selection and per-destination overrides
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no per-rule format or destination overrides; rendering is chosen by destination kind in adapters (`src/connectors/destinations/`)
 
 **Story** As a user, I want Slack to get a rich card while a plain webhook gets readable text,
 so that I am not forced to pick one format for the whole rule.
@@ -1221,7 +1221,7 @@ format, so choosing `markdown` never becomes a way to inject raw markup.
 
 ## F134 — Default rules and workspace bootstrap
 
-**Priority** P1 · **Status** not started
+**Priority** P1 · **Status** ❌ no default rules or workspace bootstrap; a new integration just subscribes to its chosen events with no filters
 
 **Story** As a new user, I want my workspace to receive something sensible the moment I connect
 GitHub, so that my first ten minutes are not an empty channel and a configuration form.
@@ -1300,7 +1300,7 @@ Seeding runs inside the same authorization context as workspace creation.
 
 ## F135 — Rule templates
 
-**Priority** P2 · **Status** not started
+**Priority** P2 · **Status** ❌ no rule templates; presets (F154) are also unbuilt
 
 **Story** As a user setting up a second repository, I want to copy the rules I already trust,
 so that I do not rebuild them from scratch and get them subtly different.
@@ -1386,7 +1386,7 @@ template cannot become a way to persist an SSRF payload (F96) or a secret.
 
 ## F136 — Filter evaluator, compiled predicates and the evaluation budget
 
-**Priority** P0 · **Status** 🟡 pure `evaluate` per filter, run at ingress rather than in the consumer (ADR 0010 explains why); no compiled-predicate cache or evaluation budget · **The reason rules are evaluated in the consumer**
+**Priority** P0 · **Status** 🟡 pure `evaluate` per filter, run at ingress not in the consumer (`src/routing/ingress.ts`, `tests/routing/ingress.test.ts`, ADR 0010); not built: compiled-predicate cache, evaluation budget, consumer-side evaluation · **The reason rules are evaluated in the consumer**
 
 **Story** As an operator, I want rule evaluation to cost a bounded amount of work per event, so
 that adding rules does not degrade delivery for everyone on the platform.
@@ -1525,7 +1525,7 @@ the compiler's input is a validated data structure, not source text — the asse
 
 ## F137 — Delivery provenance: `rule_id` and the evaluation trace
 
-**Priority** P0 · **Status** 🟡 `routing_decisions` records delivered/filtered with a reason code (slice 7); no `deliveries.rule_id`, `rule_version` or evaluation trace · **The data half of F149**
+**Priority** P0 · **Status** 🟡 `routing_decisions` records delivered/filtered with a closed reason code, 30-day retention (`src/routing/provenance.ts`, `tests/routing/ingress.test.ts`, ADR 0010); not built: `deliveries.rule_id`, `rule_version`, evaluation trace · **The data half of F149**
 
 **Story** As a user who got a notification I did not expect, I want the delivery record to name
 the rule that produced it, so that I can fix the cause instead of muting the symptom.
@@ -1605,7 +1605,7 @@ into a support export. Rule names are user text and pass F94 escaping.
 
 ## F138 — Actor, bot and ghost filter capability
 
-**Priority** P1 · **Status** 🟡 bot any/exclude/only and the ghost exemption shipped (slice 7); no "don't know" choice, no `isGhost` control · **Implements F43's promise**
+**Priority** P1 · **Status** 🟡 bot any/exclude/only and ghost exemption (`src/routing/filters.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: explicit "don't know" choice, `isGhost` control · **Implements F43's promise**
 
 **Story** As a user, I want "not from bots" and "not from deleted accounts" as separate, honest
 choices, so that machine noise goes to one channel and human activity goes to another.
@@ -1703,7 +1703,7 @@ Actor identity is **never** used for authorization — the installation is (F57)
 
 ## F139 — Safe rule change: impact preview, simulate, versioning, rollback, test-before-enable
 
-**Priority** P1 · **Status** 🟡 pure dry run (`POST /api/integrations/:id/filters/preview`) and a dashboard tester only (slice 7); no impact preview, versioning or rollback · **Deliberately one feature, four facets**
+**Priority** P1 · **Status** 🟡 pure dry run `POST /api/integrations/:id/filters/preview` and dashboard tester (`src/api/routing.ts`, `tests/api/routing.test.ts`, ADR 0010); not built: impact preview over history, versioning, rollback, test-before-enable · **Deliberately one feature, four facets**
 
 **Story** As a user about to change a working rule, I want to see what the change would have
 done to my recent notifications before it does it, so that tightening a filter never silently
@@ -1839,7 +1839,7 @@ dialog. Replay and rollback both require an explicit capability (F204) and are a
 
 ## F140 — Event picker and the rule authoring contract
 
-**Priority** P0 · **Status** 🟡 per-filter plain-language controls in the wizard and settings (slice 7); no event-picker contract changes · **Blocks** by F42
+**Priority** P0 · **Status** 🟡 plain-language per-filter controls in wizard and settings (`web/src/integrations/settings/FiltersSection.tsx`, `web/src/integrations/filters/model.ts`); not built: one-sentence rule builder, Otherwise step, advanced collapse · **Blocks** by F42
 
 **Story** As a non-technical user, I want the rule builder to read as a sentence I can check,
 so that I can tell what I am about to build without reading documentation.

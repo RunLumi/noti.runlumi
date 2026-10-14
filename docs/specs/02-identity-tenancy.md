@@ -68,7 +68,7 @@ Everything in F25–F31 below exists because of that gap.
 
 ## F15 — Organization model
 
-**Priority** P0 · **Status** ✅ implemented (single-org) · **Decision changed 2026-10-13**
+**Priority** P0 · **Status** ✅ multi-org: no `organizationLimit`; `selectMembership` returns 404 for non-member org, explicit `?org=` required on writes for multi-workspace users; `tests/workspace.test.ts`, `tests/api/org-required.test.ts`, `tests/api/workspace-active.test.ts` · **Decision changed 2026-10-13**
 
 **Story** As a user, I want my notifications grouped under an organization, so that my
 integrations and history are separate from anyone else's.
@@ -112,7 +112,7 @@ client-supplied role.
 
 ## F16 — User identity
 
-**Priority** P0 · **Status** ✅ implemented
+**Priority** P0 · **Status** 🟡 Better Auth config sets email verification required, min 12 / max 128 password (`src/auth/better-auth.ts`), unverified sessions refused (`src/auth/workspace.ts`). Not built: tests of the policy itself, explicit email-canonicalization check, account deletion path
 
 **Acceptance** — verified present:
 - [x] `user` table via Better Auth, email unique.
@@ -134,7 +134,7 @@ exactly the code we should not own.
 
 ## F17 — Email verification
 
-**Priority** P0 · **Status** ✅ implemented · **Note** documented constraint changed
+**Priority** P0 · **Status** 🟡 `sendVerificationEmail` 1 h expiry, `sendOnSignIn`, 3/900 s resend limit configured (`src/auth/better-auth.ts`, `src/auth/email.ts`). Not built: tests (resend limit, unverified access), email-volume monitoring or provider migration plan, never sent via real Cloudflare Email Sending · **Note** documented constraint changed
 
 **What exists** — `sendVerificationEmail` via `src/auth/email.ts`, 1-hour expiry,
 `autoSignInAfterVerification: false`, `sendOnSignIn: true`.
@@ -168,7 +168,7 @@ only send from your routing domains.
 
 ## F18 — Password reset
 
-**Priority** P0 · **Status** ✅ implemented
+**Priority** P0 · **Status** 🟡 `sendResetPassword` and `revokeSessionsOnPasswordReset: true` configured, 3/900 s limit (`src/auth/better-auth.ts`). Not built: tests for revocation or generic response, documented reset-link TTL, real email delivery check
 
 **Acceptance**
 - [x] `sendResetPassword` implemented.
@@ -182,7 +182,7 @@ only send from your routing domains.
 
 ## F19 — Passkeys
 
-**Priority** P1 · **Status** ✅ implemented
+**Priority** P1 · **Status** 🟡 `@better-auth/passkey` with `rpID`/`origin` from `APP_ORIGIN`, 10/60 s limit (`src/auth/better-auth.ts`), UI `web/src/passkeys.tsx`. Not built: tests, sign-counter regression handling unverified, passkey-only recovery path, no real-device WebAuthn run
 
 **Acceptance**
 - [x] `@better-auth/passkey` with server-derived `rpID`, `rpName`, `origin`.
@@ -201,7 +201,7 @@ only send from your routing domains.
 
 ## F20 — Sessions
 
-**Priority** P0 · **Status** ✅ implemented · **Caveat**
+**Priority** P0 · **Status** 🟡 DB sessions, 30-day expiry with 24 h refresh, `cookieCache` off asserted (`tests/security/config-guards.test.ts`), verified-email gate (`src/auth/workspace.ts`). Not built: session/device list and revoke UI, absolute-timeout decision · **Caveat**
 
 **Acceptance**
 - [x] Database-backed sessions via `session` table.
@@ -223,7 +223,7 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F21 — Invitations
 
-**Priority** P0 · **Status** ✅ implemented
+**Priority** P0 · **Status** 🟡 `sendInvitationEmail`, role validation, verified-email requirement on accept configured (`src/auth/better-auth.ts`); accept UI `web/src/onboarding.tsx`. Not built: tests for acceptance or role validation, explicit invite TTL, second-org-creation check
 
 **Acceptance**
 - [x] `sendInvitationEmail` with a `/invite?id=` link.
@@ -241,7 +241,7 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F22 — Rate limiting
 
-**Priority** P0 · **Status** ✅ implemented
+**Priority** P0 · **Status** 🟡 Better Auth `rateLimit.storage: 'database'` with per-route rules and `cf-connecting-ip` configured (`src/auth/better-auth.ts`). Not built: any test of these rules; ingress limits live separately (F29)
 
 **Acceptance**
 - [x] `storage: "database"` — survives across Worker instances.
@@ -258,7 +258,7 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F23 — CSRF and origin policy
 
-**Priority** P0 · **Status** ✅ implemented
+**Priority** P0 · **Status** ✅ `requireSameOrigin` middleware enforces exact `APP_ORIGIN` on all mutating `/api/*` routes (`src/security/csrf.ts`); `trustedOrigins` pinned; `tests/security/csrf.test.ts`, `tests/api/workspace-active.test.ts`. SameSite cookie attribute not independently confirmed
 
 **Acceptance**
 - [x] `trustedOrigins: [env.APP_ORIGIN]` — single exact origin, no suffix matching.
@@ -275,7 +275,7 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F24 — Authorization model
 
-**Priority** P0 · **Status** ✅ domain capabilities + `authorize()` gate with audited denials (PR #9)
+**Priority** P0 · **Status** ✅ domain capabilities in `src/auth/permissions.ts`, single `authorize()` gate with audited denials and capability named in 403 (`src/auth/workspace.ts`); role x capability table in `tests/auth/permissions.test.ts` (PR #9); no viewer role
 
 **What exists** — `src/auth/permissions.ts` defines `admin` and `member` via
 `createAccessControl(defaultStatements)`:
@@ -314,7 +314,7 @@ missing argument, not a missing `if`.
 
 ## F25 — Domain tenancy bridge
 
-**Priority** P0 · **Status** 🟡 expand (0006) + contract-by-trigger for new writes (0008); legacy backfill and NOT NULL/FK pending
+**Priority** P0 · **Status** 🟡 expand + indexes (0006), contract-by-trigger blocking new NULL/changed org ids (0008), later tables created NOT NULL. Not built: legacy-row backfill, final NOT NULL + FK on `integrations`/`deliveries`/`notification_outbox`, static every-table test, rollback rehearsal
 
 **Story** As a security reviewer, I want every tenant-owned record to carry an organization
 id, so that isolation is representable in the schema and not merely intended in application
@@ -356,7 +356,7 @@ authorization layer to enforce.
 
 ## F26 — Tenant-scoped authorization
 
-**Priority** P0 · **Status** 🟡 integrations API fully scoped with cross-tenant 404 (PR #9); static query-predicate test pending
+**Priority** P0 · **Status** 🟡 `authorize()` resolves membership then scopes every domain query by `organization_id`; cross-tenant 404 tested (`tests/api/integrations.test.ts`, PR #9). Not built: static test that every query has an org predicate, repository-function scope enforcement
 
 **Story** As a security reviewer, I want every data access to require an explicit
 organization scope, so that a missing filter is a type error rather than a breach.
@@ -388,7 +388,7 @@ membership first, then joins through `membership.organizationId`. That is the ri
 
 ## F27 — Connection and installation registry
 
-**Priority** P0 · **Status** ✅ installation registry with verified binding (PR #6, PR #11)
+**Priority** P0 · **Status** ✅ `github_installations` with unique installation id, tenant taken from the verified installation row, unknown installation refused (PR #6, PR #11, ADR 0008; `tests/github/install-flow.test.ts`). Audit of unknown-installation 403s not built
 
 **Story** As an operator, I want every inbound event to resolve to exactly one organization
 through its verified installation, so that no event can be routed using sender-chosen data.
@@ -405,7 +405,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F28 — Audit events
 
-**Priority** P1 · **Status** 🟡 table, append-only trigger, integration + denial events (PR #9); admin read API `GET /api/audit` and dashboard page, actor name only, no IP or user agent, allow-listed metadata (slice 6e, ADR 0019); member/session events not written, no actor email by decision, no correlation id
+**Priority** P1 · **Status** 🟡 `audit_events` append-only with integration, source, replay, denial, installation and workspace events (`src/audit/actions.ts`, PR #9), admin `GET /api/audit` plus page (ADR 0019). Not built: member/invite/role/session events, correlation id, actor email by decision; IP and user agent stored but not shown
 
 **Acceptance**
 - [ ] `audit_events(id, organization_id, actor_id, action, subject_type, subject_id,
@@ -424,7 +424,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F29 — Webhook ingress protection
 
-**Priority** P0 · **Status** 🟡 per-installation flood control wired (fixed window, fails open); per-connection keying and quota accounting pending
+**Priority** P0 · **Status** 🟡 per-installation GitHub limiter (`ingressLimiter`, `tests/security/rate-limit.test.ts`) and per-source flood limit with 429 + Retry-After for generic and provider sources (`tests/sources/ingress.test.ts`); D1 counters, fails open. Not built: quota or billing accounting, GitHub route 429 test
 
 **Story** As an operator, I want webhook ingress bounded, so that one misbehaving provider
 cannot exhaust our Worker quota.
@@ -447,7 +447,7 @@ cannot exhaust our Worker quota.
 
 ## F30 — Workspace deletion and data export
 
-**Priority** P1 · **Status** ✅ two-phase deletion, bounded purge, credential-free export (PR #12)
+**Priority** P1 · **Status** ✅ two-phase workspace deletion, bounded resumable purge, credential-free export; admin only (PR #12, `src/pipeline/purge.ts`, `src/api/workspace-lifecycle.ts`, `tests/api/workspace-lifecycle.test.ts`)
 
 **Acceptance**
 - [ ] ⚠️ `disableOrganizationDeletion: true` currently makes this **impossible**. Either
@@ -468,7 +468,7 @@ cannot exhaust our Worker quota.
 
 ## F31 — Retire the superseded identity schema
 
-**Priority** P1 · **Status** ✅ 0004 labelled superseded; CI guard against any reference (PR #12) · **Decision: documentation only**
+**Priority** P1 · **Status** ✅ `migrations/0004_identity.sql` marked superseded, `docs/AUTH_SETUP.md` rewritten, CI guard that no source references retired tables (`tests/retired-schema.test.ts`, ADR 0003, PR #12) · **Decision: documentation only**
 
 **Acceptance** — per the decision taken 2026-10-13, **no schema change**:
 - [ ] `migrations/0004_identity.sql` gains a header comment naming it **superseded by
@@ -493,7 +493,7 @@ cannot exhaust our Worker quota.
 
 ## F32 — Better Auth ADR
 
-**Priority** P1 · **Status** ❌ not started
+**Priority** P1 · **Status** 🟡 `docs/adr/0003-better-auth.md` records Better Auth ownership, pinned versions, `organization.id` reuse, database rate-limit storage, server-derived passkey RP ID, plugin-is-not-isolation. Not recorded: multi-org decision as accepted (still listed under revisit), Email Sending constraint
 
 **Records**
 1. Better Auth owns identity, sessions, organizations, roles, invitations, passkeys and auth
