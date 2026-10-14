@@ -152,46 +152,45 @@ describe('the engine over D1', () => {
     const t0 = Date.now();
     const run = (signals: Signals, at: number) => evaluateAlerts(env(), at, { sinks: [recording], signals });
 
-    expect((await run(hot('outbox_stall', 2), t0)).fired).toBe(1);
+    expect((await run(hot('breaker_open_many', 5), t0)).fired).toBe(1);
     expect(events.map((e) => e.kind)).toEqual(['firing']);
-    const row = db.raw.prepare("SELECT * FROM alert_state WHERE alert_id='outbox_stall'").get() as Record<
-      string,
-      unknown
-    >;
+    const row = db.raw
+      .prepare("SELECT * FROM alert_state WHERE alert_id='breaker_open_many'")
+      .get() as Record<string, unknown>;
     expect(row).toMatchObject({
       state: 'firing',
       since: t0,
       last_notified: t0,
-      last_value: 2,
-      dedupe_key: `outbox_stall:${t0}`,
+      last_value: 5,
+      dedupe_key: `breaker_open_many:${t0}`,
     });
 
     // Dedupe: the same breach a minute and 59 minutes later says nothing and writes nothing.
     const writes = vi.spyOn(db.d1, 'prepare');
-    await run(hot('outbox_stall', 2), t0 + MIN);
-    await run(hot('outbox_stall', 3), t0 + 59 * MIN);
+    await run(hot('breaker_open_many', 5), t0 + MIN);
+    await run(hot('breaker_open_many', 6), t0 + 359 * MIN);
     expect(events).toHaveLength(1);
     expect(writes.mock.calls.some((c) => /INSERT INTO alert_state/.test(String(c[0])))).toBe(false);
 
     // Renotify at the cadence, same incident key.
-    await run(hot('outbox_stall', 3), t0 + 60 * MIN);
+    await run(hot('breaker_open_many', 6), t0 + 360 * MIN);
     expect(events.map((e) => e.kind)).toEqual(['firing', 'renotify']);
     expect(events[1]?.dedupeKey).toBe(events[0]?.dedupeKey);
-    expect(events[1]?.firingForMs).toBe(60 * MIN);
+    expect(events[1]?.firingForMs).toBe(360 * MIN);
 
     // Resolve once, after three clear evaluations in a row (hysteresis).
-    await run(QUIET, t0 + 61 * MIN);
-    await run(QUIET, t0 + 62 * MIN);
+    await run(QUIET, t0 + 361 * MIN);
+    await run(QUIET, t0 + 362 * MIN);
     expect(events.map((e) => e.kind)).toEqual(['firing', 'renotify']);
-    const resolved = await run(QUIET, t0 + 63 * MIN);
+    const resolved = await run(QUIET, t0 + 363 * MIN);
     expect(resolved.resolved).toBe(1);
-    await run(QUIET, t0 + 64 * MIN);
+    await run(QUIET, t0 + 364 * MIN);
     expect(events.map((e) => e.kind)).toEqual(['firing', 'renotify', 'resolved']);
-    expect((await loadAlertStates(db.d1)).get('outbox_stall')).toMatchObject({ state: 'resolved' });
+    expect((await loadAlertStates(db.d1)).get('breaker_open_many')).toMatchObject({ state: 'resolved' });
 
     // A later breach is a new incident with a new key.
-    await run(hot('outbox_stall', 2), t0 + 90 * MIN);
-    expect(events[3]?.dedupeKey).toBe(`outbox_stall:${t0 + 90 * MIN}`);
+    await run(hot('breaker_open_many', 5), t0 + 400 * MIN);
+    expect(events[3]?.dedupeKey).toBe(`breaker_open_many:${t0 + 400 * MIN}`);
   });
 
   it('job_stale waits for a second consecutive breach, so one post-maintenance tick never notifies', async () => {
@@ -261,22 +260,25 @@ describe('the engine over D1', () => {
     });
     const report = await evaluateAlerts({ ...env(), DB: flaky }, Date.now(), {
       sinks: [recording],
-      signals: { ...QUIET, outboxStalled: 1, breakersOpen: 9 },
+      signals: { ...QUIET, credentialsQuarantined: 1, breakersOpen: 9 },
     });
     expect(report.fired).toBe(2);
-    expect(events.map((e) => e.alertId).sort()).toEqual(['breaker_open_many', 'outbox_stall']);
+    expect(events.map((e) => e.alertId).sort()).toEqual([
+      'breaker_open_many',
+      'credentials_quarantined_nonzero',
+    ]);
   });
 
   it('an unreadable signal neither fires nor resolves', async () => {
     const t0 = Date.now();
-    await evaluateAlerts(env(), t0, { sinks: [recording], signals: hot('outbox_stall', 1) });
+    await evaluateAlerts(env(), t0, { sinks: [recording], signals: hot('breaker_open_many', 5) });
     const report = await evaluateAlerts(env(), t0 + MIN, {
       sinks: [recording],
-      signals: { ...QUIET, outboxStalled: null },
+      signals: { ...QUIET, breakersOpen: null },
     });
     expect(report.unknown).toBe(1);
     expect(events.map((e) => e.kind)).toEqual(['firing']);
-    expect((await loadAlertStates(db.d1)).get('outbox_stall')?.state).toBe('firing');
+    expect((await loadAlertStates(db.d1)).get('breaker_open_many')?.state).toBe('firing');
   });
 });
 
@@ -513,13 +515,14 @@ describe('ALERT_WEBHOOK_URL in the boot report', () => {
 });
 
 describe('the alert job inside the cron tick', () => {
+  // A condition that stays true however the cron runs: an integration whose credentials are quarantined.
   const seedStuckOutbox = () => {
     seedOrganization(db.raw, 'org-a');
     db.raw
       .prepare(
-        "INSERT INTO notification_outbox(id,payload_json,state,organization_id,created_at) VALUES('s','{}','pending','org-a',?)",
+        "INSERT INTO integrations(id,organization_id,repo,event_types,destination,webhook_ciphertext,name,credentials_quarantined_at) VALUES('q1','org-a','r','[]','slack','c','n','2026-10-01 00:00:00')",
       )
-      .run(sqliteTimestamp(Date.now() - 3_600_000));
+      .run();
   };
   const quiet = () => {
     vi.spyOn(console, 'info').mockImplementation(() => undefined);
@@ -533,7 +536,9 @@ describe('the alert job inside the cron tick', () => {
     const err = quiet();
     seedStuckOutbox();
     await tick().catch(() => undefined);
-    expect(db.raw.prepare("SELECT state FROM alert_state WHERE alert_id='outbox_stall'").get()).toEqual({
+    expect(
+      db.raw.prepare("SELECT state FROM alert_state WHERE alert_id='credentials_quarantined_nonzero'").get(),
+    ).toEqual({
       state: 'firing',
     });
     expect(err.mock.calls.some((c) => String(c[0]).includes('alert_firing'))).toBe(true);
@@ -563,7 +568,11 @@ describe('the alert job inside the cron tick', () => {
       ).toEqual({
         outcome: 'ok',
       });
-      expect(db.raw.prepare("SELECT state FROM alert_state WHERE alert_id='outbox_stall'").get()).toEqual({
+      expect(
+        db.raw
+          .prepare("SELECT state FROM alert_state WHERE alert_id='credentials_quarantined_nonzero'")
+          .get(),
+      ).toEqual({
         state: 'firing',
       });
     } finally {

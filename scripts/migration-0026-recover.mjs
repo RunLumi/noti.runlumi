@@ -24,7 +24,9 @@
 import {
   SCRATCH_TABLES,
   SCRATCH_VIEWS,
+  CORRELATION_TABLES,
   LATER_MIGRATION_OBJECTS,
+  correlationStatements,
   SNAPSHOT_TABLE,
   TABLES,
   compareColumns,
@@ -49,6 +51,7 @@ export async function planRecovery(executor, options = {}) {
     ...SCRATCH_VIEWS,
     SNAPSHOT_TABLE,
     SOURCES_TRIGGER,
+    'd1_migrations',
   ]);
   const has = (name) => present.has(name);
   const restore = TABLES.filter((t) => has(oldName(t)));
@@ -72,6 +75,22 @@ export async function planRecovery(executor, options = {}) {
         `${table}: discarding ${diverged} row(s) written or changed after the swap (--discard-live-changes)`,
       );
     }
+  }
+
+  // 0027 added `correlation_id` to the live tables only. If it is applied (d1_migrations lists it) or the live
+  // table has the column, the restored original needs it back, or the current Worker's INSERTs fail.
+  const needsCorrelation = [];
+  if (restore.some((t) => CORRELATION_TABLES.includes(t))) {
+    const [applied] = has('d1_migrations')
+      ? await executor.query("SELECT COUNT(*) AS n FROM d1_migrations WHERE name LIKE '0027%'")
+      : [{ n: 0 }];
+    const hasColumn = await executor.query(
+      "SELECT m.name AS t FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table' AND m.name IN ('deliveries','notification_outbox') AND p.name = 'correlation_id'",
+    );
+    const live = new Set(hasColumn.map((r) => String(r.t)));
+    for (const t of restore)
+      if (CORRELATION_TABLES.includes(t) && (Number(applied?.n ?? 0) > 0 || live.has(t)))
+        needsCorrelation.push(t);
   }
 
   /** @type {string[]} */
@@ -128,6 +147,9 @@ export async function planRecovery(executor, options = {}) {
       drop('INDEX', String(r.name));
       statements.push(String(r.sql));
     }
+    for (const t of needsCorrelation) statements.push(...correlationStatements(t));
+    if (needsCorrelation.length > 0)
+      notes.push(`re-adding correlation_id (migration 0027) to: ${needsCorrelation.join(', ')}`);
     if (restore.includes('integrations') && !triggers.some((r) => r.name === SOURCES_TRIGGER))
       blockers.push(
         `no ${SOURCES_TRIGGER} in ${SNAPSHOT_TABLE} or on the live tables; restore from the Time Travel bookmark`,

@@ -2,8 +2,8 @@ import { Hono } from 'hono';
 import { authorize, isFailure } from '../auth/workspace';
 import type { Bindings } from '../env';
 import { hit } from '../security/rate-limit';
-import { can } from '../auth/permissions';
 import { log } from '../platform/log';
+import { isPlatformOperator } from '../observability/operator';
 import { readSinkHealth } from '../observability/alerts/sink-health';
 import { computeSummary, parseWindow } from '../observability/slis';
 
@@ -33,11 +33,12 @@ observability.get('/summary', async (c) => {
   if (windowMs === null) return c.json({ error: 'window must be <n>h or <n>d, from 1h to 30d' }, 400);
   const summary = await computeSummary(c.env.DB, who.orgId, windowMs);
   c.header('Cache-Control', 'no-store');
-  // Platform operations detail is for admins: a member gets a coarse verdict, an admin the job list and
-  // the health of the alert webhook (times and a count; never a URL).
+  // Platform operations detail is for platform operators only (a workspace admin is any person who signed up):
+  // everyone else gets a coarse verdict. Operators also get the alert webhook's health (times and a count;
+  // never a URL).
   const { jobs, ...workspace } = summary;
   const jobsStatus = jobs === null ? 'unknown' : jobs.some((j) => j.stale) ? 'degraded' : 'ok';
-  if (!can(who.role, 'delivery.replay')) return c.json({ ...workspace, jobsStatus });
+  if (!isPlatformOperator(c.env, who.userId)) return c.json({ ...workspace, jobsStatus });
   const alerting = await readSinkHealth(c.env.DB).catch((error: unknown) => {
     log('warn', 'summary_sink_health_unreadable', { error });
     return null;

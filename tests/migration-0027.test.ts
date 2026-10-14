@@ -58,6 +58,7 @@ describe('migration 0027', () => {
     const added = [...after.keys()].filter((k) => !before.has(k)).sort();
     expect(added).toEqual([
       'index:deliveries_correlation',
+      'index:deliveries_org_correlation',
       'index:delivery_attempts_dead',
       'index:integrations_quarantined',
       'index:job_runs_started',

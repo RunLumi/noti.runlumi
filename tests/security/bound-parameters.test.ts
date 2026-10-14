@@ -37,6 +37,7 @@ const ALLOWED_FRAGMENTS: Readonly<Record<string, string>> = {
   keyset: 'a fixed cursor clause chosen by whether a cursor exists (provenance.ts)',
   notLegacy: 'a fixed NOT EXISTS clause (github route)',
   suspended: "either 'CURRENT_TIMESTAMP' or 'NULL' (lifecycle.ts)",
+  from: 'FROM_VIEW, or FROM_VIEW with the fixed INDEXED BY deliveries_org_correlation, chosen by whether a correlation filter exists (delivery-queries.ts)',
   table:
     'iterated from the TENANT_TABLES constant list (purge.ts) or passed as a literal (expired-records.ts)',
   column: 'passed as a literal by the boundedDelete callers (expired-records.ts)',

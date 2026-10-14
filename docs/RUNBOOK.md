@@ -158,14 +158,14 @@ never a tenant id or a payload. A notice the webhook refused is kept on its aler
 as the same kind about ten minutes later, up to six tries, then dropped (`alert_notice_dropped` in the log).
 All sinks together get 15 seconds per evaluation, so a hung endpoint cannot hold up the jobs after it.
 
-Is the webhook working? An admin sees it in `GET /api/observability/summary` under `alerting` (configured,
+Is the webhook working? A platform operator (a user id on the secret `PLATFORM_OPERATOR_USER_IDS`; nobody by default, and a workspace admin is not one) sees it in `GET /api/observability/summary` under `alerting` (configured,
 last success, last failure, consecutive failures), also readable here:
 
 ```sql
 SELECT value, datetime(updated_at/1000,'unixepoch') AS updated FROM ops_state WHERE key='alert_sink_health';
 ```
 
-A set but unusable `ALERT_WEBHOOK_URL` logs `alert_webhook_unusable` every tick and `/health` lists it under
+A set but unusable `ALERT_WEBHOOK_URL` logs `alert_webhook_unusable` once an hour and `/health` lists it under
 `warnings`. Webhook health is NOT on `/health`, which deliberately touches no dependency. **UNVERIFIED:**
 no message has been sent to a real Slack, Discord, Lark or Teams endpoint from this code; the request
 shapes follow each provider's documented webhook format and are exercised against fakes only.
@@ -175,8 +175,16 @@ Thresholds are starting values from the specification, not measured baselines
 to change them, and to have noise until you do.
 
 **Maintenance windows.** Under `MAINTENANCE_MODE` the cron skips every job and writes exactly one row, a
-marker in `ops_state` (`cron_maintenance`), so the silence is not read as a missed cron. Nothing else is
-written during the freeze.
+marker in `ops_state` (`cron_maintenance`), so the silence is not read as a missed cron: a heartbeat gap is
+excused only when the marker brackets the WHOLE gap (a marker in the middle of a longer silence excuses
+nothing). Nothing else is written during the freeze. For ten minutes after the last skipped tick the alerts
+that read backlog or job freshness (`job_stale`, `outbox_stall`, `queue_backlog`,
+`dlq_consumer_no_progress`) hold their state: the first ticks after a freeze see every job overdue and the
+outbox undrained until the cron catches up, and these alerts also need two consecutive breaches. A backlog
+that is still there after that fires; the guard delays, it does not hide. If the marker cannot be written
+the gap is reported (a false alarm, never silence). A `MAINTENANCE_MODE` left on logs
+`maintenance_mode_prolonged` (error level) once an hour from the first hour: the alert job is skipped too, so
+that log line is the only signal.
 
 ### Alert: job_stale
 
@@ -200,7 +208,7 @@ cause, then wait a tick; redeploy if the cron trigger is gone (`npm run deploy`)
 
 **What it means.** Outbox rows pending over five minutes, claims older than two leases, or retries overdue
 by 15 minutes (the same counts as the `delivery_stall` log line, read once per tick and shared). Severity
-critical.
+critical; fires after two consecutive evaluations.
 
 **Check.** The queries in "Stuck outbox" and "Queue backlog" below; the stall counts are capped at 1000.
 
@@ -1038,8 +1046,12 @@ Stay in maintenance mode. Do not hand-edit tables to "make the numbers match".
   ```
 
   It refuses if a live table holds a row its `_old` does not (a write after the swap) unless you pass
-  `--discard-live-changes`. Then re-run the migration, or stay on the old schema (the previous Worker works
-  with it). The same steps by hand, per table that has `<table>_old`: `DROP TRIGGER IF EXISTS
+  `--discard-live-changes`. Do it with writers still frozen (`MAINTENANCE_MODE`), then lift the freeze. If
+  migration 0027 is already applied (`d1_migrations` lists it), recovery re-adds `correlation_id` (with its
+  CHECK) to the restored `deliveries` and `notification_outbox` and recreates the two `deliveries` indexes,
+  because the current Worker INSERTs that column; the plan prints a note when it does. After recovery EITHER
+  Worker version works: the current one (0027 and later) finds its column, and a Worker from before 0027
+  ignores it. Then re-run the migration, or stay on the restored schema. The same steps by hand, per table that has `<table>_old`: `DROP TRIGGER IF EXISTS
   sources_delete_integrations; DROP TABLE IF EXISTS <t>; ALTER TABLE <t>_old RENAME TO <t>;` then drop
   `_gate_0026_*`, `_gate_0026_poison`, `*_v4`, `_contract_verify`, `_swap_verify`, `_guard_*`, and recreate
   the indexes and triggers from `SELECT sql FROM _snapshot_0026`.

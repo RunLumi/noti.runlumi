@@ -50,3 +50,10 @@ export const MAX_NOTIFY_FAILURES = 6;
 
 /** Total time one evaluation may spend in sinks, so a hung webhook cannot delay the jobs after it. */
 export const SINK_BUDGET_MS = 15_000;
+
+/**
+ * After the last maintenance skip, the alerts that read backlog or job freshness stay quiet this long: the
+ * first ticks after a freeze see every job overdue and the outbox undrained, then the cron catches up
+ * (docs/RUNBOOK.md "Maintenance windows"). Longer than the longest catch-up we expect (a few ticks).
+ */
+export const SETTLE_AFTER_MAINTENANCE_MS = 10 * MINUTE;

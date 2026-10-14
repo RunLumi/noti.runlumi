@@ -36,10 +36,12 @@ Stall detection wrote a log line and nobody was told.
    first runs, so a job added by a later release never reads stale on deploy; a job that ran but was never
    healthy is stale from ITS OWN first run. A scheduled job that never executes is caught statically (the
    scheduler is tied to the table by a test), not at run time.
-3. **Summary** (`GET /api/observability/summary`): admins get `jobs` (`name, lastOk, lastFailed, stale`)
-   and `alerting` (webhook configured, last success, last failure, consecutive failures); every member
-   gets only `jobsStatus` (`ok | degraded | unknown`). Platform operations detail is not shown to tenants
-   (review LOW).
+3. **Summary** (`GET /api/observability/summary`): everyone gets `jobsStatus` (`ok | degraded | unknown`).
+   `jobs` (`name, lastOk, lastFailed, stale`) and `alerting` (webhook configured, last success, last failure,
+   consecutive failures) are for PLATFORM OPERATORS only: user ids on the secret
+   `PLATFORM_OPERATOR_USER_IDS` (comma separated, exact match, server-side; unset or empty means nobody).
+   A workspace role cannot gate them: any person who signs up is the admin of their own workspace, and
+   these describe the platform's posture (delta review F3).
 4. **DLQ health, honestly.** The dead-letter consumer writes an `ops_state` run record. Queue depth
    is not available to the Worker, so the alert `dlq_consumer_no_progress` is a ledger proxy: rows
    non-terminal for six hours. A stopped dispatcher leaves the same footprint; `outbox_stall` fires
@@ -61,7 +63,10 @@ Stall detection wrote a log line and nobody was told.
    `dlq_consumer_no_progress`. A pure state machine fires once with an incident key, repeats at a cadence
    (critical 1 h, warning 6 h) and resolves once. Hysteresis (review M1): `job_stale` and
    `cron_heartbeat_missing` need two consecutive breaches to fire, and EVERY alert needs three consecutive
-   clear evaluations before RESOLVED, so a flapping signal does not flap the channel. An unreadable signal
+   clear evaluations before RESOLVED, so a flapping signal does not flap the channel. After a maintenance
+   freeze (delta review F1) `outbox_stall`, `queue_backlog` and `dlq_consumer_no_progress` also need two
+   consecutive breaches, and `job_stale`, `outbox_stall`, `queue_backlog` and `dlq_consumer_no_progress`
+   hold their state for ten minutes after the last maintenance skip (the cron has not caught up yet). An unreadable signal
    is `null`: it neither fires nor resolves. The engine runs third in the tick (heartbeat, stall detection,
    alerts; detection survives a later hang) and also in the failed-boot tick, so `key_config_fault` fires
    from a Worker that cannot serve.
@@ -76,7 +81,10 @@ Stall detection wrote a log line and nobody was told.
      heartbeat; it now makes ONE write, an `ops_state` marker (`cron_maintenance`: a from/to range), in a
      table no migration rebuilds, so the write freeze is otherwise intact. `writeHeartbeat` compares each
      heartbeat with the previous one and records a gap (`cron_gap`) only when it is five minutes or more
-     AND no maintenance marker overlaps it; `cron_heartbeat_missing` reads that record (it no longer needs
+     AND no maintenance marker brackets the whole gap (a tick of slack at each end; a marker inside a longer
+     silence excuses nothing; an unwritable marker is logged and the gap then counts: a false alarm, never
+     silence). A freeze left on logs `maintenance_mode_prolonged` once an hour, the only signal then, since
+     the alert job is skipped too; `cron_heartbeat_missing` reads that record (it no longer needs
      one `job_runs` row per heartbeat).
    - **stall.ts is not merged into the engine on purpose.** It logs a `warn` line existing log searches
      and the runbook key on, with its own `ops_state` key; the engine adds hysteresis, sinks and retries
@@ -93,7 +101,9 @@ Stall detection wrote a log line and nobody was told.
    stays on its alert row (`unsent`, `retry_at`, `notify_failures`) and is re-sent AS THE SAME KIND (a
    FIRING stays a FIRING; a RESOLVED is retried) about ten minutes later, up to six tries, then dropped
    with a log line; a newer transition supersedes it. All sinks share a 15 s budget per evaluation (each
-   call gets what is left, capped at 10 s), so a hung webhook cannot delay the later jobs. The webhook's
+   call gets what is left, capped at 10 s), so a hung webhook cannot delay the later jobs. A webhook
+   skipped because the budget ran out made no request: it is retried but not counted as a webhook failure.
+   A re-sent RESOLVED reports the original firing duration. `alert_webhook_unusable` is logged once an hour. The webhook's
    health (last success, last failure, consecutive failures) is an `ops_state` record shown to admins in the
    summary; it is not on `/health`, which deliberately touches no dependency (a deviation from the
    request, for that reason). A set-but-unusable URL logs `alert_webhook_unusable` every tick and is a
@@ -104,7 +114,17 @@ Stall detection wrote a log line and nobody was told.
    labels), a cron job table, a correlation lookup and a deploy-order note, and a test that fails when an
    alert has no entry or a label is missing, an entry has no alert, the anchor drifts, or a new SQL block
    does not run against the schema.
-9. **Deploy order.** Apply migration 0027 before the Worker (it adds tables, partial indexes and three
+9. **Indexes for the lookup** (delta review F4). `deliveries_org_correlation(organization_id, correlation_id)`
+   (partial) serves the API list; the query names it with INDEXED BY because the planner otherwise prefers
+   the (organization, updated_at) index that satisfies ORDER BY and walks the workspace. A plan test pins it.
+   `deliveries_correlation(correlation_id, organization_id)` serves the operator's cross-workspace lookup.
+10. **Recovery after 0027** (delta review F2). `scripts/migration-0026-recover.mjs` restores `<t>_old` over the
+   live tables. When 0027 is applied (`d1_migrations`) or the live table has the column, the plan re-adds
+   `correlation_id` (with its CHECK) to the restored `deliveries` and `notification_outbox` and the two
+   `deliveries` indexes, so the current Worker's INSERTs still work; a pre-0027 Worker ignores them. The
+   finalize and recover whole-row comparisons name the columns 0026 created (`COMPARE_COLUMNS`). Tested
+   through the real `wrangler d1 migrations apply` for 0001..0027 and `planRecovery`.
+11. **Deploy order.** Apply migration 0027 before the Worker (it adds tables, partial indexes and three
    nullable columns; an `ADD COLUMN ... CHECK` validates existing rows once, a full scan per table, so use a
    quiet window on a large database). The previous Worker ignores all of it.
 

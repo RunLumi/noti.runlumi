@@ -58,8 +58,13 @@ export function buildListQuery(orgId: string, f: ListFilters): BuiltQuery {
     where.push('(d.updated_at < ? OR (d.updated_at = ? AND d.id < ?))');
     values.push(f.cursor.updatedAt, f.cursor.updatedAt, f.cursor.id);
   }
+  // The workspace-scoped lookup by id must use its own index: the planner would prefer the
+  // (organization, updated_at) index that satisfies ORDER BY and walk the workspace (tests pin this).
+  const from = f.correlationId
+    ? FROM_VIEW.replace('FROM deliveries d', 'FROM deliveries d INDEXED BY deliveries_org_correlation')
+    : FROM_VIEW;
   return {
-    sql: `SELECT ${SELECT_VIEW} ${FROM_VIEW} WHERE ${where.join(' AND ')}
+    sql: `SELECT ${SELECT_VIEW} ${from} WHERE ${where.join(' AND ')}
      ORDER BY d.updated_at DESC, d.id DESC LIMIT ?`,
     values: [...values, f.limit + 1],
   };

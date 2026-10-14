@@ -134,7 +134,7 @@ describe('H1: a maintenance window is not a missed cron', () => {
 describe('M1: hysteresis stops a flapping signal from flapping the channel', () => {
   it('a signal alternating around its threshold sends one FIRING and no RESOLVED until it stays clear', async () => {
     const t0 = Date.now();
-    const hot = { ...QUIET, outboxStalled: 3 };
+    const hot = { ...QUIET, breakersOpen: 5 };
     const run = (s: Signals, at: number) => evaluateAlerts(env(), at, { sinks: [recording], signals: s });
     await run(hot, t0);
     for (let i = 1; i <= 12; i++) await run(i % 2 === 0 ? hot : QUIET, t0 + i * MIN);
@@ -268,7 +268,7 @@ describe('M2: sink health, re-sent kinds and the shared budget', () => {
     };
     const report = await evaluateAlerts(env(), t0, {
       sinks: [{ ...recording, name: 'log' }, slow],
-      signals: { ...QUIET, keyConfigFaults: 1, breakersOpen: 9, oldestPendingAgeMs: 99 * MIN },
+      signals: { ...QUIET, keyConfigFaults: 1, breakersOpen: 9, credentialsQuarantined: 2 },
     });
     expect(report.fired).toBe(3);
     expect(events).toHaveLength(3); // the log-like sink ran for every alert
@@ -285,22 +285,28 @@ describe('M3: the webhook secret', () => {
     expect(resolveWebhookTarget('   ')).toBeNull();
   });
 
-  it('set but unusable: a warning every tick, the log sink still runs, nothing is sent', async () => {
+  it('set but unusable: one warning an hour (not every tick), the log sink still runs, nothing is sent', async () => {
     quiet();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const e = { ...env(), ALERT_WEBHOOK_URL: 'https://evil.example.com/x' };
-    for (let i = 0; i < 2; i++)
-      await evaluateAlerts(e, Date.now() + i * MIN, { signals: { ...QUIET, keyConfigFaults: 1 } });
-    expect(warn.mock.calls.filter((c) => String(c[0]).includes('alert_webhook_unusable'))).toHaveLength(2);
+    const t0 = Date.now();
+    const warnings = () =>
+      warn.mock.calls.filter((c) => String(c[0]).includes('alert_webhook_unusable')).length;
+    for (let i = 0; i < 59; i++)
+      await evaluateAlerts(e, t0 + i * MIN, { signals: { ...QUIET, keyConfigFaults: 1 } });
+    expect(warnings()).toBe(1);
+    await evaluateAlerts(e, t0 + 60 * MIN, { signals: QUIET });
+    expect(warnings()).toBe(2);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
-describe('the summary: operational detail is for admins', () => {
+describe('the summary: platform detail is for platform operators only (F3)', () => {
   let h: Harness;
   const call = caller(worker, () => h);
+  const get = (as: string, org: string) => call('GET', '/api/observability/summary', { as, org });
   beforeEach(() => {
     h = setup();
     h.db.raw
@@ -313,11 +319,24 @@ describe('the summary: operational detail is for admins', () => {
       .run(JSON.stringify({ lastSuccessAt: 5, lastFailureAt: 9, consecutiveFailures: 2 }));
   });
 
-  it('an admin sees the job list and the webhook health; no URL ever', async () => {
-    const res = await call('GET', '/api/observability/summary', { as: 'alice', org: 'org-a' });
+  it('by default (no operators configured) nobody gets the detail, not even a workspace admin', async () => {
+    for (const [as, org] of [
+      ['alice', 'org-a'],
+      ['bob', 'org-a'],
+      ['mallory', 'org-b'],
+    ] as const) {
+      const body = await (await get(as, org)).json<Record<string, unknown>>();
+      expect(body.jobsStatus, as).toBe('degraded');
+      expect(body, as).not.toHaveProperty('jobs');
+      expect(body, as).not.toHaveProperty('alerting');
+    }
+  });
+
+  it('an operator sees the job list and the webhook health; no URL ever', async () => {
+    h.env.PLATFORM_OPERATOR_USER_IDS = ' someone-else , alice ';
+    const res = await get('alice', 'org-a');
     expect(res.status).toBe(200);
     const body = await res.json<Record<string, unknown>>();
-    expect(body.jobsStatus).toBe('degraded');
     expect(
       (body.jobs as { name: string; stale: boolean }[]).find((j) => j.name === 'dedup_purge')?.stale,
     ).toBe(true);
@@ -330,12 +349,191 @@ describe('the summary: operational detail is for admins', () => {
     expect(JSON.stringify(body)).not.toMatch(/hooks\.slack|https?:\/\//);
   });
 
-  it('a member gets only a coarse verdict', async () => {
-    const res = await call('GET', '/api/observability/summary', { as: 'bob', org: 'org-a' });
-    expect(res.status).toBe(200);
-    const body = await res.json<Record<string, unknown>>();
-    expect(body.jobsStatus).toBe('degraded');
-    expect(body).not.toHaveProperty('jobs');
-    expect(body).not.toHaveProperty('alerting');
+  it('only the listed user: another workspace admin, a member and a look-alike id are denied', async () => {
+    h.env.PLATFORM_OPERATOR_USER_IDS = 'alice';
+    for (const [as, org] of [
+      ['mallory', 'org-b'], // admin of another workspace
+      ['bob', 'org-a'], // member of the operator's workspace
+    ] as const) {
+      expect(await (await get(as, org)).json()).not.toHaveProperty('jobs');
+    }
+    h.env.PLATFORM_OPERATOR_USER_IDS = 'alic,ALICE,al*';
+    expect(await (await get('alice', 'org-a')).json()).not.toHaveProperty('jobs');
+    h.env.PLATFORM_OPERATOR_USER_IDS = '';
+    expect(await (await get('alice', 'org-a')).json()).not.toHaveProperty('alerting');
+  });
+});
+
+describe('F1: the freeze does not page', () => {
+  const tickEnv = (extra: Record<string, unknown> = {}) =>
+    ({ ...BOOT_ENV, DB: db.d1, ...extra }) as unknown as Bindings;
+  const tick = (extra: Record<string, unknown> = {}) =>
+    worker.scheduled({} as ScheduledEvent, tickEnv(extra)).catch(() => undefined);
+
+  async function seedBacklog(): Promise<void> {
+    const { seedOrganization } = await import('../support/d1');
+    seedOrganization(db.raw, 'org-a');
+    const old = (ms: number) => new Date(Date.now() - ms).toISOString().slice(0, 19).replace('T', ' ');
+    const msg = (id: string) =>
+      JSON.stringify({ id, integrationId: 'i', organizationId: 'org-a', title: 't', url: '' });
+    // A pending delivery with its outbox row, and a retrying one whose retry came due during the freeze.
+    db.raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,organization_id,state,created_at) VALUES('p','i','org-a','pending',?)",
+      )
+      .run(old(3 * MIN));
+    db.raw
+      .prepare(
+        "INSERT INTO notification_outbox(id,organization_id,payload_json,state,created_at) VALUES('p','org-a',?,'pending',?)",
+      )
+      .run(msg('p'), old(3 * MIN));
+    db.raw
+      .prepare(
+        "INSERT INTO deliveries(id,integration_id,organization_id,state,attempts,created_at,next_attempt_at) VALUES('r','i','org-a','retrying',1,?,?)",
+      )
+      .run(old(30 * MIN), Date.now() + 5 * MIN);
+  }
+
+  it.each([10, 20])(
+    '%i maintenance ticks, then normal ticks: nothing fires, nothing is resolved',
+    async (frozen) => {
+      quiet();
+      await seedBacklog();
+      await tick(); // a normal tick before the freeze
+      for (let i = 0; i < frozen; i++) {
+        vi.setSystemTime(Date.now() + MIN);
+        await tick({ MAINTENANCE_MODE: 'true' });
+      }
+      for (let i = 0; i < 6; i++) {
+        vi.setSystemTime(Date.now() + MIN);
+        await tick();
+        // The consumer catches up on the first tick after the freeze.
+        if (i === 0) db.raw.prepare("UPDATE deliveries SET state='sent' WHERE id IN ('p','r')").run();
+        expect(
+          db.raw.prepare("SELECT alert_id FROM alert_state WHERE state='firing'").all(),
+          `tick ${i}`,
+        ).toEqual([]);
+      }
+      const everFired = db.raw
+        .prepare("SELECT alert_id FROM alert_state WHERE since > 0 AND dedupe_key <> ''")
+        .all();
+      expect(everFired).toEqual([]);
+    },
+  );
+
+  it('a backlog that is still there after the settle period fires (the guard delays, never hides)', async () => {
+    quiet();
+    const t0 = Date.now();
+    await markMaintenanceSkip(db.d1, t0);
+    const stuck = { ...QUIET, outboxStalled: 4, oldestPendingAgeMs: 30 * MIN, deadLetterStuckRows: 2 };
+    const run = (at: number) => evaluateAlerts(env(), at, { sinks: [recording], signals: stuck });
+    await run(t0 + 2 * MIN);
+    await run(t0 + 9 * MIN);
+    expect(events).toHaveLength(0);
+    await run(t0 + 11 * MIN); // settled, first breach
+    expect(events).toHaveLength(0);
+    await run(t0 + 12 * MIN); // second breach: confirmed
+    expect(events.map((e) => e.alertId).sort()).toEqual([
+      'dlq_consumer_no_progress',
+      'outbox_stall',
+      'queue_backlog',
+    ]);
+  });
+});
+
+describe('F5: smaller fixes', () => {
+  it('a webhook skipped for the budget is retried but is not counted as a webhook failure', async () => {
+    quiet();
+    const t0 = Date.now();
+    const burn: AlertSink = {
+      name: 'log',
+      notify: () => {
+        vi.setSystemTime(Date.now() + SINK_BUDGET_MS + 1);
+        return Promise.resolve();
+      },
+    };
+    const neverCalled = vi.fn(() => Promise.resolve());
+    const never: AlertSink = { name: 'webhook', notify: neverCalled };
+    await evaluateAlerts(env(), t0, { sinks: [burn, never], signals: { ...QUIET, keyConfigFaults: 1 } });
+    expect(neverCalled).not.toHaveBeenCalled();
+    expect((await loadAlertStates(db.d1)).get('key_config_fault')).toMatchObject({ unsent: 'firing' });
+    expect(await readSinkHealth(db.d1)).toEqual({
+      lastSuccessAt: null,
+      lastFailureAt: null,
+      consecutiveFailures: 0,
+    });
+  });
+
+  it('a re-sent RESOLVED reports the original firing duration, not one that grows with the delay', async () => {
+    quiet();
+    const t0 = Date.now();
+    const seen: AlertEvent[] = [];
+    let up = true;
+    const sink: AlertSink = {
+      name: 'webhook',
+      notify: (e) => {
+        seen.push(e);
+        return up ? Promise.resolve() : Promise.reject(new Error('down'));
+      },
+    };
+    const hot = { ...QUIET, keyConfigFaults: 1 };
+    await evaluateAlerts(env(), t0, { sinks: [sink], signals: hot });
+    up = false;
+    for (let i = 1; i <= 3; i++)
+      await evaluateAlerts(env(), t0 + (30 + i) * MIN, { sinks: [sink], signals: QUIET });
+    up = true;
+    await evaluateAlerts(env(), t0 + (33 + 10) * MIN + NOTIFY_RETRY_MS, { sinks: [sink], signals: QUIET });
+    const resolved = seen.filter((e) => e.kind === 'resolved');
+    expect(resolved).toHaveLength(2);
+    expect(resolved[0]?.firingForMs).toBe(33 * MIN);
+    expect(resolved[1]?.firingForMs).toBe(33 * MIN);
+  });
+
+  it('a maintenance marker in the middle of a longer silence does not excuse the silence around it', async () => {
+    const t = Date.now();
+    await writeHeartbeat(db.d1, t);
+    await markMaintenanceSkip(db.d1, t + 10 * MIN);
+    await markMaintenanceSkip(db.d1, t + 12 * MIN);
+    await writeHeartbeat(db.d1, t + 30 * MIN);
+    expect(db.raw.prepare("SELECT value FROM ops_state WHERE key='cron_gap'").get()).toBeDefined();
+  });
+
+  it('a marker that brackets the whole gap does excuse it', async () => {
+    const t = Date.now();
+    await writeHeartbeat(db.d1, t);
+    for (let i = 1; i <= 9; i++) await markMaintenanceSkip(db.d1, t + i * MIN);
+    await writeHeartbeat(db.d1, t + 10 * MIN);
+    expect(db.raw.prepare("SELECT value FROM ops_state WHERE key='cron_gap'").get()).toBeUndefined();
+  });
+
+  it('an unwritable marker is logged, and the gap then counts (a false alarm, never silence)', async () => {
+    quiet();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const t = Date.now();
+    await writeHeartbeat(db.d1, t);
+    const readOnly = new Proxy(db.d1, {
+      get(target, prop) {
+        if (prop !== 'prepare') return Reflect.get(target, prop) as unknown;
+        return (sql: string) => {
+          if (/INSERT INTO ops_state/.test(sql)) throw new Error('D1_ERROR: read only');
+          return target.prepare(sql);
+        };
+      },
+    });
+    for (let i = 1; i <= 9; i++) await markMaintenanceSkip(readOnly, t + i * MIN);
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('maintenance_marker_failed'))).toBe(true);
+    await writeHeartbeat(db.d1, t + 10 * MIN);
+    expect(db.raw.prepare("SELECT value FROM ops_state WHERE key='cron_gap'").get()).toBeDefined();
+  });
+
+  it('a MAINTENANCE_MODE left on is reported as prolonged, once an hour', async () => {
+    const err = quiet();
+    const t = Date.now();
+    for (let i = 0; i <= 125; i++) await markMaintenanceSkip(db.d1, t + i * MIN);
+    const lines = err.mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.includes('maintenance_mode_prolonged'));
+    expect(lines).toHaveLength(2); // after 60 and after 120 minutes
+    expect(lines[0]).toContain('"hours":1');
   });
 });

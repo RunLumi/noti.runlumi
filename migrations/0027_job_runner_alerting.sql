@@ -33,7 +33,7 @@
 --
 -- Expand-only. ROLLBACK: the previous Worker ignores the new columns and tables. To remove them (SQLite 3.35+):
 --   DROP TABLE job_state; DROP TABLE job_runs; DROP TABLE alert_state;
---   DROP INDEX deliveries_correlation; DROP INDEX integrations_quarantined;
+--   DROP INDEX deliveries_correlation; DROP INDEX deliveries_org_correlation; DROP INDEX integrations_quarantined;
 --   DROP INDEX sources_dropped; DROP INDEX delivery_attempts_dead;
 --   ALTER TABLE deliveries DROP COLUMN correlation_id;
 --   ALTER TABLE notification_outbox DROP COLUMN correlation_id;
@@ -90,9 +90,13 @@ ALTER TABLE notification_outbox ADD COLUMN correlation_id TEXT
 ALTER TABLE delivery_attempts ADD COLUMN correlation_id TEXT
   CHECK(correlation_id IS NULL OR length(correlation_id) <= 64);
 
--- Leading column is the id so an operator can look one up across workspaces; the API always adds
--- organization_id as the second column. Partial: most rows carry one, but every pre-0027 row does not.
+-- Two indexes, one per access path. `deliveries_correlation` leads with the id so an operator can look one up
+-- across workspaces. `deliveries_org_correlation` leads with the workspace: the API's list query
+-- (`organization_id = ? AND correlation_id = ?`) names it with INDEXED BY, because the planner would
+-- otherwise prefer the (organization, updated_at) index that satisfies its ORDER BY and scan a workspace. Partial: most rows carry one, but every pre-0027 row does not.
 CREATE INDEX deliveries_correlation ON deliveries(correlation_id, organization_id)
+  WHERE correlation_id IS NOT NULL;
+CREATE INDEX deliveries_org_correlation ON deliveries(organization_id, correlation_id)
   WHERE correlation_id IS NOT NULL;
 
 CREATE INDEX integrations_quarantined ON integrations(credentials_quarantined_at)

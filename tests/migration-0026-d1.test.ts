@@ -325,6 +325,17 @@ describe('the real `wrangler d1 migrations apply --local` (workerd SQLite)', () 
         expect(rowsWithoutOrg(restored, t), t).toEqual(original[t]);
       }
       expect(names(restored)).toEqual(expect.arrayContaining(names(pristine)));
+      // Migration 0027 stays recorded as applied, so the restored tables must carry what it added.
+      for (const t of ['deliveries', 'notification_outbox']) {
+        const cols = (
+          restored.prepare(`SELECT name FROM pragma_table_info('${t}')`).all() as { name: string }[]
+        ).map((c) => c.name);
+        expect(cols, `${t} correlation_id`).toContain('correlation_id');
+      }
+      expect(names(restored)).toEqual(
+        expect.arrayContaining(['deliveries_correlation', 'deliveries_org_correlation']),
+      );
+      expect(((plan as { notes?: string[] }).notes ?? []).join('\n')).toMatch(/correlation_id/);
       restored.close();
     },
   );

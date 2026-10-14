@@ -51,6 +51,12 @@ export interface AlertDef {
    * does not send a FIRING and a RESOLVED every few minutes (hysteresis).
    */
   readonly clearTicks: number;
+  /**
+   * True where a freeze makes the signal look bad until the jobs have caught up (every job is overdue, the
+   * outbox has not drained, claims aged): the alert is held back for SETTLE_AFTER_MAINTENANCE_MS after the
+   * last maintenance skip, on top of `confirmTicks`.
+   */
+  readonly settlesAfterMaintenance: boolean;
 }
 
 /** The heading anchor in docs/RUNBOOK.md (`### Alert: job_stale`). */
@@ -73,6 +79,7 @@ export const ALERTS: readonly AlertDef[] = [
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 2,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: true,
   },
   {
     id: 'outbox_stall',
@@ -82,8 +89,9 @@ export const ALERTS: readonly AlertDef[] = [
     threshold: THRESHOLDS.outboxStalled,
     read: (s) => s.outboxStalled,
     renotifyMs: RENOTIFY_MS.critical,
-    confirmTicks: 1,
+    confirmTicks: 2,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: true,
   },
   {
     id: 'dead_letter_spike',
@@ -95,6 +103,7 @@ export const ALERTS: readonly AlertDef[] = [
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
   },
   {
     id: 'breaker_open_many',
@@ -106,6 +115,7 @@ export const ALERTS: readonly AlertDef[] = [
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
   },
   {
     id: 'key_config_fault',
@@ -117,6 +127,7 @@ export const ALERTS: readonly AlertDef[] = [
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
   },
   {
     id: 'credentials_quarantined_nonzero',
@@ -128,6 +139,7 @@ export const ALERTS: readonly AlertDef[] = [
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
   },
   {
     id: 'queue_backlog',
@@ -137,8 +149,9 @@ export const ALERTS: readonly AlertDef[] = [
     threshold: THRESHOLDS.oldestPendingAgeMs,
     read: (s) => s.oldestPendingAgeMs,
     renotifyMs: RENOTIFY_MS.critical,
-    confirmTicks: 1,
+    confirmTicks: 2,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: true,
   },
   {
     id: 'ingress_drop_rate',
@@ -150,6 +163,7 @@ export const ALERTS: readonly AlertDef[] = [
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
   },
   {
     id: 'cron_heartbeat_missing',
@@ -161,6 +175,7 @@ export const ALERTS: readonly AlertDef[] = [
     renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 2,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
   },
   {
     id: 'dlq_consumer_no_progress',
@@ -171,7 +186,8 @@ export const ALERTS: readonly AlertDef[] = [
     threshold: THRESHOLDS.deadLetterStuckRows,
     read: (s) => s.deadLetterStuckRows,
     renotifyMs: RENOTIFY_MS.critical,
-    confirmTicks: 1,
+    confirmTicks: 2,
     clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: true,
   },
 ];

@@ -204,13 +204,29 @@ describe('lookup by correlation id', () => {
     expect(await res.json()).toMatchObject({ fields: [{ field: 'correlationId' }] });
   });
 
-  it('is an index lookup, not a scan', () => {
-    const plan = h.db.raw
-      .prepare(
-        "EXPLAIN QUERY PLAN SELECT id FROM deliveries d WHERE d.organization_id = 'o' AND d.correlation_id = 'c'",
-      )
+  it('the API list query for a correlation id seeks deliveries_org_correlation, never a workspace walk', async () => {
+    const { buildListQuery } = await import('../../src/api/delivery-queries');
+    const q = buildListQuery('org-a', {
+      state: null,
+      integrationId: null,
+      correlationId: 'c0ffee00-0000-4000-8000-000000000000',
+      from: null,
+      to: null,
+      cursor: null,
+      limit: 25,
+    });
+    const plan = (
+      h.db.raw.prepare(`EXPLAIN QUERY PLAN ${q.sql.replace(/\?/g, "'x'")}`).all() as { detail: string }[]
+    ).map((p) => p.detail);
+    const text = plan.join('\n');
+    expect(text).toMatch(/deliveries_org_correlation/);
+    expect(text).not.toMatch(/deliveries_org_updated/);
+    expect(plan.filter((d) => /^SCAN (TABLE )?deliveries\b/.test(d))).toEqual([]);
+    // The operator's cross-workspace lookup uses the id-first index.
+    const operator = h.db.raw
+      .prepare("EXPLAIN QUERY PLAN SELECT id FROM deliveries WHERE correlation_id = 'c'")
       .all() as { detail: string }[];
-    expect(plan.map((p) => p.detail).join('\n')).toMatch(/deliveries_correlation/);
+    expect(operator.map((p) => p.detail).join('\n')).toMatch(/deliveries_correlation\b/);
   });
 
   it('a replay carries the id of the replay request, never the original ingress id', async () => {

@@ -64,6 +64,10 @@ GENERIC_WEBHOOK_ENABLED=false
 # unusable value is a /health warning and alerts then go to the log only (which always runs). Empty: log only.
 ALERT_WEBHOOK_URL=
 
+# Optional secret. Comma-separated user ids of platform operators: the only people who see per-job state
+# and alert-webhook health in GET /api/observability/summary (a workspace admin does not). Empty: nobody.
+PLATFORM_OPERATOR_USER_IDS=
+
 # --- Notes -----------------------------------------------------------------
 # `AUTH_EMAIL` is a Cloudflare Email Sending binding declared in wrangler.jsonc,
 # not an environment variable, so it does not belong in this file. Local email

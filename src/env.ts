@@ -102,4 +102,9 @@ export type Bindings = AuthBindings & {
    * webhook sink stands down (the log sink always runs).
    */
   ALERT_WEBHOOK_URL?: string;
+  /**
+   * Optional secret: comma-separated user ids of platform operators, the only people who see per-job state
+   * and the alert webhook's health in `GET /api/observability/summary`. Unset or empty: nobody (src/observability/operator.ts).
+   */
+  PLATFORM_OPERATOR_USER_IDS?: string;
 };

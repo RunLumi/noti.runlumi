@@ -1481,7 +1481,9 @@ Scope: `docs/specs/REMAINING.md` rows 1.9 to 1.11 and `docs/adr/0024-job-runner-
   batch per tick; one cadence table; staleness at 3x cadence (`jobs` for admins, `jobsStatus` for everyone) and
   as `job_stale`; a job with no record is not stale. Maintenance windows write one `ops_state` marker so they
   are not read as a missed cron. Review follow-ups: capped, index-seek alert signals with plan tests; hysteresis
-  and clear streaks; unsent notices re-sent as the same kind; a shared sink budget; webhook health for admins.
+  and clear streaks; unsent notices re-sent as the same kind; a shared sink budget; webhook health for platform operators only (`PLATFORM_OPERATOR_USER_IDS`). Delta review: a freeze settle period and
+  two-tick confirmation for the backlog alerts, a marker must bracket the whole heartbeat gap, a prolonged-
+  maintenance log, `deliveries_org_correlation` for the API lookup, and recovery re-adds `correlation_id` after 0027.
 - DLQ consumer writes an `ops_state` run record; `dlq_consumer_no_progress` is a ledger-side proxy, not queue depth.
 - Correlation id on `deliveries`, outbox, attempts, queue message, consumer logs, delivery view;
   `GET /api/deliveries?correlationId=`.

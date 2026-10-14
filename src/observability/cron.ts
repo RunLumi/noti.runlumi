@@ -67,6 +67,8 @@ export const HEARTBEAT_KEY = 'cron_heartbeat';
 export const MAINTENANCE_KEY = 'cron_maintenance';
 /** `{ at, gapMs }`: the last time a heartbeat came more than {@link HEARTBEAT_GAP_MS} after the one before. */
 export const GAP_KEY = 'cron_gap';
+/** How far a maintenance marker's ends may sit from the heartbeats it brackets (two ticks). */
+export const MARKER_SLACK_MS = 2 * 60_000;
 /** A gap this long between consecutive heartbeats means ticks were missed (`cron_heartbeat_missing`). */
 export const HEARTBEAT_GAP_MS = 5 * 60_000;
 
@@ -78,6 +80,8 @@ const UPSERT = `INSERT INTO ops_state(key,value,updated_at) VALUES(?1,?2,?3)
 async function readState(db: Db, key: string): Promise<{ value: string } | null> {
   return db.prepare('SELECT value FROM ops_state WHERE key=?1').bind(key).first<{ value: string }>();
 }
+
+export type MaintenanceRange = { readonly from: number; readonly to: number };
 
 function parseRange(raw: string | undefined): { from: number; to: number } | null {
   try {
@@ -98,8 +102,13 @@ export async function writeHeartbeat(db: Db, nowMs: number): Promise<void> {
   const previous = Number((await readState(db, HEARTBEAT_KEY))?.value);
   if (Number.isFinite(previous) && nowMs - previous >= HEARTBEAT_GAP_MS) {
     const maintenance = parseRange((await readState(db, MAINTENANCE_KEY))?.value);
-    // The gap is explained when the cron SAID it was skipping inside it.
-    const explained = maintenance !== null && maintenance.to >= previous && maintenance.from <= nowMs;
+    // Explained only when the cron said it was skipping across the WHOLE gap: the marker starts at the first
+    // tick after the last heartbeat and ends at the last tick before this one (a tick of slack each side).
+    // A marker in the middle of a longer silence does not excuse the silence around it.
+    const explained =
+      maintenance !== null &&
+      maintenance.from <= previous + MARKER_SLACK_MS &&
+      maintenance.to >= nowMs - MARKER_SLACK_MS;
     if (!explained) {
       await db
         .prepare(UPSERT)
@@ -119,12 +128,30 @@ export async function markMaintenanceSkip(db: Db, nowMs: number): Promise<void> 
   try {
     const previous = parseRange((await readState(db, MAINTENANCE_KEY))?.value);
     // Consecutive skips extend one window; a skip long after the last starts a new one.
-    const from = previous && nowMs - previous.to <= 3 * 60_000 ? previous.from : nowMs;
+    const continues = previous !== null && nowMs - previous.to <= 3 * 60_000;
+    const from = continues && previous ? previous.from : nowMs;
     await db
       .prepare(UPSERT)
       .bind(MAINTENANCE_KEY, JSON.stringify({ from, to: nowMs }), nowMs)
       .run();
+    // The freeze is meant to last minutes. Every skipped job is silent, so say so loudly once an hour: a
+    // MAINTENANCE_MODE left on is otherwise an outage with no alert (the alert job is skipped too).
+    const hours = Math.floor((nowMs - from) / PROLONGED_MS);
+    const before = continues && previous ? Math.floor((previous.to - from) / PROLONGED_MS) : 0;
+    if (hours >= 1 && hours > before) {
+      log('error', 'maintenance_mode_prolonged', { hours, since: new Date(from).toISOString() });
+    }
   } catch (error) {
+    // Marker unwritable: log it. The first heartbeat after the freeze then sees an unexplained gap and the
+    // alert fires: a false alarm is the safe direction, silence is not.
     log('warn', 'maintenance_marker_failed', { error });
   }
 }
+
+/** The maintenance marker, or null (absent, malformed or unreadable is "no maintenance recorded"). */
+export async function readMaintenance(db: Db): Promise<MaintenanceRange | null> {
+  return parseRange((await readState(db, MAINTENANCE_KEY))?.value);
+}
+
+/** A maintenance window older than this is reported as prolonged, once per further hour. */
+export const PROLONGED_MS = 60 * 60_000;

@@ -19,6 +19,7 @@
  */
 import type { Bindings } from '../../env';
 import { log } from '../../platform/log';
+import { readMaintenance } from '../cron';
 import { ALERTS, type AlertDef } from './registry';
 import type { StallCounts } from '../stall';
 import { collectSignals, type Signals } from './signals';
@@ -31,7 +32,12 @@ import {
   type AlertSink,
 } from './sinks';
 import { decideAlert, loadAlertStates, saveAlertState, type AlertRow, type NoticeKind } from './state';
-import { MAX_NOTIFY_FAILURES, NOTIFY_RETRY_MS, SINK_BUDGET_MS } from './thresholds';
+import {
+  MAX_NOTIFY_FAILURES,
+  NOTIFY_RETRY_MS,
+  SETTLE_AFTER_MAINTENANCE_MS,
+  SINK_BUDGET_MS,
+} from './thresholds';
 
 export interface AlertReport {
   readonly evaluated: number;
@@ -58,9 +64,12 @@ const EVENT_KIND: Readonly<Record<'fire' | 'renotify' | 'resolve', AlertEventKin
 };
 
 interface Delivery {
+  /** Every sink accepted the notice. False also when a webhook was skipped for the budget (retried later). */
   readonly ok: boolean;
-  /** A non-log sink was asked (or skipped for the budget): the webhook's health is worth recording. */
+  /** A webhook request was actually made: its outcome is worth recording. */
   readonly webhookTried: boolean;
+  /** A webhook request was made and failed. A skip for the budget made no request and is not a failure. */
+  readonly webhookFailed: boolean;
 }
 
 /** Contained: a throwing sink is logged, never rethrown. */
@@ -71,12 +80,12 @@ async function announce(
 ): Promise<Delivery> {
   let ok = true;
   let webhookTried = false;
+  let webhookFailed = false;
   for (const sink of sinks) {
     const remaining = deadlineMs - Date.now();
     const external = sink.name !== 'log';
-    if (external) webhookTried = true;
     if (external && remaining <= 0) {
-      ok = false;
+      ok = false; // not sent, so retried; but no request was made, so the webhook is not blamed
       log('error', 'alert_sink_failed', {
         sink: sink.name,
         alert: event.alertId,
@@ -84,10 +93,14 @@ async function announce(
       });
       continue;
     }
+    if (external) webhookTried = true;
     try {
       await sink.notify(event, { timeoutMs: remaining });
     } catch (error) {
-      if (external) ok = false;
+      if (external) {
+        ok = false;
+        webhookFailed = true;
+      }
       // The class and, for our own closed webhook codes, the code. Never the message: a sink's error text
       // could carry a URL.
       const message = error instanceof Error ? error.message : '';
@@ -99,7 +112,19 @@ async function announce(
       });
     }
   }
-  return { ok, webhookTried };
+  return { ok, webhookTried, webhookFailed };
+}
+
+/** The incident key is `<alert>:<time it started firing>`: how long it fired survives a re-sent RESOLVED. */
+function firingStart(row: AlertRow): number {
+  const at = Number(row.dedupeKey.slice(row.dedupeKey.lastIndexOf(':') + 1));
+  return Number.isFinite(at) ? at : row.since;
+}
+
+function firingFor(kind: AlertEventKind, row: AlertRow, nowMs: number): number {
+  if (kind === 'firing') return 0;
+  // RESOLVED: `since` is when it resolved (also on a re-send), so the duration never grows with the delay.
+  return Math.max(0, (kind === 'resolved' ? row.since : nowMs) - firingStart(row));
 }
 
 function eventFor(
@@ -108,7 +133,6 @@ function eventFor(
   row: AlertRow,
   value: number | null,
   nowMs: number,
-  since: number,
   environment: string,
 ): AlertEvent {
   return {
@@ -120,7 +144,7 @@ function eventFor(
     threshold: def.threshold,
     unit: def.unit,
     dedupeKey: row.dedupeKey,
-    firingForMs: kind === 'firing' ? 0 : Math.max(0, nowMs - since),
+    firingForMs: firingFor(kind, row, nowMs),
     environment,
   };
 }
@@ -143,6 +167,31 @@ function afterDelivery(
   return { ...row, unsent: kind, retryAt: nowMs + NOTIFY_RETRY_MS, notifyFailures: failures };
 }
 
+const UNUSABLE_KEY = 'alert_webhook_unusable_logged';
+const UNUSABLE_LOG_EVERY_MS = 60 * 60_000;
+
+/** A secret that is set but unusable means alerts reach the log only: say so, at most once an hour. */
+async function warnUnusableWebhook(db: Bindings['DB'], nowMs: number): Promise<void> {
+  try {
+    const row = await db
+      .prepare('SELECT value FROM ops_state WHERE key=?1')
+      .bind(UNUSABLE_KEY)
+      .first<{ value: string }>();
+    const last = Number(row?.value);
+    if (Number.isFinite(last) && nowMs - last < UNUSABLE_LOG_EVERY_MS) return;
+    await db
+      .prepare(
+        `INSERT INTO ops_state(key,value,updated_at) VALUES(?1,?2,?3)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`,
+      )
+      .bind(UNUSABLE_KEY, String(nowMs), nowMs)
+      .run();
+  } catch {
+    // ops_state unreadable: fall through and log (noisier is the safe direction).
+  }
+  log('warn', 'alert_webhook_unusable', {});
+}
+
 export async function evaluateAlerts(
   env: Pick<Bindings, 'DB'> & Partial<Bindings>,
   nowMs: number = Date.now(),
@@ -150,11 +199,14 @@ export async function evaluateAlerts(
 ): Promise<AlertReport> {
   const sinks = deps.sinks ?? sinksFromEnv(env);
   if (env.ALERT_WEBHOOK_URL?.trim() && !resolveWebhookTarget(env.ALERT_WEBHOOK_URL, env.APP_ORIGIN)) {
-    // Every tick while it stays wrong: a secret that is set but unusable means alerts reach the log only.
-    log('warn', 'alert_webhook_unusable', {});
+    await warnUnusableWebhook(env.DB, nowMs);
   }
   const signals = deps.signals ?? (await collectSignals(env, nowMs, deps.stallCounts));
   const states = await loadAlertStates(env.DB);
+  // Shortly after a maintenance freeze the backlog and job-freshness signals look bad until the cron has
+  // caught up; those alerts hold their state (neither fire nor resolve) for the settle period.
+  const marker = await readMaintenance(env.DB).catch(() => null);
+  const settling = marker !== null && nowMs - marker.to <= SETTLE_AFTER_MAINTENANCE_MS;
   const environment = env.ENVIRONMENT_NAME ?? 'unknown';
   const deadline = Date.now() + SINK_BUDGET_MS;
   let report: AlertReport = {
@@ -171,7 +223,7 @@ export async function evaluateAlerts(
   let webhookFailed = false;
 
   for (const def of ALERTS) {
-    const value = def.read(signals);
+    const value = def.settlesAfterMaintenance && settling ? null : def.read(signals);
     const prev = states.get(def.id) ?? null;
     const decision = decideAlert(prev, {
       id: def.id,
@@ -196,14 +248,9 @@ export async function evaluateAlerts(
       decision.action !== 'none' ? EVENT_KIND[decision.action] : resend && prev?.unsent ? prev.unsent : null;
     const base = next ?? prev;
     if (kind && base) {
-      const since = decision.action === 'resolve' ? (prev?.since ?? base.since) : base.since;
-      const delivery = await announce(
-        sinks,
-        eventFor(def, kind, base, value, nowMs, since, environment),
-        deadline,
-      );
+      const delivery = await announce(sinks, eventFor(def, kind, base, value, nowMs, environment), deadline);
       webhookTried = webhookTried || delivery.webhookTried;
-      webhookFailed = webhookFailed || !delivery.ok;
+      webhookFailed = webhookFailed || delivery.webhookFailed;
       next = afterDelivery(
         base,
         kind,

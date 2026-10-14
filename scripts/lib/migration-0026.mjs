@@ -140,4 +140,27 @@ export const compareColumns = (table) => COMPARE_COLUMNS[table] ?? '*';
  * originals do not have. Recovery recreates indexes from the live tables when the snapshot is empty; these
  * must not be recreated on a restored original (0027: `deliveries_correlation` needs `correlation_id`).
  */
-export const LATER_MIGRATION_OBJECTS = new Set(['deliveries_correlation']);
+export const CORRELATION_TABLES = ['deliveries', 'notification_outbox'];
+
+/**
+ * Re-add what migration 0027 added to a restored original: the nullable `correlation_id` column with its
+ * CHECK, and for `deliveries` its two partial indexes. Same text as 0027 (a test pins the column text).
+ * @param {string} table
+ * @returns {string[]}
+ */
+export function correlationStatements(table) {
+  const statements = [
+    `ALTER TABLE ${ident(table)} ADD COLUMN correlation_id TEXT CHECK(correlation_id IS NULL OR length(correlation_id) <= 64)`,
+  ];
+  if (table === 'deliveries') {
+    statements.push(
+      'DROP INDEX IF EXISTS deliveries_correlation',
+      'CREATE INDEX deliveries_correlation ON deliveries(correlation_id, organization_id) WHERE correlation_id IS NOT NULL',
+      'DROP INDEX IF EXISTS deliveries_org_correlation',
+      'CREATE INDEX deliveries_org_correlation ON deliveries(organization_id, correlation_id) WHERE correlation_id IS NOT NULL',
+    );
+  }
+  return statements;
+}
+
+export const LATER_MIGRATION_OBJECTS = new Set(['deliveries_correlation', 'deliveries_org_correlation']);
