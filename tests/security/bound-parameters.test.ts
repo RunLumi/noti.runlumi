@@ -70,6 +70,13 @@ const SCRIPT_FRAGMENTS: Readonly<Record<string, string>> = {
   version: 'assertVersion()',
   hex: 'an 8-character upper-case hex of assertVersion()',
   table: 'one of two string literals passed by the same file',
+  old: 'ident(oldName(t.table)) over the fixed list of six tables, in scripts/migration-0026-finalize.mjs',
+  't.table': 'a name from the fixed list of six tables in scripts/lib/migration-0026.mjs',
+  list: 'a join of fixed table names from scripts/lib/migration-0026.mjs, each quoted by the same file',
+  'ident(table)':
+    'ident() throws unless the name matches [A-Za-z_][A-Za-z0-9_]*; the names are the fixed list of six',
+  'ident(oldName(table))': 'ident() as above, over a fixed table name plus a literal suffix',
+  'ident(SNAPSHOT_TABLE)': 'a string constant of scripts/lib/migration-0026.mjs, validated by ident()',
 };
 
 /** Parameters of reviewed builders: the caller passes constants (see ALLOWED_FRAGMENTS). */

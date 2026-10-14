@@ -64,7 +64,11 @@ describe('src/worker.ts serves the probes from the API', () => {
     const res = await worker.fetch(new Request('https://noti.example/health/ready'), envWith(), ctx);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/application\/json/);
-    expect(await res.json()).toEqual({ ok: true, checks: { config: true, d1: true, queue: true } });
+    expect(await res.json()).toEqual({
+      ok: true,
+      checks: { config: true, d1: true, queue: true },
+      warnings: ['migration_0026_old_tables_present'],
+    });
   });
 
   it('GET /health/ready is 503 JSON with D1 down, never the shell', async () => {

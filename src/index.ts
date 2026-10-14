@@ -26,7 +26,7 @@ import { detectStalls } from './observability/stall';
 import { purgeEventDedup } from './delivery/dedup';
 import { purgeExpiredRecords } from './pipeline/retention';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
-import { purgeDueWorkspace } from './pipeline/purge';
+import { existingLegacyTables, purgeDueWorkspace } from './pipeline/purge';
 import { pruneRateLimits, RATE_LIMIT_RETENTION_MS } from './security/rate-limit';
 import { purgeExpiredAuthRecords } from './pipeline/expired-records';
 import account from './api/account';
@@ -130,7 +130,29 @@ app.get('/health', async (c) => {
 
 const READY_D1_TIMEOUT_MS = 3000;
 const READY_CACHE_MS = 5000;
-const readyCache = new WeakMap<object, { at: number; ok: boolean; checks: Record<string, boolean> }>();
+const readyCache = new WeakMap<
+  object,
+  { at: number; ok: boolean; checks: Record<string, boolean>; warnings: string[] }
+>();
+
+/**
+ * Warning only, never a failure: migration 0026 keeps its originals as `<table>_old` until an operator
+ * finalizes (docs/RUNBOOK.md). They hold orphan rows with credentials, so a lingering one must be visible.
+ */
+async function readyWarnings(db: D1Database): Promise<string[]> {
+  try {
+    const warnings: string[] = [];
+    if ((await existingLegacyTables(db)).length > 0) warnings.push('migration_0026_old_tables_present');
+    // A failed 0026 run can leave this view behind, and while it exists EVERY `ALTER TABLE ... RENAME` fails.
+    const gate = await db
+      .prepare("SELECT 1 AS present FROM sqlite_master WHERE type='view' AND name='_gate_0026_poison'")
+      .first<{ present: number }>();
+    if (gate) warnings.push('migration_0026_gate_view_present');
+    return warnings;
+  } catch {
+    return [];
+  }
+}
 
 async function d1Answers(db: D1Database): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -158,16 +180,25 @@ app.get('/health/ready', async (c) => {
   const cached = readyCache.get(c.env);
   const now = Date.now();
   if (cached && now - cached.at < READY_CACHE_MS)
-    return c.json({ ok: cached.ok, checks: cached.checks }, cached.ok ? 200 : 503, {
-      'cache-control': 'no-store',
-    });
+    return c.json(
+      {
+        ok: cached.ok,
+        checks: cached.checks,
+        ...(cached.warnings.length > 0 ? { warnings: cached.warnings } : {}),
+      },
+      cached.ok ? 200 : 503,
+      { 'cache-control': 'no-store' },
+    );
   const report = await bootReport(c.env);
   const d1 = await d1Answers(c.env.DB);
   const queue = typeof c.env.DELIVERY_QUEUE?.send === 'function';
   const checks = { config: report.names.length === 0, d1, queue };
   const ok = checks.config && checks.d1 && checks.queue;
-  readyCache.set(c.env, { at: now, ok, checks });
-  return c.json({ ok, checks }, ok ? 200 : 503, { 'cache-control': 'no-store' });
+  const warnings = d1 ? await readyWarnings(c.env.DB) : [];
+  readyCache.set(c.env, { at: now, ok, checks, warnings });
+  return c.json({ ok, checks, ...(warnings.length > 0 ? { warnings } : {}) }, ok ? 200 : 503, {
+    'cache-control': 'no-store',
+  });
 });
 
 app.post('/webhooks/github', githubWebhook);
@@ -313,12 +344,17 @@ export default {
   // consumer marks the deliveries `dead_lettered` for replay (docs/RUNBOOK.md). The dead-letter consumer
   // only needs D1 and is never gated here.
   queue: async (batch: MessageBatch<unknown>, env: Bindings) => {
+    // The dead-letter consumer is never gated, in maintenance or out of it: its queue has max_retries 1, so
+    // handing its message back (retryAll consumes an attempt) would drop the message before the ledger row
+    // is marked `dead_lettered`. Pausing queue delivery is the freeze for it (docs/RUNBOOK.md).
+    if (batch.queue === DEAD_LETTER_QUEUE) return consumeDeadLetters(batch, env);
     if (inMaintenance(env)) {
       // The migration write freeze: nothing is read or written; the messages come back after the window.
+      // retryAll counts as an attempt (max_retries 5 at 300 s: a message dead-letters after about 25 minutes of
+      // this), so pause queue delivery first; this is the backstop for a message already in flight.
       batch.retryAll({ delaySeconds: RETRY_AFTER_SECONDS });
       return;
     }
-    if (batch.queue === DEAD_LETTER_QUEUE) return consumeDeadLetters(batch, env);
     const report = await bootReport(env);
     if (report.storage.length > 0 || report.credentials.length > 0) {
       log('error', 'config_invalid', { misconfigured: report.names, code: report.code });

@@ -1543,7 +1543,7 @@ deployment.
 - **Migration 0026.** Rebuilds those six tables with `organization_id TEXT NOT NULL REFERENCES
   organization(id) ON DELETE CASCADE`. Backfills only what is derivable from our own rows (integration
   from its source, delivery from its integration, outbox row from its delivery or payload integration);
-  quarantines the rest into `legacy_orphaned_rows` with metadata only (credentials and payloads leave the live tables, recoverable only through Time Travel; never guessed into a tenant); verifies the copy against the live original and swaps by RENAME, dropping the old table only behind a foreign-key guard released by a recount (safe whether or not D1 aborts a failed file). Renumbered 0023 -> 0026 so it follows 0024 (#51) and 0025 (#53); it carries 0024's `integrations.credential_fingerprint`. `tests/migration-0026.test.ts` (21 tests, incl. runners that abort and runners that carry on, a late writer, a re-run, and upgrades from 0012/0015/0017/0020/0021) diffs the schema before and after, runs the backfill over
+  quarantines the rest into `legacy_orphaned_rows` with metadata only (credentials and payloads leave the live tables, recoverable only through Time Travel; never guessed into a tenant); verifies the copy against the live original and swaps by RENAME, **keeping every original as `<table>_old`** (the guarded DROP of the first version was defeatable and was removed; see the non-destructive follow-up below). Renumbered 0023 -> 0026 so it follows 0024 (#51) and 0025 (#53); it carries 0024's `integrations.credential_fingerprint`. `tests/migration-0026.test.ts` (21 tests, incl. runners that abort and runners that carry on, a late writer, a re-run, and upgrades from 0012/0015/0017/0020/0021) diffs the schema before and after, runs the backfill over
   legacy-shaped rows, proves nothing secret reaches the quarantine, and proves an unbalanced copy aborts
   with the old schema intact. Six existing test files gained `seedOrganization` calls; one expectation
   changed to "the schema refuses a tenant-less outbox row".
@@ -1619,3 +1619,29 @@ staging drill and Time Travel re-drill, audit of unknown-installation 403s, type
 - **Staleness** is a weekly workflow (`npm run check:stale`, `tests/stale/`), not part of `npm run check`.
 - **Event**: `unmapped_provider_response` (kind, attempt, numeric status, status class, ids; no body or URL). Log only.
 - **Verified:** unit tests for the above. **Not verified:** any real provider.
+
+## Migration 0026 made non-destructive (ADR 0021 A4, follow-up to #52)
+
+A second independent review applied 0026 in scratch SQLite (3 runner modes x sabotage x foreign keys on/off, plus
+140 kill-between-statements states) and found the guarded `DROP TABLE <t>_old` could lose the originals (re-run
+over a leftover `_old` in a carrying-on runner; foreign keys off; `defer_foreign_keys`). 0026 has never run on a real D1, so it was edited in place:
+
+- **No DROP/DELETE/TRUNCATE of an original or `_old` anywhere in the file** (static scan test). `_old` stays until
+  `scripts/migration-0026-finalize.mjs` (+ `.sql`) reconciles it row for row and drops it (idempotent, `--apply`, `--ack-drift`).
+- **Tripwires and gates** (FK on, legacy_alter_table off, no `_old`, six live tables) that also stop a carrying-on runner:
+  gate tables created by an erroring CTAS, `AND EXISTS (gate)` on every data statement, a poison view that fails every RENAME.
+- **`scripts/migration-0026-recover.mjs`**: restores originals and verbatim indexes/triggers from `_snapshot_0026`; tested
+  from every statement boundary (141 states) plus sabotage and late-writer states. `sources_delete_integrations` window shrunk to two adjacent statements.
+- Preflight now derives tenants exactly as the migration does (prediction == result, 25-round fuzz) and blocks on FK off / leftover `_old`.
+- `_old` tables and `_snapshot_0026` are TEMPORARY rows in the retention matrix, cleared per workspace by the purge, and `/health/ready` warns (200) while they exist.
+- `MAINTENANCE_MODE`: the dead-letter consumer is never gated; the runbook freezes with `wrangler queues pause-delivery` first and states the 25-minute `retryAll` limit.
+- Tests: `tests/migration-0026-matrix.test.ts` (52) and extended preflight/retention/purge/health tests.
+
+Not done / UNVERIFIED: everything on a real D1 (see RELEASE_GATES); `wrangler queues pause-delivery` semantics for in-flight batches and message age; the wrangler executor of the finalize/recover scripts (tested only through an injected node:sqlite executor); finalize compares whole rows by INTERSECT rather than hashing.
+
+Re-review fixes (same PR): the file used 6- and 7-term compound SELECTs that workerd's SQLite rejects ("too many terms"; node:sqlite allows 500), so
+verification is one INSERT per row and finalize/preflight are many small statements, with a static ban (<= 4 terms across migrations, scripts and
+runbook SQL) and `tests/migration-0026-d1.test.ts` running the real `wrangler d1 migrations apply --local` on a seeded legacy database plus finalize/recover via
+`wrangler d1 execute --local`. `PRAGMA legacy_alter_table=OFF` first (sqlite3 shell default ON let empty copies be swapped in); the snapshot is always populated and recover
+falls back to the live tables' DDL. finalize refuses an empty live table over a non-empty original, lists ids, and needs `--ack-changed` separately from `--ack-drift`;
+`/health/ready` also warns on a leftover `_gate_0026_poison`. Still UNVERIFIED on a remote D1: see the RUNBOOK list and the mandatory throwaway-D1 rehearsal.

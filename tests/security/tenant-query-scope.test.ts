@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeD1 } from '../support/d1';
 import { collectStatements, findViolations, readSources, type Violation } from '../support/sql-scope';
 import { must } from '../support/must';
+import { LEGACY_OLD_TABLES } from '../../src/pipeline/purge';
 
 /**
  * F26 / F233: every query on a tenant table carries an `organization_id` predicate, and every
@@ -40,6 +41,8 @@ const NOT_TENANT_TABLES: Readonly<Record<string, string>> = {
   github_installation_repositories: 'child of github_installations; scoped through installation_row_id',
   legacy_orphaned_rows:
     'quarantine of rows that had no derivable tenant (0026); metadata only, read by no code',
+  _snapshot_0026:
+    'DDL text of the indexes and triggers 0026 recreates (temporary, until finalize); no tenant data',
   auth_users: 'retired 0004 identity table (F31); no code reads it',
   auth_orgs: 'retired 0004 identity table (F31); no code reads it',
   auth_memberships: 'retired 0004 identity table (F31); no code reads it',
@@ -70,11 +73,17 @@ interface Fk {
 
 function schema() {
   const { raw } = createFakeD1();
+  // The temporary `<table>_old` originals kept by migration 0026 until finalize are pre-contract by
+  // definition (nullable organization_id, no foreign key); they are covered by the retention matrix
+  // (kind 'temporary') and by the purge, not by the contract.
+  const temporary = new Set<string>(LEGACY_OLD_TABLES);
   const tables = (
     raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all() as {
       name: string;
     }[]
-  ).map((t) => t.name);
+  )
+    .map((t) => t.name)
+    .filter((t) => !temporary.has(t));
   const info = new Map(
     tables.map((t) => [
       t,

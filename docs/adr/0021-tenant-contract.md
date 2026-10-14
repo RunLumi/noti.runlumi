@@ -51,28 +51,59 @@ by rebuild (the same technique as 0009, 0012 and 0018). In order, in one file:
    code (a test fails if `src/` mentions it) and is dropped by an operator after review.
 3. **Verify** the copy against the live original (kept + quarantined = original, and every orphan has
    its quarantine row). The check is an INSERT into a table whose CHECK constraint is named
-   `row_counts_must_match`, so where D1 aborts a failed file it aborts here, before anything is renamed.
-4. **Swap, safe without atomicity.** The Cloudflare migrations, best-practices and limits pages do not say
-   whether a file runs in a transaction or whether a failed statement stops it (**UNVERIFIED**; they do
-   document 30 seconds per query, 100 KB per statement and chunks of about 1,000 rows for large
-   changes). sqlite3's own default carries on after an error, and SQL has no conditional DROP, so the
-   first version of this file (verify, then DROP, then RENAME) could drop an original after a failed
-   verify, and could lose a row written by a live Worker between the copy and the DROP. The file is
-   now structured so that no failure, and no concurrent write, can destroy the original: the original is
-   RENAMED aside (`<table>_old`), the verified copy takes its name, and `DROP TABLE <table>_old` is
-   guarded by a temporary foreign key (a one-row child table pointing at the original) that is released
-   only by a `DELETE ... WHERE` that recounts the original against the copy at that moment. A mismatch,
-   a late row or an earlier failure leaves the guard, and the DROP itself errors with `FOREIGN KEY
-   constraint failed`, leaving every original row in `<table>_old`. The mechanism assumes D1 enforces
-   foreign keys (its documented default; **UNVERIFIED** here). Tests run the file under three runners:
-   inside a transaction, stopping at the first error with no wrapper, and carrying on after errors,
-   each with a sabotaged copy and with a row written after the verify. The file is also re-runnable: its
-   scratch objects are dropped `IF EXISTS`, the quarantine is idempotent, copies are in `rowid` order
-   (`src/api/deliveries.ts` reads rowid as recency). It carries every column added by 0024 (`integrations.credential_fingerprint`) and 0025 (`deliveries.duplicate_of`, `suppressed_reason`, `possible_duplicate`, `provider_message_id`, with their CHECKs); the schema-diff test over the whole chain fails when a later migration adds one it does not carry. `event_dedup`, `delivery_attempts` and `destination_health` (0025) were already NOT NULL with a foreign key and are not rebuilt; attempt rows of a quarantined delivery are removed later as orphans by the retention job (ADR 0023), and each free-text field in the quarantine is cut to
-   200 characters (a 2,400-character legacy repo previously overflowed the record's CHECK).
-   It must still run in a write freeze: `MAINTENANCE_MODE=true` answers 503 with Retry-After on every route
-   but the probes, skips cron and retries queue batches. A late row would be refused by the guard, but the
-   live Worker would then be running on an incomplete table until an operator restored from Time Travel.
+   `row_counts_must_match`, so where D1 aborts a failed file it aborts here, before anything is renamed; a
+   second gate keeps every rename blocked where it does not. After the swap the same recount runs against
+   the kept `_old` (`swap_counts_must_match`). Counts only; the content comparison is finalize's.
+4. **Swap, non-destructive, safe without atomicity.** The Cloudflare migrations, best-practices and limits
+   pages do not say whether a file runs in a transaction or whether a failed statement stops it
+   (**UNVERIFIED**; they do document 30 seconds per query, 100 KB per statement and chunks of about 1,000
+   rows). sqlite3's own default carries on after an error, and SQL has no conditional DROP.
+   **Design change (amended after a second independent review).** The first version renamed the original
+   aside, then `DROP TABLE <t>_old` behind a temporary foreign-key guard released by a recount. Applied in
+   scratch SQLite in three runner modes, with sabotage and foreign keys on and off, that guard failed:
+   re-running over a leftover `_old` in a carrying-on runner dropped the originals (28 of 54 sabotage
+   cases), foreign keys off dropped them (39 of 54), and `PRAGMA defer_foreign_keys=ON` inside a
+   transaction defeated it too. A guard that depends on runner behaviour and pragmas is not a guard, so
+   **the DROP was removed rather than defended**: migration 0026 contains no `DROP`, `DELETE` or
+   `TRUNCATE` of an original or an `_old` table (a test scans the file), and the originals stay as
+   `<table>_old` until an operator runs `scripts/migration-0026-finalize.mjs`, which reconciles each `_old`
+   against its live table row for row (whole-row INTERSECT, kept + quarantined = original, nothing
+   live-only, foreign keys on and clean) and only then drops. `scripts/migration-0026-recover.mjs` puts the
+   originals back, with every index and trigger recreated verbatim from `_snapshot_0026` (DDL captured
+   before anything is dropped).
+   Because the originals can no longer be lost, the remaining job is to stop a carrying-on runner from
+   leaving a half-swapped database. Tripwires at the top are inserts into CHECK-constrained tables
+   (`foreign_keys_must_be_on`, `legacy_alter_table_must_be_off`, `old_tables_from_an_earlier_run_...`,
+   `all_six_tenant_tables_must_exist`), so an aborting runner stops with a named error. For a runner that
+   carries on, two gate tables are created only when nothing tripped (`CREATE TABLE ... AS SELECT CASE WHEN
+   <ok> THEN 1 ELSE abs(-9223372036854775808) END`: the ELSE raises "integer overflow", so no table
+   appears); every backfill, quarantine and copy has `AND EXISTS (SELECT 1 FROM _gate_0026_ok)` and fails
+   to compile without it, and a view over both gates makes every `ALTER TABLE ... RENAME` fail ("error in
+   view ... no such table") until both exist. The first statement is `PRAGMA legacy_alter_table=OFF` (the sqlite3 shell defaults to ON, which skips that
+   view check; a re-review found a carrying-on runner then swapped EMPTY copies in), and a tripwire verifies it
+   took effect; a runner that ignores pragmas and carries on can still swap empty copies with the originals whole
+   in `_old` (recoverable). **D1 compatibility:** workerd's SQLite allows at most 5 compound SELECT terms (node:sqlite
+   500), which the first version of this file exceeded; every statement in migrations and scripts is now
+   held to 4 and `tests/migration-0026-d1.test.ts` runs the real `wrangler d1 migrations apply --local` on a seeded
+   legacy database, then finalize and recover through wrangler. Local workerd is not the remote service: the
+   `pragma_*` functions, the overflow trick and the view gate on a remote D1 stay UNVERIFIED (runbook rehearsal). Tested under three runners (rolled back, aborting,
+   carrying on) with foreign keys off, `defer_foreign_keys`, `legacy_alter_table`, a leftover `_old`, a
+   sabotaged copy for each of the six tables, a row written after the verify, the process killed after every
+   one of the file's statements (with a re-run in every mode afterwards), and recovery from each of those
+   states (`tests/migration-0026-matrix.test.ts`). The file is re-runnable once `_old` is finalized or
+   restored (scratch is dropped `IF EXISTS`, the quarantine is idempotent, copies are in `rowid` order).
+   It carries every column added by 0024 and 0025; the schema-diff test fails when a later migration adds
+   one it does not carry. `event_dedup`, `delivery_attempts` and `destination_health` (0025) were already NOT
+   NULL with a foreign key and are not rebuilt; each free-text field in the quarantine is cut to 200
+   characters.
+   **Consequence: the `_old` tables are tenant data at rest** (including orphan rows with v0 credentials) and
+   are covered as TEMPORARY in the retention matrix (drop within 7 days), cleared per workspace by the
+   purge when present, flagged by a `/health/ready` warning (never a 503), and blocked by the preflight.
+   The window still must be a write freeze. `MAINTENANCE_MODE` answers 503 with Retry-After, skips cron and
+   hands queue messages back; but `retryAll` consumes a retry (main queue `max_retries` 5 at 300 s: about 25
+   minutes, less for a message already retrying), so the runbook makes `wrangler queues pause-delivery` on
+   both queues the primary freeze. The dead-letter consumer is now never gated (its queue has
+   `max_retries` 1, so handing the message back dropped it before the ledger update).
 5. **Recreate** every index and trigger. A schema diff test compares `sqlite_master` before and
    after: columns, defaults, primary keys, every CHECK clause, every index and trigger are identical;
    the only change is `organization_id` becoming NOT NULL with one foreign key (`tests/migration-0026.test.ts`).
@@ -159,8 +190,8 @@ plan is the staging runner (`scripts/tenant-isolation-drill.mjs`), env-driven, r
   backfill in `docs/RUNBOOK.md`. The copy itself remains one statement per table.
 - **Not run on a real D1.** Atomic rollback of a failed migration, foreign-key behaviour during the
   rebuild, statement-size and time limits are assumptions (**UNVERIFIED**), and the rollback rehearsal
-  has not happened. The migration is written not to depend on atomicity (the DROP is guarded, see decision A4), but that
-  guard has never been exercised on D1, and rehearsal on staging is a blocking release item. The runbook
+  has not happened. The migration is written not to depend on atomicity (nothing is dropped until finalize, see decision A4), but that
+  tripwires, gates and the `pragma_*` functions have never been exercised on D1, and rehearsal on staging is a blocking release item. The runbook
   says how to freeze writers, bookmark, recount, verify and recover.
 - **The staging drill has not been run**, nor the Time Travel re-drill; there is no staging environment.
 - **Every cross-tenant probe is not audited:** recording is capped at 20 a minute per user by ADR 0019,

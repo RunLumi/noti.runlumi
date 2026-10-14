@@ -540,7 +540,7 @@ What the files themselves say:
 | 0021 noise control | Old Worker ignores the column and both tables, but it **stops releasing**: rows in `held`/`claimed` wait until a Worker that knows about them runs again (nothing is lost). Turn noise settings off and let `held_events` drain before rolling back if updates must not be delayed | `DROP TABLE held_events; DROP TABLE noise_open_failures;` is safe only once nothing is waiting; the column stays (dropping it needs a rebuild) |
 | 0024 credential lifecycle | Old Worker ignores the three columns. **Apply before** the new Worker (its queries name them). A rollback past the Worker leaves revoked integrations quarantined (still stopped) but a revoked **source** is only `enabled=0`, which the old Worker also honours; it would let someone re-enable it | Expand-only: the columns stay (dropping them needs `ALTER TABLE ... DROP COLUMN`, SQLite 3.35+) |
 | 0025 delivery ledger depth | Old Worker ignores the four new `deliveries` columns and the tables `event_dedup`, `delivery_attempts`, `destination_health`: it stops recording attempts and suppressed repeats and stops honouring the breaker and pacing, nothing else. Waiting deliveries (`last_error` `circuit_open` or `destination_paced`) are retried by their next scheduled time | Expand-only. `DROP TABLE` the three tables is safe; the columns stay (dropping them needs a rebuild) |
-| 0026 tenant contract | The previous Worker keeps working: the new schema is stricter than it needs and it never writes a NULL organization. Rows the migration could not attribute to a tenant were moved to `legacy_orphaned_rows` with metadata only; they left the live tables and are recoverable **only through Time Travel** (the quarantine keeps metadata, never credentials) | **Not reversible by SQL.** Restoring nullable columns is another rebuild, and quarantined rows are not put back. The only real undo is a D1 Time Travel restore to the bookmark taken before applying (procedure **UNVERIFIED**) |
+| 0026 tenant contract | The previous Worker keeps working: the new schema is stricter than it needs and it never writes a NULL organization. Rows the migration could not attribute to a tenant leave the live tables (metadata in `legacy_orphaned_rows`) but stay whole in `<table>_old` until finalize | Until finalize: `scripts/migration-0026-recover.mjs` restores the originals and their indexes and triggers (valid until traffic has resumed on the new tables). After finalize: **not reversible by SQL**; a D1 Time Travel restore to the bookmark taken before applying is the only undo (procedure **UNVERIFIED**) |
 | 0016 observability | Old Worker ignores `ops_state` and the two indexes | `DROP TABLE ops_state; DROP INDEX deliveries_state_created; DROP INDEX audit_events_created;` |
 
 A rollback rehearsal has **not** been performed (docs/RELEASE_GATES.md). A restore from D1
@@ -599,88 +599,177 @@ What Cloudflare documents, and what it does not (checked 2026-10-14):
   `PRAGMA defer_foreign_keys = true` for changes that would violate foreign keys
   (<https://developers.cloudflare.com/d1/reference/migrations/>).
 - **Not stated** (so **UNVERIFIED**): whether a migration file runs in a transaction, whether a failed
-  statement aborts the file or the runner carries on, and any per-file statement limit. The
-  best-practices page says nothing on these either. The migration is therefore written to be safe in
-  both worlds (below), and this procedure does not rely on atomicity.
+  statement aborts the file or the runner carries on, any per-file statement limit.
+- **Measured, not documented.** workerd's SQLite allows **at most 5 compound SELECT terms** (a sixth fails
+  "too many terms in compound SELECT"; node:sqlite allows 500, so unit tests over it cannot see this). Every
+  statement in migrations and scripts is held to 4 by a test, and
+  `tests/migration-0026-d1.test.ts` runs the real `wrangler d1 migrations apply --local` (workerd) on the whole
+  chain and on a seeded legacy database with zero row loss, then finalize and recover through
+  `wrangler d1 execute --local`.
 
-How the file protects the data without atomicity: a table is never dropped by name while its
-replacement is unproven. The original is renamed aside (`<table>_old`), the copy takes its name, and
-`DROP TABLE <table>_old` is guarded by a temporary foreign key that is released only by a statement
-whose WHERE clause recounts the original against the copy at that moment. If anything failed, or a
-row was written after the copy, the DROP errors with `FOREIGN KEY constraint failed` and the original
-rows are still in `<table>_old`. The foreign key relies on D1 enforcing foreign keys, which it does by
-default (**UNVERIFIED** on this account until rehearsed).
+#### UNVERIFIED on a production (remote) D1 (rehearse before relying on any of it)
+
+Local wrangler is workerd's SQLite, not the production D1 service. These are proven locally and **not**
+on a remote database: `pragma_foreign_keys` / `pragma_legacy_alter_table` / `pragma_foreign_key_check` as
+table-valued functions; the overflow trick (`CREATE TABLE ... AS SELECT CASE ... abs(-9223372036854775808)`
+failing the statement without creating the table); `CREATE VIEW` over tables that do not exist yet, and
+`ALTER TABLE ... RENAME` failing on it; `PRAGMA legacy_alter_table=OFF` being accepted as the first statement
+of a migration (and that default for the remote connection); `foreign_keys` being on; a file's
+transaction/abort behaviour; INTERSECT over wide rows and blobs inside the 30 second limit at the 100,000
+row ceiling; `wrangler queues pause-delivery` semantics.
+
+**Mandatory before production: rehearse on a throwaway REMOTE D1** (`wrangler d1 create lumi-noti-rehearsal`,
+never the production database): load a copy of production-shaped legacy rows, run the preflight, apply 0026,
+confirm each item above by observation, run finalize (check, then `--apply`), then repeat from a fresh copy
+and force a failure (drop one `_old` table half way, or edit a copy of the file to fail the verify), run
+recover, and record the results in `docs/RELEASE_GATES.md`. Delete the rehearsal database afterwards.
+
+### What the file does, and what it cannot do
+
+**It never destroys an original.** It has no `DROP`, `DELETE` or `TRUNCATE` of any of the six tables or
+of `<table>_old` (a test scans for that). Each original is renamed aside to `<table>_old`, the verified
+copy takes its name, and **the `_old` tables stay until you run the finalize step below.** Whatever the
+runner does (rolls back, aborts, or carries on after an error), whatever the pragmas, and however many
+times it is re-run, the original rows are in the live table or in `<table>_old`.
+
+It also refuses to run in a state it does not understand. Tripwires at the top fail the file with a
+named constraint: `foreign_keys_must_be_on`, `legacy_alter_table_must_be_off`,
+`old_tables_from_an_earlier_run_must_be_finalized_or_restored_first`, `all_six_tenant_tables_must_exist`.
+A runner that carries on after the error is stopped from doing harm by two gate tables (created only when
+nothing tripped) that every data statement depends on, and by a view that makes every `ALTER TABLE ...
+RENAME` fail until both gates exist. The very first statement is `PRAGMA legacy_alter_table=OFF` (the sqlite3
+shell defaults to ON, which skips the view check and let a carrying-on runner swap EMPTY copies in); the
+tripwire then verifies it took effect. A runner that ignores pragmas still stops at the tripwire (aborting
+runners) or, if it carries on and has legacy ON, may swap empty copies with the originals whole in
+`<table>_old`: run recover.
 
 ### Procedure (maintenance window; every step is mandatory)
 
-1. **Preflight, read-only.** Reports everything the migration will quarantine, ids that differ only by
-   case, cross-tenant anomalies, and row counts:
+1. **Preflight, read-only.** Reports everything the migration will quarantine (derived exactly as the
+   migration derives it: a tenant derived to an id that is not an organization still counts), ids that
+   differ only by case, cross-tenant anomalies, row counts, `foreign_keys` off, and leftover `_old` tables:
 
    ```
    wrangler d1 execute lumi-noti --remote --json --file scripts/migration-0026-preflight.sql > preflight.json
    node scripts/migration-0026-preflight.mjs preflight.json
    ```
 
-   It exits 1 until every quarantined row is acknowledged by exact count
-   (`--ack-orphans <N>`): those rows' credentials and payloads leave the live tables and are
-   recoverable **only through Time Travel**. It also refuses any table above 100,000 rows (the
-   ceiling: one `INSERT ... SELECT` per table must finish inside 30 seconds). To get under it, purge
-   deliveries by retention first (`DELIVERY_RETENTION_DAYS`, `purgeExpiredRecords`), or run the
-   chunked backfill below. Decisions on the reviewed items: a delivery whose organization differs
-   from its integration's, an integration whose organization differs from its source's, and
-   deliveries of a quarantined integration are **kept** (each row is valid on its own, and deleting
-   history on a guess is worse); review each before applying.
-2. **Bookmark.** `wrangler d1 time-travel info lumi-noti`; write the bookmark down. It is the only
-   undo (procedure **UNVERIFIED**).
-3. **Freeze every writer.** Deploy with `MAINTENANCE_MODE=true` (`wrangler deploy --var
-   MAINTENANCE_MODE:true`). Every route except `/health` and `/health/ready` answers 503 with
-   `Retry-After: 300` (providers retry; none are told the event was accepted), cron jobs do nothing and
-   queue batches are retried after five minutes. Confirm: a webhook POST returns 503 and the cron log
-   shows `maintenance_mode_cron_skipped`. Also pause the cron trigger and the queue consumer in the
-   dashboard if you do not trust a single flag. Wait for in-flight requests to drain (one minute).
+   It exits 1 until every quarantined row is acknowledged by exact count (`--ack-orphans <N>`): those
+   rows leave the live tables (they stay in `<table>_old` until finalize, then only in Time Travel). It also
+   refuses any table above 100,000 rows (the ceiling: one `INSERT ... SELECT` per table must finish inside 30
+   seconds); purge deliveries by retention first or use the chunked backfill below. A delivery whose
+   organization differs from its integration's, an integration whose organization differs from its
+   source's, and deliveries of a quarantined integration are **kept**; review each.
+2. **Bookmark.** `wrangler d1 time-travel info lumi-noti`; write the bookmark down. Procedure
+   **UNVERIFIED**; it is the undo of last resort and the only one after finalize.
+3. **Freeze every writer, in this order.**
+   1. **Pause queue delivery first:** `wrangler queues pause-delivery noti-deliveries` and
+      `wrangler queues pause-delivery noti-dead-letters` (command names from the Cloudflare Queues wrangler
+      reference; what a paused queue does to in-flight batches and to message age is **UNVERIFIED**; resume
+      with `resume-delivery`). Pausing is the real freeze. `MAINTENANCE_MODE` alone is not: its queue
+      handling is `retryAll({ delaySeconds: 300 })`, and `retryAll` **consumes a retry**. The main queue has
+      `max_retries: 5`, so a message gets six deliveries; in maintenance it is handed back at 0, 5, 10, 15,
+      20 and 25 minutes and then moves to the dead-letter queue. A fresh message therefore survives a window of
+      **under 25 minutes**, and a message already part-way through its retries (a delivery that was retrying
+      before the freeze) survives **less than 5 minutes**. Dead-lettered deliveries are marked
+      `dead_lettered` and can be replayed (docs/RUNBOOK.md, replay), so this is recoverable but noisy.
+      The dead-letter queue consumer is never gated by `MAINTENANCE_MODE` (its queue has `max_retries: 1`,
+      so handing its message back would drop it before the ledger row is marked); pausing
+      `noti-dead-letters` is what keeps it from writing to `deliveries` during the window.
+   2. Deploy with `MAINTENANCE_MODE=true` (`wrangler deploy --var MAINTENANCE_MODE:true`). Every route
+      except `/health` and `/health/ready` answers 503 with `Retry-After: 300` (providers retry; none are
+      told the event was accepted) and cron jobs do nothing. Confirm: a webhook POST returns 503 and the
+      cron log shows `maintenance_mode_cron_skipped`. Pause the cron trigger in the dashboard if you do not
+      trust a single flag. Wait one minute for in-flight requests to drain.
+   Keep the whole window **under 60 minutes**: Queues retention is configurable up to 14 days on Workers
+   Paid and fixed at 24 hours on Free; the default on Paid is not stated (UNVERIFIED), so do not rely on more.
 4. **Final recount.** Re-run step 1 immediately before applying; the counts must be the same.
 5. **Apply.** `wrangler d1 migrations apply lumi-noti --remote`.
 6. **Verify before unfreezing** (all must hold):
 
    ```sql
-   -- the contract is in place on all six tables (expect 6 rows with notnull=1)
-   SELECT 'integrations' t, "notnull" FROM pragma_table_info('integrations') WHERE name='organization_id'
-   UNION ALL SELECT 'deliveries', "notnull" FROM pragma_table_info('deliveries') WHERE name='organization_id'
-   UNION ALL SELECT 'notification_outbox', "notnull" FROM pragma_table_info('notification_outbox') WHERE name='organization_id'
-   UNION ALL SELECT 'held_events', "notnull" FROM pragma_table_info('held_events') WHERE name='organization_id'
-   UNION ALL SELECT 'routing_decisions', "notnull" FROM pragma_table_info('routing_decisions') WHERE name='organization_id'
-   UNION ALL SELECT 'noise_open_failures', "notnull" FROM pragma_table_info('noise_open_failures') WHERE name='organization_id';
-   -- no leftovers (expect 0 rows): a leftover means a step failed
-   SELECT name FROM sqlite_master WHERE type='table'
-     AND (name LIKE '%\_old' ESCAPE '\' OR name LIKE '%\_v4' ESCAPE '\' OR name LIKE '\_guard%' ESCAPE '\' OR name LIKE '\_contract%' ESCAPE '\');
+   -- the foreign key is in place on all six tables (expect 6 rows, each with fk = 1). One query: workerd's
+   -- SQLite allows at most 5 compound SELECT terms, so no six-way UNION here.
+   SELECT m.name, COUNT(*) AS fk FROM sqlite_master m, pragma_foreign_key_list(m.name) f
+     WHERE m.type='table' AND f."from"='organization_id' AND f."table"='organization'
+       AND m.name IN ('integrations','deliveries','notification_outbox','held_events','routing_decisions','noise_open_failures')
+     GROUP BY m.name;
+   -- scratch left over (expect 0 rows): a leftover here means a step failed. The six `_old` tables are EXPECTED.
+   SELECT name FROM sqlite_master WHERE name LIKE '%\_v4' ESCAPE '\' OR name LIKE '\_guard%' ESCAPE '\'
+     OR name LIKE '\_contract%' ESCAPE '\' OR name LIKE '\_gate%' ESCAPE '\' OR name IN ('_swap_verify','_fk_required','_alter_mode','_old_absent','_live_present');
    -- no dangling foreign keys (expect 0 rows)
    PRAGMA foreign_key_check;
-   -- what was removed from the live tables
+   -- what was removed from the live tables (it is in `<table>_old`)
    SELECT source_table, reason, COUNT(*) FROM legacy_orphaned_rows GROUP BY 1,2;
-   -- row counts equal the preflight totals minus the quarantined rows, per table
    ```
 
-   Then check the four indexes and five triggers of `integrations` exist
-   (`SELECT name FROM sqlite_master WHERE tbl_name='integrations'`) and send one test notification
-   (`POST /api/integrations/:id/test`) before unfreezing.
-7. **Unfreeze** (`MAINTENANCE_MODE=false`), watch `/health/ready`, the delivery log and the cron heartbeat.
-8. After review, `DROP TABLE legacy_orphaned_rows;` (no code reads it).
+   `integrations` must have **5 named indexes and 4 triggers of its own** (`integrations_repo`,
+   `_org_idx`, `_kek_version`, `_org_created`, `_source`; `integrations_org_required_insert`,
+   `_org_immutable`, `_source_same_org`, `_source_immutable`) **plus the trigger on `sources`**
+   (`sources_delete_integrations`):
+   `SELECT name FROM sqlite_master WHERE tbl_name='integrations' OR name='sources_delete_integrations'`
+   (10 rows, plus any autoindex). Send one test notification (`POST /api/integrations/:id/test`).
+7. **Finalize, still frozen** (below). Doing it in the window is what makes the strict comparison possible.
+8. **Unfreeze, in this order:** `MAINTENANCE_MODE=false`, then `wrangler queues resume-delivery
+   noti-deliveries` and `noti-dead-letters`. Watch `/health/ready`, the delivery log and the cron heartbeat.
+9. After review, `DROP TABLE legacy_orphaned_rows;` (no code reads it).
+
+### Finalize: the only step that drops the originals
+
+Take a Time Travel bookmark first (dropped rows include quarantined orphans whose credentials exist
+nowhere else). Check only, then apply:
+
+```
+node scripts/migration-0026-finalize.mjs --database lumi-noti --remote
+node scripts/migration-0026-finalize.mjs --database lumi-noti --remote --apply
+```
+
+It refuses, dropping nothing, unless per table (`scripts/migration-0026-finalize.sql`): kept rows equal
+their originals in every column (a whole-row comparison, stronger than a hash sum), kept + quarantined =
+original, nothing live that the original lacked, and `PRAGMA foreign_keys` is 1 with no violations (the
+foreign key check is **database-wide**: a violation in any table blocks, on purpose). A live table that is
+EMPTY while its original is not is never acceptable, whatever you acknowledge. It drops the six `<table>_old`, `_snapshot_0026` and any scratch. It is idempotent (nothing left: exit 0) and
+refuses a half-present set of `_old` tables. If traffic has resumed, live rows legitimately differ:
+read the `REVIEW` lines, which list the first 20 ids of each kind, then acknowledge them separately:
+`--ack-drift <missing + live_only>` and `--ack-changed <changed>`. Changed is separate because a count never
+shows a write to an existing row: during the freeze the dead-letter consumer (never gated, see above) or a
+slipped writer can mark a delivery `dead_lettered`, and a migration that checks counts cannot see it; finalize
+compares every column. Quarantine entries from an earlier cycle that no longer match an `_old` row are ignored;
+one whose id is live blocks. **Do not leave the `_old` tables in place:**
+they are in the retention matrix as TEMPORARY (drop within 7 days), a workspace purge clears its rows from
+them, `/health/ready` carries the warning `migration_0026_old_tables_present` while they exist, and the
+preflight blocks a new run over them.
 
 ### If it fails
 
 Stay in maintenance mode. Do not hand-edit tables to "make the numbers match".
 
-- **Failed before the swap** (the `row_counts_must_match` check, or a copy error): the original tables
-  are untouched and live. Drop the scratch tables the verify query lists (`<t>_v4`, `_guard_<t>`,
-  `_contract_verify`) and re-apply; the file drops them itself with `IF EXISTS` and the quarantine is
-  idempotent.
-- **A `<table>_old` exists** (a DROP was refused): the swap happened but the guard found the copy
-  unbalanced, or a row had been written meanwhile. **The original rows are in `<table>_old`; the new
-  `<table>` may be incomplete.** Restore the original with Time Travel to the step 2 bookmark and
-  re-apply from the freeze. (Renaming `<table>_old` back is possible but the migration has already
-  dropped its indexes and triggers, so Time Travel is the supported path.) Do not re-apply on top of a
-  leftover `_old`.
-- **Anything else, or you cannot tell:** Time Travel restore to the bookmark.
+- **Tripwire fired** (`foreign_keys_must_be_on` and the others above): nothing was changed. Fix the cause
+  (or finalize/recover for a leftover `_old`) and re-apply.
+- **A leftover `_gate_0026_poison` view** (an aborted run can leave it; `/health/ready` then warns
+  `migration_0026_gate_view_present`) makes EVERY later `ALTER TABLE ... RENAME` in this database fail, including
+  other migrations'. Recover and finalize both drop it; `DROP VIEW IF EXISTS _gate_0026_poison` by hand is safe.
+- **Anything else, or you cannot tell:** run the recovery script. It works from the database alone. It is
+  tested from the database state after each of the file's statements has run (the process killed between any
+  two), after a sabotaged copy, a late writer and a runner with `legacy_alter_table` on, on node:sqlite, and
+  from a freshly migrated seeded database on workerd; it is **not** proven from every state a real D1 could
+  leave. It drops the scratch objects, drops the live table if there is one and renames
+  `<table>_old` back, then recreates every index and trigger verbatim from `_snapshot_0026`, triggers first
+  (`sources_delete_integrations` is dropped before anything else, because a trigger that names a missing
+  table makes the rename fail, and is recreated from the snapshot):
+
+  ```
+  node scripts/migration-0026-recover.mjs --database lumi-noti --remote           # plan
+  node scripts/migration-0026-recover.mjs --database lumi-noti --remote --apply
+  ```
+
+  It refuses if a live table holds a row its `_old` does not (a write after the swap) unless you pass
+  `--discard-live-changes`. Then re-run the migration, or stay on the old schema (the previous Worker works
+  with it). The same steps by hand, per table that has `<table>_old`: `DROP TRIGGER IF EXISTS
+  sources_delete_integrations; DROP TABLE IF EXISTS <t>; ALTER TABLE <t>_old RENAME TO <t>;` then drop
+  `_gate_0026_*`, `_gate_0026_poison`, `*_v4`, `_contract_verify`, `_swap_verify`, `_guard_*`, and recreate
+  the indexes and triggers from `SELECT sql FROM _snapshot_0026`.
+- After finalize the originals are gone: Time Travel restore to the step 2 bookmark is the only way back.
 
 ### Chunked backfill (large `deliveries` only)
 

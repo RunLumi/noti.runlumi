@@ -232,7 +232,12 @@ describe('GET /health/ready (F10)', () => {
   it('is 200 with booleans only when config, D1 and the queue binding are fine', async () => {
     const res = await get('/health/ready', await makeEnv());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, checks: { config: true, d1: true, queue: true } });
+    // A freshly migrated database still holds the 0026 `_old` originals: a warning, never a failure.
+    expect(await res.json()).toEqual({
+      ok: true,
+      checks: { config: true, d1: true, queue: true },
+      warnings: ['migration_0026_old_tables_present'],
+    });
     expect(sends).toEqual([]); // a presence check, never a real message
     expect(res.headers.get('cache-control')).toBe('no-store');
   });
@@ -255,7 +260,11 @@ describe('GET /health/ready (F10)', () => {
   it('503s when the queue binding is missing', async () => {
     const res = await get('/health/ready', await makeEnv({ DELIVERY_QUEUE: undefined as never }));
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ ok: false, checks: { config: false, d1: true, queue: false } });
+    expect(await res.json()).toEqual({
+      ok: false,
+      checks: { config: false, d1: true, queue: false },
+      warnings: ['migration_0026_old_tables_present'],
+    });
   });
 
   it('503s on a bad key ring and a foreign KEK, and leaks no names or values', async () => {

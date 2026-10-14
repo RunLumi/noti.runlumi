@@ -19,6 +19,7 @@ import { DEDUP_TTL_MS } from '../delivery/dedup';
 import { HEALTH_RETENTION_MS } from '../delivery/health';
 import { AUTH_RATE_LIMIT_MAX_AGE_MS, AUTH_STATE_GRACE_MS } from '../pipeline/expired-records';
 import { AUDIT_RETENTION, DELIVERY_RETENTION } from '../pipeline/retention';
+import { LEGACY_OLD_TABLES } from '../pipeline/purge';
 import { FAILED_RETENTION_MS, HELD_RETENTION_MS, OPEN_FAILURE_RETENTION_MS } from '../routing/noise-store';
 import { ROUTING_RETENTION_MS } from '../routing/provenance';
 import { RATE_LIMIT_RETENTION_MS } from '../security/rate-limit';
@@ -64,6 +65,8 @@ export type Retention =
   | { readonly kind: 'until_expiry'; readonly expiryMs: number | null; readonly afterExpiryMs: number }
   /** Kept with no expiry on purpose. `reason` says why. */
   | { readonly kind: 'indefinite'; readonly reason: string }
+  /** Exists only until an operator step removes it; `dropBy` names the step and the deadline it must meet. */
+  | { readonly kind: 'temporary'; readonly dropBy: string }
   /** No job or code path removes it. A documented gap, not a decision. */
   | { readonly kind: 'not_enforced'; readonly gap: string };
 
@@ -73,7 +76,7 @@ export type Deletion =
   /** The workspace purge (`src/pipeline/purge.ts`). `route` says which of its statements. */
   | {
       readonly kind: 'workspace_purge';
-      readonly route: 'tenant_tables' | 'drained' | 'via_installation' | 'organization_delete';
+      readonly route: 'tenant_tables' | 'drained' | 'via_installation' | 'organization_delete' | 'legacy_old';
     }
   /** A foreign key with ON DELETE CASCADE from `parent`, verified against the migrations. */
   | { readonly kind: 'fk_cascade'; readonly parent: 'user' | 'organization' | 'github_installations' }
@@ -762,6 +765,50 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     inWorkspaceExport: false,
     inAccountExport: false,
     exportNote: 'Excluded on purpose: the rows belong to no workspace.',
+    ...placeholders,
+  },
+  // Migration 0026 keeps the six originals it rebuilt, renamed aside, until the operator finalizes.
+  ...LEGACY_OLD_TABLES.map((table): RetentionRow => ({
+    id: table,
+    table,
+    category: 'legacy_retired',
+    personalData: 'indirect',
+    dataHeld: `The pre-0026 original of \`${table.slice(0, -4)}\`, as it was when migration 0026 renamed it aside (derivable tenants backfilled): every row, including rows that had no valid workspace (quarantined from the live table) and any credential columns they held (sealed v1 envelopes or legacy v0 ciphertext). A duplicate of live data, plus orphans.`,
+    purpose:
+      'Lets the operator restore the originals (scripts/migration-0026-recover.mjs) or reconcile them row for row before dropping them (scripts/migration-0026-finalize.mjs). Read by no code.',
+    retention: {
+      kind: 'temporary',
+      dropBy:
+        'Dropped by scripts/migration-0026-finalize.mjs in the same maintenance window as migration 0026, and no later than 7 days after it was applied; /health/ready warns while it exists (docs/RUNBOOK.md)',
+    },
+    deletion: [
+      { kind: 'workspace_purge', route: 'legacy_old' },
+      {
+        kind: 'none',
+        reason:
+          'Rows with no organization are not reachable by a workspace purge; only finalize removes the table.',
+      },
+    ],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Excluded on purpose: a temporary duplicate of data the live tables export.',
+    ...placeholders,
+  })),
+  {
+    id: '_snapshot_0026',
+    table: '_snapshot_0026',
+    category: 'legacy_retired',
+    personalData: 'none',
+    dataHeld:
+      'The verbatim CREATE statements of the indexes and triggers migration 0026 drops and recreates. Schema text only: no tenant data.',
+    purpose: 'Lets scripts/migration-0026-recover.mjs put them back on a restored original. Read by no code.',
+    retention: {
+      kind: 'temporary',
+      dropBy: 'Dropped by scripts/migration-0026-finalize.mjs together with the `_old` tables',
+    },
+    deletion: [{ kind: 'none', reason: 'Schema text only; finalize drops it.' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
     ...placeholders,
   },
   {

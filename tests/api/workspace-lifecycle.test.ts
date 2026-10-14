@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOOT_ENV } from '../support/boot-env';
 import type { Bindings } from '../../src/env';
-import { PURGE_ROWS_PER_TICK, purgeDueWorkspace, TENANT_TABLES } from '../../src/pipeline/purge';
+import {
+  LEGACY_OLD_TABLES,
+  PURGE_ROWS_PER_TICK,
+  purgeDueWorkspace,
+  TENANT_TABLES,
+} from '../../src/pipeline/purge';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 
 /** Workspace export and two-phase deletion (F30), over the real migrations. */
@@ -185,6 +190,27 @@ describe('workspace deletion', () => {
     expect(count('SELECT COUNT(*) AS n FROM workspace_deletions WHERE purged_at IS NOT NULL')).toBe(1);
   });
 
+  it('also clears the workspace rows kept in the temporary `<table>_old` tables, and tolerates their absence', async () => {
+    db.raw
+      .prepare(
+        "INSERT INTO integrations_old(id,repo,event_types,destination,webhook_ciphertext,organization_id) VALUES('io-a','r','[]','slack','x','org-a'),('io-n','r','[]','slack','x',NULL)",
+      )
+      .run();
+    await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' });
+    const later = Date.now() + 8 * 24 * 60 * 60 * 1000;
+    expect(await purgeDueWorkspace(db.d1, later)).toMatchObject({ completed: true });
+    expect(count('SELECT COUNT(*) AS n FROM integrations_old WHERE organization_id=?', 'org-a')).toBe(0);
+    // A row with no organization is not reachable by a workspace purge; finalize removes it.
+    expect(count('SELECT COUNT(*) AS n FROM integrations_old')).toBe(1);
+  });
+
+  it('purges when the `_old` tables are already finalized away', async () => {
+    for (const t of LEGACY_OLD_TABLES) db.raw.exec(`DROP TABLE ${t}`);
+    await call('POST', '/api/workspace/deletion', 'alice', { confirm: 'org-a' });
+    const later = Date.now() + 8 * 24 * 60 * 60 * 1000;
+    expect(await purgeDueWorkspace(db.d1, later)).toMatchObject({ completed: true });
+  });
+
   it('purges in bounded, resumable ticks', async () => {
     const insert = db.raw.prepare(
       "INSERT INTO deliveries(id,integration_id,organization_id,state) VALUES(?,'x','org-a','pending')",
@@ -289,7 +315,11 @@ describe('purge coverage', () => {
         (f) => f.table === 'organization' && f.from === 'organization_id' && f.on_delete === 'CASCADE',
       );
       return (
-        !cascades && !(TENANT_TABLES as readonly string[]).includes(table) && table !== 'workspace_deletions'
+        !cascades &&
+        !(TENANT_TABLES as readonly string[]).includes(table) &&
+        // Temporary `<table>_old` originals kept by migration 0026 until finalize: purged when present.
+        !(LEGACY_OLD_TABLES as readonly string[]).includes(table) &&
+        table !== 'workspace_deletions'
       );
     });
     expect(uncovered).toEqual([]);
