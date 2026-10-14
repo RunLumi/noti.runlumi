@@ -10,6 +10,8 @@
 -- Needs all six `<table>_old` to exist (the .mjs probes first). Per table T:
 --   old        rows in T_old, the original as it was when 0026 renamed it aside
 --   live       rows in T now
+--   (deliveries and notification_outbox compare the columns 0026 created, by name: later migrations add
+--   columns to the live tables only, e.g. 0027 correlation_id, and `SELECT *` would not line up.)
 --   identical  T_old rows that exist in T with EVERY column equal (INTERSECT compares whole rows,
 --              blobs and NULLs included: a stronger check than a per-row hash sum)
 --   same_id    T_old rows whose id exists in T (identical, or changed since)
@@ -40,7 +42,7 @@ UNION ALL SELECT 'quarantine_also_live:integrations', COUNT(*) FROM integrations
 -- ---- deliveries (two statements: workerd's SQLite allows at most 5 compound SELECT terms) ----
 SELECT 'old:deliveries' AS "check", COUNT(*) AS n FROM deliveries_old
 UNION ALL SELECT 'live:deliveries', COUNT(*) FROM deliveries
-UNION ALL SELECT 'identical:deliveries', COUNT(*) FROM (SELECT * FROM deliveries_old INTERSECT SELECT * FROM deliveries)
+UNION ALL SELECT 'identical:deliveries', COUNT(*) FROM (SELECT id,integration_id,state,attempts,last_error,updated_at,organization_id,last_error_code,dedup_key,replay_of,replay_count,claim_token,claimed_at,next_attempt_at,first_attempt_at,last_attempt_at,dead_lettered_at,created_at,body_hash,is_test,duplicate_of,suppressed_reason,possible_duplicate,provider_message_id FROM deliveries_old INTERSECT SELECT id,integration_id,state,attempts,last_error,updated_at,organization_id,last_error_code,dedup_key,replay_of,replay_count,claim_token,claimed_at,next_attempt_at,first_attempt_at,last_attempt_at,dead_lettered_at,created_at,body_hash,is_test,duplicate_of,suppressed_reason,possible_duplicate,provider_message_id FROM deliveries)
 UNION ALL SELECT 'same_id:deliveries', COUNT(*) FROM deliveries_old o WHERE EXISTS (SELECT 1 FROM deliveries l WHERE l.id = o.id);
 
 SELECT 'quarantined:deliveries' AS "check", COUNT(*) AS n FROM deliveries_old o
@@ -53,7 +55,7 @@ UNION ALL SELECT 'quarantine_also_live:deliveries', COUNT(*) FROM deliveries l
 -- ---- notification_outbox (two statements: workerd's SQLite allows at most 5 compound SELECT terms) ----
 SELECT 'old:notification_outbox' AS "check", COUNT(*) AS n FROM notification_outbox_old
 UNION ALL SELECT 'live:notification_outbox', COUNT(*) FROM notification_outbox
-UNION ALL SELECT 'identical:notification_outbox', COUNT(*) FROM (SELECT * FROM notification_outbox_old INTERSECT SELECT * FROM notification_outbox)
+UNION ALL SELECT 'identical:notification_outbox', COUNT(*) FROM (SELECT id,payload_json,state,created_at,dispatched_at,organization_id,claimed_at,lease_token,lease_expires_at,not_before,last_error_code FROM notification_outbox_old INTERSECT SELECT id,payload_json,state,created_at,dispatched_at,organization_id,claimed_at,lease_token,lease_expires_at,not_before,last_error_code FROM notification_outbox)
 UNION ALL SELECT 'same_id:notification_outbox', COUNT(*) FROM notification_outbox_old o WHERE EXISTS (SELECT 1 FROM notification_outbox l WHERE l.id = o.id);
 
 SELECT 'quarantined:notification_outbox' AS "check", COUNT(*) AS n FROM notification_outbox_old o

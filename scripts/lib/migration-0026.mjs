@@ -119,3 +119,25 @@ export async function inventory(executor, names) {
   const rows = await executor.query(`SELECT type, name FROM sqlite_master WHERE name IN (${list})`);
   return new Map(rows.map((r) => [String(r.name), String(r.type)]));
 }
+
+/**
+ * The columns that exist in BOTH a live table and its kept original `<t>_old`. Later migrations add columns to
+ * the live table only (0027 `correlation_id`), so whole-row comparisons name the columns 0026 created.
+ * Tables not listed have no later additions and compare with `*`.
+ */
+export const COMPARE_COLUMNS = {
+  deliveries:
+    'id,integration_id,state,attempts,last_error,updated_at,organization_id,last_error_code,dedup_key,replay_of,replay_count,claim_token,claimed_at,next_attempt_at,first_attempt_at,last_attempt_at,dead_lettered_at,created_at,body_hash,is_test,duplicate_of,suppressed_reason,possible_duplicate,provider_message_id',
+  notification_outbox:
+    'id,payload_json,state,created_at,dispatched_at,organization_id,claimed_at,lease_token,lease_expires_at,not_before,last_error_code',
+};
+
+/** @param {string} table */
+export const compareColumns = (table) => COMPARE_COLUMNS[table] ?? '*';
+
+/**
+ * Indexes and triggers created by LATER migrations on the live rebuilt tables, over columns the kept
+ * originals do not have. Recovery recreates indexes from the live tables when the snapshot is empty; these
+ * must not be recreated on a restored original (0027: `deliveries_correlation` needs `correlation_id`).
+ */
+export const LATER_MIGRATION_OBJECTS = new Set(['deliveries_correlation']);

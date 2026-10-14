@@ -232,7 +232,7 @@ describe('M2: sink health, re-sent kinds and the shared budget', () => {
         }),
     );
     const started = performance.now();
-    const outcome = await webhookSink(target, { fetch: hangs })
+    const outcome = await webhookSink(target, { transport: hangs })
       .notify(
         {
           kind: 'firing',

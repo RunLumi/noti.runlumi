@@ -27,6 +27,7 @@ import {
   SCRATCH_VIEWS,
   SNAPSHOT_TABLE,
   TABLES,
+  compareColumns,
   ident,
   inventory,
   oldName,
@@ -147,7 +148,7 @@ async function listDrift(executor, reconcile) {
       [
         t.changed > 0,
         'changed',
-        `SELECT id FROM ${old} WHERE id IN (SELECT id FROM ${table}) AND id NOT IN (SELECT id FROM (SELECT * FROM ${old} INTERSECT SELECT * FROM ${table})) LIMIT 20`,
+        `SELECT id FROM ${old} WHERE id IN (SELECT id FROM ${table}) AND id NOT IN (SELECT id FROM (SELECT ${compareColumns(t.table)} FROM ${old} INTERSECT SELECT ${compareColumns(t.table)} FROM ${table})) LIMIT 20`,
       ],
       [
         t.liveOnly > 0,

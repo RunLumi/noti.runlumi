@@ -139,7 +139,10 @@ function bodyFor(kind: WebhookTarget['kind'], text: string): string {
 
 export const ALERT_WEBHOOK_TIMEOUT_MS = 10_000;
 
-export function webhookSink(target: WebhookTarget, options: { readonly fetch?: Fetcher } = {}): AlertSink {
+export function webhookSink(
+  target: WebhookTarget,
+  options: { readonly transport?: Fetcher } = {},
+): AlertSink {
   return {
     name: 'webhook',
     async notify(e, ctx) {
@@ -157,7 +160,7 @@ export function webhookSink(target: WebhookTarget, options: { readonly fetch?: F
             1,
             Math.min(ALERT_WEBHOOK_TIMEOUT_MS, ctx?.timeoutMs ?? ALERT_WEBHOOK_TIMEOUT_MS),
           ),
-          ...(options.fetch ? { fetch: options.fetch } : {}),
+          ...(options.transport ? { fetch: options.transport } : {}),
         },
       );
       if (result.outcome !== 'delivered' && result.outcome !== 'accepted') {
@@ -171,7 +174,7 @@ export function webhookSink(target: WebhookTarget, options: { readonly fetch?: F
 /** The sinks for this deployment: the log always, the webhook when configured and valid. */
 export function sinksFromEnv(
   env: { readonly ALERT_WEBHOOK_URL?: string; readonly APP_ORIGIN?: string },
-  options: { readonly fetch?: Fetcher } = {},
+  options: { readonly transport?: Fetcher } = {},
 ): readonly AlertSink[] {
   const target = resolveWebhookTarget(env.ALERT_WEBHOOK_URL, env.APP_ORIGIN);
   return target ? [logSink, webhookSink(target, options)] : [logSink];

@@ -24,8 +24,10 @@
 import {
   SCRATCH_TABLES,
   SCRATCH_VIEWS,
+  LATER_MIGRATION_OBJECTS,
   SNAPSHOT_TABLE,
   TABLES,
+  compareColumns,
   ident,
   inventory,
   oldName,
@@ -57,7 +59,7 @@ export async function planRecovery(executor, options = {}) {
   for (const table of restore) {
     if (!has(table)) continue;
     const [row] = await executor.query(
-      `SELECT COUNT(*) AS n FROM (SELECT * FROM ${ident(table)} EXCEPT SELECT * FROM ${ident(oldName(table))})`,
+      `SELECT COUNT(*) AS n FROM (SELECT ${compareColumns(table)} FROM ${ident(table)} EXCEPT SELECT ${compareColumns(table)} FROM ${ident(oldName(table))})`,
     );
     const diverged = Number(row?.n ?? 0);
     if (diverged > 0 && !options.discardLiveChanges) {
@@ -100,7 +102,12 @@ export async function planRecovery(executor, options = {}) {
     const known = new Set(fromSnapshot.map((r) => String(r.name)));
     const candidates = [
       ...fromSnapshot,
-      ...fromLive.filter((r) => !known.has(String(r.name)) && !/_old\b/.test(String(r.sql))),
+      ...fromLive.filter(
+        (r) =>
+          !known.has(String(r.name)) &&
+          !LATER_MIGRATION_OBJECTS.has(String(r.name)) &&
+          !/_old\b/.test(String(r.sql)),
+      ),
     ];
     const wanted = candidates.filter(
       (r) =>

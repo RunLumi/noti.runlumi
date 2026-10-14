@@ -71,6 +71,9 @@ const SCRIPT_FRAGMENTS: Readonly<Record<string, string>> = {
   hex: 'an 8-character upper-case hex of assertVersion()',
   table: 'one of two string literals passed by the same file',
   old: 'ident(oldName(t.table)) over the fixed list of six tables, in scripts/migration-0026-finalize.mjs',
+  'compareColumns(t.table)':
+    'a fixed column list or * chosen by a table name from the fixed list of six tables (scripts/lib/migration-0026.mjs)',
+  'compareColumns(table)': 'same: the table is from the fixed list of six tables',
   't.table': 'a name from the fixed list of six tables in scripts/lib/migration-0026.mjs',
   list: 'a join of fixed table names from scripts/lib/migration-0026.mjs, each quoted by the same file',
   'ident(table)':

@@ -436,7 +436,7 @@ describe('sinks', () => {
     const fetchMock = vi.fn((_url: string, _init: RequestInit) =>
       Promise.resolve(new Response('ok', { status: 200 })),
     );
-    await webhookSink(target, { fetch: fetchMock }).notify(event());
+    await webhookSink(target, { transport: fetchMock }).notify(event());
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe(SLACK_HOOK);
@@ -463,7 +463,7 @@ describe('sinks', () => {
       slack: () => new Response('ok', { status: 200 }),
     };
     const fetchMock = vi.fn((_u: string, _i: RequestInit) => Promise.resolve(answers[target.kind]()));
-    await webhookSink(target, { fetch: fetchMock }).notify(event());
+    await webhookSink(target, { transport: fetchMock }).notify(event());
     expect(Object.keys(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string))).toContain(key);
   });
 
@@ -476,7 +476,7 @@ describe('sinks', () => {
         Promise.resolve(new Response('', { status: 302, headers: { location: 'https://evil.example/' } })),
       () => Promise.reject(Object.assign(new Error(`failed ${SLACK_HOOK}`), { name: 'TimeoutError' })),
     ]) {
-      const error = await webhookSink(target, { fetch: vi.fn(response) })
+      const error = await webhookSink(target, { transport: vi.fn(response) })
         .notify(event())
         .then(
           () => null,
@@ -491,7 +491,7 @@ describe('sinks', () => {
     const target = resolveWebhookTarget(SLACK_HOOK);
     if (!target) throw new Error('fixture');
     const fetchMock = vi.fn(() => Promise.resolve(new Response('', { status: 500 })));
-    await webhookSink(target, { fetch: fetchMock })
+    await webhookSink(target, { transport: fetchMock })
       .notify(event())
       .catch(() => undefined);
     expect(fetchMock).toHaveBeenCalledTimes(1);
