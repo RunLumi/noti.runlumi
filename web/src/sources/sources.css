@@ -146,6 +146,11 @@
   outline-offset: 2px;
 }
 
+/* Revoked source (F40, ADR 0049): the integrations' red-rail notice, with 16px body text. */
+.source-revoked-body {
+  margin: 0;
+}
+
 .source-actions {
   display: flex;
   flex-wrap: wrap;

@@ -18,7 +18,7 @@ import {
   type FieldErrors,
 } from '../validation';
 import { WebhookFields, WebhookGuide } from '../WebhookFields';
-import { RevokeDialog } from './RevokeDialog';
+import { IntegrationRevokeDialog } from './RevokeDialog';
 import { useLocale } from '../../i18n/LocaleProvider';
 
 interface CredentialsSectionProps {
@@ -213,7 +213,7 @@ export function CredentialsSection({ orgId: liveOrgId, integration }: Credential
             {t('settings.credentials.replace')}
           </Button>
           {!integration.revoked && canRevoke && (
-            <RevokeDialog orgId={ws.orgId} integration={integration} onRevoked={onRevoked} />
+            <IntegrationRevokeDialog orgId={ws.orgId} integration={integration} onRevoked={onRevoked} />
           )}
         </div>
       )}

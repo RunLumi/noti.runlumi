@@ -469,6 +469,36 @@ export function installFetch(state: ApiState): void {
       );
       return Promise.resolve(json({ integration: revoked }));
     }
+    const revokeSource = /^\/api\/sources\/([^/]+)\/revoke-credentials$/.exec(path);
+    if (method === 'POST' && revokeSource) {
+      // Admin only, as the server enforces it.
+      if (state.me !== 'unauthenticated' && state.me.user.role !== 'admin')
+        return Promise.resolve(json({ error: 'Missing capability: source.revoke' }, 403));
+      if (state.sources === 'error') return Promise.resolve(json({ error: 'boom' }, 500));
+      const current = (state.sources as { id: string }[]).find((s) => s.id === revokeSource[1]);
+      if (!current) return Promise.resolve(json({ error: 'Not found' }, 404));
+      // Like the server: switched off at once and marked revoked; the key is destroyed after the drain window
+      // by the credential sweep, so the response still says it is being destroyed. The fingerprint is kept.
+      const revoked = { ...current, enabled: false, revoked: true, keyDestroyed: false };
+      state.sources = (state.sources as { id: string }[]).map((s) =>
+        s.id === revokeSource[1] ? revoked : s,
+      );
+      return Promise.resolve(json({ source: revoked }));
+    }
+    const rotateSource = /^\/api\/sources\/([^/]+)\/rotate$/.exec(path);
+    if (method === 'POST' && rotateSource && Array.isArray(state.sources)) {
+      const current = (state.sources as { id: string; kind: string }[]).find((s) => s.id === rotateSource[1]);
+      if (!current) return Promise.resolve(json({ error: 'Not found' }, 404));
+      // A new secret lifts a revoke and turns the source back on (ADR 0036).
+      const rotated = { ...current, enabled: true, revoked: false, keyDestroyed: false };
+      state.sources = (state.sources as { id: string }[]).map((s) =>
+        s.id === rotateSource[1] ? rotated : s,
+      );
+      // Only a generic source gets a generated secret back; a provider's pasted credential is never returned.
+      return Promise.resolve(
+        json(current.kind === 'generic' ? { source: rotated, secret: fixtureSecret() } : { source: rotated }),
+      );
+    }
     if (method === 'POST' && path === '/api/integrations') {
       const created = { ...INTEGRATIONS[0], id: 'int_new', name: 'New integration' };
       // Later reads of the new id find it, as they would against the real API.

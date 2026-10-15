@@ -317,9 +317,9 @@ sheet, switch, field, destination-choice and dialog styles and the `validation.t
 | Path | Role |
 | --- | --- |
 | `SourcesPage.tsx` | `/sources`: create form, one-time secret reveal, list, empty / error / loading states |
-| `SourceCard.tsx` | Endpoint URL with copy, last event, connected chats, pause switch, actions |
+| `SourceCard.tsx` | Endpoint URL with copy, last event, connected chats, credential fingerprint and revoked state, pause switch, actions (rotate, revoke, delete) |
 | `SecretReveal.tsx`, `CopyButton.tsx` | One-time secret (persistent warning, focus moves in, explicit dismiss); copy with a stated outcome and a manual-copy fallback |
-| `SourceDialogs.tsx` | Rotate (states the cutover) and delete (typed name, states the chats deleted with it); focus starts on the safe choice |
+| `SourceDialogs.tsx` | Rotate (states the cutover, or after a revoke that it turns the source back on) and delete (typed name, states the chats deleted with it); focus starts on the safe choice. Revoke uses the shared `RevokeDialog` (ADR 0049) |
 | `ConnectChat.tsx`, `connect.ts` | Connect a Lark, Slack or Teams chat to a source; pure validation mirrors `src/api/integration-input.ts` |
 | `Guidance.tsx`, `snippets.ts` | Event format and signing explanation; shell and Node examples that read the secret from `NOTI_SIGNING_SECRET` |
 | `api.ts`, `hooks.ts` | Strict response parsing; mutations that return a secret use `gcTime: 0` and never write the query cache |
@@ -468,8 +468,16 @@ radio cards reused for three fixed reasons (`compromised`, `no_longer_used`, `ot
 the burned one), and a plain consequence sentence. On success the replace form opens and a status region says what happened. `CredentialsNotice`
 has a revoked variant; the delivery detail shows the integration's current fingerprint; `redeliver.integration.revoked` explains why no
 redelivery is offered. Controls are 44 px, the dialog uses the existing opaque modal surface, strings are in `messages.en.ts` and `messages.vi.ts`
-(including the audit labels `key_destroyed`). Role: the button is shown to everyone and the server answers 403 for a member, as the delete
-button does. Not built: the same control and fingerprint on the Sources page.
+(including the audit labels `key_destroyed`). Role: the button is shown to admins only (`useCanRevoke`); the server still answers 403
+for a member.
+
+Sources ([ADR 0049](adr/0049-source-revoke-and-fingerprint-in-the-dashboard.md)): `RevokeDialog` takes the mutation and its copy as
+props, so the integration (`IntegrationRevokeDialog`) and the source card share one dialog and its focus and Enter rules. Every source card
+shows its fingerprint (or why there is none). A revoked source shows a `Revoked` badge, what happened to the encrypted copy (destroyed,
+being destroyed, or kept until an operator destroys it when there is no fingerprint), a red-rail notice naming the way back, and a receiving
+switch that is off, `aria-disabled` and says why. The revoke control is admin-only beside Rotate and Delete and is gone while revoked; after a
+revoke a status notice says what happened and focus moves to Rotate, whose dialog then says the source is turned back on. GitLab and Stripe
+sources are worded for a pasted credential. Strings in `messages.en.ts` and `messages.sources.vi.ts`.
 
 ## Design-token drift and no fabricated numbers (ADR 0038, `web/src/design/`)
 
@@ -490,6 +498,8 @@ button does. Not built: the same control and fingerprint on the Sources page.
 - Shared loading and empty states on the four lists, the 16px empty-state body and the drift and number checks (ADR 0038): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no screen-reader pass.
 
 - Revoke dialog and fingerprint (ADR 0036): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no real-contrast check of the new radio list, no screen-reader pass, no screenshot.
+
+- Source revoke and fingerprint (ADR 0049): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop (a revoked card adds two facts and a notice; its reflow is unverified), no screen-reader pass, no screenshot.
 
 - Slice 6f (setup flow, shell, settings sections): see the browser record in `docs/adr/0025-setup-and-shell-ux.md`. Not exercised anywhere: the GitHub connect round trip with a real App, a real provider accepting a test from the setup flow, screen readers, Safari and Firefox, a real 320px run in CI.
 

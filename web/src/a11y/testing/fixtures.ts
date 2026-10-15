@@ -148,6 +148,9 @@ export const SOURCES = [
     secretRotatedAt: null,
     reusedIdRejections: 2,
     integrationCount: 1,
+    credentialFingerprint: 'P4Q2WJ7N',
+    revoked: false,
+    keyDestroyed: false,
   },
   {
     id: 'src_2',
@@ -165,6 +168,9 @@ export const SOURCES = [
     secretRotatedAt: '2026-10-05 10:00:00',
     reusedIdRejections: 0,
     integrationCount: 0,
+    credentialFingerprint: null,
+    revoked: false,
+    keyDestroyed: false,
   },
 ] as const;
 

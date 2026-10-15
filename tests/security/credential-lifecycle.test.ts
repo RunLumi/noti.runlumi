@@ -267,6 +267,38 @@ describe('revoking a source credential (F40)', () => {
     expect((await call('POST', path, { as: 'alice', body: { reason: 'x' } })).status).toBe(422);
     expect(auditRows('source.credentials.revoke')).toHaveLength(0);
   });
+
+  it('refuses a request with no origin or for a missing source, leaves the row untouched, and audits the reason', async () => {
+    const src = await createSource();
+    const path = `/api/sources/${src.source.id}/revoke-credentials`;
+    const state = () =>
+      h.db.raw
+        .prepare('SELECT enabled, credentials_revoked_at AS r FROM sources WHERE id=?')
+        .get(src.source.id) as { enabled: number; r: string | null };
+    expect((await call('POST', path, { as: 'alice', origin: null })).status).toBe(403);
+    expect((await call('POST', path, { as: 'bob' })).status).toBe(403);
+    expect((await call('POST', path, { as: 'mallory' })).status).toBe(404);
+    expect((await call('POST', '/api/sources/missing/revoke-credentials', { as: 'alice' })).status).toBe(404);
+    // Nothing above changed the row: another workspace cannot even switch it off.
+    expect(state()).toEqual({ enabled: 1, r: null });
+    expect(auditRows('source.credentials.revoke')).toHaveLength(0);
+
+    const res = await call('POST', path, { as: 'alice', body: { reason: 'no_longer_used' } });
+    expect(res.status).toBe(200);
+    // The dashboard reads the fingerprint and revoked state from this response (ADR 0049).
+    expect((await res.json<{ source: Created['source'] }>()).source).toMatchObject({
+      revoked: true,
+      credentialFingerprint: src.source.credentialFingerprint,
+    });
+    expect(state().enabled).toBe(0);
+    const entries = auditRows('source.credentials.revoke');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.organization_id).toBe('org-a');
+    expect(JSON.parse(entries[0]?.metadata_json ?? '{}')).toEqual({
+      kind: 'generic',
+      reason: 'no_longer_used',
+    });
+  });
 });
 
 describe('crypto-shredding on delete (F40)', () => {

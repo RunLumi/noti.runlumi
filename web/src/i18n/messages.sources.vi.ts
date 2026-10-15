@@ -66,7 +66,8 @@ export const sourcesVi = {
   },
   'sources.card.reusedHelp':
     'Mỗi sự kiện cần một webhook-id riêng. Một yêu cầu dùng lại một id với nội dung khác sẽ bị từ chối với HTTP 409 để không bao giờ bị bỏ qua một cách im lặng. Hãy cấp id mới cho mỗi sự kiện; chỉ thử lại cùng một sự kiện với cùng id và cùng nội dung.',
-  'sources.adminOnly': 'Chỉ quản trị viên không gian làm việc mới đổi được secret hoặc xóa nguồn.',
+  'sources.adminOnly':
+    'Chỉ quản trị viên không gian làm việc mới đổi hoặc thu hồi được secret, hoặc xóa nguồn.',
   'sources.card.created': 'Thời điểm tạo',
   'sources.toggle.label': 'Nhận sự kiện',
   'sources.toggle.labelFor': 'Nhận sự kiện cho {name}',
@@ -122,6 +123,44 @@ export const sourcesVi = {
   'sources.delete.confirm': 'Xóa nguồn',
   'sources.delete.deleting': 'Đang xóa…',
   'sources.delete.failed': 'Nguồn chưa được xóa.',
+  'sources.card.fingerprint': 'Dấu vân tay',
+  'sources.card.fingerprintHint':
+    'Một mã ngắn tính từ secret đã lưu, để bạn biết secret có đổi hay không mà Noti không cần hiển thị nó. Mã này không phải là secret và không thể đổi ngược lại thành secret.',
+  'sources.card.fingerprintNone':
+    'Không có dấu vân tay cho secret này: nó được lưu trước khi có dấu vân tay, hoặc hệ thống này chưa có khóa tạo dấu vân tay.',
+  'sources.card.credential': 'Secret đã lưu',
+  'sources.card.credentialRevoked': 'Đã thu hồi',
+  'sources.card.encryptedCopy': 'Bản mã hóa',
+  'sources.card.copyDestroyed':
+    'Đã hủy trong cơ sở dữ liệu đang chạy nên Noti không đọc được nữa. Lịch sử cơ sở dữ liệu của Cloudflare có thể giữ một bản trong tối đa 30 ngày.',
+  'sources.card.copyDestroying':
+    'Đang được hủy. Nó không còn được dùng vào việc gì và sẽ bị hủy trong vài phút sau khi thu hồi.',
+  'sources.card.copyKept':
+    'Chưa bị hủy: vì không có dấu vân tay, Noti giữ nó cho đến khi người vận hành hủy. Nó không được dùng vào việc gì.',
+  'sources.revoked.title': 'Đã thu hồi secret',
+  'sources.revoked.body':
+    'Nguồn này từ chối mọi sự kiện cho đến khi quản trị viên không gian làm việc đổi secret và hệ thống của bạn được cập nhật để dùng secret mới.',
+  'sources.revoked.providerTitle': 'Đã thu hồi thông tin xác thực',
+  'sources.revoked.providerBody':
+    'Nguồn này từ chối mọi sự kiện cho đến khi quản trị viên không gian làm việc dán thông tin xác thực mới từ {provider}. Hãy dán thông tin mới, không phải thông tin đã thu hồi.',
+  'sources.toggle.revoked': 'Tắt: secret đã bị thu hồi',
+  'sources.revoke.open': 'Thu hồi secret…',
+  'sources.revoke.title': 'Thu hồi secret của {name}?',
+  'sources.revoke.body':
+    'Noti tắt nguồn này ngay và từ chối mọi sự kiện, dù có ký bằng secret này hay không. Bản mã hóa của nó bị hủy vài phút sau đó, nên Noti không đọc lại được; lịch sử cơ sở dữ liệu của Cloudflare có thể giữ một bản trong tối đa 30 ngày. Không thể hoàn tác: để nhận sự kiện lại, hãy đổi secret và cập nhật hệ thống của bạn để dùng secret mới.',
+  'sources.revoke.confirm': 'Thu hồi secret',
+  'sources.revoke.done': 'Đã thu hồi secret. {name} từ chối mọi sự kiện cho đến khi bạn đổi secret.',
+  'sources.revoke.provider.open': 'Thu hồi thông tin xác thực…',
+  'sources.revoke.provider.title': 'Thu hồi thông tin xác thực của {name}?',
+  'sources.revoke.provider.body':
+    'Noti tắt nguồn này ngay và từ chối mọi sự kiện từ {provider}. Bản mã hóa của nó bị hủy vài phút sau đó, nên Noti không đọc lại được; lịch sử cơ sở dữ liệu của Cloudflare có thể giữ một bản trong tối đa 30 ngày. Không thể hoàn tác: để nhận sự kiện lại, hãy tạo thông tin xác thực mới trong {provider} và dán vào đây. Nếu nó đã bị lộ, hãy thay nó cả trong {provider}.',
+  'sources.revoke.provider.confirm': 'Thu hồi thông tin xác thực',
+  'sources.revoke.provider.done':
+    'Đã thu hồi thông tin xác thực. {name} từ chối mọi sự kiện cho đến khi bạn dán thông tin xác thực mới.',
+  'sources.rotate.revokedBody':
+    'Một secret mới được tạo và hiển thị một lần, và nguồn được bật lại. Hãy cập nhật hệ thống của bạn để dùng nó; secret đã thu hồi vẫn bị từ chối.',
+  'sources.rotate.provider.revokedBody':
+    'Dán thông tin xác thực mới bạn đã tạo trong {provider}. Lưu lại sẽ bật nguồn trở lại. Đừng dán lại thông tin đã thu hồi.',
   'integration.source': 'Nguồn',
   'integration.source.value': 'Sự kiện từ hệ thống của riêng bạn',
   'integration.source.manage': 'Quản lý nguồn',

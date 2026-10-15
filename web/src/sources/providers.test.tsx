@@ -38,6 +38,9 @@ const row = {
   droppedEvents: 0,
   lastDroppedAt: null,
   integrationCount: 0,
+  credentialFingerprint: null,
+  revoked: false,
+  keyDestroyed: false,
 };
 
 describe('credential checks agree with the Worker', () => {

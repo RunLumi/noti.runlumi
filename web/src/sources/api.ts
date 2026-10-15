@@ -1,4 +1,4 @@
-import { ApiError, api } from '../lib/api';
+import { ApiError, api, type RevokeReason } from '../lib/api';
 import type { AuthMode, SourceKind } from './providers';
 
 /**
@@ -26,6 +26,15 @@ export interface Source {
   /** Events refused because their webhook-id was already used with a different body. */
   readonly reusedIdRejections: number;
   readonly integrationCount: number;
+  /**
+   * Keyed, tenant-scoped code computed from the stored secret (F39), 8 characters: never the secret. Null when the
+   * secret was sealed before fingerprints existed or the deployment has no fingerprint key. Kept after a revoke.
+   */
+  readonly credentialFingerprint: string | null;
+  /** The credential was revoked (F40): the source stays off until a new secret is entered (rotate). */
+  readonly revoked: boolean;
+  /** Revoked and its wrapped key destroyed (F40): nobody can open the sealed secret any more. */
+  readonly keyDestroyed: boolean;
 }
 
 /**
@@ -62,7 +71,10 @@ export function parseSource(value: unknown): Source {
     typeof value.reusedIdRejections !== 'number' ||
     typeof value.droppedEvents !== 'number' ||
     !nullableString(value.lastDroppedAt) ||
-    typeof value.integrationCount !== 'number'
+    typeof value.integrationCount !== 'number' ||
+    !nullableString(value.credentialFingerprint) ||
+    typeof value.revoked !== 'boolean' ||
+    typeof value.keyDestroyed !== 'boolean'
   )
     throw new ApiError('Unexpected source shape', 500);
   return {
@@ -81,6 +93,10 @@ export function parseSource(value: unknown): Source {
     droppedEvents: value.droppedEvents,
     lastDroppedAt: value.lastDroppedAt,
     integrationCount: value.integrationCount,
+    credentialFingerprint: value.credentialFingerprint,
+    revoked: value.revoked,
+    // A key can only be destroyed after a revoke; anything else is not shown as destroyed.
+    keyDestroyed: value.revoked && value.keyDestroyed,
   };
 }
 
@@ -131,6 +147,15 @@ export const sourcesApi = {
         body: JSON.stringify(body),
       }),
     ),
+  /** Revoke the credential (F40): the source is switched off at once and its encrypted copy destroyed. */
+  revokeCredentials: async (orgId: string, id: string, reason: RevokeReason): Promise<Source> => {
+    const body = await api<unknown>(withOrg(`${item(id)}/revoke-credentials`, orgId), {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (!isRecord(body)) throw new ApiError('Unexpected response', 500);
+    return parseSource(body.source);
+  },
   /** `cascade` must be true when chats are connected: they are deleted with the source. */
   remove: async (orgId: string, id: string, cascade: boolean): Promise<void> => {
     const path = withOrg(item(id), orgId);

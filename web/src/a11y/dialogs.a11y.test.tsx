@@ -4,8 +4,8 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { audit, describeViolations } from './testing/axe';
-import { renderApp } from './testing/render';
-import { MEMBER } from './testing/fixtures';
+import { renderApp, requests, clearRequests } from './testing/render';
+import { MEMBER, ORG_ID, SOURCES } from './testing/fixtures';
 
 /**
  * Dialogs, wizard steps and error states: the screens a person only reaches by acting. Each
@@ -478,7 +478,7 @@ describe('sources', () => {
     expect(await tabStaysWithin(user, rotateDialog, 6)).toBe(true);
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(rotate));
+    await waitFor(() => expect(document.activeElement?.textContent).toBe(rotate.textContent));
 
     const remove = screen.getAllByRole('button', { name: /Delete source/ })[0];
     await user.click(remove);
@@ -499,5 +499,136 @@ describe('sources', () => {
     for (const summary of screen.getAllByText(/Gửi một sự kiện thử|Gửi các sự kiện này đến một chat/))
       await user.click(summary);
     await expectClean('sources with guidance open (vi)');
+  });
+});
+
+describe('source credential: fingerprint and revoke (F39, F40, ADR 0049)', () => {
+  const card = async (name: string) => {
+    const heading = await screen.findByRole('heading', { name });
+    return heading.closest('article') as HTMLElement;
+  };
+
+  it('shows the fingerprint, or says why there is none, and no revoked state', async () => {
+    await renderApp('/sources');
+    const ci = await card('CI pipeline');
+    expect(within(ci).getByText('Fingerprint')).toBeTruthy();
+    expect(within(ci).getByText('P4Q2WJ7N')).toBeTruthy();
+    expect(within(ci).getByText(/A short code computed from the stored secret/)).toBeTruthy();
+    expect(within(ci).queryByText('Revoked')).toBeNull();
+    const billing = await card('Billing service');
+    expect(within(billing).getByText(/No fingerprint is available for this secret/)).toBeTruthy();
+  });
+
+  it('is accessible, focuses Cancel first, traps Tab, closes on Escape and restores focus', async () => {
+    const user = userEvent.setup();
+    await renderApp('/sources');
+    const ci = await card('CI pipeline');
+    const trigger = within(ci).getByRole('button', { name: 'Revoke secret…' });
+    await user.click(trigger);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke the secret for CI pipeline?' });
+    await expectClean('source revoke dialog open');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })),
+    );
+    expect(within(dialog).getByText(/refuses every event/)).toBeTruthy();
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(3);
+    expect(await tabStaysWithin(user, dialog, 8)).toBe(true);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it('revokes, shows the revoked state, locks the switch and moves focus to the rotate path', async () => {
+    const user = userEvent.setup();
+    clearRequests();
+    await renderApp('/sources');
+    let ci = await card('CI pipeline');
+    await user.click(within(ci).getByRole('button', { name: 'Revoke secret…' }));
+    const dialog = await screen.findByRole('alertdialog');
+    const radio = within(dialog).getByRole('radio', { name: 'We no longer use it' });
+    await user.click(radio);
+    // Enter on a reason does not revoke: only the confirm button does.
+    radio.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    expect(requests.some((r) => r.includes('/revoke-credentials'))).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke secret' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+
+    expect(requests).toContain(`POST /api/sources/src_1/revoke-credentials?org=${ORG_ID}`);
+    ci = await card('CI pipeline');
+    expect(await within(ci).findByText(/Secret revoked\. CI pipeline refuses every event/)).toBeTruthy();
+    expect(within(ci).getByText('Revoked')).toBeTruthy();
+    expect(within(ci).getByText(/Being destroyed/)).toBeTruthy();
+    // The fingerprint outlives the revoke.
+    expect(within(ci).getByText('P4Q2WJ7N')).toBeTruthy();
+    expect(within(ci).queryByRole('button', { name: 'Revoke secret…' })).toBeNull();
+    const rotate = within(ci).getByRole('button', { name: 'Rotate secret…' });
+    await waitFor(() => expect(document.activeElement).toBe(rotate));
+    const toggle = within(ci).getByRole('switch');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(toggle.getAttribute('aria-disabled')).toBe('true');
+    expect(within(ci).getByText('Off: the secret was revoked')).toBeTruthy();
+    await user.click(toggle);
+    expect(requests.some((r) => r.startsWith('PATCH /api/sources/src_1'))).toBe(false);
+    await expectClean('revoked source');
+
+    // Rotate is the way back: the dialog says so, and the new secret turns the source on.
+    await user.click(rotate);
+    const rotateDialog = await screen.findByRole('alertdialog');
+    expect(within(rotateDialog).getByText(/the source is turned back on/)).toBeTruthy();
+    await user.click(within(rotateDialog).getByRole('button', { name: 'Rotate secret' }));
+    await screen.findByText(/New signing secret for CI pipeline/);
+    ci = await card('CI pipeline');
+    await waitFor(() => expect(within(ci).queryByText('Revoked')).toBeNull());
+    expect(within(ci).getByRole('switch').getAttribute('aria-checked')).toBe('true');
+    expect(within(ci).queryByText(/Secret revoked\./)).toBeNull();
+    expect(within(ci).getByRole('button', { name: 'Revoke secret…' })).toBeTruthy();
+  });
+
+  it('states what happened to the encrypted copy: destroyed, or kept when there is no fingerprint', async () => {
+    await renderApp('/sources', {
+      api: {
+        sources: [
+          { ...SOURCES[0], enabled: false, revoked: true, keyDestroyed: true },
+          { ...SOURCES[1], revoked: true, keyDestroyed: false },
+        ],
+      },
+    });
+    expect(within(await card('CI pipeline')).getByText(/Destroyed in the live database/)).toBeTruthy();
+    expect(within(await card('Billing service')).getByText(/Not destroyed yet/)).toBeTruthy();
+    await expectClean('revoked sources');
+  });
+
+  it('words a provider source for its pasted credential', async () => {
+    const user = userEvent.setup();
+    await renderApp('/sources', {
+      api: { sources: [{ ...SOURCES[0], kind: 'gitlab', authMode: 'signing_token' }] },
+    });
+    const ci = await card('CI pipeline');
+    await user.click(within(ci).getByRole('button', { name: 'Revoke credential…' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Revoke the credential for CI pipeline?' });
+    expect(within(dialog).getByText(/create a new credential in GitLab/)).toBeTruthy();
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke credential' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(await within(ci).findByText('Credential revoked')).toBeTruthy();
+    expect(within(ci).getByText(/pastes a new credential from GitLab/)).toBeTruthy();
+  });
+
+  it('offers no revoke control to a member, who lacks source.revoke', async () => {
+    await renderApp('/sources', { api: { me: MEMBER } });
+    const ci = await card('CI pipeline');
+    expect(within(ci).getByText('P4Q2WJ7N')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Revoke/ })).toBeNull();
+  });
+
+  it('is accessible in Vietnamese, with the diacritics intact', async () => {
+    const user = userEvent.setup();
+    await renderApp('/sources', { locale: 'vi' });
+    const ci = await card('CI pipeline');
+    expect(within(ci).getByText('Dấu vân tay')).toBeTruthy();
+    await user.click(within(ci).getByRole('button', { name: 'Thu hồi secret…' }));
+    await screen.findByRole('alertdialog', { name: 'Thu hồi secret của CI pipeline?' });
+    await expectClean('source revoke dialog (vi)');
   });
 });

@@ -684,7 +684,7 @@ export const en = {
   },
   'sources.card.reusedHelp':
     'Each event needs its own webhook-id. A request that reuses an id with different content is refused with HTTP 409 so it is never silently dropped. Give every event a new id; only retry the same event with the same id and the same body.',
-  'sources.adminOnly': 'Only workspace admins can rotate the secret or delete a source.',
+  'sources.adminOnly': 'Only workspace admins can rotate or revoke the secret, or delete a source.',
   'sources.card.created': 'Created',
   'sources.toggle.label': 'Receive events',
   'sources.toggle.labelFor': 'Receive events for {name}',
@@ -742,6 +742,45 @@ export const en = {
   'sources.delete.confirm': 'Delete source',
   'sources.delete.deleting': 'Deleting…',
   'sources.delete.failed': 'The source was not deleted.',
+  // --- Source credential: fingerprint and revoke (F39, F40, ADR 0049) -------
+  'sources.card.fingerprint': 'Fingerprint',
+  'sources.card.fingerprintHint':
+    'A short code computed from the stored secret, so you can tell whether it changed without Noti showing it. It is not the secret and cannot be turned back into it.',
+  'sources.card.fingerprintNone':
+    'No fingerprint is available for this secret: it was saved before fingerprints existed, or this deployment has no fingerprint key.',
+  'sources.card.credential': 'Stored secret',
+  'sources.card.credentialRevoked': 'Revoked',
+  'sources.card.encryptedCopy': 'Encrypted copy',
+  'sources.card.copyDestroyed':
+    'Destroyed in the live database, so Noti cannot read it. Cloudflare’s database history can keep a copy for up to 30 days.',
+  'sources.card.copyDestroying':
+    'Being destroyed. It is not used for anything, and is destroyed within a few minutes of the revoke.',
+  'sources.card.copyKept':
+    'Not destroyed yet: without a fingerprint, Noti keeps it until an operator destroys it. It is not used for anything.',
+  'sources.revoked.title': 'Secret revoked',
+  'sources.revoked.body':
+    'This source refuses every event until a workspace admin rotates the secret and your system is updated to use the new one.',
+  'sources.revoked.providerTitle': 'Credential revoked',
+  'sources.revoked.providerBody':
+    'This source refuses every event until a workspace admin pastes a new credential from {provider}. Paste a new one, not the revoked one.',
+  'sources.toggle.revoked': 'Off: the secret was revoked',
+  'sources.revoke.open': 'Revoke secret…',
+  'sources.revoke.title': 'Revoke the secret for {name}?',
+  'sources.revoke.body':
+    'Noti turns this source off now and refuses every event, signed with this secret or not. Its encrypted copy is destroyed a few minutes later, so Noti cannot read it again; Cloudflare’s database history can keep a copy for up to 30 days. This cannot be undone: to receive events again, rotate the secret and update your system to use the new one.',
+  'sources.revoke.confirm': 'Revoke secret',
+  'sources.revoke.done': 'Secret revoked. {name} refuses every event until you rotate the secret.',
+  'sources.revoke.provider.open': 'Revoke credential…',
+  'sources.revoke.provider.title': 'Revoke the credential for {name}?',
+  'sources.revoke.provider.body':
+    'Noti turns this source off now and refuses every event from {provider}. Its encrypted copy is destroyed a few minutes later, so Noti cannot read it again; Cloudflare’s database history can keep a copy for up to 30 days. This cannot be undone: to receive events again, create a new credential in {provider} and paste it here. If it was leaked, also replace it in {provider}.',
+  'sources.revoke.provider.confirm': 'Revoke credential',
+  'sources.revoke.provider.done':
+    'Credential revoked. {name} refuses every event until you paste a new credential.',
+  'sources.rotate.revokedBody':
+    'A new secret is created and shown once, and the source is turned back on. Update your system to use it; the revoked secret stays refused.',
+  'sources.rotate.provider.revokedBody':
+    'Paste a new credential you created in {provider}. Saving it turns the source back on. Do not paste the revoked one again.',
   'integration.source': 'Source',
   'integration.source.value': 'Events from your own system',
   'integration.source.manage': 'Manage sources',

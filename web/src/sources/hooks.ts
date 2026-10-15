@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { integrationsApi, type CreateSourceIntegrationBody } from '../lib/api';
+import { integrationsApi, type CreateSourceIntegrationBody, type RevokeReason } from '../lib/api';
 import { integrationKeys } from '../integrations/hooks';
 import { sourcesApi, type Source } from './api';
 
@@ -47,6 +47,19 @@ export function useToggleSource(orgId: string) {
     mutationFn: ({ source, enabled }: { source: Source; enabled: boolean }) =>
       sourcesApi.update(orgId, source.id, { enabled }),
     onSettled: () => qc.invalidateQueries({ queryKey: sourceKeys.all(orgId) }),
+  });
+}
+
+/**
+ * Revoke a source's credential (F40). The list is refetched before the call resolves (the returned promise is
+ * awaited), so the card shows the revoked state as the dialog closes. No secret is involved, but the hooks still
+ * never write the cache by hand: the list only ever holds what a plain `list` call returned.
+ */
+export function useRevokeSource(orgId: string, id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reason: RevokeReason) => sourcesApi.revokeCredentials(orgId, id, reason),
+    onSuccess: () => qc.invalidateQueries({ queryKey: sourceKeys.all(orgId) }),
   });
 }
 

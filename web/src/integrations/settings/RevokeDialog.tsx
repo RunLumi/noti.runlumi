@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { AlertDialog } from '@base-ui/react/alert-dialog';
+import type { UseMutationResult } from '@tanstack/react-query';
 import { IconShieldOff } from '@tabler/icons-react';
 import { Button, Notice } from '../../components/ui';
 import { REVOKE_REASONS, type Integration, type RevokeReason } from '../../lib/api';
@@ -9,10 +10,19 @@ import { describeError } from '../errors';
 import { useRevokeCredentials } from '../hooks';
 import { useLocale } from '../../i18n/LocaleProvider';
 
-interface RevokeDialogProps {
-  readonly orgId: string;
-  readonly integration: Integration;
-  /** Called after the server accepted the revoke, so the section can move focus and announce it. */
+/** What the dialog says; the caller words it for what is being revoked (a webhook URL, a signing secret). */
+export interface RevokeCopy {
+  readonly open: string;
+  readonly title: string;
+  readonly body: string;
+  readonly confirm: string;
+}
+
+interface RevokeDialogProps<T> {
+  /** The revoke call. The dialog only reads its pending and error state and calls it with the chosen reason. */
+  readonly revoke: UseMutationResult<T, Error, RevokeReason>;
+  readonly copy: RevokeCopy;
+  /** Called after the server accepted the revoke, so the caller can move focus and announce it. */
   readonly onRevoked: () => void;
 }
 
@@ -23,18 +33,17 @@ const REASON_LABEL = {
 } as const satisfies Record<RevokeReason, string>;
 
 /**
- * Revoking says the stored webhook URL is burned (F40): Noti stops using it at once and destroys its
- * encrypted copy, which cannot be recovered. It is a confirmation, not a typed phrase: nothing is lost that a
- * new URL does not restore. Focus starts on Cancel so a stray Enter cannot revoke (F221). The reason is one
- * of three fixed choices, never free text, because it goes into the audit log.
+ * Revoking says a stored credential is burned (F40): Noti stops using it at once and destroys its encrypted
+ * copy, which cannot be recovered. It is a confirmation, not a typed phrase: nothing is lost that a new
+ * credential does not restore. Focus starts on Cancel so a stray Enter cannot revoke (F221). The reason is one
+ * of three fixed choices, never free text, because it goes into the audit log. Shared by integrations (webhook
+ * URL) and sources (signing secret or pasted credential, ADR 0049); only the copy and the call differ.
  */
-export function RevokeDialog({ orgId, integration, onRevoked }: RevokeDialogProps) {
+export function RevokeDialog<T>({ revoke, copy, onRevoked }: RevokeDialogProps<T>) {
   useLocale();
-  const revoke = useRevokeCredentials(orgId, integration.id);
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<RevokeReason>('compromised');
   const cancelRef = useRef<HTMLButtonElement>(null);
-  const destination = t(DESTINATIONS[integration.destination].name);
 
   const onOpenChange = (next: boolean) => {
     if (revoke.isPending) return;
@@ -63,15 +72,13 @@ export function RevokeDialog({ orgId, integration, onRevoked }: RevokeDialogProp
     <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
       <AlertDialog.Trigger render={<Button variant="danger" type="button" />}>
         <IconShieldOff size={18} aria-hidden="true" />
-        {t('revoke.open')}
+        {copy.open}
       </AlertDialog.Trigger>
       <AlertDialog.Portal>
         <AlertDialog.Backdrop className="modal-backdrop" />
         <AlertDialog.Popup className="modal delete-dialog" initialFocus={cancelRef}>
-          <AlertDialog.Title className="modal-title">
-            {t('revoke.title', { name: integration.name })}
-          </AlertDialog.Title>
-          <AlertDialog.Description>{t('revoke.body', { destination })}</AlertDialog.Description>
+          <AlertDialog.Title className="modal-title">{copy.title}</AlertDialog.Title>
+          <AlertDialog.Description>{copy.body}</AlertDialog.Description>
           <form className="form-stack" onSubmit={onSubmit}>
             <fieldset className="revoke-reasons">
               <legend className="field-label">{t('revoke.reason.label')}</legend>
@@ -106,12 +113,37 @@ export function RevokeDialog({ orgId, integration, onRevoked }: RevokeDialogProp
                 aria-disabled={revoke.isPending || undefined}
                 onClick={() => void confirm()}
               >
-                {revoke.isPending ? t('revoke.revoking') : t('revoke.confirm')}
+                {revoke.isPending ? t('revoke.revoking') : copy.confirm}
               </Button>
             </div>
           </form>
         </AlertDialog.Popup>
       </AlertDialog.Portal>
     </AlertDialog.Root>
+  );
+}
+
+interface IntegrationRevokeDialogProps {
+  readonly orgId: string;
+  readonly integration: Integration;
+  readonly onRevoked: () => void;
+}
+
+/** Revoke an integration's stored webhook URL (ADR 0036). */
+export function IntegrationRevokeDialog({ orgId, integration, onRevoked }: IntegrationRevokeDialogProps) {
+  useLocale();
+  const revoke = useRevokeCredentials(orgId, integration.id);
+  const destination = t(DESTINATIONS[integration.destination].name);
+  return (
+    <RevokeDialog
+      revoke={revoke}
+      onRevoked={onRevoked}
+      copy={{
+        open: t('revoke.open'),
+        title: t('revoke.title', { name: integration.name }),
+        body: t('revoke.body', { destination }),
+        confirm: t('revoke.confirm'),
+      }}
+    />
   );
 }

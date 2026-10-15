@@ -1,5 +1,5 @@
 import { StaleWorkspaceNotice, useBoundWorkspace } from '../workspace/bound';
-import { useId, useRef, useState, type FormEvent } from 'react';
+import { useId, useRef, useState, type FormEvent, type Ref } from 'react';
 import { AlertDialog } from '@base-ui/react/alert-dialog';
 import { IconRefresh, IconTrash } from '@tabler/icons-react';
 import { Field, SecretInput } from '../components/form';
@@ -32,13 +32,19 @@ function Failure({ error, title }: { readonly error: unknown; readonly title: st
  * Rotation is immediate and has no overlap, so it is confirmed. Focus starts on the safe
  * choice. A generic source gets a new secret from Noti, which the parent reveals once. A GitLab
  * or Stripe source asks for the new credential the person created in that provider; it is
- * sealed on write and never shown again.
+ * sealed on write and never shown again. After a revoke (F40) this is the way back: the copy says the source is
+ * turned on again and the revoked credential stays refused.
  */
 export function RotateDialog({
   orgId: liveOrgId,
   source,
   onRotated,
-}: DialogProps & { readonly onRotated: (result: SourceWithSecret) => void }) {
+  triggerRef,
+}: DialogProps & {
+  readonly onRotated: (result: SourceWithSecret) => void;
+  /** The opening button, so the card can move focus to it after a revoke. */
+  readonly triggerRef?: Ref<HTMLButtonElement>;
+}) {
   useLocale();
   const ws = useBoundWorkspace(liveOrgId);
   const rotate = useRotateSource(ws.orgId);
@@ -96,7 +102,7 @@ export function RotateDialog({
         if (!next) reset();
       }}
     >
-      <AlertDialog.Trigger render={<Button variant="outline" type="button" />}>
+      <AlertDialog.Trigger render={<Button ref={triggerRef} variant="outline" type="button" />}>
         <IconRefresh size={18} aria-hidden="true" />
         {t(provider ? 'sources.rotate.provider.open' : 'sources.rotate.open')}
       </AlertDialog.Trigger>
@@ -108,8 +114,10 @@ export function RotateDialog({
           </AlertDialog.Title>
           <AlertDialog.Description>
             {provider
-              ? t('sources.rotate.provider.body', { provider: providerName })
-              : t('sources.rotate.body')}
+              ? t(source.revoked ? 'sources.rotate.provider.revokedBody' : 'sources.rotate.provider.body', {
+                  provider: providerName,
+                })
+              : t(source.revoked ? 'sources.rotate.revokedBody' : 'sources.rotate.body')}
           </AlertDialog.Description>
           <form className="form-stack" noValidate onSubmit={(e) => void confirm(e)}>
             <StaleWorkspaceNotice show={ws.stale} />
