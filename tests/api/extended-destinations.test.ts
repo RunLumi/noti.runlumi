@@ -43,6 +43,12 @@ let dns: Record<string, string[] | 'servfail' | 'nxdomain'>;
 function setUp(): void {
   db = createFakeD1();
   seedOrganization(db.raw, 'org-a');
+  // The workspace allowlist (ADR 0029) approves the fixture hosts; a test below removes it.
+  db.raw
+    .prepare(
+      "INSERT INTO workspace_webhook_hosts(organization_id,host,created_at) VALUES('org-a','*.example.com',1)",
+    )
+    .run();
   db.raw
     .prepare('INSERT INTO "user"(id,name,email,email_verified,created_at,updated_at) VALUES(?,?,?,?,?,?)')
     .run('bob', 'bob', 'bob@example.test', 1, 1, 1);
@@ -263,6 +269,17 @@ describe('custom webhook integrations', () => {
     expect((await res.json<Failed>()).fields[0]).toMatchObject({ field: 'signingSecret' });
   });
 
+  it('refuses a host the workspace has not approved, before any DNS lookup (ADR 0029)', async () => {
+    db.raw.prepare('DELETE FROM workspace_webhook_hosts').run();
+    fetchMock.mockClear();
+    const res = await create({ destination: 'generic_webhook', webhookUrl: HOOK });
+    expect(res.status).toBe(422);
+    const body = await res.json<Failed>();
+    expect(body.fields[0]).toMatchObject({ field: 'webhookUrl' });
+    expect(body.fields[0]?.message).toMatch(/allowlist/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rotating the credentials re-verifies the host and issues a new secret, once', async () => {
     const first = await (await create({ destination: 'generic_webhook', webhookUrl: HOOK })).json<Created>();
     dns['new.example.com'] = ['10.1.2.3'];
@@ -309,11 +326,11 @@ describe('custom webhook integrations', () => {
     };
     await consumeDeliveries({ messages: [msg], retryAll: vi.fn() } as unknown as MessageBatch<unknown>, env);
     expect(msg.ack).toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [
-      string,
-      { headers: Record<string, string>; body: string },
-    ];
+    // The send path re-resolves the host first (no recorded resolution yet): two DNS-over-HTTPS queries, then the send.
+    const sends = fetchMock.mock.calls.filter((c) => !String(c[0]).startsWith('https://cloudflare-dns.com'));
+    expect(fetchMock.mock.calls.length - sends.length).toBe(2);
+    expect(sends).toHaveLength(1);
+    const [url, init] = sends[0] as [string, { headers: Record<string, string>; body: string }];
     expect(url).toBe(HOOK);
     const key = fromBase64((created.signingSecret ?? '').slice('whsec_'.length));
     if (!key) throw new Error('key');

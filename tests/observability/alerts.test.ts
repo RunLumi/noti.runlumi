@@ -38,6 +38,8 @@ const QUIET: Signals = {
   sourcesDropping: 0,
   heartbeatMaxGapMs: 0,
   deadLetterStuckRows: 0,
+  egressGuardsOpen: 0,
+  egressGuardFaults: 0,
 };
 
 let db: FakeD1;
@@ -333,6 +335,26 @@ describe('signals from D1 and the boot report', () => {
     expect(s.breakersOpen).toBe(2);
     expect(s.deadLettersRecent).toBe(1); // only the attempt inside the window
     expect(s.heartbeatMaxGapMs).toBe(13 * MIN); // the recorded gap, still inside its window
+  });
+
+  it('reads the platform-wide Discord guard: open now is 1, closed or expired is 0', async () => {
+    const now = Date.now();
+    expect((await collectSignals(env(), now)).egressGuardsOpen).toBe(0);
+    db.raw
+      .prepare("INSERT INTO egress_guard_state(provider,open_until,updated_at) VALUES('discord',?,?)")
+      .run(now + MIN, now);
+    expect((await collectSignals(env(), now)).egressGuardsOpen).toBe(1);
+    expect((await collectSignals(env(), now + 2 * MIN)).egressGuardsOpen).toBe(0);
+  });
+
+  it('reads guard faults from ops_state inside the fault window only', async () => {
+    const now = Date.now();
+    expect((await collectSignals(env(), now)).egressGuardFaults).toBe(0);
+    db.raw
+      .prepare("INSERT INTO ops_state(key,value,updated_at) VALUES('egress_guard_fault',?,?)")
+      .run(JSON.stringify({ at: now - MIN, count: 4 }), now);
+    expect((await collectSignals(env(), now)).egressGuardFaults).toBe(4);
+    expect((await collectSignals(env(), now + 20 * MIN)).egressGuardFaults).toBe(0);
   });
 
   it('counts a boot-report fault as key_config_fault', async () => {

@@ -133,7 +133,7 @@ const SELECT_HEALTH = `SELECT state,consecutive_failures,opened_at,open_until,pr
   last_failure_at,last_failure_code,last_success_at,destination_host
   FROM destination_health WHERE organization_id=?1 AND integration_id=?2`;
 
-export type GateReason = 'circuit_open' | 'destination_paced';
+export type GateReason = 'circuit_open' | 'destination_paced' | 'platform_paused' | 'workspace_paused';
 
 export type Gate =
   | {

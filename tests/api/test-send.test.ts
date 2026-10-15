@@ -431,6 +431,18 @@ describe('a test to a custom webhook reveals only three buckets', () => {
         await legacySeal('https://hooks.example.com/noti/inbound', K_LEGACY),
         await legacySeal(generateSigningSecret(), K_LEGACY),
       );
+    // Allowlisted host with a fresh recorded resolution (ADR 0029), so the send makes no DNS lookup.
+    db.raw
+      .prepare(
+        "INSERT INTO workspace_webhook_hosts(organization_id,host,created_at) VALUES('org-a','hooks.example.com',1)",
+      )
+      .run();
+    db.raw
+      .prepare(
+        `INSERT INTO webhook_host_resolutions(organization_id,integration_id,host,addresses,status,resolved_at,last_used_at)
+         VALUES('org-a','int-gen','hooks.example.com','["93.184.216.34"]','ok',?,?)`,
+      )
+      .run(Date.now(), Date.now());
   }
 
   it.each([

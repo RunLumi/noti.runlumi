@@ -113,6 +113,7 @@ job is **stale** when its last healthy run (`ok` or `skipped`) is more than thre
 | `noise_purge` | Released and failed noise-control records. |
 | `expired_auth_purge` | Expired sessions, one-time tokens, install states. |
 | `dedup_purge` | Expired dedup rows. |
+| `egress_maintenance` | Egress-guard bucket purge; custom-webhook host re-resolution (only while the feature flag is on). |
 
 Two tables (migration 0027). `job_state` has ONE row per job, overwritten every run: first seen, last
 start and finish, last outcome, last healthy and last failed time, last counters (rows processed) and
@@ -339,6 +340,53 @@ GROUP BY state;
 (`{"at":..,"seen":..,"moved":..}`); a stale or absent value with stuck rows suggests the consumer is not
 attached (check the `noti-dead-letters` consumer in the Cloudflare dashboard; the queue deletes unconsumed
 messages after four days). Fix the consumer, then replay per "Dead-letter inspection and redelivery".
+
+### Alert: egress_breaker_open
+
+**What it means.** The platform-wide Discord guard (`src/delivery/egress-guard.ts`, ADR 0029) is open: in the
+last ten minutes the platform received 1,000 or more `401`, `403` or `429` answers from Discord. Discord bans
+the calling IP at Cloudflare at 10,000 such answers in ten minutes (docs/DESTINATION_API_REFERENCE.md
+section 4), and every tenant's Discord webhook leaves from the same egress, so while it is open NO Discord
+request leaves for ANY tenant. Deliveries wait (`platform_paused`), spend no attempt and are not
+dead-lettered. Severity critical. Trip point, window and pacing are engineering judgment, not measured
+values, and the Discord numbers are unverified against the real service.
+
+**Check.** The global tables hold counts only. Each workspace and integration has its own budget first
+(`workspace_paused`), so the global trip means many workspaces were each within budget at once, or a provider-wide
+problem. The per-workspace counters name who:
+
+```sql
+SELECT provider, datetime(open_until/1000,'unixepoch') AS open_until, opened_count FROM egress_guard_state;
+SELECT datetime(minute_start/1000,'unixepoch') AS minute, requests, invalid FROM egress_guard_buckets
+WHERE provider='discord' ORDER BY minute_start DESC LIMIT 15;
+SELECT organization_id, integration_id, SUM(invalid) AS invalid, SUM(requests) AS requests
+FROM egress_guard_tenant_buckets WHERE provider='discord' AND minute_start > (strftime('%s','now')-600)*1000
+GROUP BY organization_id, integration_id ORDER BY invalid DESC LIMIT 20;
+```
+
+**What to do.** It closes by itself eleven minutes after it opened and trips again if the cause persists. To
+find the cause, look for integrations whose attempts end in `destination_revoked`, `destination_unauthorized`
+or `destination_rate_limited` (`delivery_attempts`, last hour, by `integration_id`): usually one dead webhook
+or one tenant bursting. Pause that integration, then wait for the guard to close. Do not clear
+`egress_guard_state` by hand while the invalid count is still high: Discord's ban is what follows.
+
+### Alert: egress_guard_failing
+
+**What it means.** The Discord guard (see `egress_breaker_open`) could not read or write its D1 tables three or
+more times in the last 15 minutes. It fails OPEN, so deliveries still go out but the protection against a
+Discord ban of the shared egress is OFF. Severity warning. The count is kept in `ops_state` key
+`egress_guard_fault` (best effort: if D1 is down entirely the count itself cannot be written).
+
+**Check.**
+
+```sql
+SELECT value, datetime(updated_at/1000,'unixepoch') AS last_fault FROM ops_state WHERE key='egress_guard_fault';
+SELECT name FROM sqlite_master WHERE name LIKE 'egress_guard_%';
+```
+
+**What to do.** Look for `egress_guard_unreadable` and `egress_guard_record_failed` in the logs (error class only).
+A missing table means migration 0029 was not applied before the Worker: apply it. Otherwise treat it as a D1
+incident (see "D1 degraded"). Until it clears, watch Discord delivery for 401, 403 and 429 answers by hand.
 
 ## Find a delivery by correlation id
 
@@ -922,6 +970,7 @@ What the files themselves say:
 | 0024 credential lifecycle | Old Worker ignores the three columns. **Apply before** the new Worker (its queries name them). A rollback past the Worker leaves revoked integrations quarantined (still stopped) but a revoked **source** is only `enabled=0`, which the old Worker also honours; it would let someone re-enable it | Expand-only: the columns stay (dropping them needs `ALTER TABLE ... DROP COLUMN`, SQLite 3.35+) |
 | 0025 delivery ledger depth | Old Worker ignores the four new `deliveries` columns and the tables `event_dedup`, `delivery_attempts`, `destination_health`: it stops recording attempts and suppressed repeats and stops honouring the breaker and pacing, nothing else. Waiting deliveries (`last_error` `circuit_open` or `destination_paced`) are retried by their next scheduled time | Expand-only. `DROP TABLE` the three tables is safe; the columns stay (dropping them needs a rebuild) |
 | 0026 tenant contract | The previous Worker keeps working: the new schema is stricter than it needs and it never writes a NULL organization. Rows the migration could not attribute to a tenant leave the live tables (metadata in `legacy_orphaned_rows`) but stay whole in `<table>_old` until finalize | Until finalize: `scripts/migration-0026-recover.mjs` restores the originals and their indexes and triggers (valid until traffic has resumed on the new tables). After finalize: **not reversible by SQL**; a D1 Time Travel restore to the bookmark taken before applying is the only undo (procedure **UNVERIFIED**) |
+| 0029 egress guard and webhook hosts | Old Worker ignores the five tables: it stops counting Discord answers and stops holding Discord requests (the global breaker is off), and the custom webhook is off anyway. **Apply before** the new Worker | Expand-only: `DROP TABLE egress_guard_buckets; DROP TABLE egress_guard_state; DROP TABLE egress_guard_tenant_buckets; DROP TABLE workspace_webhook_hosts; DROP TABLE webhook_host_resolutions;` |
 | 0028 ingress usage and audit read | Old Worker ignores the `ingress_usage` table and `audit_events.correlation_id`; it stops counting usage and stops stamping request ids on audit rows, nothing else. **Apply before** the new Worker (its queries name them) | Expand-only: `DROP TABLE ingress_usage; DROP INDEX audit_events_org_correlation; DROP INDEX audit_events_org_actor; DROP INDEX audit_events_org_target;` is safe; the column stays (`ALTER TABLE audit_events DROP COLUMN correlation_id`, SQLite 3.35+) |
 | 0016 observability | Old Worker ignores `ops_state` and the two indexes | `DROP TABLE ops_state; DROP INDEX deliveries_state_created; DROP INDEX audit_events_created;` |
 

@@ -68,7 +68,8 @@ export interface DeliveryItem {
     readonly originalState: DeliveryState | null;
   } | null;
   /** Why a waiting delivery has not been sent although nothing failed this time. */
-  readonly pausedReason?: 'circuit_open' | 'destination_paced' | null;
+  readonly pausedReason?:
+    'circuit_open' | 'destination_paced' | 'platform_paused' | 'workspace_paused' | null;
 }
 
 export interface DeliveryPage {
@@ -240,7 +241,10 @@ export function parseDelivery(value: unknown): DeliveryItem {
     possibleDuplicate: value.possibleDuplicate === true,
     suppression: parseSuppression(value.suppression),
     pausedReason:
-      value.pausedReason === 'circuit_open' || value.pausedReason === 'destination_paced'
+      value.pausedReason === 'circuit_open' ||
+      value.pausedReason === 'destination_paced' ||
+      value.pausedReason === 'platform_paused' ||
+      value.pausedReason === 'workspace_paused'
         ? value.pausedReason
         : null,
   };
