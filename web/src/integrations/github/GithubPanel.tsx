@@ -1,10 +1,14 @@
-import { IconAlertTriangle, IconPlugConnectedX } from '@tabler/icons-react';
+import { useRef, useState, type RefObject } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { IconAlertTriangle, IconExternalLink, IconPlugConnectedX } from '@tabler/icons-react';
 import { Badge, Notice } from '../../components/ui';
-import type { GithubInstallation } from '../../lib/api';
+import { authApi, type GithubDisconnect, type GithubInstallation } from '../../lib/api';
 import { t, tp } from '../../i18n';
 import { describeError } from '../errors';
 import { ConnectGithubButton } from './ConnectGithubButton';
+import { DisconnectDialog } from './DisconnectDialog';
 import { useGithubConnection } from './hooks';
+import { githubAccessUrl } from './RepoPicker';
 import { useLocale } from '../../i18n/LocaleProvider';
 
 const STATUS_BADGE = { active: 'success', suspended: 'warning', uninstalled: 'danger' } as const;
@@ -14,7 +18,21 @@ const STATUS_LABEL = {
   uninstalled: 'github.status.uninstalled',
 } as const;
 
-export function Installation({ orgId, installation }: { orgId: string; installation: GithubInstallation }) {
+/** Set by the Integrations page for admins; the setup flow shows installations without it. */
+interface DisconnectControl {
+  readonly onDisconnected: (result: GithubDisconnect) => void;
+  readonly focusAfter: RefObject<HTMLElement | null>;
+}
+
+export function Installation({
+  orgId,
+  installation,
+  disconnect,
+}: {
+  orgId: string;
+  installation: GithubInstallation;
+  disconnect?: DisconnectControl;
+}) {
   useLocale();
   const { account, status } = installation;
   const scope =
@@ -35,7 +53,21 @@ export function Installation({ orgId, installation }: { orgId: string; installat
         <p className="installation-note">{t('github.suspended.body', { account })}</p>
       )}
       {status === 'uninstalled' && (
-        <p className="installation-note">{t('github.uninstalled.body', { account })}</p>
+        <>
+          <p className="installation-note">{t('github.uninstalled.body', { account })}</p>
+          <p className="installation-note">{t('github.uninstalled.again', { account })}</p>
+          <p className="installation-note">
+            <a
+              href={githubAccessUrl(installation)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-link"
+            >
+              {t('github.settingsLink', { account })}
+              <IconExternalLink size={16} aria-hidden="true" />
+            </a>
+          </p>
+        </>
       )}
       {status === 'active' && installation.needsResync && (
         <div className="cred-notice">
@@ -49,6 +81,16 @@ export function Installation({ orgId, installation }: { orgId: string; installat
           </div>
         </div>
       )}
+      {disconnect && status !== 'uninstalled' && (
+        <div className="installation-actions">
+          <DisconnectDialog
+            orgId={orgId}
+            installation={installation}
+            onDisconnected={disconnect.onDisconnected}
+            focusAfter={disconnect.focusAfter}
+          />
+        </div>
+      )}
     </li>
   );
 }
@@ -60,9 +102,28 @@ export function Installation({ orgId, installation }: { orgId: string; installat
 export function GithubPanel({ orgId }: { orgId: string }) {
   useLocale();
   const connection = useGithubConnection(orgId);
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
+  const isAdmin = me.data?.user.role === 'admin';
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const [disconnected, setDisconnected] = useState<GithubDisconnect | null>(null);
+  const control: DisconnectControl = { onDisconnected: setDisconnected, focusAfter: headingRef };
+  const stoppable = connection.data?.installations.some((i) => i.status !== 'uninstalled') ?? false;
   return (
     <section className="github-panel" aria-labelledby="github-panel-title" aria-busy={connection.isPending}>
-      <h2 id="github-panel-title">{t('github.title')}</h2>
+      <h2 id="github-panel-title" ref={headingRef} tabIndex={-1}>
+        {t('github.title')}
+      </h2>
+      {disconnected && (
+        <Notice kind="success">
+          <p>
+            {disconnected.pausedIntegrations > 0
+              ? tp('github.disconnect.done', disconnected.pausedIntegrations, {
+                  account: disconnected.account,
+                })
+              : t('github.disconnect.doneNone', { account: disconnected.account })}
+          </p>
+        </Notice>
+      )}
       {connection.isPending ? (
         <p className="field-hint">{t('github.loading')}</p>
       ) : connection.isError ? (
@@ -86,9 +147,17 @@ export function GithubPanel({ orgId }: { orgId: string }) {
           {connection.data.installations.length > 0 && (
             <ul className="installations">
               {connection.data.installations.map((i) => (
-                <Installation key={i.id} orgId={orgId} installation={i} />
+                <Installation
+                  key={i.id}
+                  orgId={orgId}
+                  installation={i}
+                  {...(isAdmin ? { disconnect: control } : {})}
+                />
               ))}
             </ul>
+          )}
+          {!isAdmin && me.data && stoppable && (
+            <p className="field-hint">{t('github.disconnect.adminOnly')}</p>
           )}
           <ConnectGithubButton
             orgId={orgId}

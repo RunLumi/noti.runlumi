@@ -126,6 +126,7 @@ export const auditVi = {
   'audit.action.github.installation.bind': 'Đã kết nối GitHub',
   'audit.action.github.installation.bind_refused': 'Kết nối GitHub bị từ chối',
   'audit.action.github.installation.lifecycle': 'Bản cài đặt GitHub đã thay đổi',
+  'audit.action.github.installation.disconnect': 'Đã ngắt kết nối GitHub',
   'audit.action.github.repository.out_of_scope': 'Đã bỏ qua cập nhật từ repository ngoài phạm vi kết nối',
   'audit.action.github.webhook.refused': 'Đã từ chối cập nhật từ GitHub',
   'audit.action.workspace.export': 'Đã xuất dữ liệu không gian làm việc',
@@ -205,4 +206,8 @@ export const auditVi = {
   'audit.detail.previousRole': 'Vai trò trước đó',
   'audit.detail.revoked': 'Thiết bị đã đăng xuất',
   'audit.detail.self': 'Tự rời đi',
+  'audit.detail.previousStatus': 'Trạng thái trước đó',
+  'audit.detail.pausedIntegrations': 'Số tích hợp đã tạm dừng',
+  'audit.detail.overflow': 'Danh sách repository quá dài để lưu',
+  'audit.value.github_disconnected': 'GitHub đã bị ngắt kết nối',
 } as const satisfies Record<keyof typeof auditEn, string | PluralMessage>;

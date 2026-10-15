@@ -572,6 +572,7 @@ See [ADR 0008](adr/0008-github-install-verification.md) and [GITHUB_APP.md](GITH
 | --- | --- | --- |
 | `POST /api/github/install` | `integration.create` | `200 {url}`. Navigate the browser to `url`. Returns `503` when the App is not configured and `403` without our `Origin`. |
 | `GET /api/github/installations` | `integration.read` | `200 {configured, installations: [{id, account, accountType, repositorySelection, status, updatedAt, needsResync, repositories: string[]}]}` |
+| `POST /api/github/installations/:id/disconnect` | **Admin only** (`source.revoke`) | Disconnects the installation from this workspace ([ADR 0058](adr/0058-github-disconnect-ghost-rendering-and-ack-budget.md)). Its `status` becomes `uninstalled`, so every later event for it is refused (`403`). The workspace's GitHub integrations that use it are paused, each with an `integration.update` audit row with `reason: 'github_disconnected'`, and one `github.installation.disconnect` row is written. GitHub is not called: the App stays installed on the account until someone uninstalls it in GitHub's settings. Destination credentials are kept. `200 {disconnected: true, account, alreadyStopped, pausedIntegrations}`. Repeating the call is a no-op (`alreadyStopped: true`, no second audit row). `404` for another workspace's or an unknown id, `403` without our `Origin` or for a member, `409` while deletion is pending, `429` above 10 per admin per minute. Binding the same installation id again is refused with `installation_disconnected`. Uninstall and reinstall the App on GitHub, which issues a new id. |
 | `GET /github/setup` | session | GitHub's setup redirect. Continues to GitHub OAuth. |
 | `GET /github/callback` | session | GitHub's OAuth redirect. Verifies and binds, then redirects to `/integrations?github=<status>`. |
 
@@ -585,6 +586,7 @@ See [ADR 0008](adr/0008-github-install-verification.md) and [GITHUB_APP.md](GITH
 - `installation_not_accessible`
 - `installation_admin_required`
 - `installation_deleted`
+- `installation_disconnected` (this workspace stopped that installation; uninstall and reinstall the App on GitHub)
 - `installation_too_large`
 - `workspace_access_lost`
 - `unexpected_error`

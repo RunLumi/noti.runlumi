@@ -96,6 +96,14 @@ function installationStatements(
   }
 }
 
+/**
+ * The most repositories one `installation_repositories` event may add and remove together and still be
+ * stored. It matches the bind flow's 1,000-repository bound (ADR 0008 §6) and keeps the batch at most
+ * 40 INSERTs plus a few statements, inside the Free plan's 50 D1 queries per invocation
+ * (docs/specs/01-platform-runtime.md). GitHub's documentation states no size for this event's lists.
+ */
+export const MAX_REPOSITORY_DELTA = 1000;
+
 function repositoryStatements(
   db: D1Database,
   action: string,
@@ -107,6 +115,7 @@ function repositoryStatements(
   const removed = pickRepositories({ repositories: event.repositories_removed });
   const selection = selectionOf(event);
   const statements: D1PreparedStatement[] = [];
+  const overflow = added.length + removed.length > MAX_REPOSITORY_DELTA;
 
   if (selection === 'all') {
     // Scope is now the whole account; the stored list is irrelevant and is cleared.
@@ -119,6 +128,21 @@ function repositoryStatements(
         .bind(row.id, row.organization_id),
       db.prepare('DELETE FROM github_installation_repositories WHERE installation_row_id=?').bind(row.id),
     );
+  } else if (overflow) {
+    // Too large to store before the acknowledgement (F64). Fail closed and bounded: forget the stored
+    // set, so no repository routes on stale data (a removed one in particular), and flag the
+    // installation for a reconnect, which re-reads the full list through the bind flow.
+    // An `all` installation routes by account, not by this list, so it needs nothing stored.
+    if ((selection ?? row.repository_selection) === 'selected')
+      statements.push(
+        db
+          .prepare(
+            `UPDATE github_installations SET repository_selection='selected',repositories_complete=0,
+               updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`,
+          )
+          .bind(row.id, row.organization_id),
+        db.prepare('DELETE FROM github_installation_repositories WHERE installation_row_id=?').bind(row.id),
+      );
   } else {
     if (selection === 'selected' && row.repository_selection === 'all') {
       // Switching from 'all' to 'selected' sends only a delta, so the full set is unknown.
@@ -140,6 +164,7 @@ function repositoryStatements(
       added: added.map((r) => r.fullName).slice(0, 50),
       removed: removed.map((r) => r.fullName).slice(0, 50),
       ...(selection ? { selection } : {}),
+      ...(overflow ? { overflow: true } : {}),
     }),
   );
   return statements;

@@ -55,6 +55,8 @@ const ALLOWED_FRAGMENTS: Readonly<Record<string, string>> = {
   "from.map(() => '?').join(',')": 'a placeholder list sized by the array (lifecycle.ts)',
   "chunk.map(() => '?').join(',')": 'a placeholder list sized by the chunk (repos.ts)',
   "chunk.map(() => '(?,?,?)').join(',')": 'a placeholder list sized by the chunk (repos.ts)',
+  "chunk.map(() => '(?,?)').join(',')":
+    'a VALUES list sized by the chunk of integration ids (audit.ts enabledIntegrationAudits, ADR 0058)',
 };
 
 /**
@@ -444,6 +446,12 @@ describe('no_query_exceeds_100_bound_parameters', () => {
     // the token, the expiry and the LIMIT: 2 * (4 + keys) + 3.
     const keys = constantIn('src/pipeline/noise-release.ts', 'CLAIM_KEYS_PER_CALL');
     expect(2 * (4 + keys) + 3).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    // ADR 0058: per-integration audit rows bind 2 per row plus 8 shared values; the pause binds 1 per id plus 1.
+    expect(constantIn('src/audit/audit.ts', 'AUDIT_ROWS_PER_STATEMENT') * 2 + 8).toBeLessThanOrEqual(
+      D1_MAX_BOUND_PARAMETERS,
+    );
+    const disconnect = 'src/connectors/sources/' + 'git' + 'hub/disconnect.ts';
+    expect(constantIn(disconnect, 'IDS_PER_PAUSE') + 1).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
   });
 
   it('a digest scope binds at most the listed group keys, which the renderer bounds', async () => {

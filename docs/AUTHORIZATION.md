@@ -45,7 +45,7 @@
 | `source.update` | yes | yes | `PATCH /api/sources/:id` |
 | `source.delete` | yes | no | `DELETE /api/sources/:id` |
 | `source.rotate` | yes | no | `POST /api/sources/:id/rotate` |
-| `source.revoke` | yes | no | `POST /api/sources/:id/revoke-credentials` |
+| `source.revoke` | yes | no | `POST /api/sources/:id/revoke-credentials`<br>`POST /api/github/installations/:id/disconnect` |
 | `delivery.read` | yes | yes | `GET /api/deliveries`<br>`GET /api/deliveries/summary`<br>`GET /api/deliveries/:id`<br>`GET /api/observability/summary`<br>`GET /api/setup/progress` |
 | `delivery.replay` | yes | no | `POST /api/deliveries/replay-plan`<br>`POST /api/deliveries/replay`<br>`POST /api/deliveries/:id/replay` |
 | `audit.read` | yes | no | `GET /api/audit` |
@@ -110,6 +110,7 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `GET /api/setup/progress` | capability `delivery.read` | `src/api/setup-progress.ts` |
 | `POST /api/github/install` | capability `integration.create` | `src/api/github.ts` |
 | `GET /api/github/installations` | capability `integration.read` | `src/api/github.ts` |
+| `POST /api/github/installations/:id/disconnect` | capability `source.revoke` | `src/api/github.ts` |
 | `GET /github/setup` | signed-in session; membership checked in the handler | `src/api/github.ts` |
 | `GET /github/callback` | signed-in session; membership checked in the handler | `src/api/github.ts` |
 | `POST /webhooks/github` | signed webhook (`verify`) | `src/connectors/sources/github/route.ts` |

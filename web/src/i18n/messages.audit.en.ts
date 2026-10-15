@@ -130,6 +130,7 @@ export const auditEn = {
   'audit.action.github.installation.bind': 'GitHub connected',
   'audit.action.github.installation.bind_refused': 'GitHub connection refused',
   'audit.action.github.installation.lifecycle': 'GitHub installation changed',
+  'audit.action.github.installation.disconnect': 'GitHub disconnected',
   'audit.action.github.repository.out_of_scope': 'Update from a repository outside the connection ignored',
   'audit.action.github.webhook.refused': 'GitHub update refused',
   'audit.action.workspace.export': 'Workspace data exported',
@@ -209,4 +210,8 @@ export const auditEn = {
   'audit.detail.previousRole': 'Previous role',
   'audit.detail.revoked': 'Devices signed out',
   'audit.detail.self': 'Left on their own',
+  'audit.detail.previousStatus': 'Status before',
+  'audit.detail.pausedIntegrations': 'Integrations paused',
+  'audit.detail.overflow': 'Repository list too long to store',
+  'audit.value.github_disconnected': 'GitHub was disconnected',
 } as const;

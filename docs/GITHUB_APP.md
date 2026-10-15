@@ -71,6 +71,20 @@ All three fail closed.
 The App's private key is **not** needed yet. Noti does not call the GitHub API as the App
 until reconciliation (F69) and permission reads (F61) are built.
 
+## Disconnecting
+
+A workspace admin can disconnect an installation from the Integrations page (ADR 0058). It takes effect at once:
+
+- Noti marks its row `uninstalled` and refuses every later event for it with `403`;
+- the integrations that use it are paused, with the reason in the audit log;
+- destinations and their webhook settings are kept.
+
+Noti does **not** uninstall the App on GitHub. It holds no App private key, and that is the account owner's call.
+GitHub keeps delivering until someone uninstalls the App there. For an organization, that is in the organization's
+settings under GitHub Apps (`github.com/organizations/<account>/settings/installations`). For a personal account, it
+is `github.com/settings/installations`. To connect the same account again, uninstall the App on GitHub first and
+then install it again, which gives a new installation id. The old id stays refused (`installation_disconnected`).
+
 ## Routing
 
 `/github/setup` and `/github/callback` must reach the Worker, not the SPA. Route them the

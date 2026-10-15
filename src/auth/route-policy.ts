@@ -376,6 +376,13 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
     handler: local('/installations'),
     access: cap('integration.read'),
   },
+  {
+    method: 'POST',
+    path: '/api/github/installations/:id/disconnect',
+    file: 'src/api/github.ts',
+    handler: local('/installations/:id/disconnect'),
+    access: cap('source.revoke'),
+  },
   // Browser redirects: the user's own session is required; the single-use state row then binds
   // the flow to one user and one workspace, and membership is re-checked before binding.
   {

@@ -26,6 +26,8 @@ export const AUDIT_ACTIONS = [
   'github.installation.bind',
   'github.installation.bind_refused',
   'github.installation.lifecycle',
+  // An admin disconnected an installation from the workspace (F70, ADR 0058). GitHub is not called.
+  'github.installation.disconnect',
   'github.repository.out_of_scope',
   'github.webhook.refused',
   'workspace.export',

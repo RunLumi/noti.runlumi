@@ -38,6 +38,7 @@ export type InstallError =
   | 'installation_not_accessible'
   | 'installation_admin_required'
   | 'installation_deleted'
+  | 'installation_disconnected'
   | 'installation_too_large'
   | 'workspace_access_lost'
   | 'unexpected_error'
@@ -488,11 +489,16 @@ export async function bindInstallation(
   if (tombstone) throw new InstallFlowError('installation_deleted');
 
   const existing = await db
-    .prepare('SELECT id,organization_id FROM github_installations WHERE installation_id=? AND app_id=?')
+    .prepare(
+      'SELECT id,organization_id,status FROM github_installations WHERE installation_id=? AND app_id=?',
+    )
     .bind(installation.installationId, appId)
-    .first<{ id: string; organization_id: string }>();
+    .first<{ id: string; organization_id: string; status: string }>();
   if (existing && existing.organization_id !== organizationId)
     throw new InstallFlowError('installation_bound_elsewhere');
+  // This workspace stopped this installation (an admin disconnected it, or GitHub reported it
+  // uninstalled). `uninstalled` is terminal (ADR 0008, ADR 0058); GitHub issues a new id on reinstall.
+  if (existing?.status === 'uninstalled') throw new InstallFlowError('installation_disconnected');
 
   const rowId = existing?.id ?? crypto.randomUUID();
   const status = installation.suspended ? 'suspended' : 'active';

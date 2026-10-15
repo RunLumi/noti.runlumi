@@ -10,8 +10,10 @@ import {
   startInstall,
   type InstallError,
 } from '../connectors/sources/github/install';
+import { disconnectInstallation } from '../connectors/sources/github/disconnect';
 import type { Bindings } from '../env';
 import { log } from '../platform/log';
+import { hit } from '../security/rate-limit';
 import { isDeletionPending } from './workspace-lifecycle';
 
 /**
@@ -107,6 +109,43 @@ api.get('/installations', async (c) => {
       needsResync: i.repositories_complete === 0,
       repositories: repos.results.filter((r) => r.installation_row_id === i.id).map((r) => r.full_name),
     })),
+  });
+});
+
+/** Disconnects per admin per minute; the action is rare and each one pauses integrations. */
+export const DISCONNECTS_PER_MINUTE = 10;
+
+/**
+ * Disconnect an installation from this workspace (F70, ADR 0058). Admin only (`source.revoke`: it stops a
+ * source and pauses the integrations that use it). Our row is marked `uninstalled`, so ingress refuses its
+ * events from now on; the integrations it served are paused with an audited reason. GitHub is not called:
+ * the App stays installed on the GitHub account until someone uninstalls it there, which the dashboard
+ * explains. Another workspace's installation is a 404. Repeating the call changes nothing.
+ */
+api.post('/installations/:id/disconnect', async (c) => {
+  const origin = c.req.header('origin');
+  if (!origin || origin !== new URL(c.env.APP_ORIGIN).origin) return c.json({ error: 'Forbidden' }, 403);
+  const who = await authorize(c, 'source.revoke');
+  if (isFailure(who)) return c.json({ error: who.error }, who.status);
+  if (await isDeletionPending(c.env.DB, who.orgId))
+    return c.json({ error: 'This workspace is scheduled for deletion.' }, 409);
+  const limited = await hit(c.env.DB, `github-disconnect:${who.userId}`, DISCONNECTS_PER_MINUTE, 60_000);
+  if (limited.limited)
+    return c.json({ error: 'Too many changes; try again shortly' }, 429, {
+      'retry-after': String(limited.retryAfterSeconds),
+    });
+  const outcome = await disconnectInstallation(c.env.DB, {
+    organizationId: who.orgId,
+    installationRowId: c.req.param('id'),
+    actorId: who.userId,
+    ...requestOrigin(c.req.raw.headers),
+  });
+  if (outcome.kind === 'not_found') return c.json({ error: 'Not found' }, 404);
+  return c.json({
+    disconnected: true,
+    account: outcome.account,
+    alreadyStopped: outcome.kind === 'already_stopped',
+    pausedIntegrations: outcome.kind === 'disconnected' ? outcome.pausedIntegrations : 0,
   });
 });
 

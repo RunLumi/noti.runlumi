@@ -145,6 +145,57 @@ export function auditStatement(
     );
 }
 
+/** Rows per statement in `enabledIntegrationAudits`: 2 bound values each plus 8 shared, under D1's 100. */
+const AUDIT_ROWS_PER_STATEMENT = 40;
+
+/**
+ * One audit row per listed integration that is STILL ENABLED when the statement runs, written by a few
+ * multi-row statements instead of one per integration (a workspace may have 100 integrations and a Worker
+ * invocation has a small D1 query budget). Put it right BEFORE the UPDATE that pauses them in the same
+ * batch: both see the same rows, so an integration someone else paused first gets no false entry.
+ * Metadata is scrubbed exactly as in `auditStatement`.
+ */
+export function enabledIntegrationAudits(
+  db: D1Database,
+  entry: Omit<AuditEntry, 'subjectType' | 'subjectId' | 'organizationId'> & {
+    readonly organizationId: string;
+  },
+  integrationIds: readonly string[],
+): D1PreparedStatement[] {
+  const out: D1PreparedStatement[] = [];
+  for (let i = 0; i < integrationIds.length; i += AUDIT_ROWS_PER_STATEMENT)
+    out.push(enabledIntegrationAuditChunk(db, entry, integrationIds.slice(i, i + AUDIT_ROWS_PER_STATEMENT)));
+  return out;
+}
+
+function enabledIntegrationAuditChunk(
+  db: D1Database,
+  entry: Omit<AuditEntry, 'subjectType' | 'subjectId' | 'organizationId'> & {
+    readonly organizationId: string;
+  },
+  chunk: readonly string[],
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,ip,user_agent,metadata_json,correlation_id)
+       SELECT v.column1,i.organization_id,?,?,'integration',i.id,?,?,?,?,?
+       FROM (VALUES ${chunk.map(() => '(?,?)').join(',')}) AS v
+       JOIN integrations i ON i.id=v.column2
+       WHERE i.organization_id=? AND i.enabled=1`,
+    )
+    .bind(
+      entry.actorId,
+      entry.action,
+      entry.outcome,
+      entry.ip ?? null,
+      entry.userAgent ? scrubSecrets(entry.userAgent).slice(0, MAX_USER_AGENT) : null,
+      serialiseMetadata(entry.metadata),
+      sanitiseCorrelationId(currentCorrelationId()),
+      ...chunk.flatMap((id) => [crypto.randomUUID(), id]),
+      entry.organizationId,
+    );
+}
+
 export async function recordAudit(db: D1Database, entry: AuditEntry): Promise<void> {
   await auditStatement(db, entry).run();
 }

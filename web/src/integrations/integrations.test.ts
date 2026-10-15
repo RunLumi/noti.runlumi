@@ -281,6 +281,7 @@ describe('GitHub connection', () => {
     'installation_admin_required',
     'installation_bound_elsewhere',
     'installation_deleted',
+    'installation_disconnected',
     'installation_too_large',
     'workspace_access_lost',
     'github_unavailable',

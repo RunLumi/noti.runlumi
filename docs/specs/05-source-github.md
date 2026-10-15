@@ -247,7 +247,7 @@ so that a GitHub change breaks a test rather than production.
 
 ## F60 — Actor trust and the ghost user
 
-**Priority** P0 · **Status** ✅ login and `sender.type` only; ghost flagged and not shown as a person; `[bot]` suffix or `Bot` type sets `isBot`; display names never read (`tests/events/canonical.test.ts`, `tests/github/ingress-contract.test.ts`)
+**Priority** P0 · **Status** ✅ login and `sender.type` only; ghost flagged and not shown as a person, asserted for every destination kind at every rung (card, markdown, plain) and for held updates (`tests/github/ghost-rendering.test.ts`, ADR 0058); `[bot]` suffix or `Bot` type sets `isBot`; display names never read (`tests/events/canonical.test.ts`, `tests/github/ingress-contract.test.ts`)
 
 **Story** As a user, I want notifications to attribute activity correctly, so that a bot or a
 system account is never presented as a colleague who broke the build.
@@ -413,7 +413,7 @@ notice. This is a strong argument for keeping reconciliation in V1 rather than d
 
 ## F64 — Ack discipline
 
-**Priority** P0 · **Status** ✅ 202 only after the durable write, 5xx on D1 failure, no outbound call, dispatcher kick after commit (`tests/github/ingress-contract.test.ts`); not built: a p99 SLO
+**Priority** P0 · **Status** ✅ 202 only after the durable write, 5xx on D1 failure, no outbound call, dispatcher kick after commit (`tests/github/ingress-contract.test.ts`); for every GitHub fixture no fetch or timer before the ack, D1 work independent of payload size, bounded D1 retry wait, oversize repository deltas stored boundedly and fail closed (`tests/github/ack-budget.test.ts`, ADR 0058); not built: a p99 SLO
 
 **Story** As a user, I want a 2xx back within 10 seconds even when a destination is down, so
 that GitHub considers the event delivered and does not hold connections open.
@@ -650,7 +650,7 @@ reconstructed, so they can never be confused with a real delivery for dedup purp
 
 ## F70 — Disconnect and data removal
 
-**Priority** P1 · **Status** 🟡 uninstall or deletion events mark the installation `uninstalled` and stop delivery (`lifecycle.ts`), destination credentials untouched, workspace deletion purges installs (`src/pipeline/purge.ts`); not built: user-initiated disconnect, UI copy, token revocation (no tokens held)
+**Priority** P1 · **Status** 🟡 uninstall or deletion events, and an admin's disconnect from the dashboard (UI copy says the App stays installed on GitHub, links its settings, and that destinations are kept), mark the installation `uninstalled` and stop delivery; a disconnect also pauses its integrations with an audited reason (`lifecycle.ts`, `disconnect.ts`, `tests/github/disconnect.test.ts`, ADR 0058); destination credentials untouched; workspace deletion purges installs (`src/pipeline/purge.ts`); not built: purging the synced repository set on disconnect, a revivable `disconnected` status (needs a migration), token revocation (no tokens held)
 
 **Story** As a customer, I want to disconnect GitHub and have everything removed, so that I
 can satisfy a repo deletion request.

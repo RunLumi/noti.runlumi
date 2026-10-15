@@ -371,6 +371,10 @@ const SITES: Readonly<Record<string, { readonly count: number; readonly how: str
     count: 1,
     how: 'batch: installation bind (tests/github/install-flow.test.ts)',
   },
+  'src/connectors/sources/github/disconnect.ts': {
+    count: 1,
+    how: 'batch: disconnect, its status change and the integration pauses (tests/github/disconnect.test.ts)',
+  },
   'src/connectors/sources/github/lifecycle.ts': {
     count: 1,
     how: 'batch: lifecycle transitions (tests/github/install-flow.test.ts)',

@@ -704,3 +704,87 @@ describe('source credential: fingerprint and revoke (F39, F40, ADR 0049)', () =>
     await expectClean('source revoke dialog (vi)');
   });
 });
+
+describe('disconnect GitHub (alert dialog, F70, ADR 0058)', () => {
+  const panel = async () =>
+    (await screen.findByRole('heading', { name: /GitHub connection|Kết nối GitHub/ })).closest(
+      'section',
+    ) as HTMLElement;
+
+  it('is accessible, focuses Keep connected first, traps Tab, closes on Escape and restores focus', async () => {
+    const user = userEvent.setup();
+    clearRequests();
+    await renderApp('/integrations');
+    const trigger = await within(await panel()).findByRole('button', { name: 'Disconnect acme' });
+    await user.click(trigger);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Disconnect acme from this workspace?' });
+    await expectClean('disconnect dialog open');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Keep connected' })),
+    );
+    // What stops, what is kept, that GitHub keeps the App, and how to come back.
+    expect(within(dialog).getByText(/stops accepting GitHub updates from acme at once/)).toBeTruthy();
+    expect(
+      within(dialog).getByText(/chat destinations and their saved webhook settings are kept/),
+    ).toBeTruthy();
+    expect(within(dialog).getByText(/does not uninstall the Noti App from acme on GitHub/)).toBeTruthy();
+    const link = within(dialog).getByRole('link', { name: 'Open the GitHub App settings for acme' });
+    expect(link.getAttribute('href')).toBe('https://github.com/organizations/acme/settings/installations');
+    expect(await tabStaysWithin(user, dialog, 8)).toBe(true);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(requests.some((r) => r.includes('/disconnect'))).toBe(false);
+  });
+
+  it('disconnects, announces the paused integrations, shows the stopped state and moves focus to the panel', async () => {
+    const user = userEvent.setup();
+    clearRequests();
+    await renderApp('/integrations');
+    await user.click(await within(await panel()).findByRole('button', { name: 'Disconnect acme' }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+
+    expect(requests).toContain(`POST /api/github/installations/inst_1/disconnect?org=${ORG_ID}`);
+    const section = await panel();
+    expect(
+      await within(section).findByText(/^acme is disconnected\. \d+ integrations? (was|were) paused\.$/),
+    ).toBeTruthy();
+    expect(await within(section).findByText('Disconnected')).toBeTruthy();
+    expect(
+      within(section).getByText(/To connect acme again, first make sure the Noti App is uninstalled/),
+    ).toBeTruthy();
+    expect(
+      within(section)
+        .getByRole('link', { name: 'Open the GitHub App settings for acme' })
+        .getAttribute('href'),
+    ).toBe('https://github.com/organizations/acme/settings/installations');
+    expect(within(section).queryByRole('button', { name: 'Disconnect acme' })).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(section).getByRole('heading', { name: 'GitHub connection' }),
+      ),
+    );
+    await expectClean('disconnected installation');
+  });
+
+  it('offers no disconnect control to a member, and says who can', async () => {
+    await renderApp('/integrations', { api: { me: MEMBER } });
+    const section = await panel();
+    expect(await within(section).findByText(/Only a workspace admin can disconnect/)).toBeTruthy();
+    expect(within(section).queryByRole('button', { name: /Disconnect/ })).toBeNull();
+  });
+
+  it('reads in Vietnamese with its diacritics', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations', { locale: 'vi' });
+    await user.click(await within(await panel()).findByRole('button', { name: 'Ngắt kết nối acme' }));
+    const dialog = await screen.findByRole('alertdialog', {
+      name: 'Ngắt kết nối acme khỏi không gian làm việc này?',
+    });
+    expect(within(dialog).getByRole('button', { name: 'Giữ kết nối' })).toBeTruthy();
+    expect(within(dialog).getByText(/không gỡ Noti App khỏi acme trên GitHub/)).toBeTruthy();
+    await expectClean('disconnect dialog (vi)');
+  });
+});

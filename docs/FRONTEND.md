@@ -484,6 +484,47 @@ request), a new audit scenario with installation rows in `web/src/a11y/pages.a11
 schedules nothing, a deletion scheduled without an export, a failed export). **Not verified:** a real browser download, a real 320 px
 device, a screen reader, and a native-speaker review of the Vietnamese.
 
+## GitHub disconnect (ADR 0058, `web/src/integrations/github/`)
+
+**Where.** On the Integrations page, each installation in `GithubPanel` that is not stopped has an outline "Disconnect"
+button for admins. It sits on its own row under the scope line (`.installation-actions`), with a Tabler Outline
+`IconPlugConnectedX` at 18 px, and its accessible name is "Disconnect <account>". Members get no control and a hint
+instead ("Only a workspace admin can disconnect…"). The server answers 403 to a member in any case, and so does the
+a11y mock server. The setup flow's `GithubStep` reuses `Installation` without the control.
+
+**Confirmation.** `DisconnectDialog.tsx` uses the alert-dialog pattern of `RemoveMemberDialog`:
+
+- focus starts on "Keep connected", Tab is trapped, and Escape closes and returns focus to the trigger;
+- only the danger "Disconnect" button sends `POST /api/github/installations/:id/disconnect?org=…`;
+- the description has four 16 px paragraphs (`.disconnect-body`): what stops (at once; integrations paused, the
+  reason in the audit log), what is kept (destinations and their webhook settings), what this does not do
+  (uninstall the App on GitHub), and how to connect again (uninstall, then install);
+- below it is a link to GitHub's installation settings for the account, built by `githubAccessUrl` from
+  `RepoPicker.tsx`, the URL pattern the picker already uses. It opens in a new tab with `noopener`;
+- a refusal stays in the dialog as an error `Notice`.
+
+**After.** The dialog closes with focus on the panel heading (`tabIndex=-1`, through `finalFocus`), because the
+trigger is gone. A success `Notice` names the account and how many integrations were paused (plural-aware), and
+the connection, integration and setup queries are read again. The installation's badge reads "Disconnected"
+(`github.status.uninstalled`, which was "Uninstalled"). The schema cannot tell a disconnect from an uninstall on
+GitHub, so its note names both causes and says how to connect again, with the same GitHub settings link. The
+audit log shows the new `github.installation.disconnect` action. The paused integrations' `integration.update`
+rows show "Reason: GitHub was disconnected".
+
+**Glass and surfaces.** None: the control and the dialog are on opaque reading surfaces (the panel card and the
+modal), as `DESIGN.md` requires.
+
+**Copy.** `github.disconnect.*`, `github.uninstalled.again`, `github.settingsLink` and
+`github.return.installation_disconnected` are in `messages.{en,vi}.ts`. `audit.action.github.installation.disconnect`,
+`audit.detail.{previousStatus,pausedIntegrations,overflow}` and `audit.value.github_disconnected` are in
+`messages.audit.{en,vi}.ts`.
+
+Verified: jsdom with axe in English and Vietnamese (`dialogs.a11y.test.tsx`, "disconnect GitHub"): the dialog's
+focus contract, the four parts and the link target, the request path, the stopped state after it, focus on the
+heading, and a member's view. The catalogue, hard-coded-string and stylesheet tests also pass. **Not verified:** a
+real browser at 320 px or desktop, a screen reader, a native-speaker review of the Vietnamese, and a real GitHub
+App.
+
 ## Current truth
 
 Signup, sign-in, verify, forgot/reset, sign-out, `/me`, onboarding, invitations and team
@@ -597,6 +638,8 @@ sources are worded for a pasted credential. Strings in `messages.en.ts` and `mes
   the address reaches the console, a beacon or any request URL. No screen changed; this is a test-only rule.
 
 ## Not yet verified
+
+- GitHub disconnect (ADR 0058): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop (the installation row gains one button; its wrap at 320 px is unverified), no screen-reader pass, no screenshot, no real GitHub App.
 
 - Request ID in the detail dialog and the activity filter, and the pause and delete impact counts (ADR 0050): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no screen-reader pass, no screenshot, and the counts' cost was not measured on a real D1.
 

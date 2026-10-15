@@ -350,13 +350,34 @@ export const vi = {
   'github.type.user': 'Tài khoản cá nhân',
   'github.status.active': 'Đã kết nối',
   'github.status.suspended': 'Bị tạm ngưng',
-  'github.status.uninstalled': 'Đã gỡ cài đặt',
+  'github.status.uninstalled': 'Đã ngắt kết nối',
   'github.scope.all': 'Tất cả repository của {account}, kể cả repository mới',
   'github.scope.selected': { other: '{count} repository được chọn' },
   'github.suspended.body':
     'Noti App đang bị tạm ngưng cho {account} trong GitHub, nên không có cập nhật nào được gửi tới. Chủ sở hữu của {account} có thể bỏ tạm ngưng trong phần cài đặt của GitHub.',
   'github.uninstalled.body':
-    'Noti App đã bị gỡ khỏi {account}, nên các tích hợp của nó không nhận được gì. Hãy kết nối lại GitHub để khôi phục quyền truy cập.',
+    'Noti không còn nhận cập nhật từ {account}, nên các tích hợp của nó không nhận được gì. Hoặc quản trị viên không gian làm việc đã ngắt kết nối nó tại đây, hoặc Noti App đã bị gỡ khỏi {account} trên GitHub.',
+  'github.uninstalled.again':
+    'Để kết nối lại {account}, trước hết hãy chắc chắn Noti App đã được gỡ khỏi tài khoản đó trên GitHub, rồi chọn Kết nối GitHub.',
+  'github.settingsLink': 'Mở phần cài đặt GitHub App của {account}',
+  'github.disconnect.open': 'Ngắt kết nối',
+  'github.disconnect.openFor': 'Ngắt kết nối {account}',
+  'github.disconnect.title': 'Ngắt kết nối {account} khỏi không gian làm việc này?',
+  'github.disconnect.stops':
+    'Noti ngừng nhận cập nhật GitHub từ {account} ngay lập tức. Các tích hợp dùng repository của tài khoản này sẽ bị tạm dừng, và nhật ký kiểm tra ghi lại lý do.',
+  'github.disconnect.keeps':
+    'Các nơi nhận tin nhắn và cài đặt webhook đã lưu của chúng vẫn được giữ. Không có gì bị xóa.',
+  'github.disconnect.github':
+    'Thao tác này không gỡ Noti App khỏi {account} trên GitHub. Để gỡ cả ở đó, hãy gỡ cài đặt trong phần cài đặt GitHub của {account}.',
+  'github.disconnect.again': 'Để kết nối lại {account} sau này, hãy gỡ App trên GitHub trước, rồi cài lại.',
+  'github.disconnect.keep': 'Giữ kết nối',
+  'github.disconnect.confirm': 'Ngắt kết nối',
+  'github.disconnect.working': 'Đang ngắt kết nối…',
+  'github.disconnect.error': 'Chúng tôi chưa ngắt kết nối được {account}. Hãy thử lại.',
+  'github.disconnect.done': { other: 'Đã ngắt kết nối {account}. {count} tích hợp đã được tạm dừng.' },
+  'github.disconnect.doneNone': 'Đã ngắt kết nối {account}. Không có tích hợp nào cần tạm dừng.',
+  'github.disconnect.adminOnly':
+    'Chỉ quản trị viên không gian làm việc mới ngắt kết nối được một tài khoản GitHub.',
   'github.resync.title': 'Danh sách repository của Noti có thể đã cũ',
   'github.resync.body':
     'GitHub đã đổi những repository của {account} mà Noti được phép thấy, nhưng chúng tôi chỉ nhận được một phần thay đổi. Hãy kết nối lại để làm mới danh sách.',
@@ -379,6 +400,8 @@ export const vi = {
     'Bản cài đặt GitHub đó đã được kết nối với một không gian làm việc Noti khác. Mỗi bản cài đặt chỉ thuộc về một nơi.',
   'github.return.installation_deleted':
     'Bản cài đặt đó đã bị gỡ khỏi GitHub trước khi kịp kết nối. Hãy cài App lại.',
+  'github.return.installation_disconnected':
+    'Bản cài đặt GitHub đó đã bị ngắt kết nối khỏi không gian làm việc này hoặc đã bị gỡ, nên không thể kết nối lại nguyên trạng. Hãy gỡ Noti App trên GitHub, rồi chọn Kết nối GitHub để cài lại.',
   'github.return.installation_too_large':
     'Bản cài đặt đó có hơn 1.000 repository được chọn, mà Noti chưa theo dõi được. Hãy chọn ít repository hơn, hoặc chọn tất cả repository, trong GitHub.',
   'github.return.workspace_access_lost':

@@ -54,6 +54,10 @@ export function detailValue(item: SummaryItem): string {
   if (key === 'destination' && isDestinationKind(value)) return destinationName(value);
   if (key === 'purgeAfter') return formatDateTime(value);
   if (key === 'role' || key === 'previousRole') return roleLabel(value);
+  // ADR 0058: the codes a GitHub disconnect records, in words.
+  if (key === 'reason' && value === 'github_disconnected') return t('audit.value.github_disconnected');
+  if (key === 'previousStatus' && (value === 'active' || value === 'suspended'))
+    return t(value === 'active' ? 'github.status.active' : 'github.status.suspended');
   return value;
 }
 

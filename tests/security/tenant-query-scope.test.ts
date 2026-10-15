@@ -233,10 +233,11 @@ const ALLOWLIST: readonly Allowed[] = [
   },
   {
     file: 'src/connectors/sources/github/install.ts',
-    includes: 'SELECT id,organization_id FROM github_installations WHERE installation_id=? AND app_id=?',
+    includes:
+      'SELECT id,organization_id,status FROM github_installations WHERE installation_id=? AND app_id=?',
     category: 'credential-keyed ingress',
     reason:
-      'Bind step: finds a possibly existing registry row for a verified installation, then REFUSES when its organization differs from the caller (installation_bound_elsewhere).',
+      'Bind step: finds a possibly existing registry row for a verified installation, then REFUSES when its organization differs from the caller (installation_bound_elsewhere) or this workspace stopped it (installation_disconnected).',
   },
   {
     file: 'src/connectors/sources/github/install.ts',

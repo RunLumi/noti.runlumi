@@ -566,6 +566,32 @@ export function installFetch(state: ApiState): void {
       );
       return Promise.resolve(json({ integration: updated }));
     }
+    // ADR 0058: admin only, as the server enforces it; the installation stops and its integrations pause.
+    const disconnect = /^\/api\/github\/installations\/([^/]+)\/disconnect$/.exec(path);
+    if (method === 'POST' && disconnect) {
+      if (state.me !== 'unauthenticated' && state.me.user.role !== 'admin')
+        return Promise.resolve(json({ error: 'Missing capability: source.revoke' }, 403));
+      const found = (state.installations as { id: string; account: string; status: string }[]).find(
+        (i) => i.id === disconnect[1],
+      );
+      if (!found) return Promise.resolve(json({ error: 'Not found' }, 404));
+      const alreadyStopped = found.status === 'uninstalled';
+      let paused = 0;
+      if (!alreadyStopped && Array.isArray(state.integrations)) {
+        const owner = `${found.account.toLowerCase()}/`;
+        state.integrations = (state.integrations as { repo?: string; enabled?: boolean }[]).map((i) => {
+          if (i.enabled !== true || !(i.repo ?? '').toLowerCase().startsWith(owner)) return i;
+          paused += 1;
+          return { ...i, enabled: false };
+        });
+      }
+      state.installations = (state.installations as { id: string }[]).map((i) =>
+        i.id === found.id ? { ...i, status: 'uninstalled' } : i,
+      );
+      return Promise.resolve(
+        json({ disconnected: true, account: found.account, alreadyStopped, pausedIntegrations: paused }),
+      );
+    }
     const revoke = /^\/api\/integrations\/([^/]+)\/revoke-credentials$/.exec(path);
     if (method === 'POST' && revoke) {
       const current = (state.integrations as { id: string }[]).find((i) => i.id === revoke[1]);

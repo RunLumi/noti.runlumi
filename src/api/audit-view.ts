@@ -44,6 +44,8 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
   'integration.update': {
     fields: 'list',
     enabled: 'boolean',
+    // Set when the change was a consequence of another action, e.g. `github_disconnected` (ADR 0058).
+    reason: 'string',
     eventTypes: 'list',
     repo: 'string',
     filters: 'list',
@@ -98,6 +100,13 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
     selection: 'string',
     added: 'list',
     removed: 'list',
+    // The delta was larger than Noti stores from one event; the stored set was cleared (ADR 0058).
+    overflow: 'boolean',
+  },
+  'github.installation.disconnect': {
+    account: 'string',
+    previousStatus: 'string',
+    pausedIntegrations: 'number',
   },
   'github.repository.out_of_scope': NONE,
   'github.webhook.refused': { reason: 'string' },

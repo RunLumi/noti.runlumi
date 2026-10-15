@@ -18,6 +18,7 @@ const RETURN_MESSAGES = {
   installation_admin_required: 'github.return.installation_admin_required',
   installation_bound_elsewhere: 'github.return.installation_bound_elsewhere',
   installation_deleted: 'github.return.installation_deleted',
+  installation_disconnected: 'github.return.installation_disconnected',
   installation_too_large: 'github.return.installation_too_large',
   workspace_access_lost: 'github.return.workspace_access_lost',
   github_unavailable: 'github.return.github_unavailable',

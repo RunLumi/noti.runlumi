@@ -542,7 +542,37 @@ export const githubApi = {
       throw new ApiError('Unexpected install URL', 500);
     return url.toString();
   },
+  /**
+   * Disconnect an installation from the workspace (ADR 0058). Admin only on the server. GitHub is not
+   * called: the App stays installed on the account until someone uninstalls it there.
+   */
+  disconnect: async (orgId: string, installationId: string): Promise<GithubDisconnect> => {
+    const body = await request(
+      withOrg(`/api/github/installations/${encodeURIComponent(installationId)}/disconnect`, orgId),
+      { method: 'POST', body: '{}' },
+    );
+    if (
+      !isRecord(body) ||
+      typeof body.pausedIntegrations !== 'number' ||
+      typeof body.alreadyStopped !== 'boolean' ||
+      typeof body.account !== 'string'
+    )
+      throw new ApiError('Unexpected response', 500);
+    return {
+      account: body.account,
+      pausedIntegrations: body.pausedIntegrations,
+      alreadyStopped: body.alreadyStopped,
+    };
+  },
 };
+
+export interface GithubDisconnect {
+  readonly account: string;
+  /** Integrations this disconnect paused; 0 when it was already stopped. */
+  readonly pausedIntegrations: number;
+  /** It was already disconnected here or uninstalled on GitHub: nothing changed. */
+  readonly alreadyStopped: boolean;
+}
 
 /**
  * `GET /api/public/signup-mode` (ADR 0048): whether this deployment creates accounts for anyone, only for invited

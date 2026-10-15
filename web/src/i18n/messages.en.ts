@@ -342,13 +342,39 @@ export const en = {
   'github.type.user': 'Personal account',
   'github.status.active': 'Connected',
   'github.status.suspended': 'Suspended',
-  'github.status.uninstalled': 'Uninstalled',
+  'github.status.uninstalled': 'Disconnected',
   'github.scope.all': 'All repositories of {account}, including new ones',
   'github.scope.selected': { one: '{count} selected repository', other: '{count} selected repositories' },
   'github.suspended.body':
     'The Noti App is suspended for {account} in GitHub, so no updates arrive from it. An owner of {account} can unsuspend it in GitHub’s settings.',
   'github.uninstalled.body':
-    'The Noti App was uninstalled from {account}, so its integrations receive nothing. Connect GitHub again to restore access.',
+    'Noti no longer accepts updates from {account}, so its integrations receive nothing. Either a workspace admin disconnected it here, or the Noti App was uninstalled from {account} on GitHub.',
+  'github.uninstalled.again':
+    'To connect {account} again, first make sure the Noti App is uninstalled from it on GitHub, then choose Connect GitHub.',
+  'github.settingsLink': 'Open the GitHub App settings for {account}',
+  // --- Disconnect (F70, ADR 0058) ------------------------------------------
+  'github.disconnect.open': 'Disconnect',
+  'github.disconnect.openFor': 'Disconnect {account}',
+  'github.disconnect.title': 'Disconnect {account} from this workspace?',
+  'github.disconnect.stops':
+    'Noti stops accepting GitHub updates from {account} at once. Integrations that use its repositories are paused, and the audit log records why.',
+  'github.disconnect.keeps':
+    'Your chat destinations and their saved webhook settings are kept. Nothing is deleted.',
+  'github.disconnect.github':
+    'This does not uninstall the Noti App from {account} on GitHub. To remove it there too, uninstall it in the GitHub settings for {account}.',
+  'github.disconnect.again':
+    'To connect {account} again later, uninstall the App on GitHub first, then install it again.',
+  'github.disconnect.keep': 'Keep connected',
+  'github.disconnect.confirm': 'Disconnect',
+  'github.disconnect.working': 'Disconnecting…',
+  'github.disconnect.error': 'We couldn’t disconnect {account}. Try again.',
+  'github.disconnect.done': {
+    one: '{account} is disconnected. {count} integration was paused.',
+    other: '{account} is disconnected. {count} integrations were paused.',
+  },
+  'github.disconnect.doneNone': '{account} is disconnected. No integration needed pausing.',
+  'github.disconnect.adminOnly':
+    'Only a workspace admin can disconnect a GitHub account from this workspace.',
   'github.resync.title': 'Noti’s repository list may be out of date',
   'github.resync.body':
     'GitHub changed which repositories of {account} Noti may see, and only part of the change reached us. Reconnect to refresh the list.',
@@ -370,6 +396,8 @@ export const en = {
     'That GitHub installation is already connected to another Noti workspace. It can belong to only one.',
   'github.return.installation_deleted':
     'That installation was removed from GitHub before it could be connected. Install the App again.',
+  'github.return.installation_disconnected':
+    'That GitHub installation was disconnected from this workspace or uninstalled, so it can’t be connected again as it is. Uninstall the Noti App on GitHub, then choose Connect GitHub to install it again.',
   'github.return.installation_too_large':
     'That installation includes more than 1,000 selected repositories, which Noti can’t track yet. Choose fewer repositories, or all repositories, in GitHub.',
   'github.return.workspace_access_lost':
