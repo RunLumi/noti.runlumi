@@ -12,6 +12,7 @@ import { validateCanonicalEvent } from '../../events/validate';
 import { isJsonContentType, readBodyCapped } from '../../lib/body';
 import { correlationField, currentCorrelationId } from '../../platform/correlation';
 import { log } from '../../platform/log';
+import { settleBackground } from '../../platform/background';
 import { ingressBatch } from '../../db/retry';
 import { dispatchOutbox } from '../../pipeline/outbox';
 import { createNoisePlanner } from '../../routing/noise-ingress';
@@ -357,7 +358,10 @@ export function providerWebhook(kind: ProviderKind) {
 
     if (queued > 0)
       c.executionCtx.waitUntil(
-        dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }),
+        settleBackground(
+          dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }),
+          'outbox_dispatch',
+        ),
       );
     // F50: an exact duplicate is 200, not 202 and never 4xx.
     const duplicate = targets.length > 0 && queued === 0 && held === 0;

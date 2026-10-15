@@ -11,6 +11,8 @@ import {
 } from '../../src/pipeline/credentials';
 import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 import { legacySeal } from '../support/legacy';
+import { RELEASE_BACKOFF_MS } from '../../src/delivery/claim';
+import { dispatchOutbox } from '../../src/pipeline/outbox';
 
 /**
  * The real delivery path, end to end over the real migrations: signed webhook → tenant
@@ -683,5 +685,152 @@ describe('/health', () => {
     expect(text).not.toContain('short');
     expect(JSON.parse(text)).toMatchObject({ ok: false, code: 'config_invalid' });
     expect((await bootReport(env)).credentials).toContain('KEK_V1');
+  });
+});
+
+/**
+ * ADR 0041 (slice 2.17, F169): the answer to the provider is only given once the event is durable,
+ * and the queue hand-off cannot get ahead of the outbox claim or of a failed send.
+ */
+interface OutboxRow {
+  id: string;
+  state: string;
+  lease_token: string | null;
+  not_before: number | null;
+  last_error_code: string | null;
+}
+
+function onlyOutbox(): OutboxRow {
+  const row = db.raw
+    .prepare('SELECT id,state,lease_token,not_before,last_error_code FROM notification_outbox')
+    .get() as OutboxRow | undefined;
+  if (!row) throw new Error('no outbox row');
+  return row;
+}
+
+/** A signed GitHub `issues` ingress request, with its background tasks left unawaited. */
+async function ingressWithoutWaiting(
+  event: Record<string, unknown>,
+  deliveryId: string,
+): Promise<{ res: Response; waits: Promise<unknown>[]; kickedWith: number[] }> {
+  const body = JSON.stringify(event);
+  const waits: Promise<unknown>[] = [];
+  // Outbox rows committed at the moment each background task was scheduled.
+  const kickedWith: number[] = [];
+  const ctx = {
+    waitUntil: (p: Promise<unknown>) => {
+      kickedWith.push(
+        (db.raw.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get() as { n: number }).n,
+      );
+      waits.push(p);
+    },
+    passThroughOnException: () => undefined,
+  } as unknown as ExecutionContext;
+  const res = await worker.fetch(
+    new Request('https://noti.test/webhooks/github', {
+      method: 'POST',
+      body,
+      headers: {
+        'content-type': 'application/json',
+        'x-hub-signature-256': await sign(body),
+        'x-github-event': 'issues',
+        'x-github-delivery': deliveryId,
+      },
+    }),
+    env,
+    ctx,
+  );
+  return { res, waits, kickedWith };
+}
+
+describe('ack ordering on the real ingress path (F169)', () => {
+  it('answers 202 with the outbox row already committed, and hands nothing to the queue before the answer', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    const { res, waits, kickedWith } = await ingressWithoutWaiting(issueEvent(100), 'ack-1');
+    expect(res.status).toBe(202);
+    // The dispatch kick is scheduled only after the event is committed: one row existed at kick time.
+    expect(kickedWith).toEqual([1]);
+    // The kick is a hint; the durable row above is what the 202 promises.
+    await Promise.all(waits);
+    expect(sent).toHaveLength(1);
+    expect(onlyOutbox().state).toBe('dispatched');
+  });
+
+  it('the queue send sees the row claimed by this dispatcher, and the dispatched mark follows the send', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    const statesAtSend: string[] = [];
+    env = makeEnv({
+      DELIVERY_QUEUE: {
+        send: (m: DeliveryMessage) => {
+          statesAtSend.push(onlyOutbox().state);
+          sent.push(m);
+          return Promise.resolve();
+        },
+      } as unknown as Queue<DeliveryMessage>,
+    });
+    await postWebhook(issueEvent(100), 'ack-2');
+    expect(statesAtSend).toEqual(['claimed']);
+    expect(onlyOutbox().state).toBe('dispatched');
+  });
+
+  it('answers 5xx, and hands nothing to the queue, when the durable write fails', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    const real = db.d1;
+    env = makeEnv({
+      DB: new Proxy(real, {
+        get: (target, prop, receiver) =>
+          prop === 'batch'
+            ? () => Promise.reject(new Error('D1 unavailable'))
+            : (Reflect.get(target, prop, receiver) as unknown),
+      }),
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const { res, waits, kickedWith } = await ingressWithoutWaiting(issueEvent(100), 'ack-3');
+    expect(kickedWith).toEqual([]);
+    error.mockRestore();
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(waits).toHaveLength(0);
+    expect(sent).toHaveLength(0);
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM notification_outbox').get()).toEqual({ n: 0 });
+  });
+});
+
+describe('rollback when the queue send fails (F169, F172)', () => {
+  it('leaves the outbox row claimable and marks no delivery sent; a later dispatch delivers it once', async () => {
+    installation('org-a', '100');
+    await integration('int-a', 'org-a', LARK_A);
+    let queueUp = false;
+    env = makeEnv({
+      DELIVERY_QUEUE: {
+        send: (m: DeliveryMessage) => {
+          if (!queueUp) return Promise.reject(new Error('queue unavailable'));
+          sent.push(m);
+          return Promise.resolve();
+        },
+      } as unknown as Queue<DeliveryMessage>,
+    });
+
+    const res = await postWebhook(issueEvent(100), 'rb-1');
+    expect(res.status).toBe(202);
+    const row = onlyOutbox();
+    expect(row).toMatchObject({ state: 'pending', lease_token: null, last_error_code: 'internal_error' });
+    expect(row.not_before).toBeGreaterThan(Date.now());
+    // The row is released, not sent: no delivery reached a terminal "sent" state, and no provider was called.
+    expect(delivery(row.id)?.state).toBe('pending');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Claimable again once the back-off has passed.
+    queueUp = true;
+    const later = Date.now() + RELEASE_BACKOFF_MS + 1000;
+    const report = await dispatchOutbox(env, { now: () => later, newLeaseToken: () => 'lease-rb-1' });
+    expect(report.dispatched).toBe(1);
+    const queued = sent.find((m) => m.id === row.id);
+    if (!queued) throw new Error('the retried dispatch did not reach the queue');
+    await consume([message(queued)]);
+    expect(delivery(row.id)?.state).toBe('sent');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

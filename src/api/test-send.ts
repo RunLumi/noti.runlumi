@@ -3,6 +3,7 @@ import { auditStatement, requestOrigin } from '../audit/audit';
 import { newLeaseToken } from '../delivery/claim';
 import { testDeliveryId } from '../delivery/ids';
 import type { Bindings, DeliveryMessage } from '../env';
+import { settleBackground } from '../platform/background';
 import { correlationField, currentCorrelationId } from '../platform/correlation';
 import { dispatchOutbox } from '../pipeline/outbox';
 import { hit } from '../security/rate-limit';
@@ -193,7 +194,10 @@ testSend.post('/:id/test', async (c) => {
   }
 
   c.executionCtx.waitUntil(
-    dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId: who.orgId }),
+    settleBackground(
+      dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId: who.orgId }),
+      'outbox_dispatch',
+    ),
   );
   return c.json({ deliveryId: id }, 202);
 });

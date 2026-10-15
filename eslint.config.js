@@ -8,6 +8,7 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
+import noUnguardedWaitUntil from './eslint-rules/no-unguarded-waituntil.mjs';
 
 export default tseslint.config(
   {
@@ -74,6 +75,16 @@ export default tseslint.config(
         'error',
         { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
       ],
+    },
+  },
+
+  // A background promise that rejects is lost silently (ADR 0041, F169). Scoped to production
+  // source: tests only mock `waitUntil`, and the rule is about what runs in the Worker.
+  {
+    files: ['src/**/*.ts'],
+    plugins: { local: { rules: { 'no-unguarded-waituntil': noUnguardedWaitUntil } } },
+    rules: {
+      'local/no-unguarded-waituntil': 'error',
     },
   },
 

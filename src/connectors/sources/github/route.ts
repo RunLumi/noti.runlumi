@@ -14,6 +14,7 @@ import { recordAudit } from '../../../audit/audit';
 import { handleLifecycle, LIFECYCLE_EVENTS } from './lifecycle';
 import { repositoryInScope, resolveTenant } from './tenant';
 import { log } from '../../../platform/log';
+import { settleBackground } from '../../../platform/background';
 import { buildCanonical } from '../build';
 import { boundedEventId } from '../../../events/id';
 import { ingressBatch } from '../../../db/retry';
@@ -437,7 +438,12 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // The prompt path; the every-minute reconciler is the recovery path (F174). Both are
   // safe together because each row's claim is atomic (F172).
   if (queued > 0)
-    c.executionCtx.waitUntil(dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }));
+    c.executionCtx.waitUntil(
+      settleBackground(
+        dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }),
+        'outbox_dispatch',
+      ),
+    );
   // F50: an exact duplicate is answered 200 (already accepted, stop retrying), never 202 and never 4xx.
   const duplicate = candidates > 0 && queued === 0 && held === 0;
   await recordIngressUsage(

@@ -37,7 +37,7 @@ The only destination with true server-side idempotency is **Lark's app API**, wh
 
 ## F169 — Durable acceptance before acknowledgement
 
-**Priority** P0 · **Status** 🟡 Batch-then-202 holds: delivery and outbox rows commit in one `db.batch()` before the 202 (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`); `waitUntil` wraps only the awaited-send dispatcher. Not built: tests for ack ordering and batch rollback, the no-queue-send-in-waitUntil lint rule, the dedup-claim step. · **Fixes** part of D4
+**Priority** P0 · **Status** 🟡 Batch-then-202 holds: delivery and outbox rows commit in one `db.batch()` before the 202 (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`); `waitUntil` wraps only the awaited-send dispatcher. Built in slice 2.17 (ADR 0041): ack-ordering and queue-failure rollback tests over the real ingress path (`tests/pipeline/delivery-path.test.ts`); the `local/no-unguarded-waituntil` ESLint rule (`eslint-rules/`, `tests/lint/`), which requires every `waitUntil` promise in `src/` to be settled (`settleBackground`, `src/platform/background.ts`) and fixed five violations. The rule checks settlement, not that a send sits outside `waitUntil`; the send is awaited in `outbox.ts`. Not built: the dedup-claim step. · **Fixes** part of D4
 
 **Story** As a customer, I want every event I was told was accepted to actually be stored, so
 that an `AGENTS.md`-compliant "acknowledge only after durable acceptance" is real.
@@ -449,7 +449,7 @@ it as standardized.
 
 ## F179 — Error classification
 
-**Priority** P0 · **Status** 🟡 Table-driven classification for Slack webhook, Lark codes, Discord (404 terminal, 401/403 gated on body code) and Teams (`src/connectors/destinations/*/classify.ts`, `tests/destinations/*.test.ts`). Not built: Slack Web API codes (no app adapter), `message_limit_exceeded` copy, disabling every destination on 410 (only Discord auto-pauses), a metric for unmapped errors (log field only). · **Fixes** D11 · **Extends** F13
+**Priority** P0 · **Status** 🟡 Table-driven classification for Slack webhook, Lark codes, Discord (404 terminal, 401/403 gated on body code) and Teams (`src/connectors/destinations/*/classify.ts`, `tests/destinations/*.test.ts`). Slack Web API `{ok:false, error}` tokens now classified in `src/connectors/destinations/slack/web-api.ts` (ADR 0041, `tests/destinations/slack-web-api.test.ts`), using only codes in `docs/DESTINATION_API_REFERENCE.md` §1.3; not wired, as there is no Web API send mode, and not re-checked against docs.slack.dev (blocked from the session on 2026-10-15). Not built: a Slack Web API send mode, `message_limit_exceeded` copy, disabling every destination on 410 (only Discord auto-pauses), a metric for unmapped errors (log field only). · **Fixes** D11 · **Extends** F13
 
 **Story** As an operator, I want permanent failures to stop burning retries, so that a
 revoked webhook does not cost me 13 attempts.

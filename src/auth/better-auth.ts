@@ -9,6 +9,7 @@ import * as schema from '../db/schema';
 import { sendAuthEmail, type EmailEnvironment } from './email';
 import { ac, roles, isOrgRole } from './permissions';
 import { log } from '../platform/log';
+import { settleBackground } from '../platform/background';
 import { createAuditHooks } from './audit-hooks';
 import { AUTH_DEFAULT_RATE, AUTH_RATE_RULES } from './rate-limit-rules';
 import {
@@ -46,7 +47,7 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
   const db = drizzle(env.DB, { schema });
   const send = (input: Parameters<typeof sendAuthEmail>[1]) => {
     const promise = sendAuthEmail(env, input);
-    if (executionCtx) executionCtx.waitUntil(promise);
+    if (executionCtx) executionCtx.waitUntil(settleBackground(promise, 'auth_email_send'));
     else return promise;
   };
   const audit = createAuditHooks(env.DB);

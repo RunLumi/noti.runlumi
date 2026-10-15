@@ -8,6 +8,7 @@ import type { Bindings, DeliveryMessage } from '../../../env';
 import { isJsonContentType, readBodyCapped } from '../../../lib/body';
 import { correlationField, currentCorrelationId } from '../../../platform/correlation';
 import { log } from '../../../platform/log';
+import { settleBackground } from '../../../platform/background';
 import { ingressBatch } from '../../../db/retry';
 import { dispatchOutbox } from '../../../pipeline/outbox';
 import { createNoisePlanner } from '../../../routing/noise-ingress';
@@ -280,7 +281,12 @@ export async function genericWebhook(c: Context<{ Bindings: Bindings }>): Promis
   }
 
   if (queued > 0)
-    c.executionCtx.waitUntil(dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }));
+    c.executionCtx.waitUntil(
+      settleBackground(
+        dispatchOutbox(c.env, { now: () => Date.now(), newLeaseToken, organizationId }),
+        'outbox_dispatch',
+      ),
+    );
   // F50: an exact duplicate is 200, not 202 and never 4xx.
   const duplicate = rows.results.length > 0 && queued === 0 && held === 0;
   await recordIngressUsage(
