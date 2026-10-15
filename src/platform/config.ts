@@ -3,6 +3,8 @@ import { parseKeyHex } from '../crypto/envelope';
 import { isEnvironmentName, isFingerprintKey, kekCheckValue } from '../crypto/fingerprint';
 import type { Bindings } from '../env';
 import { resolveWebhookTarget } from '../observability/alerts/sinks';
+import { unknownKeys } from './config-keys';
+import { log } from './log';
 
 /**
  * Boot-time configuration validation (F04, F10, F34), run at every entrypoint.
@@ -17,7 +19,8 @@ import { resolveWebhookTarget } from '../observability/alerts/sinks';
  *  | storage     | `DB`                                                               | every request except the probes; the queue consumer and `scheduled` |
  *  | credentials | `KEK_V1/2`, `KMS_ACTIVE_VERSION`, `ENVIRONMENT_NAME`, `KEK_CHECK_V<n>`, and a KEK that does not match its check value | writes under `/api/integrations` and `/api/sources` (they seal credentials), the queue consumer and `scheduled`. NOT webhook ingress, auth or any read |
  *  | queue       | `DELIVERY_QUEUE`                                                   | the queue consumer and `scheduled` (dispatch). Ingress already persists to the outbox without it |
- *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), `ALERT_WEBHOOK_URL` (optional, set but not a Slack, Discord, Lark or Teams webhook URL), a second KEK without a check value | nothing; `/health` lists them and only the job that needs the binding stands down |
+ *  | auth        | `APP_ORIGIN` (an absolute origin, https outside local development), `BETTER_AUTH_SECRET` (at least 32 characters, not a placeholder) | every `/api` and `/github` request except the probes (503). NOT webhook ingress, the queue consumer or `scheduled`: none of them needs a session |
+ *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), `ALERT_WEBHOOK_URL` (optional, set but not a Slack, Discord, Lark or Teams webhook URL), a second KEK without a check value, the GitHub App bindings (`GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) while a placeholder or malformed | nothing; the GitHub routes already fail closed on their own. Names reach only the log and the platform operator's readiness view, never an anonymous caller |
  */
 
 type ConfigEnv = Partial<
@@ -35,6 +38,12 @@ type ConfigEnv = Partial<
     | 'KEK_CHECK_V1'
     | 'KEK_CHECK_V2'
     | 'APP_ORIGIN'
+    | 'BETTER_AUTH_SECRET'
+    | 'GITHUB_WEBHOOK_SECRET'
+    | 'GITHUB_APP_ID'
+    | 'GITHUB_APP_SLUG'
+    | 'GITHUB_CLIENT_ID'
+    | 'GITHUB_CLIENT_SECRET'
   >
 >;
 
@@ -69,7 +78,85 @@ export interface ConfigAssessment {
   readonly storage: string[];
   readonly credentials: string[];
   readonly queue: string[];
+  /** Sign-in and the dashboard API cannot work: `APP_ORIGIN` or `BETTER_AUTH_SECRET`. */
+  readonly auth: string[];
   readonly warnings: string[];
+}
+
+/** An unset value, a deploy placeholder (`REPLACE_WITH_...`) or an all-zero stand-in. */
+const PLACEHOLDER = /^(|replace[-_ ].*|replace-me|changeme|0+)$/i;
+const isPlaceholder = (value: string | undefined): boolean =>
+  value === undefined || PLACEHOLDER.test(value.trim());
+
+/**
+ * An absolute origin and nothing else (no path, query, fragment or credentials), https unless it is a
+ * developer's own machine. Better Auth's base URL, the trusted origin and the CSRF check all use it.
+ */
+export function isUsableOrigin(origin: string | undefined): boolean {
+  if (!origin) return false;
+  try {
+    const url = new URL(origin);
+    const bare =
+      url.pathname === '/' &&
+      url.search === '' &&
+      url.hash === '' &&
+      url.username === '' &&
+      url.password === '';
+    const secure = url.protocol === 'https:' || (url.protocol === 'http:' && isLocalOrigin(origin));
+    return bare && secure && origin.replace(/\/$/, '') === url.origin;
+  } catch {
+    return false;
+  }
+}
+
+const BETTER_AUTH_SECRET_MIN_CHARS = 32;
+
+/**
+ * Looks like something copied from an example, not generated: a placeholder word at the start (the value in
+ * `.dev.vars.example` is `replace-with-at-least-32-characters-of-entropy`) or anywhere as a whole word.
+ */
+const EXAMPLE_SECRET =
+  /^(replace|change|example|sample|your|todo|dummy|default|placeholder)|changeme|entropy|placeholder/i;
+
+/** Fewer than 10 distinct characters, or one character making up over a third of it: a pattern, not a key. */
+function lowEntropy(value: string): boolean {
+  const counts = new Map<string, number>();
+  for (const ch of value) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  return counts.size < 10 || Math.max(...counts.values()) > value.length / 3;
+}
+
+/** A session secret that must not be accepted outside a developer's own machine. */
+export function isWeakAuthSecret(secret: string | undefined): boolean {
+  if (!secret || secret.length < BETTER_AUTH_SECRET_MIN_CHARS) return true;
+  return isPlaceholder(secret) || EXAMPLE_SECRET.test(secret) || lowEntropy(secret);
+}
+
+function authFaults(env: ConfigEnv): string[] {
+  const faults: string[] = [];
+  if (!isUsableOrigin(env.APP_ORIGIN)) faults.push('APP_ORIGIN');
+  const secret = env.BETTER_AUTH_SECRET;
+  // A developer's own machine may use a simple value; anywhere else an example or repetitive one is refused.
+  const local = env.ENVIRONMENT_NAME === 'development' && isLocalOrigin(env.APP_ORIGIN);
+  const unusable = local ? !secret || secret.length < BETTER_AUTH_SECRET_MIN_CHARS : isWeakAuthSecret(secret);
+  if (unusable) faults.push('BETTER_AUTH_SECRET');
+  return faults;
+}
+
+/**
+ * The GitHub App bindings, as warnings: while any is a placeholder the install flow and webhook route
+ * answer 503 on their own (src/connectors/sources/github), and `scripts/predeploy-check.mjs` allows them
+ * unset because the feature stays closed by design. They are named so an operator sees WHICH is missing.
+ */
+function githubFaults(env: ConfigEnv): string[] {
+  const faults: string[] = [];
+  if (isPlaceholder(env.GITHUB_WEBHOOK_SECRET)) faults.push('GITHUB_WEBHOOK_SECRET');
+  if (isPlaceholder(env.GITHUB_APP_ID) || !/^[1-9][0-9]*$/.test(env.GITHUB_APP_ID ?? ''))
+    faults.push('GITHUB_APP_ID');
+  if (isPlaceholder(env.GITHUB_APP_SLUG) || !/^[a-z0-9-]{1,100}$/i.test(env.GITHUB_APP_SLUG ?? ''))
+    faults.push('GITHUB_APP_SLUG');
+  if (isPlaceholder(env.GITHUB_CLIENT_ID)) faults.push('GITHUB_CLIENT_ID');
+  if (isPlaceholder(env.GITHUB_CLIENT_SECRET)) faults.push('GITHUB_CLIENT_SECRET');
+  return faults;
 }
 
 /**
@@ -115,17 +202,20 @@ export function assessConfig(env: ConfigEnv): ConfigAssessment {
   }
 
   if (env.ENCRYPTION_KEY && !HEX_64.test(env.ENCRYPTION_KEY)) warnings.push('ENCRYPTION_KEY');
-  if (env.FINGERPRINT_KEY && !isFingerprintKey(env.FINGERPRINT_KEY)) warnings.push('FINGERPRINT_KEY');
+  // Without a valid key no credential fingerprint is computed, so a revoked secret is never destroyed outside
+  // development (it would otherwise be possible to paste the burned value back unnoticed): named so it is seen.
+  if (!isFingerprintKey(env.FINGERPRINT_KEY)) warnings.push('FINGERPRINT_KEY');
   // Optional: unset is fine (the log sink still runs); set but unusable means alerts reach the log only.
   if (env.ALERT_WEBHOOK_URL && resolveWebhookTarget(env.ALERT_WEBHOOK_URL, env.APP_ORIGIN) === null)
     warnings.push('ALERT_WEBHOOK_URL');
-  return { storage, credentials: [...new Set(credentials)], queue, warnings };
+  warnings.push(...githubFaults(env));
+  return { storage, credentials: [...new Set(credentials)], queue, auth: authFaults(env), warnings };
 }
 
 /** Every required-binding fault, in tier order (F04). Warnings are not included. */
 export function assertConfig(env: ConfigEnv): string[] {
   const a = assessConfig(env);
-  return [...a.storage, ...a.credentials, ...a.queue];
+  return [...a.storage, ...a.credentials, ...a.queue, ...a.auth];
 }
 
 /**
@@ -152,16 +242,24 @@ export async function kekMismatches(env: ConfigEnv): Promise<string[]> {
 }
 
 export interface BootReport extends ConfigAssessment {
-  /** Every required-binding fault: storage, then credentials, then queue. Empty when the Worker may serve. */
+  /**
+   * Faults that stop the queue consumer and `scheduled`: storage, then credentials, then queue. An `auth`
+   * fault is NOT in here (neither entrypoint needs a session); it is in {@link BootReport.auth}.
+   */
   readonly names: readonly string[];
   /** `kek_environment_mismatch` when a well-formed KEK does not match this environment's check value. */
   readonly code: 'config_invalid' | 'kek_environment_mismatch' | null;
+  /** Names in `env` this Worker does not read: a likely typo in a secret or var. Names only, bounded. */
+  readonly unknownKeys: readonly string[];
 }
 
 const memo = new WeakMap<object, Promise<BootReport>>();
 
 async function compute(env: Bindings): Promise<BootReport> {
   const a = assessConfig(env);
+  // Once per isolate (the report is memoised per env object). Names only, never a value.
+  const unknown = unknownKeys(env);
+  if (unknown.length > 0) log('warn', 'config_unknown_keys', { unknown_bindings: unknown });
   let credentials = a.credentials;
   let code: BootReport['code'] = null;
   if (credentials.length > 0) code = 'config_invalid';
@@ -183,9 +281,11 @@ async function compute(env: Bindings): Promise<BootReport> {
     storage: a.storage,
     credentials,
     queue: a.queue,
+    auth: a.auth,
     warnings: a.warnings,
+    unknownKeys: unknown,
     names,
-    code: names.length > 0 ? (code ?? 'config_invalid') : null,
+    code: names.length > 0 ? (code ?? 'config_invalid') : a.auth.length > 0 ? 'config_invalid' : null,
   };
 }
 
@@ -202,7 +302,9 @@ export function bootReport(env: Bindings): Promise<BootReport> {
     storage: [],
     credentials: ['KEK_CHECK'],
     queue: [],
+    auth: [],
     warnings: [],
+    unknownKeys: [],
     names: ['KEK_CHECK'],
     code: 'config_invalid',
   }));

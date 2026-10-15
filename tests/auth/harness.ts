@@ -63,7 +63,7 @@ export function createAuthHarness(): AuthHarness {
   const env = {
     ...BOOT_ENV,
     DB: db.d1,
-    BETTER_AUTH_SECRET: 'x'.repeat(48),
+    BETTER_AUTH_SECRET: 'auth-harness-secret-Zq7Kd2mV9xR4tLw8',
     APP_ORIGIN: ORIGIN,
     AUTH_FROM_EMAIL: 'noti@noti.test',
     AUTH_EMAIL: {

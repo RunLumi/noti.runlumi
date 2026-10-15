@@ -155,6 +155,10 @@ export interface DeliveryRowRecord {
   integration_destination_host: string | null;
   integration_enabled: number | null;
   integration_quarantined_at: string | null;
+  /** `revoked` when the customer revoked the credential (F40); anything else is a quarantine of ours. */
+  integration_quarantine_reason: string | null;
+  /** Non-secret fingerprint of the integration's CURRENT credential (F39); null when none was computed. */
+  integration_fingerprint: string | null;
   latest_replay_state: string | null;
   /** Held events this delivery carries (noise control); 0 for an ordinary delivery. */
   held_count: number | null;
@@ -173,11 +177,12 @@ export interface DeliveryErrorView {
  * Whether a replay could actually be delivered: the consumer dead-letters a message whose
  * integration is gone, paused or has unreadable credentials, so we do not offer one.
  */
-export type IntegrationStatus = 'available' | 'missing' | 'disabled' | 'quarantined';
+export type IntegrationStatus = 'available' | 'missing' | 'disabled' | 'quarantined' | 'revoked';
 
 export function integrationStatus(row: DeliveryRowRecord): IntegrationStatus {
   if (row.integration_name === null && row.integration_repo === null) return 'missing';
-  if (row.integration_quarantined_at !== null) return 'quarantined';
+  if (row.integration_quarantined_at !== null)
+    return row.integration_quarantine_reason === 'revoked' ? 'revoked' : 'quarantined';
   return row.integration_enabled === 1 ? 'available' : 'disabled';
 }
 
@@ -189,6 +194,8 @@ export interface DeliveryView {
     readonly repo: string | null;
     readonly destination: string | null;
     readonly destinationHost: string | null;
+    /** Fingerprint of the integration's current credential (F39), to tell which one a failure concerns; null if none. */
+    readonly credentialFingerprint: string | null;
   };
   /** False once the integration was deleted: history stays, the integration does not. */
   readonly integrationExists: boolean;
@@ -294,6 +301,7 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
       repo: row.integration_repo,
       destination: row.integration_destination,
       destinationHost: row.integration_destination_host,
+      credentialFingerprint: row.integration_fingerprint,
     },
     integrationExists: row.integration_name !== null || row.integration_repo !== null,
     integrationStatus: status,

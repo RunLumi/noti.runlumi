@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index';
+import { bootReport } from '../../src/platform/config';
 import type { Bindings, DeliveryMessage } from '../../src/env';
 import { keyringFromEnv } from '../../src/crypto/keyring-env';
 import {
@@ -39,6 +40,8 @@ function makeEnv(over: Partial<Bindings> = {}): Bindings {
     } as unknown as Queue<DeliveryMessage>,
     GITHUB_WEBHOOK_SECRET: HMAC_FIXTURE,
     GITHUB_APP_ID: APP_ID,
+    APP_ORIGIN: 'https://noti.test',
+    BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
     ENCRYPTION_KEY: K_LEGACY,
     KEK_V1: K1,
     KEK_V2: '',
@@ -591,6 +594,7 @@ describe('credential maintenance jobs', () => {
     });
     expect(await credentialStatus(db.d1, 2)).toEqual({
       legacyRemaining: 0,
+      revokedKeysRemaining: 0,
       staleKekRemaining: 0,
       quarantined: 0,
       revoked: 0,
@@ -617,6 +621,7 @@ describe('credential job safety', () => {
       staleKekRemaining: 0,
       quarantined: 0,
       revoked: 0,
+      revokedKeysRemaining: 0,
     });
   });
 
@@ -658,22 +663,25 @@ describe('credential job safety', () => {
 });
 
 describe('/health', () => {
-  it('warns about a malformed optional legacy key without refusing to serve', async () => {
+  it('a malformed optional legacy key warns the operator and does not refuse to serve', async () => {
     env = makeEnv({ ENCRYPTION_KEY: 'nope' });
     const res = await worker.fetch(new Request('https://noti.test/health'), env, {} as ExecutionContext);
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text).toContain('ENCRYPTION_KEY');
+    expect(text).not.toContain('ENCRYPTION_KEY');
     expect(text).not.toContain('nope');
-    expect(JSON.parse(text)).toMatchObject({ ok: true, warnings: ['ENCRYPTION_KEY'] });
+    expect(JSON.parse(text)).toEqual({ ok: true, service: 'lumi-noti' });
+    expect((await bootReport(env)).warnings).toContain('ENCRYPTION_KEY');
   });
 
-  it('names the misconfigured key binding without revealing a value', async () => {
+  it('refuses with a coarse code: the misconfigured key binding is named only to the operator', async () => {
     env = makeEnv({ KEK_V1: 'short' });
     const res = await worker.fetch(new Request('https://noti.test/health'), env, {} as ExecutionContext);
     expect(res.status).toBe(503);
     const text = await res.text();
-    expect(text).toContain('KEK_V1');
+    expect(text).not.toContain('KEK_V1');
     expect(text).not.toContain('short');
+    expect(JSON.parse(text)).toMatchObject({ ok: false, code: 'config_invalid' });
+    expect((await bootReport(env)).credentials).toContain('KEK_V1');
   });
 });

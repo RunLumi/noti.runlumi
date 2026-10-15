@@ -492,7 +492,11 @@ describe('fails closed', () => {
     });
     const res = await get('/api/audit', 'alice', { DB: leaky });
     expect(res.status).toBe(503);
-    expect(JSON.stringify(await res.json())).not.toContain('a1');
+    // No event of the other workspace is returned. Assert on the field, not on a substring of the body, which
+    // also carries a random correlation id that can contain 'a1'.
+    const body = await res.json<Record<string, unknown>>();
+    expect(body).not.toHaveProperty('events');
+    expect(JSON.stringify(body)).not.toMatch(/"id":"a1"/);
     expect(error.mock.calls.map((c) => String(c[0])).join('')).toContain('tenant_mismatch');
     error.mockRestore();
   });

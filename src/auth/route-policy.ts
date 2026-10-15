@@ -283,6 +283,15 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
   },
   {
     method: 'GET',
+    path: '/api/observability/readiness',
+    file: 'src/api/observability.ts',
+    handler: local('/readiness'),
+    // Names no workspace: the caller's own user id from the verified session must be on the secret
+    // PLATFORM_OPERATOR_USER_IDS (src/observability/operator.ts); anyone else gets a 404.
+    access: { kind: 'self' },
+  },
+  {
+    method: 'GET',
     path: '/api/deliveries/:id',
     file: 'src/api/deliveries.ts',
     handler: local('/:id'),

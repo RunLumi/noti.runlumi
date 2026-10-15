@@ -21,10 +21,16 @@ export interface DeliveryError {
   readonly userActionable: boolean;
 }
 
-export type IntegrationStatus = 'available' | 'missing' | 'disabled' | 'quarantined';
+export type IntegrationStatus = 'available' | 'missing' | 'disabled' | 'quarantined' | 'revoked';
 
 export function isIntegrationStatus(value: unknown): value is IntegrationStatus {
-  return value === 'available' || value === 'missing' || value === 'disabled' || value === 'quarantined';
+  return (
+    value === 'available' ||
+    value === 'missing' ||
+    value === 'disabled' ||
+    value === 'quarantined' ||
+    value === 'revoked'
+  );
 }
 
 export interface DeliveryItem {
@@ -35,6 +41,8 @@ export interface DeliveryItem {
     readonly repo: string | null;
     readonly destination: DestinationKind | null;
     readonly destinationHost: string | null;
+    /** Fingerprint of the integration's CURRENT webhook URL (F39); null when none. */
+    readonly credentialFingerprint: string | null;
   };
   readonly integrationExists: boolean;
   /** Why a redelivery would not be delivered, or `available`. */
@@ -214,6 +222,8 @@ export function parseDelivery(value: unknown): DeliveryItem {
       repo: typeof integration.repo === 'string' ? integration.repo : null,
       destination,
       destinationHost: typeof integration.destinationHost === 'string' ? integration.destinationHost : null,
+      credentialFingerprint:
+        typeof integration.credentialFingerprint === 'string' ? integration.credentialFingerprint : null,
     },
     integrationExists: value.integrationExists,
     integrationStatus: value.integrationStatus,

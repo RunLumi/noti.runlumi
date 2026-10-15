@@ -63,12 +63,20 @@ const ALLOWED_FRAGMENTS: Readonly<Record<string, string>> = {
  * a UUID) and `tests/security/kek-destroy-check.test.ts` feeds hostile input to every one.
  */
 const SCRIPT_FRAGMENTS: Readonly<Record<string, string>> = {
-  "dependents('integrations', v)": 'v is assertVersion()',
+  'integrationDependents(v, options.legacyOld === true)':
+    'v is assertVersion(); the boolean only chooses whether integrations_old is added',
   "dependents('sources', v)": 'v is assertVersion()',
-  "dependents('integrations', version)": 'version is assertVersion()',
+  'integrationDependents(version, legacyOld)':
+    'version is assertVersion(); legacyOld is a boolean from the operator database check',
   "dependents('sources', version)": 'version is assertVersion()',
   'entry.actor': 'matched against [A-Za-z0-9@._-]{1,80} first',
   id: 'a UUID matched against [0-9a-f-]{36}',
+  actor: 'assertActor(): [A-Za-z0-9@._-]{1,80}, in scripts/force-destroy-revoked.mjs',
+  auditId: 'a UUID from crypto, re-validated by assertName() in scripts/force-destroy-revoked.mjs',
+  org: 'assertName(): [A-Za-z0-9_-]{1,64}, in scripts/force-destroy-revoked.mjs',
+  where:
+    'a WHERE clause assembled in scripts/force-destroy-revoked.mjs from assertName() ids and an integer cutoff, never a request',
+  kind: "the literal 'integration' or 'source', chosen by which flag the operator passed (scripts/force-destroy-revoked.mjs)",
   metadata: 'JSON.stringify of an integer, a closed reason and an integer',
   version: 'assertVersion()',
   hex: 'an 8-character upper-case hex of assertVersion()',
@@ -363,5 +371,85 @@ describe('src/ SQL uses bound parameters only (F09)', () => {
     const inScripts = used(scriptFiles);
     expect(Object.keys(ALLOWED_FRAGMENTS).filter((k) => !inSrc.has(k))).toEqual([]);
     expect(Object.keys(SCRIPT_FRAGMENTS).filter((k) => !inScripts.has(k) && !inSrc.has(k))).toEqual([]);
+  });
+});
+
+/**
+ * `no_query_exceeds_100_bound_parameters` (docs/specs/01-platform-runtime.md F09, ADR 0036). D1 allows 100
+ * bound parameters per statement. A static count of the placeholders in every SQL text, plus the
+ * arithmetic of the builders that size a placeholder list at run time.
+ */
+const D1_MAX_BOUND_PARAMETERS = 100;
+
+/** Placeholders a SQL text binds: the highest `?N`, or the number of bare `?`, whichever is larger. */
+export function boundParameterCount(sql: string): number {
+  const text = sql.replace(/\$\{[^}]*\}/g, ''); // interpolated fragments are sized by the builders below
+  const numbered = Math.max(0, ...Array.from(text.matchAll(/\?(\d+)/g), (m) => Number(m[1])));
+  const bare = (text.match(/\?(?!\d)/g) ?? []).length;
+  return Math.max(numbered, bare);
+}
+
+describe('no_query_exceeds_100_bound_parameters', () => {
+  it('counts numbered and bare placeholders, and ignores interpolated fragments', () => {
+    expect(boundParameterCount('SELECT 1 WHERE a=? AND b=? AND c=?')).toBe(3);
+    expect(boundParameterCount('UPDATE t SET a=?1 WHERE b=?7 AND c=?1')).toBe(7);
+    expect(boundParameterCount('SELECT 1 WHERE id IN (${chunk.map(() => "?").join(",")})')).toBe(0);
+    expect(boundParameterCount('SELECT 1')).toBe(0);
+  });
+
+  it('no SQL text in src/ binds more than 100 parameters', () => {
+    const over: string[] = [];
+    let counted = 0;
+    for (const file of srcFiles) {
+      const source = readFileSync(file, 'utf8');
+      for (const site of sqlSites(source)) {
+        if (site.kind !== 'template' && site.kind !== 'literal') continue;
+        const n = boundParameterCount(site.text);
+        if (n > 0) counted++;
+        if (n > D1_MAX_BOUND_PARAMETERS)
+          over.push(`${relative(root, file)}: ${n} parameters: ${site.text.slice(0, 60)}`);
+      }
+    }
+    expect(over).toEqual([]);
+    expect(counted).toBeGreaterThan(100); // the scan is not vacuous
+  });
+
+  it('the operator scripts stay under the limit too', () => {
+    const over = scriptFiles.flatMap((file) =>
+      sqlSites(readFileSync(file, 'utf8'))
+        .filter((s) => s.kind === 'template' || s.kind === 'literal')
+        .filter((s) => boundParameterCount(s.text) > D1_MAX_BOUND_PARAMETERS)
+        .map((s) => `${relative(root, file)}: ${s.text.slice(0, 60)}`),
+    );
+    expect(over).toEqual([]);
+  });
+
+  /** A constant declared in a source file, read from the text so a changed value fails here. */
+  const constantIn = (file: string, name: string): number => {
+    const found = new RegExp(`(?:const|let)\\s+${name}\\s*(?::[^=]+)?=\\s*(\\d+)`).exec(
+      readFileSync(join(root, file), 'utf8'),
+    );
+    if (!found) throw new Error(`${name} not found in ${file}`);
+    return Number(found[1]);
+  };
+
+  it('the run-time sized placeholder lists stay under the limit at their largest chunk', () => {
+    const repos = 'src/connectors/sources/' + 'git' + 'hub/repos.ts';
+    // INSERT ... VALUES (?,?,?) per row.
+    expect(constantIn(repos, 'ROWS_PER_STATEMENT') * 3).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    // DELETE ... WHERE installation_row_id=? AND repository_id IN (<chunk>)
+    const deleteChunk = Number(/chunks\(repos, (\d+)\)/.exec(readFileSync(join(root, repos), 'utf8'))?.[1]);
+    expect(deleteChunk + 1).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    // The noise-release claim binds its predicate twice (outer and subselect) plus four fixed values and
+    // the token, the expiry and the LIMIT: 2 * (4 + keys) + 3.
+    const keys = constantIn('src/pipeline/noise-release.ts', 'CLAIM_KEYS_PER_CALL');
+    expect(2 * (4 + keys) + 3).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+  });
+
+  it('a digest scope binds at most the listed group keys, which the renderer bounds', async () => {
+    const { DIGEST_LIST_MAX, DIGEST_MAX_PARTS } = await import('../../src/routing/noise-render');
+    // `keys` of one part plus `leftoverOutside` (every key of every part) plus the other fixed values.
+    const listed = DIGEST_LIST_MAX * DIGEST_MAX_PARTS;
+    expect(DIGEST_LIST_MAX + listed + 10).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
   });
 });

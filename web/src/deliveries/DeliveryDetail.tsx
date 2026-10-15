@@ -109,6 +109,12 @@ function Facts({ delivery }: { readonly delivery: DeliveryItem }) {
             {delivery.integration.destinationHost ? ` · ${delivery.integration.destinationHost}` : ''}
           </dd>
         </div>
+        {delivery.integration.credentialFingerprint && (
+          <div>
+            <dt>{t('delivery.detail.fingerprint')}</dt>
+            <dd className="mono-wrap">{delivery.integration.credentialFingerprint}</dd>
+          </div>
+        )}
         <div>
           <dt>{t('delivery.detail.attempts')}</dt>
           <dd>{delivery.attempts}</dd>

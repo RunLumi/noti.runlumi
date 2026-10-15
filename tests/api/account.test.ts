@@ -127,6 +127,7 @@ beforeEach(() => {
   env = {
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
+    BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
     AUTH_FROM_EMAIL: 'noreply@example.test',
     AUTH_EMAIL: {
       send: (message: { to: string; subject: string; text: string }) => {

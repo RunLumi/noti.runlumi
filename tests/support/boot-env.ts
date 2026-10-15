@@ -14,4 +14,6 @@ export const BOOT_ENV = {
   ENVIRONMENT_NAME: 'staging',
   KEK_CHECK_V1: '4464ea2121d3a99ebd188370f1ef6cd0',
   FINGERPRINT_KEY: '44'.repeat(32),
+  // APP_ORIGIN and BETTER_AUTH_SECRET are asserted at boot too (ADR 0036); each test adds its own origin.
+  BETTER_AUTH_SECRET: 'boot-env-better-auth-secret-0123456789',
 } satisfies Partial<Bindings>;

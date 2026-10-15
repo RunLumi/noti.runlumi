@@ -195,7 +195,9 @@ lifecycle.get('/export', async (c) => {
       .bind(who.orgId),
     db
       .prepare(
-        `SELECT id,name,repo,source_id,event_types,filters_json,noise_json,destination,destination_host,enabled,created_at,updated_at
+        `SELECT id,name,repo,source_id,event_types,filters_json,noise_json,destination,destination_host,enabled,created_at,updated_at,
+           credential_fingerprint,
+           (credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason = 'revoked') AS credentials_revoked
          FROM integrations WHERE organization_id=? ORDER BY created_at`,
       )
       .bind(who.orgId),
@@ -203,7 +205,8 @@ lifecycle.get('/export', async (c) => {
     db
       .prepare(
         `SELECT id,kind,name,endpoint_id,auth_mode,livemode,enabled,created_at,updated_at,last_received_at,
-           secret_rotated_at,dropped_events,last_dropped_at
+           secret_rotated_at,dropped_events,last_dropped_at,credential_fingerprint,
+           (credentials_revoked_at IS NOT NULL) AS credentials_revoked
          FROM sources WHERE organization_id=? ORDER BY created_at`,
       )
       .bind(who.orgId),
