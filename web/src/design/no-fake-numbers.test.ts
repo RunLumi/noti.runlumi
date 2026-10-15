@@ -34,6 +34,8 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
     'Used as a yes or no (the person already has a workspace to switch to). The number is never displayed.',
   'integrations/noise/NoiseEditor.tsx::numeric-fallback::GROUP_WINDOW_CHOICES.find((c) => String(c.value) === e.target.value)?.value ?? 0':
     'Form state for the grouping-window select, where 0 is the choice "Off". It is a setting, not a figure on screen.',
+  'integrations/noise/NoiseEditor.tsx::numeric-fallback::MAX_WAIT_CHOICES.find((c) => String(c.value) === e.target.value)?.value ?? 0':
+    'Form state for the maximum-wait select (ADR 0043), where 0 is the choice "Off". It is a setting, not a figure on screen.',
 };
 
 /** Catalogue keys that state the fixed summary window. Their number is checked against the server below. */
