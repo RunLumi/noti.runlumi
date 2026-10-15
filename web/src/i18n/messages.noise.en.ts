@@ -31,6 +31,13 @@ export const noiseEn = {
   'noise.group.w300': '5 minutes',
   'noise.group.w900': '15 minutes',
   'noise.group.w3600': '1 hour',
+  'noise.maxWait.label': 'Send at least every',
+  'noise.maxWait.hint':
+    'When this is on, each new update restarts the wait, but Noti sends the combined message anyway this long after the first one, even if more are still coming.',
+  'noise.maxWait.off': 'Off: send when the combine time is up',
+  'noise.maxWait.w900': '15 minutes',
+  'noise.maxWait.w3600': '1 hour',
+  'noise.maxWait.w14400': '4 hours',
 
   'noise.digest.title': 'Summaries',
   'noise.digest.hint': 'Save non-urgent updates and send them as one summary on a schedule.',
@@ -54,6 +61,8 @@ export const noiseEn = {
     'Failures and other urgent updates are always sent right away, even during quiet hours.',
   'noise.preview.group':
     'Updates about the same thing that arrive within {window} are sent as one message with a count.',
+  'noise.preview.maxWait':
+    'While updates keep coming, each one restarts the wait, and the message is sent about {max} after the first one at the latest. Quiet hours can still hold it longer.',
   'noise.preview.digestHourly': 'Non-urgent updates are saved and sent as one summary every hour.',
   'noise.preview.digestDaily': 'Non-urgent updates are saved and sent as one summary every day at {time}.',
   'noise.preview.resolution': 'When a failing workflow passes again, Noti sends a “Resolved” message.',
@@ -84,6 +93,7 @@ export const noiseEn = {
   'noise.error.timezone': 'Choose a time zone from the list.',
   'noise.error.resolution':
     'Choose “workflow run failed” or “timed out” among this integration’s updates first.',
+  'noise.error.maxWait': 'Choose one of the listed times, with combining turned on.',
   'noise.error.generic': 'These settings could not be saved. Check the highlighted fields.',
 
   'noise.delete.waiting': {

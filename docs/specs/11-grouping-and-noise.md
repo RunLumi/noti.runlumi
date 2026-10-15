@@ -82,7 +82,7 @@ structurally impossible rather than merely filtered.
 
 ## F142 — Group window
 
-**Priority** P1 · **Status** 🟡 Off/1/5/15/60 min window, default off, computed preview (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); "Send at least every" maximum wait (15 min, 1 h, 4 h) in the decision, the stored document (`maxWaitSec`) and the API (ADR 0043, `tests/noise/ingress.test.ts`); not yet offered in the dashboard form, which preserves it
+**Priority** P1 · **Status** 🟡 Off/1/5/15/60 min window, default off, computed preview (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); "Send at least every" maximum wait (15 min, 1 h, 4 h) in the decision, the stored document (`maxWaitSec`) and the API (ADR 0043, `tests/noise/ingress.test.ts`) and offered in the dashboard form only while combining is on (ADR 0043 "Dashboard control", `web/src/integrations/noise/noise.test.tsx`); no browser pass or real-provider acceptance yet
 
 **Story** As a user, I want a window I can reason about, so that grouping is predictable.
 

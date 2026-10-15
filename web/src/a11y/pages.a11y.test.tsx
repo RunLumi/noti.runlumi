@@ -109,7 +109,7 @@ const SCENARIOS: readonly Scenario[] = [
     ready: () => screen.findByText(/Recent decisions|Các quyết định gần đây/),
   },
   {
-    name: 'integration settings (quiet hours, summaries and waiting updates)',
+    name: 'integration settings (quiet hours, combining with "send at least every", summaries and waiting updates)',
     path: '/integrations/int_6',
     ready: () => screen.findByText(/3 updates are waiting|3 cập nhật đang chờ/),
   },

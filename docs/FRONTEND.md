@@ -258,6 +258,14 @@ the browser has it). Design decisions, so they are reviewable:
   when the browser cannot list them.
 - The recent-decisions list shows a saved update as "Saved for later" with a sentence, and an
   urgent bypass as such.
+- **"Send at least every"** (maximum wait, [ADR 0043](adr/0043-noise-max-wait-and-summary-rendering.md),
+  "Dashboard control"): a select of Off / 15 minutes / 1 hour / 4 hours built from the server's
+  closed list, inside "Combine bursts" and shown only while a combine window is chosen. One hint
+  sentence says that each new update restarts the wait but the message is sent anyway that long
+  after the first one; the preview adds one sentence ("… at the latest. Quiet hours can still hold
+  it longer."). Turning combining off saves it as off; the draft keeps the choice meanwhile. A
+  server refusal lands on the control. Covered by the section and model tests and the `int_6` axe
+  page scenario in both languages; no browser pass.
 - Every component calls `useLocale()`; every English id in `messages.noise.en.ts` has a
   Vietnamese string in `messages.noise.vi.ts` (the catalogue tests enforce both).
 - **Verification:** jsdom tests for the model and the section (what a save sends, validation,

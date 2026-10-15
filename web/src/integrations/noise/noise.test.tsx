@@ -86,6 +86,33 @@ describe('showing the saved settings', () => {
     expect(ui.getByText(/Failures and other urgent updates are always sent right away/)).toBeTruthy();
   });
 
+  it('shows "Send at least every" with its saved value, its one-sentence hint linked, and its preview', async () => {
+    await renderApp('/integrations/int_6');
+    const root = await section();
+    const ui = within(root);
+    const max = ui.getByLabelText<HTMLSelectElement>('Send at least every');
+    expect(max.value).toBe('3600');
+    expect([...max.options].map((o) => o.text)).toEqual([
+      'Off: send when the combine time is up',
+      '15 minutes',
+      '1 hour',
+      '4 hours',
+    ]);
+    const hint = ui.getByText(/each new update restarts the wait/);
+    expect(max.getAttribute('aria-describedby')).toContain(hint.id);
+    expect(ui.getByText(/sent about 1 hour after the first one at the latest/)).toBeTruthy();
+  });
+
+  it('offers "Send at least every" only while updates are combined', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_1');
+    const root = await section();
+    const ui = within(root);
+    expect(ui.queryByLabelText('Send at least every')).toBeNull();
+    await user.selectOptions(ui.getByLabelText('Combine updates for'), '300');
+    expect(ui.getByLabelText<HTMLSelectElement>('Send at least every').value).toBe('0');
+  });
+
   it('says what is waiting and when it will be sent', async () => {
     await renderApp('/integrations/int_6');
     const root = await section();
@@ -158,6 +185,7 @@ describe('editing and saving', () => {
     await user.click(ui.getByLabelText('Save updates during quiet hours'));
     await user.selectOptions(ui.getByLabelText('Time zone'), 'UTC');
     await user.selectOptions(ui.getByLabelText('Combine updates for'), '900');
+    await user.selectOptions(ui.getByLabelText('Send at least every'), '14400');
     await user.selectOptions(ui.getByLabelText('Send non-urgent updates'), 'hourly');
     await user.click(ui.getByRole('button', { name: 'Save settings' }));
     expect(await ui.findByText('Settings saved.')).toBeTruthy();
@@ -168,8 +196,7 @@ describe('editing and saving', () => {
         timezone: 'UTC',
         quietHours: { start: '22:00', end: '08:00' },
         groupWindowSec: 900,
-        // No control for the maximum wait yet (ADR 0043): the stored value round-trips, 0 is "off".
-        maxWaitSec: 0,
+        maxWaitSec: 14400,
         digest: 'hourly',
         digestAt: '08:00',
         resolution: false,
@@ -188,6 +215,45 @@ describe('editing and saving', () => {
     await user.click(ui.getByRole('button', { name: 'Save settings' }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]?.body).toEqual({ noise: null });
+  });
+
+  it('turning combining off hides "Send at least every" and saves it as off', async () => {
+    spyOnWrites();
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_6');
+    respond = (r) =>
+      json({ integration: { ...INTEGRATIONS[0], id: 'int_6', noise: (r.body as { noise: unknown }).noise } });
+    const root = await section();
+    const ui = within(root);
+    await user.selectOptions(ui.getByLabelText('Combine updates for'), '0');
+    expect(ui.queryByLabelText('Send at least every')).toBeNull();
+    await user.click(ui.getByRole('button', { name: 'Save settings' }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.body).toMatchObject({ noise: { groupWindowSec: 0, maxWaitSec: 0 } });
+  });
+
+  it('puts a server refusal of the maximum wait on that control and focuses it', async () => {
+    spyOnWrites();
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_6');
+    respond = () =>
+      json(
+        {
+          error: 'Validation failed',
+          fields: [{ field: 'noise.maxWaitSec', message: 'server wording that must not be shown' }],
+        },
+        422,
+      );
+    const root = await section();
+    const ui = within(root);
+    const max = ui.getByLabelText<HTMLSelectElement>('Send at least every');
+    await user.selectOptions(max, '900');
+    await user.click(ui.getByRole('button', { name: 'Save settings' }));
+    const message = await ui.findByText('Choose one of the listed times, with combining turned on.');
+    expect(max.getAttribute('aria-invalid')).toBe('true');
+    expect(max.getAttribute('aria-describedby')).toContain(message.closest('[id]')?.id ?? 'missing');
+    await waitFor(() => expect(document.activeElement).toBe(max));
+    expect(screen.queryByText(/server wording/)).toBeNull();
   });
 
   it('does not send an invalid form, and focuses the first problem with a linked error', async () => {
@@ -250,6 +316,8 @@ describe('language', () => {
     ).toBeTruthy();
     expect(await ui.findByText(/3 cập nhật đang chờ\. Lần gửi tiếp theo: /)).toBeTruthy();
     expect(ui.getByLabelText('Lưu cập nhật trong giờ yên tĩnh')).toBeTruthy();
+    expect(ui.getByLabelText<HTMLSelectElement>('Gửi ít nhất mỗi').value).toBe('3600');
+    expect(ui.getByText(/chậm nhất khoảng 1 giờ sau cập nhật đầu tiên/)).toBeTruthy();
     expect(ui.getByRole('button', { name: 'Lưu cài đặt' })).toBeTruthy();
   });
 });

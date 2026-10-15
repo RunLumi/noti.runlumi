@@ -22,6 +22,18 @@ The slice brief for this work named the follow-ups by its own labels. The spec's
 
 6. **Slack and Discord summary rendering is tested through the real adapters** (the spec's F143 gap; the slice brief called it F144). `tests/noise/adapters.test.ts` asserts that Slack's top-level `text` carries the group heading, the newest-first list, the failure marker `✗` and the count, and that a digest collapses a key into a `(×N)` line and says "N updates since the last summary". A split digest names its part and the last part states what it left out. Discord's group embed carries the count, one URL (the newest update's) and the summary, and a digest embed has no URL, so Discord cannot dedupe it. No renderer code changed: the tests pass against the existing renderers, so they pin current behaviour rather than fixing a defect.
 
+## Dashboard control
+
+Added after decision 4, which left the form without a control. It supersedes the "does not offer it yet" part of that decision; the rest (the value is only sent while grouping is on) stands.
+
+- **Where and when.** A select labelled "Send at least every" sits inside the "Combine bursts" fieldset, right after "Combine updates for". It is shown only while a combine window is chosen, like the quiet-hours times and the daily summary time, because the server refuses it without one. The draft keeps the choice while grouping is off, so turning grouping off and on again does not lose it; a save with grouping off sends `0`.
+- **Choices are the server's closed list.** The options are built from `MAX_WAIT_SECONDS` (Off, 15 minutes, 1 hour, 4 hours), so the form cannot offer a value the API rejects. "Off" says what happens instead: "send when the combine time is up".
+- **Plain language, not mechanism.** One hint sentence states the two effects: each new update restarts the wait, and the message is sent anyway this long after the first one. The spec's wording ("Send anyway after this long, even if more are coming") is kept in substance; no `group_interval`-style terms.
+- **Preview.** When a maximum is set, the preview adds one sentence after the combine sentence: the message is sent about that long after the first update at the latest, and quiet hours can still hold it longer. "About" covers the release job's minute; the quiet-hours clause keeps the sentence true when decision 2's quiet-hours rule applies.
+- **Errors.** A `422` at `noise.maxWaitSec` is placed on this control in our own copy and focused, like the other noise fields.
+
+Verified by `web/src/integrations/noise/noise.test.tsx` (saved value, options, linked hint, shown only with combining, a save sends the chosen value, turning combining off sends `0`, server refusal on the control, Vietnamese), `web/src/integrations/noise/model.test.ts` (choices equal the server list, round-trip, preview sentence, error mapping), and the axe page scenario for `int_6` in both languages (`web/src/a11y/pages.a11y.test.tsx`; the fixture now stores `maxWaitSec: 3600`). The server's refusal of off-list values and of a maximum without a window was already covered by `tests/noise/api.test.ts` and `tests/noise/decision.test.ts`. Not verified: a real-browser pass (320 px reflow, native select on phones, Vietnamese diacritics) and a screen reader.
+
 ## Declined or not done in this slice
 
 - **F149 "why did I get this?" per notification: not extended.** The routing log already gives a translated reason for every event that has a decision row (filter outcomes, held updates, critical bypass, backlog cap). A per-delivery rule attribution for delivered notifications needs either a provenance row for every delivery, which ADR 0010 decided against for cost, or a rule id on `deliveries`, which is a schema change this slice may not make. An in-destination "via" line changes every outgoing format and budget, which is a product decision across all adapters.
@@ -43,10 +55,10 @@ Automated, through the real Worker entry point and migrations for the integratio
 - `tests/noise/adapters.test.ts`: Slack and Discord summary rendering (see decision 6).
 - `web/src/integrations/noise/model.test.ts`: the form keeps a maximum wait on save, and turning grouping off clears it.
 
-Not verified: a browser pass of the form (unchanged visually, because there is no new control), real Slack or Discord delivery of a long digest, and `Intl` behaviour on the Workers runtime.
+Not verified: a browser pass of the form (see "Dashboard control" for the control added later), real Slack or Discord delivery of a long digest, and `Intl` behaviour on the Workers runtime.
 
 ## Revisit when
 
-- The dashboard form gets a control for the maximum wait: then the preview sentence, the copy in both languages and a FRONTEND.md entry are needed with it.
+- People pick a maximum wait and still find the stream too chatty or too slow: then the closed list (15 min, 1 h, 4 h) is the thing to revisit, in the server and the form together.
 - A safe configurable grouping key is specified (F141). Until then the fixed key stays.
 - Per-notification attribution to a rule (F149) is wanted enough to justify a rule id on deliveries. That is a migration and needs its own ADR.

@@ -31,6 +31,13 @@ export const noiseVi = {
   'noise.group.w300': '5 phút',
   'noise.group.w900': '15 phút',
   'noise.group.w3600': '1 giờ',
+  'noise.maxWait.label': 'Gửi ít nhất mỗi',
+  'noise.maxWait.hint':
+    'Khi bật, mỗi cập nhật mới sẽ tính lại thời gian chờ, nhưng Noti vẫn gửi tin nhắn đã gộp sau khoảng này kể từ cập nhật đầu tiên, kể cả khi vẫn còn cập nhật đang đến.',
+  'noise.maxWait.off': 'Tắt: gửi khi hết thời gian gộp',
+  'noise.maxWait.w900': '15 phút',
+  'noise.maxWait.w3600': '1 giờ',
+  'noise.maxWait.w14400': '4 giờ',
 
   'noise.digest.title': 'Bản tóm tắt',
   'noise.digest.hint': 'Lưu các cập nhật không khẩn cấp và gửi thành một bản tóm tắt theo lịch.',
@@ -53,6 +60,8 @@ export const noiseVi = {
   'noise.preview.urgent': 'Lỗi và các cập nhật khẩn cấp khác luôn được gửi ngay, kể cả trong giờ yên tĩnh.',
   'noise.preview.group':
     'Các cập nhật về cùng một việc đến trong vòng {window} được gửi thành một tin nhắn có kèm số lượng.',
+  'noise.preview.maxWait':
+    'Khi cập nhật tiếp tục đến, mỗi cập nhật sẽ tính lại thời gian chờ, và tin nhắn được gửi chậm nhất khoảng {max} sau cập nhật đầu tiên. Giờ yên tĩnh vẫn có thể giữ tin lâu hơn.',
   'noise.preview.digestHourly':
     'Các cập nhật không khẩn cấp được lưu lại và gửi thành một bản tóm tắt mỗi giờ.',
   'noise.preview.digestDaily':
@@ -86,6 +95,7 @@ export const noiseVi = {
   'noise.error.timezone': 'Hãy chọn một múi giờ trong danh sách.',
   'noise.error.resolution':
     'Hãy chọn “workflow run thất bại” hoặc “hết thời gian” trong các cập nhật của tích hợp này trước.',
+  'noise.error.maxWait': 'Hãy chọn một khoảng thời gian trong danh sách và bật gộp cập nhật.',
   'noise.error.generic': 'Không lưu được các cài đặt này. Hãy kiểm tra các trường được đánh dấu.',
 
   'noise.delete.waiting': {

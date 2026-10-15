@@ -3,7 +3,7 @@ import { Field } from '../../components/form';
 import { t, type MessageId } from '../../i18n';
 import { useLocale } from '../../i18n/LocaleProvider';
 import { DIGEST_MODES } from '../../../../src/routing/noise';
-import { GROUP_WINDOW_CHOICES, type NoiseDraft, type NoiseErrors } from './model';
+import { GROUP_WINDOW_CHOICES, MAX_WAIT_CHOICES, type NoiseDraft, type NoiseErrors } from './model';
 
 interface NoiseEditorProps {
   readonly draft: NoiseDraft;
@@ -116,6 +116,33 @@ export function NoiseEditor({
             </select>
           )}
         </Field>
+        {/* Only meaningful with a combine window (ADR 0043), so it appears with one, like the
+            quiet-hours times and the daily summary time. */}
+        {draft.groupWindowSec > 0 && (
+          <Field label={t('noise.maxWait.label')} hint={t('noise.maxWait.hint')} error={errors.maxWaitSec}>
+            {(ids) => (
+              <select
+                id={ids.inputId}
+                className="input"
+                aria-describedby={ids.describedBy}
+                aria-invalid={ids.invalid || undefined}
+                value={draft.maxWaitSec}
+                onChange={(e) =>
+                  onChange(
+                    'maxWaitSec',
+                    MAX_WAIT_CHOICES.find((c) => String(c.value) === e.target.value)?.value ?? 0,
+                  )
+                }
+              >
+                {MAX_WAIT_CHOICES.map((choice) => (
+                  <option key={choice.value} value={choice.value}>
+                    {t(choice.label)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </Field>
+        )}
       </Group>
 
       <Group title="noise.digest.title" hint="noise.digest.hint">

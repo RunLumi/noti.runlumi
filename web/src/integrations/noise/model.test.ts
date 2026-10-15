@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { DEFAULT_NOISE, type NoiseSettings } from '../../../../src/routing/noise';
+import { DEFAULT_NOISE, MAX_WAIT_SECONDS, type NoiseSettings } from '../../../../src/routing/noise';
 import { isValidTimeZone } from '../../../../src/routing/noise-time';
 import { parseNoiseStatus } from '../../lib/api';
 import {
@@ -7,7 +7,9 @@ import {
   describeNoise,
   draftFromSettings,
   emptyNoiseDraft,
+  errorsFromIssues,
   isSavedReason,
+  MAX_WAIT_CHOICES,
   noiseLogText,
   quietSendTime,
   FALLBACK_ZONES,
@@ -34,11 +36,12 @@ describe('draft and settings', () => {
     settings({ digest: 'hourly', timezone: 'America/New_York' }),
     settings({ digest: 'daily', digestAt: '09:30' }),
     settings({ resolution: true }),
+    settings({ groupWindowSec: 60, maxWaitSec: 14400 }),
   ])('round-trips through the form: %j', (s) => {
     expect(validateNoiseDraft(draftFromSettings(s), EVENTS, false)).toEqual({ ok: true, settings: s });
   });
 
-  it('keeps a maximum wait set through the API when the form saves, because the form has no control for it', () => {
+  it('keeps a stored maximum wait when the form saves without touching it', () => {
     const s = settings({ groupWindowSec: 300, maxWaitSec: 900 });
     expect(validateNoiseDraft(draftFromSettings(s), EVENTS, false)).toEqual({ ok: true, settings: s });
   });
@@ -49,6 +52,18 @@ describe('draft and settings', () => {
       groupWindowSec: 0 as const,
     };
     expect(validateNoiseDraft(draft, EVENTS, false)).toEqual({ ok: true, settings: null });
+  });
+
+  it('offers exactly the closed list the server accepts for "Send at least every", off first', () => {
+    expect(MAX_WAIT_CHOICES.map((c) => c.value)).toEqual([...MAX_WAIT_SECONDS]);
+    expect(MAX_WAIT_CHOICES[0]).toEqual({ value: 0, label: 'noise.maxWait.off' });
+  });
+
+  it('places a server refusal of the maximum wait next to its control, in our own words', () => {
+    const draft = { ...emptyNoiseDraft('UTC'), groupWindowSec: 300 as const, maxWaitSec: 900 as const };
+    expect(errorsFromIssues([{ field: 'noise.maxWaitSec', message: 'server wording' }], draft)).toEqual({
+      maxWaitSec: 'Choose one of the listed times, with combining turned on.',
+    });
   });
 });
 
@@ -131,9 +146,21 @@ describe('describeNoise: the preview says what ingress will do', () => {
       'Failures and other urgent updates are always sent right away, even during quiet hours.',
     ]);
     expect(describeNoise(s, true).join(' ')).not.toContain('Resolved');
+    expect(describeNoise(s, false).join(' ')).not.toContain('at the latest');
     expect(describeNoise(settings({ digest: 'daily', digestAt: '07:15' }), false)[0]).toBe(
       'Non-urgent updates are saved and sent as one summary every day at 07:15.',
     );
+  });
+});
+
+describe('describeNoise: the maximum wait', () => {
+  it('says the message is sent by the maximum at the latest, right after the combine sentence', () => {
+    const s = settings({ groupWindowSec: 300, maxWaitSec: 3600 });
+    expect(describeNoise(s, false)).toEqual([
+      'Updates about the same thing that arrive within 5 minutes are sent as one message with a count.',
+      'While updates keep coming, each one restarts the wait, and the message is sent about 1 hour after the first one at the latest. Quiet hours can still hold it longer.',
+      'Failures and other urgent updates are always sent right away, even during quiet hours.',
+    ]);
   });
 });
 

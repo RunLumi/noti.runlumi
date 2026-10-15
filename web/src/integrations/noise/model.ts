@@ -1,6 +1,7 @@
 import {
   DEFAULT_NOISE,
   GROUP_WINDOWS,
+  MAX_WAIT_SECONDS,
   decideNoise,
   noiseCoverageIssue,
   parseNoise,
@@ -27,8 +28,8 @@ export interface NoiseDraft {
   readonly timezone: string;
   readonly groupWindowSec: GroupWindow;
   /**
-   * Carried through so that saving this form does not clear a maximum wait set through the API.
-   * The form does not offer a control for it yet (ADR 0043), so it is never changed here.
+   * "Send at least every" (ADR 0043). Kept in the draft while grouping is off, so turning
+   * grouping off and on again does not lose the choice, but only sent while grouping is on.
    */
   readonly maxWaitSec: MaxWaitSec;
   readonly digest: DigestMode;
@@ -36,7 +37,8 @@ export interface NoiseDraft {
   readonly resolution: boolean;
 }
 
-export type NoiseControl = 'quietStart' | 'quietEnd' | 'timezone' | 'digestAt' | 'resolution' | 'form';
+export type NoiseControl =
+  'quietStart' | 'quietEnd' | 'timezone' | 'maxWaitSec' | 'digestAt' | 'resolution' | 'form';
 export type NoiseErrors = Partial<Record<NoiseControl, string>>;
 
 /** The viewer's own zone when the runtime knows it and the server would accept it. */
@@ -101,6 +103,7 @@ const FIELD_TO_CONTROL: Readonly<Record<string, NoiseControl>> = {
   'noise.quietHours': 'quietStart',
   'noise.quietHours.start': 'quietStart',
   'noise.quietHours.end': 'quietEnd',
+  'noise.maxWaitSec': 'maxWaitSec',
   'noise.digestAt': 'digestAt',
   'noise.resolution': 'resolution',
 };
@@ -111,6 +114,8 @@ function messageFor(control: NoiseControl, draft: NoiseDraft): string {
       return t('noise.error.timezone');
     case 'resolution':
       return t('noise.error.resolution');
+    case 'maxWaitSec':
+      return t('noise.error.maxWait');
     case 'quietEnd':
       return parseClock(draft.quietEnd) !== null && draft.quietStart === draft.quietEnd
         ? t('noise.error.sameTime')
@@ -260,6 +265,17 @@ export const GROUP_WINDOW_CHOICES: readonly { readonly value: GroupWindow; reado
 
 export const windowLabel = (w: GroupWindow): string => t(WINDOW_LABEL[w]);
 
+const MAX_WAIT_LABEL: Readonly<Record<MaxWaitSec, MessageId>> = {
+  0: 'noise.maxWait.off',
+  900: 'noise.maxWait.w900',
+  3600: 'noise.maxWait.w3600',
+  14400: 'noise.maxWait.w14400',
+};
+
+/** The closed list the server accepts for "Send at least every" (ADR 0043), in order. */
+export const MAX_WAIT_CHOICES: readonly { readonly value: MaxWaitSec; readonly label: MessageId }[] =
+  MAX_WAIT_SECONDS.map((value) => ({ value, label: MAX_WAIT_LABEL[value] }));
+
 /** The plain-language sentences shown under the controls: exactly what ingress will do. */
 export function describeNoise(
   settings: NoiseSettings | null,
@@ -272,6 +288,9 @@ export function describeNoise(
   if (quietTime) lines.push(t('noise.preview.quiet', { time: quietTime }));
   if (settings.groupWindowSec > 0)
     lines.push(t('noise.preview.group', { window: windowLabel(settings.groupWindowSec) }));
+  // The parser only accepts a maximum wait with a combine window, so this never shows alone.
+  if (settings.groupWindowSec > 0 && settings.maxWaitSec > 0)
+    lines.push(t('noise.preview.maxWait', { max: t(MAX_WAIT_LABEL[settings.maxWaitSec]) }));
   if (settings.digest === 'hourly') lines.push(t('noise.preview.digestHourly'));
   if (settings.digest === 'daily') lines.push(t('noise.preview.digestDaily', { time: settings.digestAt }));
   if (settings.resolution && !isSource) lines.push(t('noise.preview.resolution'));
