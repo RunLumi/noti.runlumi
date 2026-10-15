@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { IconDownload, IconInbox, IconLock, IconRefresh } from '@tabler/icons-react';
 import { Button, Notice } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
+import { EmptyState, Skeleton } from '../components/state';
 import { t, tp } from '../i18n';
 import { formatDate } from '../i18n/format';
 import { useLocale } from '../i18n/LocaleProvider';
@@ -63,53 +64,6 @@ function downloadCsv(rows: readonly AuditEvent[]): void {
   setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
 }
 
-function ListSkeleton() {
-  useLocale();
-  return (
-    <div className="integration-list" aria-busy="true" aria-label={t('audit.loading')}>
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="integration-card skeleton-card" aria-hidden="true">
-          <span className="skeleton skeleton-title" />
-          <span className="skeleton skeleton-line" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptyState({ filtered, onClear }: { readonly filtered: boolean; readonly onClear: () => void }) {
-  useLocale();
-  return (
-    <section className="empty" aria-labelledby="audit-empty-title">
-      <div className="empty-icon">
-        <IconInbox size={24} aria-hidden="true" />
-      </div>
-      <h2 id="audit-empty-title">
-        {filtered ? t('audit.empty.filtered.title') : t('audit.empty.none.title')}
-      </h2>
-      <p>{filtered ? t('audit.empty.filtered.body') : t('audit.empty.none.body')}</p>
-      {filtered && (
-        <Button variant="outline" type="button" onClick={onClear}>
-          {t('audit.filter.clear')}
-        </Button>
-      )}
-    </section>
-  );
-}
-
-function Forbidden() {
-  useLocale();
-  return (
-    <section className="empty" aria-labelledby="audit-forbidden-title">
-      <div className="empty-icon">
-        <IconLock size={24} aria-hidden="true" />
-      </div>
-      <h2 id="audit-forbidden-title">{t('audit.forbidden.title')}</h2>
-      <p>{t('audit.forbidden.body')}</p>
-    </section>
-  );
-}
-
 export function AuditPage() {
   useLocale();
   const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
@@ -146,9 +100,11 @@ export function AuditPage() {
         }
       />
       {me.isPending ? (
-        <ListSkeleton />
+        <Skeleton label={t('audit.loading')} rows={3} />
       ) : !isAdmin ? (
-        <Forbidden />
+        <EmptyState icon={<IconLock size={24} aria-hidden="true" />} title={t('audit.forbidden.title')}>
+          <p>{t('audit.forbidden.body')}</p>
+        </EmptyState>
       ) : (
         <>
           {retentionDays !== null && (
@@ -156,7 +112,7 @@ export function AuditPage() {
           )}
           <AuditFilters search={search} members={members.data ?? []} onChange={setSearch} />
           {list.isPending ? (
-            <ListSkeleton />
+            <Skeleton label={t('audit.loading')} rows={3} />
           ) : list.isError && rows.length === 0 ? (
             // A failed query is an error, never an empty log (F225).
             <Notice kind="error">
@@ -170,7 +126,19 @@ export function AuditPage() {
               </Button>
             </Notice>
           ) : rows.length === 0 ? (
-            <EmptyState filtered={filtered} onClear={() => setSearch({})} />
+            <EmptyState
+              icon={<IconInbox size={24} aria-hidden="true" />}
+              title={filtered ? t('audit.empty.filtered.title') : t('audit.empty.none.title')}
+              action={
+                filtered && (
+                  <Button variant="outline" type="button" onClick={() => setSearch({})}>
+                    {t('audit.filter.clear')}
+                  </Button>
+                )
+              }
+            >
+              <p>{filtered ? t('audit.empty.filtered.body') : t('audit.empty.none.body')}</p>
+            </EmptyState>
           ) : (
             <section aria-labelledby="audit-count">
               {list.isError && <Notice kind="warning">{t('audit.error.stale')}</Notice>}

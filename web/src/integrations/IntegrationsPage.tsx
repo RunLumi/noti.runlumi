@@ -3,6 +3,7 @@ import { IconPlus, IconRefresh, IconWebhook } from '@tabler/icons-react';
 import { Button, Notice } from '../components/ui';
 import { t, tp } from '../i18n';
 import { PageHeader } from '../components/PageHeader';
+import { EmptyState, Skeleton } from '../components/state';
 import { describeError } from './errors';
 import { useIntegrations, useOrgId } from './hooks';
 import { IntegrationCard } from './IntegrationCard';
@@ -18,39 +19,6 @@ function NewIntegrationLink() {
       <IconPlus size={18} aria-hidden="true" />
       {t('integrations.new')}
     </Link>
-  );
-}
-
-/** Shape-matched placeholder rows; the container carries `aria-busy` (F225). */
-function ListSkeleton() {
-  useLocale();
-  return (
-    <div className="integration-list" aria-busy="true" aria-label={t('integrations.loading')}>
-      {[0, 1].map((i) => (
-        <div key={i} className="integration-card skeleton-card" aria-hidden="true">
-          <span className="skeleton skeleton-title" />
-          <span className="skeleton skeleton-line" />
-          <span className="skeleton skeleton-line skeleton-short" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptyState() {
-  useLocale();
-  return (
-    <section className="empty integrations-empty" aria-labelledby="integrations-empty-title">
-      <div className="empty-icon">
-        <IconWebhook size={24} aria-hidden="true" />
-      </div>
-      <h2 id="integrations-empty-title">{t('integrations.empty.title')}</h2>
-      <p>{t('integrations.empty.body')}</p>
-      <Link to="/integrations/new" className="btn btn-primary">
-        <IconPlus size={18} aria-hidden="true" />
-        {t('integrations.empty.action')}
-      </Link>
-    </section>
   );
 }
 
@@ -71,7 +39,7 @@ export function IntegrationsPage() {
       {orgId && <GithubReturnStatus orgId={orgId} resumeSetup />}
       {orgId && <GithubPanel orgId={orgId} />}
       {list.isPending ? (
-        <ListSkeleton />
+        <Skeleton label={t('integrations.loading')} rows={2} />
       ) : list.isError ? (
         // A failed query is an error, never an empty list (F225).
         <Notice kind="error">
@@ -85,7 +53,18 @@ export function IntegrationsPage() {
           </Button>
         </Notice>
       ) : integrations.length === 0 ? (
-        <EmptyState />
+        <EmptyState
+          icon={<IconWebhook size={24} aria-hidden="true" />}
+          title={t('integrations.empty.title')}
+          action={
+            <Link to="/integrations/new" className="btn btn-primary">
+              <IconPlus size={18} aria-hidden="true" />
+              {t('integrations.empty.action')}
+            </Link>
+          }
+        >
+          <p>{t('integrations.empty.body')}</p>
+        </EmptyState>
       ) : (
         <section aria-labelledby="integrations-list-title">
           <div className="list-summary">

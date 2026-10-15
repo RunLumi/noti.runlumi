@@ -19,14 +19,6 @@
   --color-red-soft: #fff1ec;
   --color-success-green: #1f7a4d;
   --color-green-soft: #e9f7ef;
-  --font-sans:
-    'Geist Variable', Geist, 'Noto Sans', 'Noto Sans Thai', 'Noto Sans Arabic', 'Noto Sans Devanagari',
-    'Noto Sans JP', 'Noto Sans KR', 'Noto Sans SC', 'Noto Sans TC', ui-sans-serif, system-ui, -apple-system,
-    BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --shadow-card:
-    inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px -1px rgba(16, 42, 67, 0.08),
-    0 8px 20px -10px rgba(16, 42, 67, 0.1);
-  --shadow-button: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 1px 2px rgba(16, 42, 67, 0.22);
   color-scheme: light;
 }
 /* ============================================================================
@@ -636,7 +628,8 @@ kbd {
 .empty p {
   margin: 0;
   max-width: 46ch;
-  font-size: 14px;
+  /* Body copy: DESIGN.md §16 and F221 set 16px as the minimum, so an empty state is never smaller. */
+  font-size: 16px;
 }
 
 .text-error {

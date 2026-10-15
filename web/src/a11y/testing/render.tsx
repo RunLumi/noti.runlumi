@@ -149,6 +149,11 @@ export interface ApiState {
   /** Make `POST .../invitations/:id/cancel` answer with this status instead (404 = already finished). */
   cancelInvitationStatus?: 404 | 500;
   /**
+   * Request paths (prefixes) that never answer, so a test can see the loading state a person sees
+   * while a list is still on its way. Everything else answers at once, as before.
+   */
+  pending?: readonly string[];
+  /**
    * Per-workspace data, selected by the `?org=` the page asked for. When present it overrides
    * `integrations`, `deliveries`, `members` and `audit`, so a test can prove that workspace A's
    * rows are never shown under workspace B.
@@ -202,6 +207,7 @@ export function installFetch(state: ApiState): void {
     const method = (init?.method ?? 'GET').toUpperCase();
     const path = url.pathname;
     requests.push(`${method} ${path}${url.search}`);
+    if (state.pending?.some((prefix) => path.startsWith(prefix))) return new Promise<Response>(() => {});
     const org = url.searchParams.get('org');
     const scoped = org && state.orgs ? state.orgs[org] : undefined;
     // With per-workspace data, a request for a workspace the mock does not know is a 404.

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { IconPlus, IconRefresh, IconPlugConnected } from '@tabler/icons-react';
 import { Field, SecretInput, focusFirstInvalid } from '../components/form';
 import { PageHeader } from '../components/PageHeader';
+import { EmptyState, Skeleton } from '../components/state';
 import { Button, Input, Notice } from '../components/ui';
 import { authApi } from '../lib/api';
 import { t, tp } from '../i18n';
@@ -263,21 +264,6 @@ function CreateForm({
   );
 }
 
-function ListSkeleton() {
-  useLocale();
-  return (
-    <div className="integration-list" aria-busy="true" aria-label={t('sources.loading')}>
-      {[0, 1].map((i) => (
-        <div key={i} className="integration-card skeleton-card" aria-hidden="true">
-          <span className="skeleton skeleton-title" />
-          <span className="skeleton skeleton-line" />
-          <span className="skeleton skeleton-line skeleton-short" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function SourcesPage() {
   useLocale();
   const orgId = useOrgId();
@@ -316,7 +302,7 @@ export function SourcesPage() {
       )}
       {orgId && <CreateForm orgId={orgId} onCreated={(result) => show('created', result)} />}
       {list.isPending ? (
-        <ListSkeleton />
+        <Skeleton label={t('sources.loading')} rows={2} />
       ) : list.isError ? (
         // A failed query is an error, never an empty list.
         <Notice kind="error">
@@ -330,13 +316,12 @@ export function SourcesPage() {
           </Button>
         </Notice>
       ) : sources.length === 0 ? (
-        <section className="empty integrations-empty" aria-labelledby="sources-empty-title">
-          <div className="empty-icon">
-            <IconPlugConnected size={24} aria-hidden="true" />
-          </div>
-          <h2 id="sources-empty-title">{t('sources.empty.title')}</h2>
+        <EmptyState
+          icon={<IconPlugConnected size={24} aria-hidden="true" />}
+          title={t('sources.empty.title')}
+        >
           <p>{t('sources.empty.body')}</p>
-        </section>
+        </EmptyState>
       ) : (
         <section aria-labelledby="sources-list-title">
           <div className="list-summary">

@@ -294,7 +294,8 @@ Decisions: [ADR 0025](adr/0025-setup-and-shell-ux.md) (supersedes the setup part
 - **Integration settings order**: status (+ repair panel), source and updates, filters, destination, test, quiet
   hours, credentials, health, history, delete. Health and the repair panel read `/api/deliveries?integration=`.
 - **Shared states**: `Skeleton`, `EmptyState`, `ErrorPanel` (what happened, why, what to do, how to get help). The
-  ErrorPanel is chosen by the kind of failure, never by server text. `error-copy.test.ts` bans filler phrases in both
+  Integrations, Sources, Activity and Audit lists draw their loading, empty and filtered-empty states with the first
+  two (ADR 0038; `web/src/components/state.test.tsx`). The ErrorPanel is chosen by the kind of failure, never by server text. `error-copy.test.ts` bans filler phrases in both
   catalogues. No support address exists in the product yet, so help says "tell your workspace admin" plus the
   reference.
 - The result of a test is announced through a polite `role="status"` region that exists before the click; focus stays
@@ -462,7 +463,23 @@ redelivery is offered. Controls are 44 px, the dialog uses the existing opaque m
 (including the audit labels `key_destroyed`). Role: the button is shown to everyone and the server answers 403 for a member, as the delete
 button does. Not built: the same control and fingerprint on the Sources page.
 
+## Design-token drift and no fabricated numbers (ADR 0038, `web/src/design/`)
+
+- **Drift.** `tokens.drift.test.ts` reads the fenced ```css blocks under DESIGN.md §5 (colour), §6.1 (type stacks),
+  §7 (spacing), §8.1 (radii), §8.3 and §8.4 (elevation and glass), and the §8.2 and §13 sentences, and asserts that
+  the top-level `:root` of `web/src/styles.css` resolves to the same values. A token may be declared once only. The
+  two exceptions are named in the test: the bundled family `Geist Variable` leads the sans stack, and
+  `--color-control-border` aliases Soft Slate. Edit a value in one place and the other must follow in the same change.
+- **No fabricated numbers.** `no-fake-numbers.test.ts` scans `web/src` TSX (not tests or `a11y/testing`) for digits in
+  rendered text, numeric literals rendered as children, and `?? 0` or `|| 0` fallbacks. A finding must be allow-listed
+  with a reason, and a stale entry fails. The Overview's "last 24 hours" labels are the server's fixed summary window
+  and are checked against `SUMMARY_WINDOW_MS`. A new figure comes from a query; while that query is loading or has
+  failed, the screen shows a dash (`DeliveryStats.tsx`, `IntegrationsStat.tsx`).
+- **Empty sections.** The empty state's body copy is 16px (`.empty p`), the minimum for body text.
+
 ## Not yet verified
+
+- Shared loading and empty states on the four lists, the 16px empty-state body and the drift and number checks (ADR 0038): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no screen-reader pass.
 
 - Revoke dialog and fingerprint (ADR 0036): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no real-contrast check of the new radio list, no screen-reader pass, no screenshot.
 

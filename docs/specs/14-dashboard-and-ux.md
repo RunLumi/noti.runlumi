@@ -153,7 +153,7 @@ handoff is the cheapest account-takeover path in a product with email invites; o
 
 ## F206 — Design system, and the no-fake-anything rule
 
-**Priority** P0 · **Status** 🟡 Tabler icons, real Lumi logo and self-hosted Geist per ADR 0002; `Notice` exported from `web/src/components/ui.tsx`; glass limited to nav and scrim with opaque fallbacks (`web/src/a11y/stylesheet.test.ts`); not built: `tokens.ts` transcription, token-drift, no-hardcoded-colour and no-fake-number tests, Skeleton, EmptyState, Toast, Tooltip, DataTable components, state matrix, brand-variant test
+**Priority** P0 · **Status** 🟡 Tabler icons, real Lumi logo and self-hosted Geist per ADR 0002; `Notice` exported from `web/src/components/ui.tsx`; glass limited to nav and scrim with opaque fallbacks (`web/src/a11y/stylesheet.test.ts`); token drift against DESIGN.md §5–§8 and §13 (`web/src/design/tokens.drift.test.ts`) and a no-fabricated-number scan with a reasoned allow-list (`web/src/design/no-fake-numbers.test.ts`), per ADR 0038; Skeleton and EmptyState are the shared states on the Integrations, Sources, Activity and Audit lists (`web/src/components/state.test.tsx`); not built: `tokens.ts` transcription, no-hardcoded-colour test, Toast, Tooltip, DataTable components, state matrix, brand-variant test
 
 **Story** As a user, I want the interface to tell me the truth about what exists, so that I
 never act on a promise the product has not kept.
@@ -2060,7 +2060,7 @@ fixture would breach that by accident).
 
 ## F224 — Internationalisation and translated-ready strings
 
-**Priority** P1 · **Status** 🟡 slice 6c, ADR 0013: Vietnamese catalogue, language switcher, saved choice, `<html lang>`, `Intl` formatting, `:lang(vi)` type, drift and hard-coded-string tests (`web/src/i18n/`); not done: locale in URL, localised server errors, lang on provider text, locale-aware screenshot pipeline, ICU plurals, native-speaker review of Vietnamese copy
+**Priority** P1 · **Status** 🟡 slice 6c, ADR 0013: Vietnamese catalogue, language switcher, saved choice, `<html lang>`, `Intl` formatting, `:lang(vi)` type, drift and hard-coded-string tests (`web/src/i18n/`); the Geist font stack is checked against DESIGN.md §6.1 in `web/src/design/tokens.drift.test.ts` and the loading and empty labels are checked in Vietnamese in `web/src/components/state.test.tsx` (ADR 0038); not done: locale in URL, localised server errors, lang on provider text, locale-aware screenshot pipeline, ICU plurals, native-speaker review of Vietnamese copy
 
 **Story** As a user who does not read English, I want the product in my language, so that setup
 does not require an interpreter.

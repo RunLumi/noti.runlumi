@@ -3,6 +3,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { IconInbox, IconRefresh } from '@tabler/icons-react';
 import { Button, Notice } from '../components/ui';
 import { PageHeader } from '../components/PageHeader';
+import { EmptyState, Skeleton } from '../components/state';
 import { t, tp } from '../i18n';
 import { describeError } from '../integrations/errors';
 import { useIntegrations, useOrgId } from '../integrations/hooks';
@@ -16,40 +17,6 @@ import { DeliveryTable } from './DeliveryTable';
 import { useDeliveryList } from './hooks';
 import { hasFilters, toFilters, type ActivitySearch } from './search';
 import { useLocale } from '../i18n/LocaleProvider';
-
-function ListSkeleton() {
-  useLocale();
-  return (
-    <div className="integration-list" aria-busy="true" aria-label={t('deliveries.loading')}>
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="integration-card skeleton-card" aria-hidden="true">
-          <span className="skeleton skeleton-title" />
-          <span className="skeleton skeleton-line" />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function EmptyState({ filtered, onClear }: { readonly filtered: boolean; readonly onClear: () => void }) {
-  useLocale();
-  return (
-    <section className="empty" aria-labelledby="deliveries-empty-title">
-      <div className="empty-icon">
-        <IconInbox size={24} aria-hidden="true" />
-      </div>
-      <h2 id="deliveries-empty-title">
-        {filtered ? t('deliveries.empty.filtered.title') : t('deliveries.empty.none.title')}
-      </h2>
-      <p>{filtered ? t('deliveries.empty.filtered.body') : t('deliveries.empty.none.body')}</p>
-      {filtered && (
-        <Button variant="outline" type="button" onClick={onClear}>
-          {t('deliveries.filter.clear')}
-        </Button>
-      )}
-    </section>
-  );
-}
 
 interface Selected {
   readonly id: string;
@@ -104,7 +71,7 @@ export function DeliveryLogPage() {
       />
       {showBulk && <BulkRedeliver orgId={orgId} scope={bulkScope} integrationName={bulkIntegration} />}
       {list.isPending ? (
-        <ListSkeleton />
+        <Skeleton label={t('deliveries.loading')} rows={3} />
       ) : list.isError && rows.length === 0 ? (
         // A failed query is an error, never an empty log (F213, F225).
         <Notice kind="error">
@@ -118,7 +85,19 @@ export function DeliveryLogPage() {
           </Button>
         </Notice>
       ) : rows.length === 0 ? (
-        <EmptyState filtered={filtered} onClear={() => setSearch({})} />
+        <EmptyState
+          icon={<IconInbox size={24} aria-hidden="true" />}
+          title={filtered ? t('deliveries.empty.filtered.title') : t('deliveries.empty.none.title')}
+          action={
+            filtered && (
+              <Button variant="outline" type="button" onClick={() => setSearch({})}>
+                {t('deliveries.filter.clear')}
+              </Button>
+            )
+          }
+        >
+          <p>{filtered ? t('deliveries.empty.filtered.body') : t('deliveries.empty.none.body')}</p>
+        </EmptyState>
       ) : (
         <section aria-labelledby="deliveries-count">
           {list.isError && <Notice kind="warning">{t('deliveries.error.stale')}</Notice>}
