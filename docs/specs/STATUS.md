@@ -14,9 +14,9 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 39 | 153 | 49 | 4 | 17 | 262 |
+| All features | 39 | 154 | 48 | 4 | 17 | 262 |
 | P0 | 35 | 104 | 8 | 3 | 8 | 158 |
-| P1 | 4 | 43 | 23 | 0 | 2 | 72 |
+| P1 | 4 | 44 | 22 | 0 | 2 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
 ## Per spec
@@ -36,7 +36,7 @@
 | [12-delivery-reliability.md](12-delivery-reliability.md) | 7 | 15 | 0 | 0 | 0 | 22 |
 | [13-observability.md](13-observability.md) | 0 | 10 | 4 | 0 | 0 | 14 |
 | [14-dashboard-and-ux.md](14-dashboard-and-ux.md) | 0 | 18 | 3 | 1 | 0 | 22 |
-| [15-security-and-compliance.md](15-security-and-compliance.md) | 3 | 12 | 1 | 0 | 0 | 16 |
+| [15-security-and-compliance.md](15-security-and-compliance.md) | 3 | 13 | 0 | 0 | 0 | 16 |
 | [16-ai-and-roadmap.md](16-ai-and-roadmap.md) | 0 | 3 | 5 | 1 | 11 | 20 |
 
 ## Features
@@ -56,7 +56,7 @@
 | F11 | Correlation IDs and structured logging | [01](01-platform-runtime.md) | P0 | 🟡 | correlation id minted at ingress, echoed as `x-request-id`, `cf-ray` captured, carried in every `log()` line through `AsyncLocalStorage` (`src/platform/correlation.ts`, `src/platform/log.ts`, `tests/platform/correlation.test.ts`, … |
 | F12 | Redaction layer | [01](01-platform-runtime.md) | P0 | ✅ | `redact()` with word-level key denylist (including email, installation id, ciphertext), URL host-only scrubbing, token-format scrubbing, `[redacted]` never a prefix, error `name`/`code` kept, never throws … |
 | F13 | Error taxonomy and classification | [01](01-platform-runtime.md) | P0 | ✅ | closed, versioned `ErrorCode` union with `retryable`, `user_actionable` and message per code, default `internal_error` (`src/platform/errors.ts`, `tests/platform/errors.test.ts`); provider classifiers map onto it … |
-| F14 | Architecture decision record process | [01](01-platform-runtime.md) | P1 | 🟡 | 19 ADRs in `docs/adr/` with Status/Context/Decision/Consequences sections, and a dated sources list and known-contradictions table in `docs/specs/README.md`; not built: the five decisions the spec lists (no Durable Objects, … |
+| F14 | Architecture decision record process | [01](01-platform-runtime.md) | P1 | 🟡 | ADRs in `docs/adr/` with Status/Context/Decision/Consequences sections, and a dated sources list and known-contradictions table in `docs/specs/README.md`; the five listed decisions are recorded (ADRs 0031 to 0035, numbers differ … |
 | F15 | Organization model | [02](02-identity-tenancy.md) | P0 | ✅ | multi-org: no `organizationLimit`; `selectMembership` returns 404 for non-member org, explicit `?org=` required on writes for multi-workspace users; `tests/workspace.test.ts`, `tests/api/org-required.test.ts`, … |
 | F16 | User identity | [02](02-identity-tenancy.md) | P0 | 🟡 | `requireEmailVerification`, 12 to 128 character policy, hash-only storage, lower-cased email with no second account for a case variant, indistinguishable sign-in failures and the verified-email gate are shown through the real … |
 | F17 | Email verification | [02](02-identity-tenancy.md) | P0 | 🟡 | verification link: 1 h (now a named constant, tested), once only, signs no one in; sign-in before verification is refused and re-sends; 3/900 s resend limit shown per address (`tests/auth/credentials-policy.test.ts`, … |
@@ -277,14 +277,14 @@
 | F232 | Authentication and authorization: what is decided elsewhere | [15](15-security-and-compliance.md) | P0 | ✅ | `docs/AUTHORIZATION.md` (pointer table, the four rules, generated roles-by-capability and route-by-guard tables); route registry `src/auth/route-policy.ts`; `tests/security/route-capability.test.ts` compares the routes the app … |
 | F233 | Tenant isolation is the release gate | [15](15-security-and-compliance.md) | P0 | 🟡 | tenant comes only from the verified installation, tenant columns NOT NULL with foreign keys (`migrations/0026_tenant_contract.sql`), static every-query-filters-by-org test (`tests/security/tenant-query-scope.test.ts`), … |
 | F234 | Accepted risk: Better Auth stores session tokens in a cleartext column | [15](15-security-and-compliance.md) | P0 | 🟡 | accepted as AR-1 in `docs/THREAT_MODEL.md`; in place: 30-day idle expiry with daily refresh, a 90-day absolute lifetime, password-reset revocation, a session list with revoke-one and revoke-others that never returns a token, … |
-| F235 | Cloudflare Email Sending: platform constraints we did not choose | [15](15-security-and-compliance.md) | P1 | ❌ | the limits table is not recorded outside this spec and no email-failure handling is built; auth mail goes through a `send_email` binding with a server-controlled sender (`src/auth/email.ts`) with no suppression list, quota … |
+| F235 | Cloudflare Email Sending: platform constraints we did not choose | [15](15-security-and-compliance.md) | P1 | 🟡 | the limits and the current failure behaviour are recorded in `docs/EMAIL_LIMITS.md` (limits not re-read since 2026-10-13); no email-failure handling is built; auth mail goes through a `send_email` binding with a server-controlled … |
 | F236 | Audit events: completeness, immutability, access | [15](15-security-and-compliance.md) | P1 | 🟡 | audit rows are written with the change in one batch, typed primitives-only size-capped metadata, admin-only `audit.read` reads, tenant-scoped (`src/audit/audit.ts`, `src/api/audit.ts`, `tests/api/audit.test.ts`); not built: static … |
 | F237 | Retention matrix and its enforcement | [15](15-security-and-compliance.md) | P0 | 🟡 | matrix, enforcement checks and generated doc built (slice S3, `docs/DATA_RETENTION.md`); not built: per-workspace downward retention, job staleness alerts (F190), payload retention rows that do not apply (the raw payload is never … |
 | F238 | Data-subject requests | [15](15-security-and-compliance.md) | P1 | 🟡 | N3 is resolved (workspace deletion, slice W). Built in slice S3: signed-in access (`GET /api/workspace/me/data-export`) and account erasure (`DELETE /api/workspace/me`), with the decisions in `docs/DSAR.md`; operator procedure in … |
 | F239 | Dependency and supply-chain hygiene | [15](15-security-and-compliance.md) | P1 | 🟡 | `npm ci`, audit gate with dated exceptions (`scripts/audit-gate.mjs`, `tests/security/audit-gate.test.ts`), SHA-pinned actions, read-only permissions, Dependabot, dev-vars drift test (`tests/config.dev_vars.test.ts`, … |
 | F240 | Security release checklist | [15](15-security-and-compliance.md) | P0 | 🟡 | `docs/RELEASE_GATES.md` is a living checklist naming the four gates, asserted by `tests/security/config-guards.test.ts`; every gate is partly done or not done: no real-provider run, no staging tenant-isolation drill, no KEK … |
 | F241 | Known-accepted-risk register | [15](15-security-and-compliance.md) | P0 | ✅ | register is `docs/THREAT_MODEL.md` section 7 with owner and review trigger per row, and a CI check that every referenced AR id exists (`tests/security/config-guards.test.ts`); gaps: no 180-day review dates recorded, no … |
-| F242 | Incident response and disclosure | [15](15-security-and-compliance.md) | P1 | 🟡 | root `SECURITY.md` (GitHub private vulnerability reporting, no invented address), `security.txt` (generated by the Worker, tested, deployed reachability unverified), `docs/INCIDENT_RESPONSE.md` skeleton with severity classes, … |
+| F242 | Incident response and disclosure | [15](15-security-and-compliance.md) | P1 | 🟡 | root `SECURITY.md` (GitHub private vulnerability reporting, no invented address), `security.txt` (generated by the Worker, tested, deployed reachability unverified), `docs/INCIDENT_RESPONSE.md` with severity classes, a playbook … |
 | F243 | AI capability boundary and the deterministic-first contract | [16](16-ai-and-roadmap.md) | P2 | 🚫 | deferred: AI is optional and later (`AGENTS.md`), a Non-goal in `docs/PRODUCT.md`, P3 in `docs/ROADMAP.md`; no model call, AI binding or AI setting exists in `src/` or `web/src/`, so every notification is deterministic today |
 | F244 | The hard rule: model output is never a source fact | [16](16-ai-and-roadmap.md) | P0 | 🚫 | deferred with Part A (no AI exists, so no model output can enter a source fact today); the rule is unenforced by any test or type until F243 is authorised; gated by G6 in F262 |
 | F245 | Provenance display in the delivered message | [16](16-ai-and-roadmap.md) | P1 | 🚫 | deferred with Part A: no AI-generated line exists to label; gated by G6 in F262 |

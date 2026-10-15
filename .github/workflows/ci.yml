@@ -31,13 +31,17 @@ jobs:
         with:
           node-version: '22'
       - run: python3 scripts/test_auth_schema.py
-      # `npm ci` installs exactly the committed lockfile. Never `npm install`: it
+      # Lifecycle scripts are off for every install (`--ignore-scripts`): the whole suite, build and integration job
+      # pass without them (docs/SUPPLY_CHAIN.md). `npm ci` installs exactly the committed lockfile. Never `npm install`: it
       # re-resolves ranges, so a passing local build would not imply a passing CI build.
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       # Production-dependency advisories (F239). Same policy as
       # `npm audit --omit=dev --audit-level=high`, plus a short dated exception list in
       # scripts/audit-gate.mjs that is mirrored in docs/SECURITY.md.
       - run: npm run audit:gate
+      # Registry signatures and sigstore provenance attestations for every installed package (F239). It reads the
+      # registry, so it needs network; a package that fails verification fails the job. Policy: docs/SUPPLY_CHAIN.md.
+      - run: npm audit signatures
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
@@ -73,7 +77,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
-      - run: npm ci --no-audit --no-fund
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run test:integration
 
   dependency-review:
