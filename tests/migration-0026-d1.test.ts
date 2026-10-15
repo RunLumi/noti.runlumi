@@ -92,6 +92,30 @@ function wrangler(args: string[], cwd = root): { status: number | null; out: str
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
+/**
+ * The first complete top-level JSON array in wrangler's output. wrangler prints trailing text after `--json`
+ * results (its log path, a version notice), so slicing from `[` to the end of the buffer is not parseable.
+ */
+function firstJsonArray(text: string): unknown {
+  const start = text.indexOf('[');
+  if (start < 0) throw new Error(`no JSON array in wrangler output: ${text.slice(-400)}`);
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === '[' || ch === '{') depth++;
+    else if (ch === ']' || ch === '}') {
+      depth--;
+      if (depth === 0) return JSON.parse(text.slice(start, i + 1));
+    }
+  }
+  throw new Error(`unterminated JSON array in wrangler output: ${text.slice(-400)}`);
+}
+
 /** A wrangler config whose migrations come from `migrationsDir`. */
 function config(name: string, migrationsDir: string): string {
   const file = join(scratch, `${name}.jsonc`);
@@ -222,7 +246,7 @@ describe('the real `wrangler d1 migrations apply --local` (workerd SQLite)', () 
     const { rowsOf } = (await import(/* @vite-ignore */ preflightPath)) as {
       rowsOf: (raw: unknown) => { check: string; n: number }[];
     };
-    const predicted = rowsOf(JSON.parse(pre.out.slice(pre.out.indexOf('['))) as unknown)
+    const predicted = rowsOf(firstJsonArray(pre.out) as unknown)
       .filter((r) => r.check.startsWith('orphan:'))
       .reduce((sum, r) => sum + r.n, 0);
     expect(predicted).toBeGreaterThan(5);
