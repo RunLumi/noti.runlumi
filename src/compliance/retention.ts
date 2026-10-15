@@ -907,7 +907,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     retention: {
       kind: 'fixed',
       ms: RESOLUTION_RETENTION_MS,
-      basis: 'RESOLUTION_RETENTION_MS (generic-webhook/host-control.ts)',
+      basis: 'RESOLUTION_RETENTION_MS (src/connectors/destinations/generic-webhook/host-control.ts)',
       note: 'Counted from the last send that checked the host (`last_used_at`); the cron sweep does not renew it. Rows of a deleted or disabled integration are removed at once by `egress_maintenance`.',
     },
     deletion: [

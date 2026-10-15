@@ -29,7 +29,9 @@ import {
  * process killed between any two statements, then proves the recovery script restores the original
  * schema and data from every one of those states.
  */
-const LONG = { timeout: 180_000 };
+// The crash matrix replays 0026 from a crash between every pair of statements in every runner: CPU-bound
+// by design. One case took about 160 s alone on a quiet machine, so 180 s failed under ordinary load.
+const LONG = { timeout: 600_000 };
 const VERIFY = '-- --- 4. verify';
 const SWAP = '-- --- 5. swap';
 const LATE_ROW = `INSERT INTO deliveries(id,integration_id,state,organization_id,created_at) VALUES('d-late','i-ok','sent','org-a','2026-02-01');\n`;

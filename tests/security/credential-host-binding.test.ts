@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, afterEach, beforeEach, type Mock } from 'vitest';
+import { mintHostVerification } from '../../src/connectors/destinations/generic-webhook/verified';
 import type { Bindings, DeliveryMessage } from '../../src/env';
 import {
   classifyDeliveryResponse,
@@ -158,6 +159,8 @@ describe('credential_is_never_sent_to_a_host_other_than_its_own: the send path',
         now: () => NOW,
         meta: META,
         fetch: rec.fetch,
+        // A custom webhook is sent only with proof that its host passed the workspace host check (ADR 0029).
+        ...(kind === 'generic_webhook' ? { hostVerification: mintHostVerification(HOST_OF[kind]) } : {}),
       });
 
       expect(result.rendered).toBe(true);
@@ -213,7 +216,9 @@ describe('credential_is_never_sent_to_a_host_other_than_its_own: the send path',
       now: () => NOW,
       meta: META,
       fetch: rec.fetch,
+      hostVerification: mintHostVerification(HOST_OF.generic_webhook),
     });
+    expect(rec.sent).toHaveLength(1);
     const headerValues = Object.values(rec.sent[0]?.headers ?? {}).join('\n');
     expect(headerValues).not.toContain(signingSecret);
     expect(rec.sent[0]?.body).not.toContain(signingSecret);
