@@ -1787,3 +1787,23 @@ authoritative per-feature state is `docs/specs/STATUS.md` (generated); the remai
   `docs/DESTINATION_API_REFERENCE.md` and was not re-verified against live Slack documentation.
 - **Not verified:** no real browser or 320 px pass, no screen-reader pass, Vietnamese strings not reviewed
   by a native speaker, no real-provider or staging evidence, the restore script against a real D1.
+
+## Release decisions and wave two (ADRs 0047 to 0052)
+
+- **Release scope (ADR 0047).** The first release is an invite-only design-partner beta (GitHub to Slack, Teams or
+  Lark). `SIGNUP_MODE` (`open`, `invite_only`, `closed`; unknown fails closed) is enforced in Better Auth's
+  `user.create.before` hook; `wrangler.jsonc` deploys `invite_only`; `closed` is the sign-up kill switch. Outbound mail
+  moved into the boot auth tier. The general rule engine and the envelope registry are deferred past V1 (six features 🚫).
+  The owner-only release gate is section 0 of `docs/RELEASE_GATES.md`.
+- **Wave two, no migrations:** sign-up mode notice and a remove-member dialog (ADR 0048); source revoke control and
+  fingerprint (ADR 0049); request id in the delivery detail and pause and delete impact counts (ADR 0050); closed log
+  catalogue, console lint and redaction-site test, which also fixed four unredacted `console.error` calls (ADR 0051);
+  destination kind registry, generated `docs/CAPABILITIES.md` and save-time feature checks (ADR 0052); the maximum-wait
+  dashboard control (ADR 0043).
+- **PR #63** (Discord global guard, custom-webhook host controls, ADR 0029) was reviewed and merged to `main` with a merge
+  of `main` and the 0026 harness fix; it had no CI run. This branch is not yet updated with that `main`: the merge was
+  refused by the permission check and waits for the owner.
+- **Verified:** the full suite on this branch (5,165 tests after the last fix), both typechecks, lint, format, docs check,
+  migration seal, web build and bundle check, on the Node SQLite fake and jsdom. **Not verified:** a real browser, a screen
+  reader, real mail, a real provider, staging, a Vietnamese native-speaker review.
+

@@ -104,15 +104,14 @@ repository.
 - A deployment without mail now fails loudly at `/api` instead of half-working. A developer without the
   `send_email` binding locally sees a 503 on `/api` rather than an error inside sign-up.
 - A refused stranger is told to check their email and nothing arrives. The sign-up page does not yet say
-  "by invitation only". Acceptable for a closed beta whose users arrive through an invitation link; a
-  public sign-up needs the page to read `SIGNUP_MODE` first.
+  "by invitation only" (since built: ADR 0048 reads `GET /api/public/signup-mode` and says so before the
+  form is submitted).
 - The beta is still at-least-once with possible duplicates (ADR 0035), and every alert threshold is
   unmeasured. Design partners should be told both.
 
 ## Not done
 
-- The sign-up page message for `invite_only` and `closed`.
-- Every item in section 5.
+- Every item in section 5. (The sign-up page message for `invite_only` and `closed` is built, ADR 0048.)
 
 ## Revisit when
 
