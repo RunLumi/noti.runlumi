@@ -10,6 +10,10 @@
  * 2. Control IDs: every `AR-n` row of the accepted-risk register in docs/THREAT_MODEL.md is unique; every `AR-n`
  *    cited anywhere outside docs/specs/ is defined there; every `Fnn` cited in the threat model is a `## Fnn`
  *    heading in docs/specs/, and spec headings are unique.
+ * 3. External references in ADRs (offline; this script makes no network request): every `http(s)://` URL in
+ *    docs/adr/ is https, parses as a URL, does not end in punctuation picked up from the prose, and sits in a
+ *    markdown link destination without whitespace. ADRs 0031 to 0035 (SOURCED_DECISION_ADRS) must cite at least one
+ *    https URL. Whether a URL still resolves, and whether it says what the ADR claims, is checked by a human, not here.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
@@ -24,6 +28,82 @@ export const LEGACY_NO_STATUS = new Set(['0002']);
 /** Decision recorded as an inline `Decision:` paragraph rather than a heading. */
 export const LEGACY_INLINE_DECISION = new Set(['0001']);
 const STATUS_WORDS = /^Status:\s*(Proposed|Accepted|Superseded|Deprecated|Rejected)\b/;
+/** Decisions that rest on external platform limits or standards; each must cite a source (spec 01 F14). */
+export const SOURCED_DECISION_ADRS = new Set(['0031', '0032', '0033', '0034', '0035']);
+/** A URL token: starts at http(s):// and stops at whitespace or a quote, angle bracket, backtick or square bracket. */
+const URL_TOKEN = /https?:\/\/[^\s<>"'`[\]]*/g;
+/** A markdown link destination, `](...)`, up to the first closing parenthesis. */
+const LINK_DESTINATION = /\]\((https?:\/\/[^)\n]*)\)/g;
+const TRAILING_PUNCTUATION = /[.,;:!?*]$/;
+
+/** The URL ends before the first closing parenthesis it did not open: that one is markdown syntax, not URL. */
+function beforeMarkdownCloser(token) {
+  let depth = 0;
+  for (let i = 0; i < token.length; i++) {
+    if (token[i] === '(') depth++;
+    else if (token[i] === ')') {
+      if (depth === 0) return token.slice(0, i);
+      depth--;
+    }
+  }
+  return token;
+}
+function lineOf(text, index) {
+  return text.slice(0, index).split('\n').length;
+}
+
+/**
+ * Offline, structural checks on every http(s) URL in the ADRs. No request is made.
+ * @param {{name: string, text: string}[]} files
+ */
+export function checkAdrUrls(files) {
+  const problems = [];
+  for (const { name, text } of files) {
+    for (const m of text.matchAll(LINK_DESTINATION)) {
+      if (/\s/.test(m[1] ?? '')) {
+        problems.push(`${name}:${lineOf(text, m.index)}: link destination contains whitespace`);
+      }
+    }
+    for (const m of text.matchAll(URL_TOKEN)) {
+      const url = beforeMarkdownCloser(m[0]);
+      const where = `${name}:${lineOf(text, m.index)}`;
+      if (!url.startsWith('https://')) {
+        problems.push(`${where}: ${url} must use https`);
+        continue;
+      }
+      try {
+        new URL(url);
+      } catch {
+        problems.push(`${where}: ${url} is not a valid URL`);
+        continue;
+      }
+      if (TRAILING_PUNCTUATION.test(url)) {
+        problems.push(`${where}: ${url} ends in punctuation that is probably not part of the URL`);
+      }
+    }
+  }
+  return problems;
+}
+
+/**
+ * Each decision ADR in SOURCED_DECISION_ADRS exists and cites at least one https URL.
+ * @param {{name: string, text: string}[]} files
+ */
+export function checkSourcedDecisions(files) {
+  const problems = [];
+  const byNumber = new Map();
+  for (const { name, text } of files) {
+    const m = /^(\d{4})-/.exec(name);
+    if (m && SOURCED_DECISION_ADRS.has(m[1])) byNumber.set(m[1], text);
+  }
+  for (const num of [...SOURCED_DECISION_ADRS].sort()) {
+    const text = byNumber.get(num);
+    if (text === undefined) problems.push(`ADR ${num}: missing, but it is a sourced decision ADR`);
+    else if (!/https:\/\/\S/.test(text))
+      problems.push(`ADR ${num}: cites no https:// source for its external claims`);
+  }
+  return problems;
+}
 
 /** @param {{name: string, text: string}[]} files */
 export function checkAdrs(files) {
@@ -123,10 +203,15 @@ export function loadRepo(base = root) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const repo = loadRepo();
-  const problems = [...checkAdrs(repo.adrs), ...checkControlIds(repo)];
+  const problems = [
+    ...checkAdrs(repo.adrs),
+    ...checkAdrUrls(repo.adrs),
+    ...checkSourcedDecisions(repo.adrs),
+    ...checkControlIds(repo),
+  ];
   if (problems.length > 0) {
     for (const p of problems) console.error(p);
     process.exit(1);
   }
-  console.log(`docs check ok: ${repo.adrs.length} ADRs, control IDs consistent`);
+  console.log(`docs check ok: ${repo.adrs.length} ADRs, ADR URLs well-formed, control IDs consistent`);
 }

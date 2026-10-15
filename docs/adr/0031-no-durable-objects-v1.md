@@ -6,7 +6,7 @@ Related: [ADR 0005](0005-delivery-reliability.md), [ADR 0034](0034-single-d1-v1.
 
 ## Context
 
-Cloudflare offers Durable Objects (DO) for per-key serialised state: counters, locks, WebSocket rooms. Noti has several
+Cloudflare offers [Durable Objects](https://developers.cloudflare.com/durable-objects/) (DO) for per-key serialised state: counters, locks, WebSocket rooms. Noti has several
 places where a reader might expect one: the per-integration claim of a delivery, the fixed-window rate limiters, the
 burst-grouping and digest state, and the idempotency check. `wrangler.jsonc` declares no `durable_objects` binding and no
 source file under `src/` or `web/src/` references one.
@@ -46,6 +46,14 @@ V1 uses **no Durable Objects**. State lives in D1 and work moves through Queues 
 - A feature that needs per-key serialisation or a live connection (exact-count rate limiting, presence, streaming).
 - A limiter bypass or abuse incident caused by fixed-window accounting.
 
+## Sources
+
+- [Durable Objects](https://developers.cloudflare.com/durable-objects/): the per-key and single-threaded model. **Not re-read**
+  on 2026-10-15 (the agent sandbox could not reach developers.cloudflare.com) and no quote from it is recorded in the repo.
+- [D1 platform limits](https://developers.cloudflare.com/d1/platform/limits/): "Each individual D1 database is inherently
+  single-threaded". Read 2026-10-13, quoted in `docs/specs/01-platform-runtime.md`.
+
 ## Not verified
 
 No load test has compared the D1 claim path with a DO-based one; the choice rests on simplicity and isolation, not on measured throughput.
+The Durable Objects behaviour cited above has not been checked against the official page in this change.

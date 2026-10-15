@@ -9,11 +9,15 @@ interface File {
 }
 interface Checks {
   checkAdrs: (files: File[]) => string[];
+  checkAdrUrls: (files: File[]) => string[];
+  checkSourcedDecisions: (files: File[]) => string[];
   checkControlIds: (i: { threatModel: string; specs: File[]; others: File[] }) => string[];
   loadRepo: () => { adrs: File[]; specs: File[]; others: File[]; threatModel: string };
 }
 const scriptPath = '../../scripts/check-docs.mjs';
-const { checkAdrs, checkControlIds, loadRepo } = (await import(/* @vite-ignore */ scriptPath)) as Checks;
+const { checkAdrs, checkAdrUrls, checkSourcedDecisions, checkControlIds, loadRepo } = (await import(
+  /* @vite-ignore */ scriptPath
+)) as Checks;
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 const good = (n: string, extra = '') =>
@@ -46,6 +50,67 @@ describe('ADR check', () => {
   });
   it('holds the real docs/adr directory to the rules', () => {
     expect(checkAdrs(loadRepo().adrs)).toEqual([]);
+  });
+});
+
+describe('ADR URL check (offline, no network)', () => {
+  const url = (text: string) => checkAdrUrls([{ name: '0040-x.md', text }]);
+  it('accepts https URLs in plain, autolink, markdown-link and code-span forms', () => {
+    expect(url('See https://developers.cloudflare.com/d1/platform/limits/ for limits.')).toEqual([]);
+    expect(url('Read <https://developers.cloudflare.com/queues/reference/delivery-guarantees/>.')).toEqual(
+      [],
+    );
+    expect(url('[D1](https://developers.cloudflare.com/d1/platform/limits/)')).toEqual([]);
+    expect(url('`https://discord.com/api/webhooks/{id}/{token}`')).toEqual([]);
+    expect(url('wiki: https://en.wikipedia.org/wiki/Foo_(bar)')).toEqual([]);
+  });
+  it('rejects http and reports the line', () => {
+    const out = url('ok\nsee http://example.com/x for details');
+    expect(out).toHaveLength(1);
+    expect(out[0]).toContain('0040-x.md:2');
+    expect(out[0]).toContain('must use https');
+  });
+  it('rejects a URL that does not parse', () => {
+    expect(url('a bare scheme: https:// and nothing else').join('\n')).toContain('is not a valid URL');
+  });
+  it('rejects trailing punctuation picked up from the prose', () => {
+    expect(
+      url('see https://developers.cloudflare.com/queues/reference/delivery-guarantees/, then').join('\n'),
+    ).toContain('ends in punctuation');
+    expect(url('the page https://example.com/a.').join('\n')).toContain('ends in punctuation');
+  });
+  it('rejects whitespace inside a markdown link destination', () => {
+    expect(url('[x](https://example.com/a )').join('\n')).toContain('contains whitespace');
+  });
+  it('holds the real docs/adr directory to the rules', () => {
+    expect(checkAdrUrls(loadRepo().adrs)).toEqual([]);
+  });
+});
+
+describe('sourced decision ADR check', () => {
+  const adr = (name: string, text: string) => ({ name, text });
+  const all = (withSource: boolean) =>
+    ['0031', '0032', '0033', '0034', '0035'].map((n) =>
+      adr(
+        `${n}-x.md`,
+        withSource ? 'Claim: https://developers.cloudflare.com/d1/platform/limits/' : 'No link here',
+      ),
+    );
+  it('accepts each of ADRs 0031 to 0035 when it cites an https source', () => {
+    expect(checkSourcedDecisions(all(true))).toEqual([]);
+  });
+  it('rejects a decision ADR with no source, and a missing one', () => {
+    const out = checkSourcedDecisions(all(false)).join('\n');
+    expect(out).toContain('ADR 0031: cites no https:// source');
+    expect(checkSourcedDecisions(all(true).slice(1)).join('\n')).toContain('ADR 0031: missing');
+  });
+  it('reports only the sourced ADRs that are absent, ignoring other ADRs', () => {
+    const out = checkSourcedDecisions([adr('0036-x.md', 'no link')]);
+    expect(out).toHaveLength(5);
+    expect(out.join('\n')).not.toContain('0036');
+  });
+  it('holds the real ADRs 0031 to 0035 to the rule', () => {
+    expect(checkSourcedDecisions(loadRepo().adrs)).toEqual([]);
   });
 });
 

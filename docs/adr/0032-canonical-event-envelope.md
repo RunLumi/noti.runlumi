@@ -11,7 +11,7 @@ wholesale, or define a private envelope.
 
 ## Decision
 
-Use a **CloudEvents 1.0 aligned** envelope (`specversion`, `id`, `source`, `type`, `subject`, `time`, plus the extension
+Use a **[CloudEvents](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) 1.0 aligned** envelope (`specversion`, `id`, `source`, `type`, `subject`, `time`, plus the extension
 attributes `provider` and `adapterversion`) with a **closed, versioned `data` object** and a hand-written bounded
 validator. "Aligned" means attribute names and the duplicate rule (`source` + `id`) follow CloudEvents; we do not claim
 full conformance, do not depend on a CloudEvents SDK, and do not emit it to third parties.
@@ -43,3 +43,8 @@ Not taken:
 - The source catalogue passes about four providers and the closed `data` object keeps needing provider-specific facts.
 - We must emit events to a customer or another system, where full CloudEvents conformance would matter.
 - F52 (published schemas) is authorised.
+
+## Sources
+
+- [CloudEvents v1.0.2 core](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md): attribute names and the
+  `source` + `id` duplicate rule. Cited in `docs/specs/04-event-model.md`. **Not re-read** on 2026-10-15.

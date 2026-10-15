@@ -5,7 +5,7 @@ Status: Accepted · Date: 2026-10-15 · Records the contract behind AR-5 and F18
 
 ## Context
 
-Cloudflare Queues delivers at least once. The destinations we send to (Slack, Teams, Lark, Discord, a customer webhook) do
+[Cloudflare Queues](https://developers.cloudflare.com/queues/reference/delivery-guarantees/) delivers at least once, and its documentation says a message "may be delivered more than once". The destinations we send to (Slack, Teams, Lark, Discord, a customer webhook) do
 not give us a server-side idempotency key. A Worker can also crash after a provider accepted a message and before the ledger
 recorded it. Exactly-once delivery to a chat tool is therefore not achievable by us, whatever we build.
 
@@ -38,6 +38,14 @@ arrive. Surfacing them keeps the ledger an honest record, which is also what inc
 - A destination offers real idempotency (a client-supplied dedup key honoured server-side), AR-5's trigger.
 - Queues offers an exactly-once or transactional send that includes the outbox write.
 - A measured duplicate rate in production that customers notice.
+
+## Sources
+
+- [Queues delivery guarantees](https://developers.cloudflare.com/queues/reference/delivery-guarantees/): at least once, with
+  rare duplicates. Quoted in `docs/specs/12-delivery-reliability.md`; the constraints table in `docs/specs/01-platform-runtime.md`
+  was read 2026-10-13. The page itself was not re-read on 2026-10-15.
+- The provider claim (Slack, Teams, Lark, Discord and a customer webhook give no server-side idempotency key) rests on
+  `docs/DESTINATION_API_REFERENCE.md`, not on a URL here. Adding the provider URLs is part of the human re-read (F14).
 
 ## Not verified
 

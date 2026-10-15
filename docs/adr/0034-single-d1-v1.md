@@ -6,7 +6,7 @@ Status: Accepted · Date: 2026-10-15 · Records the F06 deferral (spec 01 F06 is
 
 ## Context
 
-Cloudflare documents D1 as designed for many smaller databases (per tenant or per entity), and a D1 database is single-writer:
+A D1 database is single-threaded and processes queries one at a time ([D1 limits](https://developers.cloudflare.com/d1/platform/limits/), read 2026-10-13), and Cloudflare's guidance is that D1 suits many smaller databases (per tenant or per entity; see Not verified). So a D1 database is single-writer:
 more queue consumers do not give more write throughput, they give contention and an `overloaded` error once its internal
 queue fills. Queues also scales consumers down as failures rise. Spec F06 proposes a `dbFor(workspaceId)` routing function
 from the start. The code uses `env.DB` directly.
@@ -43,3 +43,15 @@ What keeps sharding possible, and is enforced:
 - A sustained `overloaded` rate, or p95 query latency breaching its SLI, on real traffic.
 - The database approaches a fraction of its size cap that retention cannot hold back.
 - A customer needs data residency or isolation that only a separate database gives.
+
+## Sources
+
+- [D1 platform limits](https://developers.cloudflare.com/d1/platform/limits/): single-threaded per database; 10 GB maximum
+  database size on Paid. Read 2026-10-13, quoted in `docs/specs/01-platform-runtime.md`.
+- [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/): the 30-day restore window, cited in
+  `docs/specs/02-identity-tenancy.md`. The per-database scope of a restore is **not re-read** on 2026-10-15.
+
+## Not verified
+
+The guidance that D1 suits many smaller databases is not quoted anywhere in the repo and was **not re-read** on 2026-10-15.
+The per-database scope of Time Travel above is likewise not re-read.

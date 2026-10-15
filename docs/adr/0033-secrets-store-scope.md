@@ -6,7 +6,7 @@ Status: Accepted · Date: 2026-10-15 · Records the scope decision behind F34 an
 ## Context
 
 Destination secrets are sealed with per-row data keys (DEKs) wrapped by a key-encryption key (KEK). F34 asks that the KEK
-live in a Cloudflare Secrets Store binding (account-level, in open beta when the spec was read), with a Worker secret as
+live in a [Cloudflare Secrets Store](https://developers.cloudflare.com/secrets-store/) binding (account-level, in open beta when the spec was read), with a Worker secret as
 the fallback. Today `wrangler.jsonc` has no `secrets_store_secrets` binding: KEKs are versioned Worker secrets
 (`KEK_V<n>`, `src/crypto/keyring-env.ts`).
 
@@ -42,3 +42,9 @@ the fallback. Today `wrangler.jsonc` has no `secrets_store_secrets` binding: KEK
   these as UNVERIFIED).
 - A customer requires customer-managed keys or a per-tenant key custody story.
 - A KEK exposure incident.
+
+## Sources
+
+- [Secrets Store](https://developers.cloudflare.com/secrets-store/): "a secure, centralized location in which account-level
+  secrets are stored", and the open-beta status. Read 2026-10-13, quoted in `docs/specs/03-secrets-and-crypto.md` and
+  `docs/specs/01-platform-runtime.md`. The beta status is as of that read; re-verify before relying on it.

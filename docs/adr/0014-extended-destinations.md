@@ -199,7 +199,7 @@ is unverified here, and the code comments say so.
     DNS-over-HTTPS lookup works as designed; (5) the threat-model review of AR-30 repeated with
     those in place. Until then it is a feature that exists in the code and cannot be reached.
 19. **`global_fetch_strictly_public` was researched and is NOT added.** It exists
-    (https://developers.cloudflare.com/workers/configuration/compatibility-flags/, read
+    (<https://developers.cloudflare.com/workers/configuration/compatibility-flags/>, read
     2026-10-13; disable flag `global_fetch_private_origin`), but the documented behaviour is
     that `fetch()` "will strictly route requests as if they were made on the public Internet",
     so that a request to the Worker's own zone loops back to Cloudflare's front door instead of
