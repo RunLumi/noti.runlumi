@@ -31,6 +31,14 @@ const ORIGIN = 'https://noti.test';
 let db: FakeD1;
 let env: Bindings;
 
+/**
+ * The ids of the seeded events in a response. Each admin read is itself an `audit.read` row (ADR 0039), written
+ * by the request under test; these assertions are about the seeded rows, so the read rows are left out here and
+ * asserted in tests/api/audit-read-recorded.test.ts.
+ */
+const dataIds = (events: { id: string; action?: string }[]) =>
+  events.filter((e) => e.action !== 'audit.read').map((e) => e.id);
+
 function get(path: string, as: string | null, bindings: Partial<Bindings> = {}) {
   return worker.fetch(
     new Request(`${ORIGIN}${path}`, { headers: as ? { 'x-test-user': as } : {} }),
@@ -120,24 +128,27 @@ describe('tenant isolation', () => {
     event({ id: 'b1', org: 'org-b', actor: 'carol', at: '2026-10-01 10:00:01', subject: 'secret-b' });
     event({ id: 'n1', org: null, actor: 'carol', at: '2026-10-01 10:00:02' });
     const res = await get('/api/audit?limit=100', 'alice');
-    const body = await res.json<{ organizationId: string; events: { id: string }[] }>();
+    const body = await res.json<{ organizationId: string; events: { id: string; action: string }[] }>();
     expect(body.organizationId).toBe('org-a');
-    expect(body.events.map((e) => e.id)).toEqual(['a1']);
-    const other = await (await get('/api/audit', 'carol')).json<{ events: { id: string }[] }>();
-    expect(other.events.map((e) => e.id)).toEqual(['b1']);
+    expect(dataIds(body.events)).toEqual(['a1']);
+    const other = await (
+      await get('/api/audit', 'carol')
+    ).json<{ events: { id: string; action: string }[] }>();
+    expect(dataIds(other.events)).toEqual(['b1']);
   });
 
   it('does not let a cursor reach into another workspace', async () => {
     for (const n of [1, 2, 3])
       event({ id: `a${n}`, org: 'org-a', actor: 'alice', at: `2026-10-0${n} 10:00:00` });
     event({ id: 'b1', org: 'org-b', at: '2026-10-01 09:00:00' });
-    const first = await (await get('/api/audit?limit=1', 'alice')).json<{ nextCursor: string }>();
+    // The first page is the read this request writes (the newest row), then a3: the cursor points at a3.
+    const first = await (await get('/api/audit?limit=2', 'alice')).json<{ nextCursor: string }>();
     const page = await (
       await get(`/api/audit?limit=5&cursor=${first.nextCursor}`, 'alice')
     ).json<{
       events: { id: string }[];
     }>();
-    expect(page.events.map((e) => e.id)).toEqual(['a2', 'a1']);
+    expect(dataIds(page.events)).toEqual(['a2', 'a1']);
   });
 });
 
@@ -169,8 +180,9 @@ describe('paging and filters', () => {
   });
 
   const ids = async (query: string) =>
-    (await (await get(`/api/audit${query}`, 'alice')).json<{ events: { id: string }[] }>()).events.map(
-      (e) => e.id,
+    dataIds(
+      (await (await get(`/api/audit${query}`, 'alice')).json<{ events: { id: string; action: string }[] }>())
+        .events,
     );
 
   it('is newest first, ordered by (created_at, id)', async () => {
@@ -180,14 +192,16 @@ describe('paging and filters', () => {
   it('pages by cursor without skipping or repeating rows that share a timestamp', async () => {
     const seen: string[] = [];
     let cursor = '';
-    for (let i = 0; i < 5; i++) {
+    // Read rows are interleaved (a read is written in the same second as the page before it), so the walk is
+    // longer than the seeded rows and stops at the last page: it must still reach every seeded row exactly once.
+    for (let i = 0; i < 10; i++) {
       const body = await (
         await get(`/api/audit?limit=1${cursor}`, 'alice')
       ).json<{
-        events: { id: string }[];
+        events: { id: string; action: string }[];
         nextCursor: string | null;
       }>();
-      seen.push(...body.events.map((e) => e.id));
+      seen.push(...dataIds(body.events));
       if (!body.nextCursor) break;
       cursor = `&cursor=${body.nextCursor}`;
     }

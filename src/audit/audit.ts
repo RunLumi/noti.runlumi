@@ -9,6 +9,7 @@ export { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction } from './actions'
 import type { AUDIT_SUBJECT_TYPES, AuditAction } from './actions';
 import { currentCorrelationId } from '../platform/correlation';
 import { sanitiseCorrelationId } from '../platform/correlation-id';
+import { scrubSecrets } from '../platform/redact';
 
 export type AuditMetadata = Readonly<Record<string, string | number | boolean | null | readonly string[]>>;
 
@@ -27,9 +28,25 @@ export interface AuditEntry {
 const MAX_METADATA_BYTES = 4096;
 const MAX_USER_AGENT = 256;
 
-/** Serialise metadata, dropping it (not truncating JSON into garbage) if it is too large. */
+/**
+ * Serialise metadata, dropping it (not truncating JSON into garbage) if it is too large.
+ *
+ * Every string value passes through the secret scrubber first (F12, ADR 0039): a URL keeps only its host, a
+ * token-shaped value or a `key=value` pair with a denied key is replaced. Keys are fixed identifiers in the
+ * code and are not scrubbed.
+ */
 export function serialiseMetadata(metadata: AuditMetadata | undefined): string {
-  const json = JSON.stringify(metadata ?? {});
+  const scrubbed = Object.fromEntries(
+    Object.entries(metadata ?? {}).map(([key, value]) => [
+      key,
+      typeof value === 'string'
+        ? scrubSecrets(value)
+        : Array.isArray(value)
+          ? value.map((item: string) => scrubSecrets(item))
+          : value,
+    ]),
+  );
+  const json = JSON.stringify(scrubbed);
   return new TextEncoder().encode(json).length <= MAX_METADATA_BYTES ? json : '{"truncated":true}';
 }
 
@@ -80,7 +97,7 @@ export function auditStatement(
       entry.subjectId,
       entry.outcome,
       entry.ip ?? null,
-      entry.userAgent ? entry.userAgent.slice(0, MAX_USER_AGENT) : null,
+      entry.userAgent ? scrubSecrets(entry.userAgent).slice(0, MAX_USER_AGENT) : null,
       options.changesAs ?? serialiseMetadata(entry.metadata),
       // The request this change was made in (F222), so a support quote of the id finds it. Null in a
       // cron job or queue consumer with no request; never a sender-supplied value.

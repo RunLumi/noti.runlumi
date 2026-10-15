@@ -113,8 +113,24 @@ beforeEach(() => {
   env = { ...BOOT_ENV, DB: db.d1, APP_ORIGIN: ORIGIN } as unknown as Bindings;
 });
 
+/**
+ * The seeded rows a response holds. Each admin read writes its own `audit.read` row (ADR 0039, asserted in
+ * tests/api/audit-read-recorded.test.ts); these tests are about the seeded rows, so those are left out here.
+ */
+const dataIds = (events: { id: string; action?: string }[]) =>
+  events.filter((e) => e.action !== 'audit.read').map((e) => e.id);
+/** The `audit.read` rows of workspace org-a so far: each read is one row, and a total counts it. */
+const readRows = (): number =>
+  (
+    db.raw
+      .prepare("SELECT COUNT(*) AS n FROM audit_events WHERE action='audit.read' AND organization_id='org-a'")
+      .get() as { n: number }
+  ).n;
+
 const ids = async (query: string, as = 'alice') =>
-  (await (await get(`/api/audit${query}`, as)).json<{ events: { id: string }[] }>()).events.map((e) => e.id);
+  dataIds(
+    (await (await get(`/api/audit${query}`, as)).json<{ events: { id: string; action: string }[] }>()).events,
+  );
 
 describe('actor, target and request filters', () => {
   beforeEach(() => {
@@ -232,10 +248,10 @@ describe('total', () => {
       totalCapped: boolean;
       nextCursor: string;
     }>();
-    expect(first.total).toBe(7);
+    expect(first.total).toBe(7 + readRows());
     expect(first.totalCapped).toBe(false);
     const filtered = await (await get('/api/audit?from=2026-10-05')).json<{ total: number }>();
-    expect(filtered.total).toBe(3);
+    expect(filtered.total).toBe(3 + readRows());
     const none = await (await get('/api/audit?action=source.delete')).json<{ total: number }>();
     expect(none.total).toBe(0);
   });
@@ -329,9 +345,9 @@ describe('field diff', () => {
     const body = await (
       await get('/api/audit')
     ).json<{
-      events: { changes: unknown[]; summary: { key: string }[] }[];
+      events: { id: string; action: string; changes: unknown[]; summary: { key: string }[] }[];
     }>();
-    expect(body.events[0]?.changes).toEqual([
+    expect(body.events.find((e) => e.id === 'u1')?.changes).toEqual([
       { field: 'enabled', kind: 'value', before: true, after: false },
     ]);
     expect(JSON.stringify(body)).not.toContain('previousEnabled');
@@ -370,8 +386,10 @@ describe('request ids', () => {
 
   it('leaves it null for rows written before it was recorded', async () => {
     event({ id: 'old', org: 'org-a', actor: 'alice', at: '2026-10-01 10:00:00' });
-    const body = await (await get('/api/audit')).json<{ events: { correlationId: string | null }[] }>();
-    expect(body.events[0]?.correlationId).toBeNull();
+    const body = await (
+      await get('/api/audit')
+    ).json<{ events: { id: string; correlationId: string | null }[] }>();
+    expect(body.events.find((e) => e.id === 'old')?.correlationId).toBeNull();
   });
 });
 
@@ -416,7 +434,7 @@ describe('fails closed', () => {
       total: number | null;
       totalCapped: boolean;
     }>();
-    expect(body.events.map((e) => e.id)).toEqual(['a1']);
+    expect(dataIds(body.events)).toEqual(['a1']);
     expect(body.total).toBeNull();
     expect(body.totalCapped).toBe(true);
     // A count that never answers is cut off by its budget and the page still comes back.
@@ -431,12 +449,12 @@ describe('fails closed', () => {
     event({ id: 'old', org: 'org-a', actor: 'alice', at: '2026-05-01 10:00:00' });
     event({ id: 'new', org: 'org-a', actor: 'alice', at: '2026-10-01 10:00:00' });
     const plain = await (await get('/api/audit')).json<{ total: number; totalSince: string | null }>();
-    expect(plain.total).toBe(1);
+    expect(plain.total).toBe(1 + readRows());
     expect(plain.totalSince).toMatch(/^2026-07-1\d \d\d:\d\d:\d\d$/);
     const wide = await (
       await get('/api/audit?from=2026-01-01')
     ).json<{ total: number; totalSince: string | null }>();
-    expect(wide.total).toBe(2);
+    expect(wide.total).toBe(2 + readRows());
     expect(wide.totalSince).toBeNull();
   });
 

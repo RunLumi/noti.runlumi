@@ -21,6 +21,8 @@ export const AUDIT_ACTIONS = [
   'delivery.replay',
   'delivery.bulk_replay',
   'access.denied',
+  // A read of this workspace's audit log, recorded before the rows are read (ADR 0039).
+  'audit.read',
   'github.installation.bind',
   'github.installation.bind_refused',
   'github.installation.lifecycle',

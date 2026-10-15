@@ -9,6 +9,7 @@
 import { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction } from '../audit/actions';
 import { DIFF_KEYS, MAX_DIFF_LIST } from '../audit/diff';
 import { sanitiseCorrelationId } from '../platform/correlation-id';
+import { scrubSecrets } from '../platform/redact';
 import { decodeCursor, parseBound } from './delivery-view';
 
 export const AUDIT_DEFAULT_PAGE = 25;
@@ -87,6 +88,8 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
     to: 'string',
   },
   'access.denied': { capability: 'string', reason: 'string', role: 'string' },
+  // Which filters an admin set (names only, never their values) and whether the page was a later one.
+  'audit.read': { filters: 'list', continued: 'boolean' },
   'github.installation.bind': { account: 'string', selection: 'string', repositories: 'number' },
   'github.installation.bind_refused': { reason: 'string' },
   'github.installation.lifecycle': {
@@ -146,7 +149,9 @@ const isUnsafe = (code: number) => UNSAFE_RANGES.some(([lo, hi]) => code >= lo &
 
 /** Plain text that cannot reorder or hide what follows it, cut to `max` characters. */
 export function safeText(value: string, max: number = MAX_TEXT): string {
-  const clean = Array.from(value)
+  // Secret-shaped text is replaced before anything else (F12, ADR 0039), so a row written before the writer
+  // scrubbed, or by a path that missed it, still never shows a token or a URL path.
+  const clean = Array.from(scrubSecrets(value))
     .filter((ch) => !isUnsafe(ch.codePointAt(0) ?? 0))
     .join('');
   // By code point, so a cut never splits a surrogate pair.

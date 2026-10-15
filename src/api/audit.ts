@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { auditStatement, requestOrigin } from '../audit/audit';
 import { authorize, isFailure } from '../auth/workspace';
 import type { Bindings } from '../env';
 import { currentCorrelationId } from '../platform/correlation';
@@ -11,6 +12,7 @@ import {
   buildAuditQuery,
   parseAuditFilters,
   toAuditView,
+  type AuditFilters,
   type AuditRowRecord,
 } from './audit-view';
 import { encodeCursor } from './delivery-view';
@@ -31,6 +33,9 @@ import { encodeCursor } from './delivery-view';
  * error. A failed query, a failed limiter write or a row that is not this workspace's answers 503 with
  * no events: never an empty list, never a partial page. The dashboard shows that as an error, not as
  * "no events".
+ *
+ * AUDITED READS (ADR 0039, F236): each read that is answered first writes an `audit.read` row. A read whose
+ * row cannot be written is answered 503 like any other failed read.
  */
 const WINDOW_MS = 60_000;
 /** An admin paging through history; well above a person, well below a script. */
@@ -40,6 +45,24 @@ export const AUDIT_READS_PER_MINUTE = 120;
 export const AUDIT_COUNT_BUDGET_MS = 1500;
 
 class TenantMismatch extends Error {}
+/** The read could not be recorded, so its rows are not returned (ADR 0039). */
+class ReadNotRecorded extends Error {}
+
+/** The filter fields an admin set, by name. Values are never recorded: they are ids and text an admin typed. */
+const FILTER_FIELDS = [
+  'action',
+  'outcome',
+  'actor',
+  'target',
+  'targetType',
+  'correlationId',
+  'from',
+  'to',
+] as const satisfies readonly (keyof AuditFilters)[];
+
+function filtersSet(filters: AuditFilters): string[] {
+  return FILTER_FIELDS.filter((field) => filters[field] !== null);
+}
 
 const audit = new Hono<{ Bindings: Bindings }>();
 
@@ -56,6 +79,24 @@ audit.get('/', async (c) => {
       return c.json({ error: 'Too many requests; try again shortly' }, 429, {
         'retry-after': String(limit.retryAfterSeconds),
       });
+
+    // Every read is itself an audit row (ADR 0039, F236), written BEFORE the rows are read: a read that cannot be
+    // recorded returns nothing. It names the filter fields and whether this is a later page, never their values,
+    // and it is bounded by the limiter above. A refused (429) or unauthorised request reads nothing, so it writes nothing.
+    try {
+      await auditStatement(c.env.DB, {
+        organizationId: who.orgId,
+        actorId: who.userId,
+        action: 'audit.read',
+        subjectType: 'organization',
+        subjectId: who.orgId,
+        outcome: 'success',
+        ...requestOrigin(c.req.raw.headers),
+        metadata: { filters: filtersSet(filters), continued: filters.cursor !== null },
+      }).run();
+    } catch {
+      throw new ReadNotRecorded();
+    }
 
     const query = buildAuditQuery(who.orgId, filters);
     const rows = await c.env.DB.prepare(query.sql)
@@ -113,7 +154,12 @@ audit.get('/', async (c) => {
   } catch (e) {
     // Category only: never the SQL, a row or a value.
     log('error', 'audit_read_failed', {
-      code: e instanceof TenantMismatch ? 'tenant_mismatch' : 'read_failed',
+      code:
+        e instanceof TenantMismatch
+          ? 'tenant_mismatch'
+          : e instanceof ReadNotRecorded
+            ? 'read_not_recorded'
+            : 'read_failed',
     });
     return c.json(
       {

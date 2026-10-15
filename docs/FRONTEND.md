@@ -164,6 +164,9 @@ log. Verification: `web/src/audit/audit.test.tsx` (URL search, diff lines, Enter
 names only, CSV) and axe on the filtered and diff states in English and Vietnamese (`web/src/a11y/pages.a11y.test.tsx`). Not verified: a
 screen reader, a real 320 px device, and the Vietnamese copy by a native speaker.
 
+**Audited reads (ADR 0039).** Each page the dashboard loads is recorded as an "Audit log read" row, so the log lists its own reads.
+Its labels are `audit.action.audit.read` and `audit.detail.continued` in `messages.audit.{en,vi}.ts`. No control changed.
+
 | `workspace/bound.tsx` | `useBoundWorkspace`: a form, wizard or dialog keeps the workspace it was opened for; `StaleWorkspaceNotice` |
 | `workspace/drift.tsx` | `WorkspaceDriftBanner`: detects an active-workspace change made in another tab (`BroadcastChannel('noti-workspace')`, focus), drops caches, alerts |
 

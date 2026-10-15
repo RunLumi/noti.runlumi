@@ -217,9 +217,14 @@ and leaves no false "success" entry.
 
 `repo` matches incoming events case-insensitively, as GitHub does.
 
-The audit log refuses `UPDATE`. It is append-only at the application level, not
-tamper-evident: organization deletion cascades to it, and a future retention job will
-delete rows.
+The audit log refuses `UPDATE` (a database trigger). The application issues no `UPDATE` of it, and
+no `DELETE` except the age-based retention purge and the workspace purge; a test scans the code for
+both ([ADR 0039](adr/0039-audit-immutability-and-audited-reads.md)). It is append-only, not
+tamper-evident.
+
+Every `GET /api/audit` that is answered first writes an `audit.read` row for the workspace, naming
+the filter fields that were set (not their values) and whether the page is a later one. If that row
+cannot be written, the request answers `503` and no events. A `429` or a `403` writes no read row.
 
 ### Send a test notification
 

@@ -125,7 +125,9 @@ records about a refusal, and how an admin reads that record back.
    `audit_read_failed` with `code: tenant_mismatch` or `read_failed`, never SQL or a row. The dashboard already shows a failed query as
    an error and not as "no events" (F225).
 6. Decided against: auditing reads of the audit log (it changes nothing, and the 120 a minute limiter already bounds it), and
-   showing the actor's email (ADR 0019 stands: a name only, only for a current member).
+   showing the actor's email (ADR 0019 stands: a name only, only for a current member). **Superseded in part by
+   [ADR 0039](0039-audit-immutability-and-audited-reads.md): every read is now recorded as an `audit.read` row, before the rows
+   are read, and a read that cannot be recorded is not answered.** The email decision stands.
 
 ### 5. Dashboard (`web/src/audit/`)
 

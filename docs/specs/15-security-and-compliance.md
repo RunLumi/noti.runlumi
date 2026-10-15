@@ -612,7 +612,7 @@ included in a DSAR export (F238) on request.
 
 ## F236 — Audit events: completeness, immutability, access
 
-**Priority** P1 · **Status** 🟡 audit rows are written with the change in one batch, typed primitives-only size-capped metadata, admin-only `audit.read` reads, tenant-scoped (`src/audit/audit.ts`, `src/api/audit.ts`, `tests/api/audit.test.ts`); not built: static no-UPDATE-or-DELETE test (retention purge deletes by age), audit of audit reads, completeness heartbeat, fail-closed destructive actions, F12 redaction of metadata · **Complements** `02` F28
+**Priority** P1 · **Status** 🟡 audit rows are written with the change in one batch, typed primitives-only size-capped metadata, admin-only `audit.read` reads, tenant-scoped (`src/audit/audit.ts`, `src/api/audit.ts`, `tests/api/audit.test.ts`). Built (ADR 0039): a static no-UPDATE-or-DELETE test (`tests/security/audit-append-only.test.ts`; the only DELETEs are the retention purge and the workspace purge, both allow-listed with reasons); every read recorded as an `audit.read` row before the rows are read, fail closed (`tests/api/audit-read-recorded.test.ts`); F12 scrubbing of metadata and user agent before storage, and of text on read (`tests/security/audit-redaction.test.ts`). Not built: completeness heartbeat and `audit_gap` alert (no per-row sequence, no fixed-cadence writer), fail-closed destructive actions, non-admin actors, Better Auth rows atomic with their change (`02` F28, REMAINING 2.3), export before delete, a DELETE-refusing trigger (would break the purges), tamper evidence · **Complements** `02` F28
 
 **Story** As a support engineer, I want to answer "who did what, when" from records I did not
 write, so that a customer dispute does not end in a guess.

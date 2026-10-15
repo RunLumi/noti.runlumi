@@ -131,6 +131,28 @@ function scrubAssignment(match: string, key: string, sep: string, value: string)
   return `${key}${sep}${REDACTED}`;
 }
 
+/**
+ * Replace secret-shaped text (URL paths, bearer tokens, provider token prefixes, `key=value` and JSON
+ * pairs with a denied key) without cutting anything else. Input is capped first so a hostile value cannot
+ * make the regexes costly. Used where a value must be kept whole but must not hold a secret (audit metadata,
+ * ADR 0039); `scrubString` is this plus truncation.
+ */
+export function scrubSecrets(input: string): string {
+  const bounded =
+    input.length > DEFAULTS.maxStringLength * 8 ? input.slice(0, DEFAULTS.maxStringLength * 8) : input;
+  const scrubbed = SCRUBBERS.reduce<string>(
+    (text, [pattern, replacement]) =>
+      typeof replacement === 'string'
+        ? text.replace(pattern, replacement)
+        : text.replace(pattern, replacement),
+    bounded,
+  );
+  // Never keep the part past the cap unscrubbed: say it was dropped instead.
+  return bounded.length < input.length
+    ? `${scrubbed}…[truncated ${input.length - bounded.length} chars]`
+    : scrubbed;
+}
+
 /** Scrub-then-truncate. Input is capped first so a hostile body cannot make regexes costly. */
 export function scrubString(input: string, maxLength: number = DEFAULTS.maxStringLength): string {
   const bounded = input.length > maxLength * 8 ? input.slice(0, maxLength * 8) : input;
