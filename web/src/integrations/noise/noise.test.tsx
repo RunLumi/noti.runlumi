@@ -168,6 +168,8 @@ describe('editing and saving', () => {
         timezone: 'UTC',
         quietHours: { start: '22:00', end: '08:00' },
         groupWindowSec: 900,
+        // No control for the maximum wait yet (ADR 0043): the stored value round-trips, 0 is "off".
+        maxWaitSec: 0,
         digest: 'hourly',
         digestAt: '08:00',
         resolution: false,
