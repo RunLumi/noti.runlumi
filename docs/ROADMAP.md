@@ -23,5 +23,13 @@
 - [ ] Optional opt-in AI summaries and noise reduction with source provenance, cost limits and deterministic fallback.
 - [ ] SSO, advanced RBAC, audit export, enterprise retention, usage-based billing if validated.
 
+## Non-goals
+Requests for these are declined, not queued. Revisiting one needs an ADR stating what changed.
+- **No regex in filters.** Routing filters compare a named, typed field of the canonical event to a literal or a
+  `*`/`**` glob (`src/routing/glob.ts`). No regular expressions, no expression language, no regex-in-routing UI and no
+  "run this code" step (spec 11 F167, spec 10 F127, ADR 0010). A regex built from user input is a
+  catastrophic-backtracking risk, and a user-authored routing language is a migration burden (Alertmanager's
+  matcher-parser change is the cautionary tale). Enforced by `tests/routing/no-regex.test.ts`.
+
 ## Stop/continue gates
 Proceed from P1 only if a real signed webhook reliably reaches a real destination and at least 8/10 target users can set it up without engineering help. Otherwise improve onboarding/reliability instead of expanding catalog.

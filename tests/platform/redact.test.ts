@@ -104,6 +104,12 @@ describe('scrubString', () => {
     expectNoFragment(out, SECRET);
   });
 
+  it('never cuts a [redacted] marker in half when it truncates (ADR 0051)', () => {
+    // `token=` + the marker ends at 16; a cut at 12 would leave `token=[reda`.
+    expect(scrubString(`token=${SECRET} tail`, 12)).toBe(`token=…[truncated ${REDACTED.length + 5} chars]`);
+    expect(scrubString(`token=${SECRET} tail`, 16)).toBe(`token=${REDACTED}…[truncated 5 chars]`);
+  });
+
   it('caps hostile input before scanning and reports everything dropped', () => {
     const out = scrubString('x'.repeat(10_000), 10);
     expect(out).toBe(`${'x'.repeat(10)}…[truncated 9990 chars]`);

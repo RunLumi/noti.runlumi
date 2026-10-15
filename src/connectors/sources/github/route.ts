@@ -132,7 +132,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     } catch {
       // A 5xx makes the failure visible in GitHub's delivery log, where it can be
       // redelivered; a revocation must never be silently dropped. No payload is logged.
-      console.error(JSON.stringify({ event: 'github_lifecycle_failed', kind }));
+      log('error', 'github_lifecycle_failed', { kind });
       return c.text('Lifecycle update failed', 500);
     }
   }

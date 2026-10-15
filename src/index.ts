@@ -350,7 +350,10 @@ async function purgeExpiredAuth(env: Bindings): Promise<JobReport> {
     purged.invitations +
     purged.authStates +
     purged.authRateLimits;
-  if (total > 0) log('info', 'expired_auth_records_purged', { ...purged });
+  // Named for the log: `authStates` and `authRateLimits` contain the denylisted word "auth", so a spread
+  // of the report logged both counts as "[redacted]" (ADR 0051).
+  const { authStates: installStates, authRateLimits: rateLimitRows, ...rest } = purged;
+  if (total > 0) log('info', 'expired_auth_records_purged', { ...rest, installStates, rateLimitRows });
   return { counters: { purged: total } };
 }
 

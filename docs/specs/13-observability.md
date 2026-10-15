@@ -438,7 +438,7 @@ the caller is not a member, so the endpoint does not confirm that an id exists.
 
 ## F194 — Structured log event catalogue
 
-**Priority** P0 · **Status** 🟡 `log()` in `src/platform/log.ts` emits one redacted JSON line with `correlation_id`, `external_request_id` and `cf_ray` inside a request (`tests/platform/log.test.ts`). Not built: closed `msg` catalogue or typed key set (msg is a free string), per-invocation byte budget, invocation logs off for the consumer; a few raw `console.error` calls bypass `log()`. · **Extends F11's key set — does not duplicate it**
+**Priority** P0 · **Status** 🟡 `log()` in `src/platform/log.ts` emits one redacted JSON line with `correlation_id`, `external_request_id` and `cf_ray` inside a request; `msg` is a closed catalogue with a description and declared fields per event (`src/platform/log-events.ts`; an unknown event or undeclared field is a compile error), `docs/LOGS.md` is generated from it and drift-tested, every call site including the former raw `console.error` ones goes through `log()`, and each line is held to a 4096-byte budget without mid-JSON truncation (ADR 0051; `tests/platform/log.test.ts`, `tests/platform/log-events.test.ts`, `tests/docs/logs-doc.test.ts`). Not built: per-invocation byte budget and `logs_dropped_budget` counter, `debug` level and sampling, dotted event names, typed field values, invocation logs off for the consumer. · **Extends F11's key set — does not duplicate it**
 
 **Story** As an engineer debugging at 2am, I want every log line to have the same shape and to
 name a known event, so that I can filter without reading.
@@ -577,7 +577,7 @@ review gate we want for a place where a secret would be invisible.
 
 ## F195 — Redaction enforcement points
 
-**Priority** P0 · **Status** 🟡 `redact()` runs on every `log()` line and delivery diagnostics are minted codes only (`src/platform/redact.ts`, `tests/platform/redact.test.ts`). Not built: console-call lint rule, site-to-test one-to-one check, property test over provider bodies, Analytics Engine and support-bundle exits (do not exist yet), redaction-failure drop-fields test. · **Enforces F12 — does not redefine it**
+**Priority** P0 · **Status** 🟡 `redact()` runs on every `log()` line and delivery diagnostics are minted codes only (`src/platform/redact.ts`, `tests/platform/redact.test.ts`); for the console exit point, ESLint `no-console` is an error in `src/` except `src/platform/log.ts`, and `tests/security/log-redaction-site.test.ts` asserts from the AST that no other file references `console`, that `log.ts` redacts in exactly one call, that every catalogued event is redacted exactly once with no planted secret surviving, and that a redaction failure drops fields and keeps the line (ADR 0051). Not built: property test over provider bodies, the inventory and one-site tests for the other exit points (D1 detail columns, dead-letter view; Analytics Engine and support bundle do not exist yet). · **Enforces F12 — does not redefine it**
 
 **Story** As a customer, I want the redaction guarantee to hold at every place data leaves our
 process, not just in logs, so that adding a new feature cannot quietly reintroduce a leak.

@@ -11,6 +11,7 @@ import {
   type InstallError,
 } from '../connectors/sources/github/install';
 import type { Bindings } from '../env';
+import { log } from '../platform/log';
 import { isDeletionPending } from './workspace-lifecycle';
 
 /**
@@ -126,7 +127,7 @@ browser.get('/setup', async (c) => {
     return c.redirect(next, 302);
   } catch (e) {
     if (e instanceof InstallFlowError) return backToDashboard(c, e.code);
-    console.error(JSON.stringify({ event: 'github_setup_failed' }));
+    log('error', 'github_setup_failed');
     return backToDashboard(c, 'unexpected_error');
   }
 });
@@ -164,7 +165,7 @@ browser.get('/callback', async (c) => {
   } catch (e) {
     if (!(e instanceof InstallFlowError)) {
       // Never a blank 500 from a browser redirect: the user lands back on the dashboard.
-      console.error(JSON.stringify({ event: 'github_callback_failed' }));
+      log('error', 'github_callback_failed');
       return backToDashboard(c, 'unexpected_error');
     }
     if (

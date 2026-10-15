@@ -41,7 +41,9 @@ No security audit has been performed (docs/SECURITY.md).
   `lease_expires_at`, `not_before`, `dead_lettered_at` are epoch **milliseconds**.
 - Live logs: `wrangler tail lumi-noti --format json`. Stall and maintenance lines are named
   `delivery_stall`, `delivery_stall_recovered`, `outbox_reconcile`, `outbox_dispatch_incomplete`,
-  `credential_maintenance`, `retention_purge`, `workspace_purge`.
+  `credential_maintenance`, `retention_purge`, `workspace_purge`. Every event name, what it means and
+  its fields are listed in [LOGS.md](LOGS.md), generated from the closed catalogue in
+  `src/platform/log-events.ts`. A line over 4 KB carries `log_truncated`.
 
 ## Severity
 

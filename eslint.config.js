@@ -87,7 +87,14 @@ export default tseslint.config(
     plugins: { local: { rules: { 'no-unguarded-waituntil': noUnguardedWaitUntil } } },
     rules: {
       'local/no-unguarded-waituntil': 'error',
+      // Every line leaves through `log()`, which redacts once and applies the byte budget (F195,
+      // ADR 0051). src/platform/log.ts is the one file allowed to call `console`.
+      'no-console': 'error',
     },
+  },
+  {
+    files: ['src/platform/log.ts'],
+    rules: { 'no-console': 'off' },
   },
 
   // Web/frontend source: browser globals.

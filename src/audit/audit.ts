@@ -9,6 +9,7 @@ export { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES, type AuditAction } from './actions'
 import type { AUDIT_SUBJECT_TYPES, AuditAction } from './actions';
 import { currentCorrelationId } from '../platform/correlation';
 import { sanitiseCorrelationId } from '../platform/correlation-id';
+import { log } from '../platform/log';
 import { scrubSecrets } from '../platform/redact';
 
 export type AuditMetadata = Readonly<Record<string, string | number | boolean | null | readonly string[]>>;
@@ -184,7 +185,7 @@ export async function recordDenial(
       .first();
     if (!recent && (options.gate ? await options.gate() : true)) await recordAudit(db, entry);
   } catch {
-    console.error(JSON.stringify({ event: 'audit_write_failed', action: entry.action }));
+    log('error', 'audit_write_failed', { action: entry.action });
     await noteAuditFailure(db);
   }
 }

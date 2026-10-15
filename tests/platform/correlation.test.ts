@@ -59,11 +59,11 @@ describe('contextFromHeaders', () => {
 describe('log integration', () => {
   it('adds the correlation keys inside a request and nothing outside one', () => {
     expect(correlationFields()).toEqual({});
-    expect(JSON.parse(logLine('info', 'x'))).not.toHaveProperty('correlation_id');
+    expect(JSON.parse(logLine('info', 'delivery_attempt'))).not.toHaveProperty('correlation_id');
     const ctx = contextFromHeaders(new Headers({ 'x-request-id': 'caller-1234', 'cf-ray': 'ray1234-AMS' }));
     const line = runWithCorrelation(
       ctx,
-      () => JSON.parse(logLine('info', 'x', { delivery_id: 'd1' })) as Record<string, unknown>,
+      () => JSON.parse(logLine('info', 'delivery_attempt', { delivery_id: 'd1' })) as Record<string, unknown>,
     );
     expect(line).toMatchObject({
       correlation_id: ctx.correlationId,
@@ -77,7 +77,11 @@ describe('log integration', () => {
     const ctx = contextFromHeaders(new Headers());
     const line = runWithCorrelation(
       ctx,
-      () => JSON.parse(logLine('info', 'x', { correlation_id: 'explicit' })) as Record<string, unknown>,
+      () =>
+        JSON.parse(logLine('info', 'delivery_attempt', { correlation_id: 'explicit' })) as Record<
+          string,
+          unknown
+        >,
     );
     // An explicit field wins (queue consumers will pass the message's own id here).
     expect(line.correlation_id).toBe('explicit');

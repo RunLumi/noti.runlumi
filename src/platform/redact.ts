@@ -167,9 +167,35 @@ export function scrubString(input: string, maxLength: number = DEFAULTS.maxStrin
 }
 
 function truncate(text: string, maxLength: number, alreadyDropped: number): string {
-  const dropped = Math.max(0, text.length - maxLength) + alreadyDropped;
-  if (dropped === 0) return text;
-  return `${text.slice(0, maxLength)}…[truncated ${dropped} chars]`;
+  if (text.length <= maxLength && alreadyDropped === 0) return text;
+  const cut = safeCut(text, maxLength);
+  return `${text.slice(0, cut)}…[truncated ${text.length - cut + alreadyDropped} chars]`;
+}
+
+/**
+ * Markers this module writes (`[redacted]`, `[circular]`, `[binary 12 bytes]`, `…[truncated 9 chars]`).
+ * A cut never lands inside one, so a shortened value cannot read as a half-redacted secret (ADR 0051).
+ */
+const MARKER = /…?\[[^[\]\n]{1,40}\]/g;
+
+/** The largest index <= `max` that splits neither a marker nor a surrogate pair. */
+function safeCut(text: string, max: number): number {
+  if (text.length <= max) return text.length;
+  let cut = max;
+  for (const m of text.matchAll(MARKER)) {
+    if (m.index >= cut) break;
+    if (m.index + m[0].length > cut) {
+      cut = m.index;
+      break;
+    }
+  }
+  const code = text.charCodeAt(cut - 1);
+  return cut > 0 && code >= 0xd800 && code <= 0xdbff ? cut - 1 : cut;
+}
+
+/** Shorten already-scrubbed text to at most `max` UTF-16 units plus a `…[truncated n chars]` marker. */
+export function truncateSafely(text: string, max: number): string {
+  return truncate(text, max, 0);
 }
 
 interface Context {

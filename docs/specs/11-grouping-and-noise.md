@@ -882,7 +882,7 @@ boundary. It must be designed so the mistake is impossible rather than merely un
 
 ## F167 — Anti-feature: no user-authored routing language
 
-**Priority** P1 · **Status** 🟡 filter schema is closed and rejects unknown or regex options (`src/routing/filter-input.ts`, `tests/routing/filter-input.test.ts`, ADR 0010); not built: the non-goal entry in `docs/ROADMAP.md` · **Deliberate non-feature**
+**Priority** P1 · **Status** ✅ filter schema is closed and rejects unknown or regex options (`src/routing/filter-input.ts`, `tests/routing/filter-input.test.ts`, ADR 0010); regex-dialect patterns are refused, regex-looking literals never match as a regex, and no `RegExp` is built in `src/routing/` (`tests/routing/no-regex.test.ts`); "No regex in filters" is a non-goal in `docs/ROADMAP.md` (ADR 0051) · **Deliberate non-feature**
 
 **Story** As a maintainer, I want to refuse a feature request for user-authored routing rules,
 so that we do not inherit Alertmanager's migration problem.

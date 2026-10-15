@@ -14,9 +14,9 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 39 | 154 | 42 | 4 | 23 | 262 |
+| All features | 40 | 153 | 42 | 4 | 23 | 262 |
 | P0 | 35 | 104 | 4 | 3 | 12 | 158 |
-| P1 | 4 | 44 | 20 | 0 | 4 | 72 |
+| P1 | 5 | 43 | 20 | 0 | 4 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
 ## Per spec
@@ -32,7 +32,7 @@
 | [07-destination-capabilities.md](07-destination-capabilities.md) | 4 | 10 | 0 | 0 | 0 | 14 |
 | [09-destinations-extended.md](09-destinations-extended.md) | 0 | 8 | 4 | 0 | 4 | 16 |
 | [10-routing-and-filtering.md](10-routing-and-filtering.md) | 0 | 10 | 6 | 0 | 4 | 20 |
-| [11-grouping-and-noise.md](11-grouping-and-noise.md) | 0 | 14 | 14 | 0 | 0 | 28 |
+| [11-grouping-and-noise.md](11-grouping-and-noise.md) | 1 | 13 | 14 | 0 | 0 | 28 |
 | [12-delivery-reliability.md](12-delivery-reliability.md) | 7 | 15 | 0 | 0 | 0 | 22 |
 | [13-observability.md](13-observability.md) | 0 | 10 | 4 | 0 | 0 | 14 |
 | [14-dashboard-and-ux.md](14-dashboard-and-ux.md) | 0 | 18 | 3 | 1 | 0 | 22 |
@@ -209,7 +209,7 @@
 | F164 | Noise reporting | [11](11-grouping-and-noise.md) | P1 | ❌ | no noise report; counts by reason exist only as `routing_decisions` rows and the per-integration noise status (`GET /api/integrations/:id/noise-status`) |
 | F165 | Grouping safety invariants | [11](11-grouping-and-noise.md) | P0 | 🟡 | organization is first key component and held queries are organization-scoped; two-organization tests (`tests/noise/ingress.test.ts`, `tests/noise/release.test.ts`, ADR 0016); primary key is the delivery id, not … |
 | F166 | Grouping observability | [11](11-grouping-and-noise.md) | P1 | 🟡 | log lines only (`noise_release`, `noise_hold_capacity`, `noise_settings_unusable`) and a per-integration noise status; no metrics store or group metrics (ADR 0016) |
-| F167 | Anti-feature: no user-authored routing language | [11](11-grouping-and-noise.md) | P1 | 🟡 | filter schema is closed and rejects unknown or regex options (`src/routing/filter-input.ts`, `tests/routing/filter-input.test.ts`, ADR 0010); not built: the non-goal entry in `docs/ROADMAP.md` |
+| F167 | Anti-feature: no user-authored routing language | [11](11-grouping-and-noise.md) | P1 | ✅ | filter schema is closed and rejects unknown or regex options (`src/routing/filter-input.ts`, `tests/routing/filter-input.test.ts`, ADR 0010); regex-dialect patterns are refused, regex-looking literals never match as a regex, and … |
 | F168 | Noise tuning feedback | [11](11-grouping-and-noise.md) | P2 | ❌ | no "too noisy" feedback control or tuning suggestions |
 | F169 | Durable acceptance before acknowledgement | [12](12-delivery-reliability.md) | P0 | 🟡 | Batch-then-202 holds: delivery and outbox rows commit in one `db.batch()` before the 202 (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`); `waitUntil` wraps only the awaited-send dispatcher. … |
 | F170 | Deduplication key derivation | [12](12-delivery-reliability.md) | P0 | ✅ | `dedupKey()` in `src/delivery/ids.ts` is SHA-256 over 0x00-separated org, connection, source and id, full digest stored in `deliveries.dedup_key`, used by all source routes; `tests/delivery/ids.test.ts` covers injectivity and … |
@@ -236,8 +236,8 @@
 | F191 | Analytics Engine metrics pipeline | [13](13-observability.md) | P1 | ❌ | No Analytics Engine binding in `wrangler.jsonc`, no typed metric writer, datasets, sampling config or datapoint budget. ADR 0011 defers it; SLIs come from D1 only (`src/observability/slis.ts`). |
 | F192 | Scheduled job runner and job health | [13](13-observability.md) | P0 | 🟡 | `runCronJobs` records every execution in `job_state` (one upserted row per job) and `job_runs` (failures and outcome changes; migration 0027: ok, failed, skipped, integer counters, closed error class; 14-day retention), one typed … |
 | F193 | Correlation id propagation | [13](13-observability.md) | P0 | 🟡 | Our UUID is minted at ingress before parsing, `external_request_id` and `cf_ray` captured, `x-request-id` echoed, id on every in-request log line, and (ADR 0024) stored on `deliveries`, `notification_outbox` and … |
-| F194 | Structured log event catalogue | [13](13-observability.md) | P0 | 🟡 | `log()` in `src/platform/log.ts` emits one redacted JSON line with `correlation_id`, `external_request_id` and `cf_ray` inside a request (`tests/platform/log.test.ts`). Not built: closed `msg` catalogue or typed key set (msg is a … |
-| F195 | Redaction enforcement points | [13](13-observability.md) | P0 | 🟡 | `redact()` runs on every `log()` line and delivery diagnostics are minted codes only (`src/platform/redact.ts`, `tests/platform/redact.test.ts`). Not built: console-call lint rule, site-to-test one-to-one check, property test over … |
+| F194 | Structured log event catalogue | [13](13-observability.md) | P0 | 🟡 | `log()` in `src/platform/log.ts` emits one redacted JSON line with `correlation_id`, `external_request_id` and `cf_ray` inside a request; `msg` is a closed catalogue with a description and declared fields per event … |
+| F195 | Redaction enforcement points | [13](13-observability.md) | P0 | 🟡 | `redact()` runs on every `log()` line and delivery diagnostics are minted codes only (`src/platform/redact.ts`, `tests/platform/redact.test.ts`); for the console exit point, ESLint `no-console` is an error in `src/` except … |
 | F196 | Observability cost control under the 2026-12-01 pricing change | [13](13-observability.md) | P1 | ❌ | No log sampling, ingestion estimate, per-environment budget, degraded mode or observability block in `wrangler.jsonc`; the cost-control ADR is not written (ADR 0011 defers it). Date-driven: Cloudflare pricing changes 2026-12-01. |
 | F197 | Delivery SLIs: accepted is not delivered | [13](13-observability.md) | P0 | 🟡 | Per-workspace confirmed-delivery ratio, retry rate and dead-letter counts from D1 with numerator, denominator, window and null on empty; Teams reported as accepted (`src/observability/slis.ts`, `src/api/observability.ts`, … |
 | F198 | Latency, queue depth and reliability measurement | [13](13-observability.md) | P1 | 🟡 | Exact end-to-end and queue-delay p50/p95 from `deliveries` timestamps at one-second resolution plus backlog age from D1, no averages (`src/observability/slis.ts`, `tests/observability/slis.test.ts`). Not built: ack and attempt … |
