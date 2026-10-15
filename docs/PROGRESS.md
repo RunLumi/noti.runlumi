@@ -1822,3 +1822,18 @@ authoritative per-feature state is `docs/specs/STATUS.md` (generated); the remai
   migration seal, web build and bundle check, on the Node SQLite fake and jsdom. **Not verified:** a real browser, a screen
   reader, real mail, a real provider, staging, a Vietnamese native-speaker review.
 
+## Main merged, wave three (ADRs 0053 to 0058)
+
+- **Main merged** (owner approval): #63 brought in; its four log events added to the closed catalogue; tests reconciled
+  (retention basis path, a host verification for the custom-webhook send, a 600 s budget for the 0026 crash matrix).
+- **Wave three:** password-changed notice, no-email-in-client-logs test, invitation never creates a workspace, ADR 0003
+  updated (ADR 0053); PATCH re-checks the stored destination, decrypt-failure alert (ADR 0054); three audit sites that wrote
+  separately now fail closed, installation actor, export before delete (ADR 0055); detail routes and a Destinations health
+  page (ADR 0056); GitHub behind the single `SourceConnector` contract (ADR 0057); GitHub disconnect, ghost rendering,
+  ack-budget tests and a repository-delta cap (ADR 0058).
+- **Security fix found by the review of 0057:** the GitHub HMAC ran over a decoded and re-encoded body; it now runs over the
+  exact raw bytes and the route decodes strictly (`AGENTS.md` invariant).
+- **Merge fixes:** the tenant-isolation drill now attacks the disconnect route; disconnect is a proven same-batch audit site.
+- **Verified:** full suite green (5,318 tests, then the drill's 151 after its fix), both typechecks, lint, format, docs,
+  migration seal, web build, bundle check. **Not verified:** anything real (browser, mail, provider, staging, D1).
+
