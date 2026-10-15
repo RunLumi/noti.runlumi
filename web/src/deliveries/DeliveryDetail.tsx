@@ -1,8 +1,10 @@
-import type { RefObject } from 'react';
+import { useRef, type RefObject } from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { Link } from '@tanstack/react-router';
 import { IconX } from '@tabler/icons-react';
 import { Button, Notice } from '../components/ui';
+import { CopyButton } from '../sources/CopyButton';
+import '../sources/sources.css';
 import { t } from '../i18n';
 import type { DeliveryItem } from './api';
 import { AttemptTimeline } from './AttemptTimeline';
@@ -96,6 +98,44 @@ function Duplicates({
   );
 }
 
+/**
+ * The request id the sender got back as `x-request-id` (F11, F193). Monospace, copyable, and one
+ * link to every delivery that request created, which is how a support reply finds the rest.
+ */
+function RequestId({
+  delivery,
+  onFollow,
+}: {
+  readonly delivery: DeliveryItem;
+  readonly onFollow: () => void;
+}) {
+  useLocale();
+  const id = delivery.correlationId;
+  return (
+    <div>
+      <dt>{t('delivery.detail.requestId')}</dt>
+      <dd>
+        {id ? (
+          <div className="request-id">
+            <code className="mono-wrap">{id}</code>
+            <CopyButton
+              text={id}
+              label="delivery.detail.requestId.copy"
+              copied="delivery.detail.requestId.copied"
+              failed="delivery.detail.requestId.copyFailed"
+            />
+            <Link to="/activity" search={{ correlationId: id }} className="text-link" onClick={onFollow}>
+              {t('delivery.detail.requestId.show')}
+            </Link>
+          </div>
+        ) : (
+          <span className="muted">{t('delivery.detail.requestId.none')}</span>
+        )}
+      </dd>
+    </div>
+  );
+}
+
 function Facts({ delivery }: { readonly delivery: DeliveryItem }) {
   useLocale();
   return (
@@ -148,6 +188,15 @@ export function DeliveryDetail({ orgId, id, initial, returnFocus, onClose, onSho
   useLocale();
   const query = useDeliveryDetail(orgId, id);
   const delivery = query.data?.delivery ?? initial;
+  // After "show every delivery from this request" the list reloads and the row that opened this
+  // dialog may be gone for a moment, so focus goes to the page heading instead (WCAG 2.4.3).
+  const followedRequest = useRef(false);
+  const finalFocus = (): HTMLElement | boolean => {
+    if (!followedRequest.current) return returnFocus.current ?? true;
+    const heading = document.querySelector<HTMLElement>('main h1');
+    if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+    return heading ?? true;
+  };
   const name = delivery
     ? delivery.integrationExists
       ? delivery.integration.name
@@ -157,7 +206,7 @@ export function DeliveryDetail({ orgId, id, initial, returnFocus, onClose, onSho
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
         <Dialog.Backdrop className="modal-backdrop" />
-        <Dialog.Popup className="drawer" finalFocus={returnFocus}>
+        <Dialog.Popup className="drawer" finalFocus={finalFocus}>
           <div className="drawer-head">
             <Dialog.Title className="drawer-title">{t('delivery.detail.title', { name })}</Dialog.Title>
             <Dialog.Close
@@ -246,6 +295,13 @@ export function DeliveryDetail({ orgId, id, initial, returnFocus, onClose, onSho
                     <dt>{t('delivery.detail.supportId')}</dt>
                     <dd className="mono-wrap">{delivery.id}</dd>
                   </div>
+                  <RequestId
+                    delivery={delivery}
+                    onFollow={() => {
+                      followedRequest.current = true;
+                      onClose();
+                    }}
+                  />
                   {delivery.error && (
                     <div>
                       <dt>{t('delivery.detail.supportCode')}</dt>

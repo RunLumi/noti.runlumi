@@ -114,6 +114,14 @@ describe('parseDelivery', () => {
     expect(() => parseDelivery(row({ integrationStatus: undefined }))).toThrow(ApiError);
     expect(() => parseDelivery(row({ error: { code: 1 } }))).toThrow(ApiError);
   });
+
+  it('keeps the request id the server sent, and drops one it would not accept (ADR 0050)', () => {
+    expect(parseDelivery(row({ correlationId: 'req_7Hq2mX9pLk' })).correlationId).toBe('req_7Hq2mX9pLk');
+    expect(parseDelivery(row({ correlationId: null })).correlationId).toBeNull();
+    expect(parseDelivery(row()).correlationId).toBeNull();
+    expect(parseDelivery(row({ correlationId: 'a b<script>' })).correlationId).toBeNull();
+    expect(parseDelivery(row({ correlationId: 'x'.repeat(65) })).correlationId).toBeNull();
+  });
 });
 
 describe('activity filters in the URL', () => {
@@ -149,6 +157,15 @@ describe('activity filters in the URL', () => {
       }),
     ).toEqual({});
     expect(hasFilters({})).toBe(false);
+  });
+
+  it('carry a request id to the server only in the shape the server accepts (ADR 0050)', () => {
+    const search = validateActivitySearch({ correlationId: 'req_7Hq2mX9pLk' });
+    expect(search).toEqual({ correlationId: 'req_7Hq2mX9pLk' });
+    expect(toFilters(search)).toEqual({ correlationId: 'req_7Hq2mX9pLk' });
+    expect(hasFilters(search)).toBe(true);
+    for (const bad of ['abc', 'has space', '-leading', 'x'.repeat(65), 42])
+      expect(validateActivitySearch({ correlationId: bad })).toEqual({});
   });
 });
 

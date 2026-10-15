@@ -30,8 +30,6 @@ const ALLOWLIST: Readonly<Record<string, string>> = {
     'Step number in the three-step "Get started" list on the Overview. It is a sequence label, not a count.',
   'pages.tsx::numeric-fallback::summary.data?.dead_lettered ?? 0':
     'The nav link returns nothing at zero, so an unloaded summary shows no failed count, and a zero is never displayed.',
-  'integrations/settings/DeleteDialog.tsx::numeric-fallback::useNoiseStatus(orgId, integration.id, open).data?.count ?? 0':
-    'The waiting line is rendered only when the count is above zero (`waiting > 0`); an unloaded status shows no line.',
   'onboarding.tsx::numeric-fallback::me.data?.user.organizations.length ?? 0':
     'Used as a yes or no (the person already has a workspace to switch to). The number is never displayed.',
   'integrations/noise/NoiseEditor.tsx::numeric-fallback::GROUP_WINDOW_CHOICES.find((c) => String(c.value) === e.target.value)?.value ?? 0':

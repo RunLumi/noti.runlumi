@@ -216,6 +216,21 @@ export const ROUTING_LOG = [
 /** What `GET /api/integrations/:id/noise-status` returns while updates are waiting. */
 export const NOISE_STATUS = { held: { count: 3, nextReleaseAt: '2026-10-14T01:00:00Z' } } as const;
 
+/**
+ * What `GET /api/integrations/:id/impact` returns (ADR 0050): a test value in the server's shape,
+ * not a measured one. The quiet-hours fixture (int_6) holds the same 3 updates as NOISE_STATUS.
+ */
+export const impactFor = (integrationId: string) => ({
+  impact: {
+    deliveries: {
+      total: { count: 1284, capped: false },
+      unsent: { count: 3, capped: false },
+      sending: { count: 1, capped: false },
+    },
+    held: { waiting: integrationId === 'int_6' ? 3 : 0, failed: 0 },
+  },
+});
+
 export const INSTALLATIONS: readonly GithubInstallation[] = [
   {
     id: 'inst_1',
@@ -249,6 +264,7 @@ const delivery = (over: Partial<DeliveryItem> & Pick<DeliveryItem, 'id' | 'state
   isTest: false,
   latestReplayState: null,
   canReplay: false,
+  correlationId: null,
   ...over,
 });
 
@@ -319,6 +335,7 @@ export const DELIVERIES: readonly DeliveryItem[] = [
     state: 'dead_lettered',
     attempts: 5,
     canReplay: true,
+    correlationId: 'req_7Hq2mX9pLk',
     error: {
       code: 'destination_revoked',
       messageKey: 'errors.destination_revoked',

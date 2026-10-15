@@ -397,6 +397,7 @@ type NoiseSettings = {
 | Method and path | Capability | Result |
 | --- | --- | --- |
 | `GET /api/integrations/:id/noise-status` | `integration.read` | `200 {held: {count, nextReleaseAt}, failed}`: updates waiting for this integration, the earliest scheduled release (ISO) or `null`, and how many rows were dead-lettered after repeated release failures. Another workspace's integration is `404`. |
+| `GET /api/integrations/:id/impact` | `integration.read` | `200 {impact: {deliveries: {total, unsent, sending}, held: {waiting, failed}}}` (ADR 0050): what pausing or deleting this integration would touch. Each delivery count is `{count, capped}` and stops at 10,000 (`capped: true` means more than that). `unsent` is `pending` or `retrying` (marked failed when its turn comes while the integration is paused or deleted), `sending` is `claimed` (an attempt already under way, which may still arrive), `total` is every delivery row (a delete keeps them in the log). `held` is the noise-control rows waiting and failed (a pause keeps them, a delete removes them). Counts only. Another workspace's integration is `404`; 60 reads a minute per user, then `429` with `Retry-After`. |
 
 Ingress responses (`POST /webhooks/...`) add `held: <n>` when updates were held for some
 integration of the event; a held update is not reported as `duplicate`.

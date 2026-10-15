@@ -1,11 +1,12 @@
 import { useId } from 'react';
 import { IconFilterOff } from '@tabler/icons-react';
 import { Button, Input } from '../components/ui';
+import { TextFilter } from '../components/TextFilter';
 import type { Integration } from '../lib/api';
 import { t } from '../i18n';
 import { DELIVERY_STATES, isDeliveryState } from './api';
 import { STATE_LABEL } from './copy';
-import { hasFilters, type ActivitySearch } from './search';
+import { hasFilters, isValidCorrelationId, type ActivitySearch } from './search';
 import { useLocale } from '../i18n/LocaleProvider';
 
 interface DeliveryFiltersProps {
@@ -95,6 +96,16 @@ export function DeliveryFilters({ search, integrations, onChange }: DeliveryFilt
           onChange={(e) => set('to', e.target.value)}
         />
       </div>
+      <TextFilter
+        key={`request:${search.correlationId ?? ''}`}
+        id={`${base}-request`}
+        label={t('deliveries.filter.requestId')}
+        hint={t('deliveries.filter.requestId.hint')}
+        invalidMessage={t('deliveries.filter.requestId.invalid')}
+        value={search.correlationId ?? ''}
+        isValid={isValidCorrelationId}
+        onCommit={(v) => set('correlationId', v)}
+      />
       <div className="filter filter-actions">
         <Button variant="outline" type="button" onClick={() => onChange({})} disabled={!hasFilters(search)}>
           <IconFilterOff size={18} aria-hidden="true" />

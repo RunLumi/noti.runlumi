@@ -107,4 +107,56 @@ export const ledgerVi = {
   'bulk.done.more': { other: 'Còn {count} lượt nữa chờ ở lượt sau.' },
   'bulk.stale': 'Danh sách đã thay đổi từ lúc bạn xem, nên chưa gửi gì. Hãy xem lại con số mới rồi thử lại.',
   'bulk.recount': 'Đếm lại',
+  // --- Mã yêu cầu trong hộp chi tiết và bộ lọc hoạt động (ADR 0050) -------
+  'delivery.detail.requestId': 'Mã yêu cầu',
+  'delivery.detail.requestId.none':
+    'Không được ghi lại. Các lượt gửi cũ, và các lượt Noti tạo ra mà không có yêu cầu gửi đến, không có mã này.',
+  'delivery.detail.requestId.copy': 'Sao chép mã yêu cầu',
+  'delivery.detail.requestId.copied': 'Đã sao chép',
+  'delivery.detail.requestId.copyFailed': 'Không sao chép được. Hãy chọn mã và tự sao chép.',
+  'delivery.detail.requestId.show': 'Xem mọi lượt gửi của yêu cầu này',
+  'deliveries.filter.requestId': 'Mã yêu cầu',
+  'deliveries.filter.requestId.hint':
+    'Dán mã yêu cầu từ một phản hồi hỗ trợ hoặc từ tiêu đề x-request-id. Nhấn Enter để áp dụng.',
+  'deliveries.filter.requestId.invalid':
+    'Mã yêu cầu gồm 4 đến 64 chữ cái, chữ số, dấu chấm, gạch ngang, dấu hai chấm hoặc gạch dưới.',
+
+  // --- Tạm dừng hoặc xóa ảnh hưởng đến gì (F217, ADR 0050) ------------------
+  'impact.title': 'Điều này ảnh hưởng đến',
+  'impact.counting': 'Đang đếm các thông báo bị ảnh hưởng…',
+  'impact.error.pause':
+    'Noti không đếm được các thông báo bị ảnh hưởng. Bạn vẫn có thể tạm dừng, rồi xem lại trong Hoạt động.',
+  'impact.error.delete':
+    'Noti không đếm được các thông báo bị ảnh hưởng. Hãy đóng hộp này và thử lại, hoặc xem Hoạt động trước.',
+  'impact.moreThan': 'Hơn {count}',
+  'impact.unsent.none': 'Không có thông báo nào đang chờ gửi.',
+  'impact.sending': { other: '{amount} thông báo đang được gửi ngay lúc này và vẫn có thể đến nơi.' },
+  'impact.pause.unsent': {
+    other:
+      '{amount} thông báo chưa được gửi. Trong lúc tích hợp tạm dừng, chúng sẽ không được gửi đi: Noti đánh dấu từng thông báo là Thất bại khi đến lượt. Sau khi bật lại tích hợp, bạn có thể gửi lại chúng từ Hoạt động.',
+  },
+  'impact.pause.held': {
+    other:
+      '{amount} cập nhật được lưu cho giờ yên tĩnh, bản tóm tắt hoặc việc gộp nhóm vẫn được giữ. Chúng được gửi sau khi bạn bật lại tích hợp.',
+  },
+  'impact.pause.history': { other: '{amount} lượt gửi trước đây vẫn nằm trong Hoạt động.' },
+  'impact.delete.unsent': {
+    other:
+      '{amount} thông báo chưa được gửi. Chúng sẽ không được gửi đi: Noti đánh dấu từng thông báo là Thất bại khi đến lượt, và không thể gửi lại sau khi tích hợp bị xóa.',
+  },
+  'impact.delete.held': {
+    other: '{amount} cập nhật đã lưu bị xóa cùng tích hợp và sẽ không bao giờ được gửi.',
+  },
+  'impact.delete.history': {
+    other:
+      '{amount} lượt gửi trước đây vẫn nằm trong Hoạt động với nhãn “Tích hợp đã xóa” cho đến khi hết hạn lưu lịch sử gửi. Không thể gửi lại các lượt này.',
+  },
+  'impact.delete.log': 'Bản ghi lý do các cập nhật được gửi hay bị giữ lại sẽ bị xóa.',
+
+  // --- Xác nhận tạm dừng (F217, ADR 0050) ------------------------------------
+  'pause.title': 'Tạm dừng {name}?',
+  'pause.body':
+    'Sẽ không có thông báo mới nào được gửi. Cài đặt và thông tin xác thực được giữ nguyên, và bạn có thể bật lại bất cứ lúc nào.',
+  'pause.cancel': 'Tiếp tục gửi',
+  'pause.confirm': 'Tạm dừng',
 } as const satisfies Record<keyof typeof ledgerEn, string | PluralMessage>;

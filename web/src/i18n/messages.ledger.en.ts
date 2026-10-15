@@ -116,4 +116,67 @@ export const ledgerEn = {
   } satisfies PluralMessage,
   'bulk.stale': 'The list changed since you looked, so nothing was sent. Check the new count and try again.',
   'bulk.recount': 'Count again',
+  // --- Request id in the detail dialog and the activity filter (ADR 0050) ----
+  'delivery.detail.requestId': 'Request ID',
+  'delivery.detail.requestId.none':
+    'Not recorded. Older deliveries, and ones Noti made without an incoming request, have none.',
+  'delivery.detail.requestId.copy': 'Copy request ID',
+  'delivery.detail.requestId.copied': 'Copied',
+  'delivery.detail.requestId.copyFailed': 'Couldn’t copy. Select the ID and copy it yourself.',
+  'delivery.detail.requestId.show': 'Show every delivery from this request',
+  'deliveries.filter.requestId': 'Request ID',
+  'deliveries.filter.requestId.hint':
+    'Paste the request ID from a support reply or an x-request-id header. Press Enter to apply.',
+  'deliveries.filter.requestId.invalid':
+    'A request ID is 4 to 64 letters, numbers, dots, dashes, colons or underscores.',
+
+  // --- What pausing or deleting affects (F217, ADR 0050) ----------------------
+  'impact.title': 'What this affects',
+  'impact.counting': 'Counting the notifications this affects…',
+  'impact.error.pause':
+    'Noti couldn’t count the notifications this affects. You can still pause, then check Activity.',
+  'impact.error.delete':
+    'Noti couldn’t count the notifications this affects. Close this and try again, or check Activity first.',
+  'impact.moreThan': 'More than {count}',
+  'impact.unsent.none': 'No notifications are waiting to be sent.',
+  'impact.sending': {
+    one: '{amount} notification is being sent right now and may still arrive.',
+    other: '{amount} notifications are being sent right now and may still arrive.',
+  } satisfies PluralMessage,
+  'impact.pause.unsent': {
+    one: '{amount} notification has not been sent yet. While the integration is paused it will not go out: Noti marks it Failed when its turn comes. After you turn the integration back on, you can redeliver it from Activity.',
+    other:
+      '{amount} notifications have not been sent yet. While the integration is paused they will not go out: Noti marks each one Failed when its turn comes. After you turn the integration back on, you can redeliver them from Activity.',
+  } satisfies PluralMessage,
+  'impact.pause.held': {
+    one: '{amount} update saved for quiet hours, a summary or grouping stays saved. It is sent after you turn the integration back on.',
+    other:
+      '{amount} updates saved for quiet hours, a summary or grouping stay saved. They are sent after you turn the integration back on.',
+  } satisfies PluralMessage,
+  'impact.pause.history': {
+    one: '{amount} past delivery stays in Activity.',
+    other: '{amount} past deliveries stay in Activity.',
+  } satisfies PluralMessage,
+  'impact.delete.unsent': {
+    one: '{amount} notification has not been sent yet. It will not go out: Noti marks it Failed when its turn comes, and it cannot be redelivered once the integration is deleted.',
+    other:
+      '{amount} notifications have not been sent yet. They will not go out: Noti marks each one Failed when its turn comes, and they cannot be redelivered once the integration is deleted.',
+  } satisfies PluralMessage,
+  'impact.delete.held': {
+    one: '{amount} saved update is deleted with the integration and never sent.',
+    other: '{amount} saved updates are deleted with the integration and never sent.',
+  } satisfies PluralMessage,
+  'impact.delete.history': {
+    one: '{amount} past delivery stays in Activity as “Deleted integration” until it ages out of the delivery history. It cannot be redelivered.',
+    other:
+      '{amount} past deliveries stay in Activity as “Deleted integration” until they age out of the delivery history. They cannot be redelivered.',
+  } satisfies PluralMessage,
+  'impact.delete.log': 'The record of why updates were sent or held back is deleted.',
+
+  // --- Pause confirmation (F217, ADR 0050) ------------------------------------
+  'pause.title': 'Pause {name}?',
+  'pause.body':
+    'No new notifications will be sent. Settings and credentials are kept, and you can turn it back on at any time.',
+  'pause.cancel': 'Keep sending',
+  'pause.confirm': 'Pause',
 } as const;

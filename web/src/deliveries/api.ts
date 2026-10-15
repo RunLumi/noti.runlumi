@@ -1,3 +1,4 @@
+import { sanitiseCorrelationId } from '../../../src/platform/correlation-id';
 import { ApiError, api, isDestinationKind, type DestinationKind } from '../lib/api';
 
 /** Delivery log client (docs/API.md "Deliveries"). The server never returns payloads or URLs. */
@@ -69,6 +70,11 @@ export interface DeliveryItem {
   } | null;
   /** Why a waiting delivery has not been sent although nothing failed this time. */
   readonly pausedReason?: 'circuit_open' | 'destination_paced' | null;
+  /**
+   * The request id minted at ingress (F193): what the sender got back as `x-request-id`. Null for
+   * rows older than migration 0027 and rows no request created.
+   */
+  readonly correlationId: string | null;
 }
 
 export interface DeliveryPage {
@@ -128,6 +134,7 @@ export interface DeliveryFilters {
   readonly integrationId?: string;
   readonly from?: string;
   readonly to?: string;
+  readonly correlationId?: string;
 }
 
 export interface BulkPlan {
@@ -243,6 +250,8 @@ export function parseDelivery(value: unknown): DeliveryItem {
       value.pausedReason === 'circuit_open' || value.pausedReason === 'destination_paced'
         ? value.pausedReason
         : null,
+    // A value the server would not accept as a filter is not shown as one either.
+    correlationId: sanitiseCorrelationId(value.correlationId),
   };
 }
 
@@ -342,6 +351,7 @@ function query(orgId: string, filters: DeliveryFilters, cursor: string | null): 
   if (filters.integrationId) params.set('integrationId', filters.integrationId);
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
+  if (filters.correlationId) params.set('correlationId', filters.correlationId);
   if (cursor) params.set('cursor', cursor);
   return params.toString();
 }

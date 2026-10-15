@@ -35,7 +35,7 @@
 
 | Capability | admin | member | Required by |
 | --- | --- | --- | --- |
-| `integration.read` | yes | yes | `GET /api/integrations`<br>`GET /api/integrations/:id`<br>`GET /api/integrations/:id/routing-log`<br>`GET /api/integrations/:id/noise-status`<br>`POST /api/integrations/:id/filters/preview`<br>`GET /api/github/installations` |
+| `integration.read` | yes | yes | `GET /api/integrations`<br>`GET /api/integrations/:id`<br>`GET /api/integrations/:id/routing-log`<br>`GET /api/integrations/:id/noise-status`<br>`GET /api/integrations/:id/impact`<br>`POST /api/integrations/:id/filters/preview`<br>`GET /api/github/installations` |
 | `integration.create` | yes | yes | `POST /api/integrations`<br>`POST /api/github/install` |
 | `integration.update` | yes | yes | `PATCH /api/integrations/:id`<br>`POST /api/integrations/:id/test` |
 | `integration.delete` | yes | yes | `DELETE /api/integrations/:id` |
@@ -87,6 +87,7 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `DELETE /api/integrations/:id` | capability `integration.delete` | `src/api/integrations.ts` |
 | `GET /api/integrations/:id/routing-log` | capability `integration.read` | `src/api/routing.ts` |
 | `GET /api/integrations/:id/noise-status` | capability `integration.read` | `src/api/routing.ts` |
+| `GET /api/integrations/:id/impact` | capability `integration.read` | `src/api/routing.ts` |
 | `POST /api/integrations/:id/filters/preview` | capability `integration.read` | `src/api/routing.ts` |
 | `POST /api/integrations/:id/revoke-credentials` | capability `integration.revoke` | `src/api/integrations.ts` |
 | `POST /api/integrations/:id/test` | capability `integration.update` | `src/api/test-send.ts` |

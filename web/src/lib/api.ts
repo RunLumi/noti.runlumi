@@ -363,6 +363,9 @@ export const integrationsApi = {
   },
   noiseStatus: async (orgId: string, id: string): Promise<NoiseStatus> =>
     parseNoiseStatus(await request(withOrg(`${item(id)}/noise-status`, orgId))),
+  /** What pausing or deleting would touch, counted by the server (ADR 0050). */
+  impact: async (orgId: string, id: string): Promise<IntegrationImpact> =>
+    parseImpact(await request(withOrg(`${item(id)}/impact`, orgId))),
   remove: async (orgId: string, id: string): Promise<void> => {
     await request(withOrg(item(id), orgId), { method: 'DELETE' });
   },
@@ -380,6 +383,52 @@ export function parseNoiseStatus(body: unknown): NoiseStatus {
   const next = held.nextReleaseAt ?? null;
   if (!nullableString(next)) throw new ApiError('Unexpected response', 500);
   return { count: held.count, nextReleaseAt: next };
+}
+
+/** A count the server stopped at its cap: `capped` means "more than `count`". */
+export interface BoundedCount {
+  readonly count: number;
+  readonly capped: boolean;
+}
+
+/** `GET /api/integrations/:id/impact` (docs/API.md, ADR 0050). Counts only. */
+export interface IntegrationImpact {
+  /** `pending` or `retrying`: marked failed when their turn comes while paused or deleted. */
+  readonly unsent: BoundedCount;
+  /** `claimed`: an attempt already under way, which may still arrive. */
+  readonly sending: BoundedCount;
+  /** Every delivery row; a delete keeps them in the activity log. */
+  readonly total: BoundedCount;
+  /** Noise-control updates waiting, and ones that failed to release; a delete removes both. */
+  readonly heldWaiting: number;
+  readonly heldFailed: number;
+}
+
+function parseBounded(value: unknown): BoundedCount {
+  if (!isRecord(value) || typeof value.count !== 'number' || typeof value.capped !== 'boolean')
+    throw new ApiError('Unexpected response', 500);
+  return { count: value.count, capped: value.capped };
+}
+
+/** A malformed answer is an error, never a zero: a confirmation must not understate what it removes. */
+export function parseImpact(body: unknown): IntegrationImpact {
+  const impact = isRecord(body) ? body.impact : null;
+  const deliveries = isRecord(impact) ? impact.deliveries : null;
+  const held = isRecord(impact) ? impact.held : null;
+  if (
+    !isRecord(deliveries) ||
+    !isRecord(held) ||
+    typeof held.waiting !== 'number' ||
+    typeof held.failed !== 'number'
+  )
+    throw new ApiError('Unexpected response', 500);
+  return {
+    unsent: parseBounded(deliveries.unsent),
+    sending: parseBounded(deliveries.sending),
+    total: parseBounded(deliveries.total),
+    heldWaiting: held.waiting,
+    heldFailed: held.failed,
+  };
 }
 
 /** One row of "why was this sent or held back". Event type and a reason code, never content. */

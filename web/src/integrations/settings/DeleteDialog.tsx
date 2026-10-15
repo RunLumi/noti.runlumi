@@ -4,11 +4,11 @@ import { useNavigate } from '@tanstack/react-router';
 import { IconTrash } from '@tabler/icons-react';
 import { Button, Input, Notice } from '../../components/ui';
 import type { Integration } from '../../lib/api';
-import { t, tp } from '../../i18n';
-import { useNoiseStatus } from '../noise/hooks';
+import { t } from '../../i18n';
 import { DESTINATIONS } from '../destinations';
 import { describeError } from '../errors';
-import { useDeleteIntegration } from '../hooks';
+import { useDeleteIntegration, useIntegrationImpact } from '../hooks';
+import { ImpactSummary } from '../ImpactSummary';
 import { useLocale } from '../../i18n/LocaleProvider';
 
 interface DeleteDialogProps {
@@ -18,7 +18,9 @@ interface DeleteDialogProps {
 
 /**
  * Delete is the one place a typed confirmation is warranted (F217): it destroys the sealed
- * credentials. Focus starts on the cancel button so a stray Enter cannot delete (F221).
+ * credentials. Focus starts on the cancel button so a stray Enter cannot delete (F221). Before the
+ * confirm button works, the dialog states what the delete removes and what it keeps, in counts the
+ * server took when the dialog opened (ADR 0050); while they are still being counted the button is inert.
  */
 export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
   useLocale();
@@ -27,8 +29,8 @@ export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const cancelRef = useRef<HTMLButtonElement>(null);
-  // Updates still waiting for a quiet-hours, summary or grouping release go with the integration.
-  const waiting = useNoiseStatus(orgId, integration.id, open).data?.count ?? 0;
+  const impact = useIntegrationImpact(orgId, integration.id, open);
+  const counting = impact.isPending && !impact.isError;
   const inputId = useId();
   const matches = typed.trim() === integration.name.trim();
   const destination = t(DESTINATIONS[integration.destination].name);
@@ -44,7 +46,7 @@ export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!matches || remove.isPending) return;
+    if (!matches || counting || remove.isPending) return;
     try {
       await remove.mutateAsync();
       await navigate({ to: '/integrations' });
@@ -73,7 +75,12 @@ export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
               destination,
             })}
           </AlertDialog.Description>
-          {waiting > 0 && <p className="field-hint">{tp('noise.delete.waiting', waiting)}</p>}
+          <ImpactSummary
+            action="delete"
+            impact={impact.data}
+            isPending={impact.isPending}
+            isError={impact.isError}
+          />
           <form className="form-stack" onSubmit={(e) => void onSubmit(e)}>
             <div className="field">
               <label className="field-label" htmlFor={inputId}>
@@ -100,7 +107,7 @@ export function DeleteDialog({ orgId, integration }: DeleteDialogProps) {
               <Button
                 type="submit"
                 variant="danger"
-                aria-disabled={!matches || remove.isPending || undefined}
+                aria-disabled={!matches || counting || remove.isPending || undefined}
               >
                 {remove.isPending ? t('delete.deleting') : t('delete.confirm')}
               </Button>

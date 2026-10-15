@@ -120,12 +120,12 @@ Decisions and verification: [ADR 0009](adr/0009-delivery-log-ux.md).
 | --- | --- |
 | `deliveries/DeliveryLogPage.tsx` | `/activity`: filters, table, load more, empty/error/loading states |
 | `deliveries/DeliveryTable.tsx` | TanStack Table; rows stack into labelled cards at narrow widths |
-| `deliveries/DeliveryDetail.tsx`, `RedeliverPanel.tsx` | Detail dialog, plain-language cause, admin-only confirmed redelivery, duplicate disclosure |
+| `deliveries/DeliveryDetail.tsx`, `RedeliverPanel.tsx` | Detail dialog, plain-language cause, admin-only confirmed redelivery, duplicate disclosure; "Details for support" holds the delivery ID, the error code and the request ID (monospace, copyable, linked to the log filtered by it; ADR 0050) |
 | `deliveries/AttemptTimeline.tsx` | Per-attempt history in the detail dialog: one line per try or wait, oldest first, outcome in words, status class and a minted code, never what the destination answered (ADR 0023) |
 | `deliveries/BulkRedeliver.tsx` | "Redeliver all failed" on the Failed view: count from the server first, then confirm; the number is typed above 20; a stale plan is refused and re-counted; not optimistic |
 | `integrations/HealthNotice.tsx` | The circuit breaker and rate-limit hold on an integration card and its settings: shown in words, never enforced (ADR 0023) |
 | `deliveries/DeliveryStats.tsx` | Overview figures from `GET /api/deliveries/summary` (last 24 hours, counted not estimated) |
-| `deliveries/search.ts`, `api.ts`, `copy.ts` | URL-backed filters, strict response parsing, state and error copy |
+| `deliveries/search.ts`, `api.ts`, `copy.ts` | URL-backed filters (outcome, integration, dates, request ID), strict response parsing, state and error copy |
 | `workspace/` | Settings: credential-free export download and two-phase workspace deletion |
 
 Delivery ledger depth (ADR 0023): the detail dialog says, in this order, what happened, then (when it
@@ -139,6 +139,18 @@ labelled `<ol>`, and the bulk panel is a labelled group with a labelled number f
 and the key ones in Vietnamese) and by the integrations and settings page scenarios, which now include an open
 breaker. **Not verified:** a real browser at 320 px and with a screen reader for these new surfaces; the
 Vietnamese copy has not been reviewed by a native speaker. A run of identical waits is one line ("Waited, and then 41 more times"), a delivery held back for more than a day reads "Stopped waiting", a repeat of a failed original says to redeliver the original, and after the bulk confirm button unmounts focus moves to the result or stale notice (the loading line is a status region).
+
+Request ID and consequence counts ([ADR 0050](adr/0050-request-id-in-detail-and-pause-delete-impact.md)): the request
+ID sits in the collapsed "Details for support" block, as spec 14 F220 places it, in Geist Mono (`.mono-wrap`), with the
+shared `CopyButton` and a real link to `/activity?correlationId=…`. Following the link closes the dialog and moves focus
+to the page heading, because the reloading list may briefly remove the row that opened it. A delivery without an id says
+"Not recorded" and offers no link. The activity filters gained a request-ID field, the audit log's text filter moved to
+`components/TextFilter.tsx` and validated with the Worker's own `sanitiseCorrelationId`. Pausing an integration now opens
+an alert dialog (focus on "Keep sending"), and the delete dialog gained the same impact block: an opaque Paper White sheet
+with a hairline border, one `role="status"` region that stays mounted, one plain sentence per non-empty group. The counts
+are the server's (`GET /api/integrations/:id/impact`); a failed count is said as unknown, never as zero. Pause is never
+blocked by a slow or failed count; the typed delete stays inert while counting and is allowed once the count fails.
+Resuming applies at once. Copy is in `i18n/messages.ledger.en.ts` and `.vi.ts`.
 
 ## Workspace switcher and audit log (`web/src/workspace/`, `web/src/audit/`)
 
@@ -183,7 +195,8 @@ Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
 
 | Path | Role |
 | --- | --- |
-| `IntegrationsPage.tsx`, `IntegrationCard.tsx`, `EnabledSwitch.tsx` | List, card, optimistic pause/resume with rollback |
+| `IntegrationsPage.tsx`, `IntegrationCard.tsx`, `EnabledSwitch.tsx` | List, card, pause (after a confirmation that states its consequence) and resume (at once), both optimistic with rollback |
+| `ImpactSummary.tsx` | What a pause or a delete affects, from `GET /api/integrations/:id/impact` (ADR 0050): one sentence per non-empty group, "More than 10,000" at the cap, an unknown count said as such, never a zero it did not measure |
 | `github/` | Connection panel, `?github=` return messages, repository picker, coverage rules |
 | `wizard/` | Six-step create flow (filters are optional) plus the optional "Test it" step shown after saving (`TestStep.tsx`); `draft.ts` holds the pure step logic |
 | `test/` | "Send a test notification" ([ADR 0018](adr/0018-test-send.md)): `TestSend.tsx` (settings section, list row and wizard step), `useTestSend.ts`, `poll.ts` (bounded wait, pure and unit-tested), `api.ts`, `test-send.css` |
@@ -252,8 +265,8 @@ the browser has it). Design decisions, so they are reviewable:
 - Errors sit next to the control in our own catalogue copy (never the server's wording) and the
   first invalid control takes focus. An unreadable stored document is a warning, not a block:
   updates are being sent normally, and saving replaces it.
-- The delete confirmation says how many updates are still waiting and will be deleted with the
-  integration. A hint says that a window that ends at midnight uses 00:00. The preview takes the
+- The delete confirmation says how many saved updates are deleted with the integration (ADR 0050
+  moved that count into the impact block, with the rest of what a delete removes and keeps). A hint says that a window that ends at midnight uses 00:00. The preview takes the
   instant as an argument (pure), and the time-zone list falls back to a built-in set of common zones
   when the browser cannot list them.
 - The recent-decisions list shows a saved update as "Saved for later" with a sentence, and an
@@ -525,6 +538,8 @@ sources are worded for a pasted credential. Strings in `messages.en.ts` and `mes
 - **Empty sections.** The empty state's body copy is 16px (`.empty p`), the minimum for body text.
 
 ## Not yet verified
+
+- Request ID in the detail dialog and the activity filter, and the pause and delete impact counts (ADR 0050): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no screen-reader pass, no screenshot, and the counts' cost was not measured on a real D1.
 
 - Shared loading and empty states on the four lists, the 16px empty-state body and the drift and number checks (ADR 0038): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no screen-reader pass.
 

@@ -34,6 +34,7 @@ import {
   MEMBERS,
   NOISE_STATUS,
   ORG_ID,
+  impactFor,
   PASSKEYS,
   ROUTING_LOG,
   SESSIONS,
@@ -164,6 +165,8 @@ export interface ApiState {
    * `integrations`, `deliveries`, `members` and `audit`, so a test can prove that workspace A's
    * rows are never shown under workspace B.
    */
+  /** Make `GET /api/integrations/:id/impact` fail; `pending` above makes it never answer. */
+  impact?: 'error';
   orgs?: Readonly<
     Record<string, { integrations: unknown[]; deliveries: unknown[]; members: unknown[]; audit: unknown[] }>
   >;
@@ -399,6 +402,12 @@ export function installFetch(state: ApiState): void {
         return Promise.resolve(
           json(noise[1] === 'int_6' ? NOISE_STATUS : { held: { count: 0, nextReleaseAt: null }, failed: 0 }),
         );
+      const impact = /^\/api\/integrations\/([^/]+)\/impact$/.exec(path);
+      if (impact) {
+        return Promise.resolve(
+          state.impact === 'error' ? json({ error: 'boom' }, 500) : json(impactFor(impact[1] ?? '')),
+        );
+      }
       if (/^\/api\/integrations\/[^/]+\/routing-log$/.test(path))
         return Promise.resolve(json({ entries: ROUTING_LOG, nextCursor: null }));
       const one = /^\/api\/integrations\/([^/]+)$/.exec(path);
@@ -492,6 +501,17 @@ export function installFetch(state: ApiState): void {
       return Promise.resolve(
         json({ error: 'refused' }, state.testSend, state.testSend === 429 ? { 'retry-after': '42' } : {}),
       );
+    }
+    const patch = /^\/api\/integrations\/([^/]+)$/.exec(path);
+    if (method === 'PATCH' && patch && Array.isArray(state.integrations)) {
+      const current = (state.integrations as { id: string }[]).find((i) => i.id === patch[1]);
+      if (!current) return Promise.resolve(json({ error: 'Not found' }, 404));
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, unknown>;
+      const updated = { ...current, ...body };
+      state.integrations = (state.integrations as { id: string }[]).map((i) =>
+        i.id === patch[1] ? updated : i,
+      );
+      return Promise.resolve(json({ integration: updated }));
     }
     const revoke = /^\/api\/integrations\/([^/]+)\/revoke-credentials$/.exec(path);
     if (method === 'POST' && revoke) {

@@ -208,6 +208,13 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
     access: cap('integration.read'),
   },
   {
+    method: 'GET',
+    path: '/api/integrations/:id/impact',
+    file: 'src/api/routing.ts',
+    handler: local('/:id/impact'),
+    access: cap('integration.read'),
+  },
+  {
     method: 'POST',
     path: '/api/integrations/:id/filters/preview',
     file: 'src/api/routing.ts',

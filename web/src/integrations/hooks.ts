@@ -18,7 +18,22 @@ export const integrationKeys = {
   all: (orgId: string) => ['integrations', orgId] as const,
   list: (orgId: string) => ['integrations', orgId, 'list'] as const,
   detail: (orgId: string, id: string) => ['integrations', orgId, 'detail', id] as const,
+  impact: (orgId: string, id: string) => ['integrations', orgId, 'impact', id] as const,
 };
+
+/**
+ * What pausing or deleting would touch (ADR 0050), asked only while a confirmation is open and
+ * asked again each time it opens: a count from an earlier opening may be out of date.
+ */
+export function useIntegrationImpact(orgId: string, id: string, enabled: boolean) {
+  return useQuery({
+    enabled,
+    queryKey: integrationKeys.impact(orgId, id),
+    queryFn: () => integrationsApi.impact(orgId, id),
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
 
 /** The shell has already loaded `me`; this reads the same cache entry. */
 export function useOrgId(): string | null {

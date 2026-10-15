@@ -25,6 +25,7 @@ const delivery = (state: DeliveryState): DeliveryItem => ({
   isTest: true,
   latestReplayState: null,
   canReplay: false,
+  correlationId: null,
 });
 
 describe('outcomeOf', () => {

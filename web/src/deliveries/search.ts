@@ -1,3 +1,4 @@
+import { sanitiseCorrelationId } from '../../../src/platform/correlation-id';
 import { isDeliveryState, type DeliveryFilters, type DeliveryState } from './api';
 
 /**
@@ -9,7 +10,12 @@ export interface ActivitySearch {
   readonly integration?: string;
   readonly from?: string;
   readonly to?: string;
+  /** The request id minted at ingress (F193), the same shape the server accepts. */
+  readonly correlationId?: string;
 }
+
+/** The server's own rule (4 to 64 characters of `A-Za-z0-9._:-`); anything else is never sent. */
+export const isValidCorrelationId = (value: string): boolean => sanitiseCorrelationId(value) !== null;
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -26,11 +32,13 @@ export function validateActivitySearch(search: Record<string, unknown>): Activit
       : undefined;
   const from = validDate(search.from);
   const to = validDate(search.to);
+  const correlationId = sanitiseCorrelationId(search.correlationId) ?? undefined;
   return {
     ...(state ? { state } : {}),
     ...(integration ? { integration } : {}),
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
+    ...(correlationId ? { correlationId } : {}),
   };
 }
 
@@ -40,6 +48,7 @@ export function toFilters(search: ActivitySearch): DeliveryFilters {
     ...(search.integration ? { integrationId: search.integration } : {}),
     ...(search.from ? { from: search.from } : {}),
     ...(search.to ? { to: search.to } : {}),
+    ...(search.correlationId ? { correlationId: search.correlationId } : {}),
   };
 }
 

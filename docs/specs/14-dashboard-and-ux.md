@@ -1380,7 +1380,7 @@ never logged in full (F208). All writes are tenant-scoped and audited where F222
 
 ## F217 — Integration settings
 
-**Priority** P0 · **Status** 🟡 slice 6f, ADR 0025: stable section order (status, source, filters, destination, test, noise, credentials, health, history, danger), repair panel, health from the delivery ledger, history links; not built: pause consequence counts, delete impact counts, disconnect-source
+**Priority** P0 · **Status** 🟡 slice 6f, ADR 0025: stable section order (status, source, filters, destination, test, noise, credentials, health, history, danger), repair panel, health from the delivery ledger, history links; ADR 0050: the pause and delete confirmations state server-counted consequences (`GET /api/integrations/:id/impact`, `tests/api/integration-impact.test.ts`, `web/src/a11y/request-and-impact.a11y.test.tsx`); not built: disconnect-source, export before delete
 
 **Story** As an administrator, I want one screen per connection where I can see and change
 everything about it, so that I never hunt through menus to turn something off.

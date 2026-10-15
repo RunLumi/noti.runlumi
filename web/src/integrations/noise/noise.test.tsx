@@ -338,15 +338,13 @@ describe('related copy', () => {
     expect(within(root).getByText('To end at midnight, choose 00:00.')).toBeTruthy();
   });
 
-  it('the delete confirmation says how many updates are still waiting and will be deleted', async () => {
+  it('the delete confirmation says how many saved updates will be deleted', async () => {
     const user = userEvent.setup();
     await renderApp('/integrations/int_6');
     await user.click(await screen.findByRole('button', { name: 'Delete integration' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(
-      await within(dialog).findByText(
-        '3 updates are still waiting to be sent. They will be deleted with this integration.',
-      ),
+      await within(dialog).findByText('3 saved updates are deleted with the integration and never sent.'),
     ).toBeTruthy();
   });
 
@@ -355,6 +353,7 @@ describe('related copy', () => {
     await renderApp('/integrations/int_1');
     await user.click(await screen.findByRole('button', { name: 'Delete integration' }));
     const dialog = await screen.findByRole('alertdialog');
-    expect(within(dialog).queryByText(/still waiting to be sent/)).toBeNull();
+    await within(dialog).findByText(/past deliveries stay in Activity/);
+    expect(within(dialog).queryByText(/saved updates? (is|are) deleted/)).toBeNull();
   });
 });
