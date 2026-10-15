@@ -139,28 +139,16 @@ browser.get('/callback', async (c) => {
   if (!session) return backToDashboard(c, 'signin_required');
   const origin = requestOrigin(c.req.raw.headers);
   try {
-    const bound = await completeVerification(
+    // The `github.installation.bind` row is written in the bind's own batch: if it cannot be written,
+    // nothing is bound and the person lands on the generic error below (F236).
+    await completeVerification(
       c.env.DB,
       config,
-      { state: c.req.query('state'), code: c.req.query('code') },
+      { state: c.req.query('state'), code: c.req.query('code'), origin },
       session.user.id,
       Date.now(),
       mayConnect(c.env.DB),
     );
-    await recordAudit(c.env.DB, {
-      organizationId: bound.organizationId,
-      actorId: session.user.id,
-      action: 'github.installation.bind',
-      subjectType: 'github_installation',
-      subjectId: bound.installationRowId,
-      outcome: 'success',
-      ...origin,
-      metadata: {
-        account: bound.installation.accountLogin,
-        selection: bound.installation.repositorySelection,
-        repositories: bound.installation.repositories.length,
-      },
-    });
     return backToDashboard(c, 'connected');
   } catch (e) {
     if (!(e instanceof InstallFlowError)) {

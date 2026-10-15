@@ -264,6 +264,19 @@ describe('install flow', () => {
     expect(audits('github.installation.bind')).toHaveLength(1);
   });
 
+  it('binds nothing when the bind audit row cannot be written (F236, ADR 0055)', async () => {
+    db.raw.exec(
+      "CREATE TRIGGER fail_bind_audit BEFORE INSERT ON audit_events WHEN NEW.action='github.installation.bind' BEGIN SELECT RAISE(ABORT,'audit down'); END",
+    );
+    const done = await connect();
+    expect(done.searchParams.get('github')).toBe('unexpected_error');
+    expect(installationRow()).toBeUndefined();
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM github_installation_repositories').get()).toEqual({
+      n: 0,
+    });
+    expect(audits('github.installation.bind')).toHaveLength(0);
+  });
+
   it('uses PKCE and revokes the user token after the check', async () => {
     const authorize = await setup(await startInstall());
     expect(authorize.origin + authorize.pathname).toBe('https://github.com/login/oauth/authorize');
@@ -591,7 +604,21 @@ describe('lifecycle and repository scope', () => {
     expect(installationRow()?.status).toBe('uninstalled');
     expect((await signedWebhook('issues', issue(7, 'acme/web'))).status).toBe(403);
     const rows = audits('github.installation.lifecycle');
-    expect(JSON.parse(String(rows.at(-1)?.metadata_json))).toEqual({ action: 'deleted' });
+    // The account login is frozen into the row, so the audit view names the installation (ADR 0055).
+    expect(JSON.parse(String(rows.at(-1)?.metadata_json))).toEqual({ action: 'deleted', account: 'acme' });
+  });
+
+  it('applies no lifecycle change when its audit row cannot be written (F236, ADR 0055)', async () => {
+    db.raw.exec(
+      "CREATE TRIGGER fail_lifecycle_audit BEFORE INSERT ON audit_events WHEN NEW.action='github.installation.lifecycle' BEGIN SELECT RAISE(ABORT,'audit down'); END",
+    );
+    const res = await signedWebhook('installation', { action: 'suspend', installation: installationBlock });
+    // Not acknowledged as accepted, so a redelivery applies it once the audit store is back.
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    expect(installationRow()).toMatchObject({ status: 'active', suspended_at: null });
+    db.raw.exec('DROP TRIGGER fail_lifecycle_audit');
+    await signedWebhook('installation', { action: 'suspend', installation: installationBlock });
+    expect(installationRow()).toMatchObject({ status: 'suspended' });
   });
 
   it('applies repository additions and removals immediately', async () => {

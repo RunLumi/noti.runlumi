@@ -601,6 +601,10 @@ export const en = {
   'workspace.danger.dialog.title': 'Delete {name}?',
   'workspace.danger.dialog.body':
     'This pauses every integration now and permanently deletes the workspace after 7 days unless you cancel. Type the workspace name to confirm.',
+  'workspace.danger.dialog.export.title': 'Keep a copy first (optional)',
+  'workspace.danger.dialog.export.body':
+    'Download this workspace’s export before you schedule the deletion: members, integrations, GitHub connections and recent deliveries and audit events, without any credentials. You can schedule the deletion without it.',
+  'workspace.danger.dialog.export.button': 'Download export',
   'workspace.danger.dialog.label': 'Type {name} to confirm',
   'workspace.danger.dialog.keep': 'Keep workspace',
   'workspace.danger.dialog.confirm': 'Schedule deletion',

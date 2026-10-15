@@ -11,7 +11,9 @@ export type AuditActor =
   | { readonly kind: 'member'; readonly name: string }
   | { readonly kind: 'system' }
   | { readonly kind: 'former' }
-  | { readonly kind: 'other' };
+  | { readonly kind: 'other' }
+  /** GitHub acting on the workspace's App installation; `account` is the GitHub login when known. */
+  | { readonly kind: 'installation'; readonly account: string | null };
 
 export type SummaryValue = string | number | boolean | readonly string[];
 export interface SummaryItem {
@@ -63,7 +65,7 @@ export interface AuditPage {
 export interface AuditFilters {
   readonly action?: AuditAction;
   readonly outcome?: AuditOutcome;
-  /** A member's user id, or `system`. */
+  /** A member's user id, `~system`, or `~github-installation`. */
   readonly actor?: string;
   readonly target?: string;
   readonly targetType?: AuditSubjectType;
@@ -92,6 +94,11 @@ function parseActor(value: unknown): AuditActor {
   if (isRecord(value) && value.kind === 'system') return { kind: 'system' };
   if (isRecord(value) && value.kind === 'former') return { kind: 'former' };
   if (isRecord(value) && value.kind === 'other') return { kind: 'other' };
+  if (isRecord(value) && value.kind === 'installation')
+    return {
+      kind: 'installation',
+      account: typeof value.account === 'string' && value.account !== '' ? value.account : null,
+    };
   throw bad('audit actor');
 }
 

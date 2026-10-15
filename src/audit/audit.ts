@@ -52,6 +52,18 @@ export function serialiseMetadata(metadata: AuditMetadata | undefined): string {
 }
 
 /**
+ * Metadata columns that add one count, read in the same batch as the change (`countAs` below). Each is a
+ * fixed expression with three parameters: the serialised metadata, the key, and the workspace id that
+ * scopes the count. Only literals live here, so nothing a request sends can reach the SQL text.
+ */
+const AUDIT_COUNTS = {
+  /** The integrations a workspace deletion request switched off: the size of the snapshot it stored. */
+  deletionSnapshot:
+    'json_patch(?, json_object(?, (SELECT json_array_length(disabled_integration_ids) FROM workspace_deletions WHERE organization_id = ?)))',
+} as const;
+export type AuditCount = keyof typeof AUDIT_COUNTS;
+
+/**
  * A statement for `db.batch`, so an audit row commits with the change it describes.
  *
  * With `ifIntegrationExists`, the row is written only if that integration exists in that
@@ -69,11 +81,37 @@ export function auditStatement(
      * same batch so it is exact. Implies the changed-rows guard. `key` is a fixed identifier, never input.
      */
     readonly changesAs?: string;
+    /**
+     * Add `{ <key>: n }` to the metadata, where `n` is one of the fixed counts in {@link AUDIT_COUNTS}, read by
+     * SQLite in the same batch, so it describes exactly the state the change produced. `key` is a fixed
+     * identifier, never input; `organizationId` scopes the count.
+     */
+    readonly countAs?: {
+      readonly key: string;
+      readonly count: AuditCount;
+      readonly organizationId: string;
+    };
   } = {},
 ): D1PreparedStatement {
-  if (options.changesAs !== undefined && !/^[a-z][A-Za-z]{0,31}$/.test(options.changesAs))
+  const identifier = /^[a-z][A-Za-z]{0,31}$/;
+  if (options.changesAs !== undefined && !identifier.test(options.changesAs))
     throw new Error('changesAs must be a plain identifier');
-  const metadataColumn = options.changesAs === undefined ? '?' : 'json_object(?, changes())';
+  if (options.countAs !== undefined && !identifier.test(options.countAs.key))
+    throw new Error('countAs.key must be a plain identifier');
+  if (options.countAs !== undefined && options.changesAs !== undefined)
+    throw new Error('changesAs and countAs cannot be combined');
+  const metadataColumn =
+    options.changesAs !== undefined
+      ? 'json_object(?, changes())'
+      : options.countAs !== undefined
+        ? AUDIT_COUNTS[options.countAs.count]
+        : '?';
+  const metadataValues =
+    options.changesAs !== undefined
+      ? [options.changesAs]
+      : options.countAs !== undefined
+        ? [serialiseMetadata(entry.metadata), options.countAs.key, options.countAs.organizationId]
+        : [serialiseMetadata(entry.metadata)];
   const guardRows = options.onlyIfPreviousStatementChangedRows || options.changesAs !== undefined;
   // `changes()` is the row count of the statement just before this one in the batch: put the
   // audit row right after the INSERT it describes and it exists only if that insert did.
@@ -99,7 +137,7 @@ export function auditStatement(
       entry.outcome,
       entry.ip ?? null,
       entry.userAgent ? scrubSecrets(entry.userAgent).slice(0, MAX_USER_AGENT) : null,
-      options.changesAs ?? serialiseMetadata(entry.metadata),
+      ...metadataValues,
       // The request this change was made in (F222), so a support quote of the id finds it. Null in a
       // cron job or queue consumer with no request; never a sender-supplied value.
       sanitiseCorrelationId(currentCorrelationId()),

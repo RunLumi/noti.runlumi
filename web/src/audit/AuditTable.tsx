@@ -120,7 +120,15 @@ export function AuditTable({ rows, onFilter }: AuditTableProps) {
                 <span className="cell-main">{actionLabel(event.action)}</span>
               </td>
               <td role="cell" data-label={t('audit.col.who')}>
-                <span className="cell-main">{actorLabel(event.actor)}</span>
+                {event.actor.kind === 'installation' && event.actor.account ? (
+                  // GitHub acting on the installation: the account it belongs to, then what that account is.
+                  <div>
+                    <span className="cell-main">{event.actor.account}</span>
+                    <span className="cell-sub">{t('audit.actor.installation')}</span>
+                  </div>
+                ) : (
+                  <span className="cell-main">{actorLabel(event.actor)}</span>
+                )}
               </td>
               <td role="cell" data-label={t('audit.col.subject')}>
                 <div>

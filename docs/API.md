@@ -707,8 +707,8 @@ type SetupProgress = {
 | --- | --- | --- |
 | `GET /api/workspace/export` | `workspace.export` | `200` JSON attachment, `format: "lumi-noti-export/v1"`, `credentialsIncluded: false`, at most the 2,000 most recent deliveries, delivery attempts and audit events (`truncated` says if older rows were left out). The export is audited. |
 | `GET /api/workspace/deletion` | `workspace.delete` | `{scheduled: false}` or `{scheduled: true, requestedAt, purgeAfter, purgeStarted}` |
-| `POST /api/workspace/deletion` | `workspace.delete` | Body `{confirm: "<workspace name>"}`. Returns `202`. Integrations are disabled immediately and the purge runs after 7 days. Returns `422` on a wrong confirmation and `409` if a deletion is already scheduled. |
-| `DELETE /api/workspace/deletion` | `workspace.delete` | Cancels and restores the integrations that were enabled. Returns `409` once the purge has started. |
+| `POST /api/workspace/deletion` | `workspace.delete` | Body `{confirm: "<workspace name>"}`. Returns `202`. Integrations are disabled immediately and the purge runs after 7 days. Returns `422` on a wrong confirmation and `409` if a deletion is already scheduled. The schedule, the pause and the `workspace.deletion.request` row are one batch: if the row cannot be written nothing is scheduled or paused (`5xx`, ADR 0055). |
+| `DELETE /api/workspace/deletion` | `workspace.delete` | Cancels and restores the integrations that were enabled. Returns `409` once the purge has started. The cancel, the restore and the `workspace.deletion.cancel` row are one batch, as above. |
 
 While a deletion is pending, integration and source mutations and `POST /api/github/install` return `409`.
 
@@ -740,7 +740,8 @@ Query: `limit` (1 to 100, default 25), `cursor` (the opaque `nextCursor` of the 
 (`success` or `denied`), `from` and `to` (`YYYY-MM-DD`, the whole UTC day, or an ISO instant), and, since
 ADR 0028:
 
-- `actor`: a CURRENT member's user id, or `~system` for events no person took (no user id can start with `~`). Anyone who is not a member of
+- `actor`: a CURRENT member's user id, `~system` for events Noti took on its own, or `~github-installation` for the changes
+  GitHub reported about the workspace's App installation (ADR 0055; no user id can start with `~`). Anyone who is not a member of
   this workspace (an outsider whose probe was recorded here, a former member) matches nothing, so the filter
   cannot be used to ask whether a user id ever touched the workspace. Ids come from `GET /api/workspace/team`.
 - `target` and `targetType`: the id and kind (`integration`, `source`, `delivery`, `organization`,
@@ -768,7 +769,10 @@ type AuditPage = {
       | { kind: 'member'; name: string }   // a CURRENT member of this workspace, name only
       | { kind: 'system' }                 // no actor (automatic)
       | { kind: 'former' }                 // a successful action by someone no longer a member
-      | { kind: 'other' };                 // a refused request from someone who never was (an outsider's probe)
+      | { kind: 'other' }                  // a refused request from someone who never was (an outsider's probe)
+      | { kind: 'installation'; account: string | null }; // GitHub acting on the App installation (lifecycle
+                                           // events, ADR 0055): the account login frozen into the row, else the
+                                           // installation's current login in THIS workspace, else null
     summary: { key: string; value: string | number | boolean | string[] }[];  // allow-listed, bounded
     correlationId: string | null;      // the request the change was made in; null for older rows and jobs
     changes: (                          // before and after of a few NON-SECRET fields an update changed

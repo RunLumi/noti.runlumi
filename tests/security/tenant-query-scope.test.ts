@@ -226,7 +226,7 @@ const ALLOWLIST: readonly Allowed[] = [
   {
     file: 'src/connectors/sources/github/lifecycle.ts',
     includes:
-      'SELECT id,organization_id,status,repository_selection FROM github_installations WHERE installation_id=? AND app_id=?',
+      'SELECT id,organization_id,status,repository_selection,account_login FROM github_installations WHERE installation_id=? AND app_id=?',
     category: 'credential-keyed ingress',
     reason:
       'Installation lifecycle webhooks (suspend, delete) arrive signed by the App; the row found by installation id carries its own organization.',

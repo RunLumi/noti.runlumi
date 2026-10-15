@@ -25,7 +25,8 @@ export const auditVi = {
   'audit.filter.dateHint': 'Ngày tính theo giờ UTC và bao gồm cả ngày đó.',
   'audit.filter.actor': 'Ai',
   'audit.filter.actor.all': 'Bất kỳ ai',
-  'audit.filter.actor.hint': 'Các thành viên hiện tại, hoặc Noti cho các sự kiện tự động.',
+  'audit.filter.actor.hint':
+    'Các thành viên hiện tại, Noti cho các sự kiện tự động, hoặc bản cài đặt GitHub App cho các thay đổi do GitHub báo về.',
   'audit.filter.target': 'Liên quan đến (mã)',
   'audit.filter.target.hint': 'Mã hiển thị dưới “Liên quan đến”, ví dụ mã của tích hợp hoặc nguồn.',
   'audit.filter.target.invalid': 'Mã này không hợp lệ.',
@@ -95,6 +96,8 @@ export const auditVi = {
   'audit.actor.system': 'Noti (tự động)',
   'audit.actor.former': 'Thành viên cũ',
   'audit.actor.other': 'Người ngoài',
+  'audit.actor.installation': 'Bản cài đặt GitHub App',
+  'audit.actor.installation.named': '{account} (bản cài đặt GitHub App)',
   'audit.outcome.success': 'Đã thực hiện',
   'audit.outcome.denied': 'Bị từ chối',
   'audit.noDetails': 'Không có chi tiết nào khác được ghi lại.',

@@ -269,7 +269,15 @@ export type AuditActor =
   /** A person who did something here and has since left (or whose membership is gone). */
   | { readonly kind: 'former' }
   /** Someone who never belonged here: an outsider whose refused request was recorded. */
-  | { readonly kind: 'other' };
+  | { readonly kind: 'other' }
+  /**
+   * GitHub acting on the workspace's App installation (a lifecycle event: uninstalled, suspended, repositories
+   * changed). `account` is the GitHub account login, or null when neither the row nor the installation has one.
+   */
+  | { readonly kind: 'installation'; readonly account: string | null };
+
+/** The actions whose actor is the GitHub App installation, not Noti: GitHub told us something changed. */
+export const INSTALLATION_ACTIONS: readonly AuditAction[] = ['github.installation.lifecycle'];
 
 export interface AuditRowRecord {
   id: string;
@@ -286,6 +294,8 @@ export interface AuditRowRecord {
   /** Present only when the actor is a CURRENT member of this workspace. */
   actor_name: string | null;
   actor_is_member: number | null;
+  /** The current account login of the installation the row is about, read with the workspace predicate. */
+  installation_account?: string | null;
 }
 
 export interface AuditEventView {
@@ -309,12 +319,32 @@ export interface AuditEventView {
  * one in this workspace.
  */
 function actorOf(row: AuditRowRecord): AuditActor {
+  if (row.actor_id === null && (INSTALLATION_ACTIONS as readonly string[]).includes(row.action))
+    return { kind: 'installation', account: installationAccount(row) };
   if (row.actor_id === null) return { kind: 'system' };
   if (row.actor_is_member === 1 && row.actor_name)
     return { kind: 'member', name: safeText(row.actor_name, 80) };
   // A successful action can only have been taken by someone who was a member then; a refused
   // request from a non-member is an outsider. Neither is named.
   return row.outcome === 'denied' ? { kind: 'other' } : { kind: 'former' };
+}
+
+/**
+ * The login frozen into the row when it was written, else the installation's current one. Both pass through
+ * `safeText`, like every other value this view shows.
+ */
+function installationAccount(row: AuditRowRecord): string | null {
+  let frozen: unknown;
+  try {
+    const parsed: unknown = JSON.parse(row.metadata_json);
+    frozen =
+      typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>).account : null;
+  } catch {
+    frozen = null;
+  }
+  const login = typeof frozen === 'string' && frozen !== '' ? frozen : (row.installation_account ?? null);
+  const clean = login === null ? '' : safeText(login, 80);
+  return clean === '' ? null : clean;
 }
 
 export function toAuditView(row: AuditRowRecord): AuditEventView {
@@ -372,6 +402,8 @@ const validTarget = (value: string): boolean =>
  * numbers, `_` and `-`), so it can never collide with a member whose id happens to be `system`.
  */
 export const SYSTEM_ACTOR = '~system';
+/** The filter value for "GitHub, acting on this workspace's App installation"; `~` for the same reason. */
+export const INSTALLATION_ACTOR = '~github-installation';
 
 const isSubjectType = (v: string): v is (typeof AUDIT_SUBJECT_TYPES)[number] =>
   (AUDIT_SUBJECT_TYPES as readonly string[]).includes(v);
@@ -392,7 +424,7 @@ export function parseAuditFilters(query: (name: string) => string | undefined): 
   if (action && !isAuditAction(action)) fields.push({ field: 'action', message: 'Unknown action.' });
   if (outcome && outcome !== 'success' && outcome !== 'denied')
     fields.push({ field: 'outcome', message: 'Use success or denied.' });
-  if (actor && actor !== SYSTEM_ACTOR && !ACTOR_ID.test(actor))
+  if (actor && actor !== SYSTEM_ACTOR && actor !== INSTALLATION_ACTOR && !ACTOR_ID.test(actor))
     fields.push({ field: 'actor', message: 'Not a valid member id.' });
   if (target && !validTarget(target)) fields.push({ field: 'target', message: 'Not a valid id.' });
   if (targetType && !isSubjectType(targetType))
@@ -447,7 +479,12 @@ function whereOf(orgId: string, f: AuditFilters, withCursor: boolean) {
     values.push(f.outcome);
   }
   if (f.actor === SYSTEM_ACTOR) {
-    where.push('e.actor_id IS NULL');
+    // Noti itself: no person, and not GitHub acting on the installation (that is its own actor below).
+    where.push(`e.actor_id IS NULL AND e.action NOT IN (${INSTALLATION_ACTIONS.map(() => '?').join(',')})`);
+    values.push(...INSTALLATION_ACTIONS);
+  } else if (f.actor === INSTALLATION_ACTOR) {
+    where.push(`e.actor_id IS NULL AND e.action IN (${INSTALLATION_ACTIONS.map(() => '?').join(',')})`);
+    values.push(...INSTALLATION_ACTIONS);
   } else if (f.actor) {
     // A person who belongs to THIS workspace now; the membership lookup repeats the tenant predicate.
     where.push(
@@ -489,10 +526,13 @@ export function buildAuditQuery(orgId: string, f: AuditFilters): Built {
     // The member join repeats the tenant predicate: a name is read only for someone who
     // belongs to THIS workspace now. `ip`, `user_agent` and the actor's email are not selected.
     sql: `SELECT e.id, e.organization_id, e.action, e.subject_type, e.subject_id, e.outcome, e.metadata_json, e.created_at,
-            e.correlation_id, e.actor_id, u.name AS actor_name, (m.id IS NOT NULL) AS actor_is_member
+            e.correlation_id, e.actor_id, u.name AS actor_name, (m.id IS NOT NULL) AS actor_is_member,
+            gi.account_login AS installation_account
           FROM audit_events e
           LEFT JOIN member m ON m.user_id = e.actor_id AND m.organization_id = e.organization_id
           LEFT JOIN "user" u ON u.id = m.user_id
+          LEFT JOIN github_installations gi
+            ON e.subject_type = 'github_installation' AND gi.id = e.subject_id AND gi.organization_id = e.organization_id
           WHERE e.organization_id = ?${filters}
           ORDER BY e.created_at DESC, e.id DESC LIMIT ?`,
     values: [...values, f.limit + 1],

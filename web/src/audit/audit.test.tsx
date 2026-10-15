@@ -6,13 +6,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SUMMARY_FIELDS } from '../../../src/api/audit-view';
 import { AUDIT_ACTIONS, AUDIT_SUBJECT_TYPES } from '../../../src/audit/actions';
 import { audit, describeViolations } from '../a11y/testing/axe';
-import { AUDIT_EVENTS, MEMBER, MULTI, OTHER_ORG_ID, ORG_ID } from '../a11y/testing/fixtures';
+import {
+  AUDIT_EVENTS,
+  INSTALLATION_AUDIT_EVENTS,
+  MEMBER,
+  MULTI,
+  OTHER_ORG_ID,
+  ORG_ID,
+} from '../a11y/testing/fixtures';
 import { clearRequests, renderApp, requests } from '../a11y/testing/render';
 import { catalogues, en } from '../i18n';
-import { actionLabel, detailLabel } from './copy';
+import { actionLabel, actorLabel, detailLabel } from './copy';
 import { csvCell, toCsv } from './csv';
 import { eventsToCsv } from './AuditPage';
 import { validateAuditSearch } from './search';
+import { setLocale } from '../i18n/locale';
 import { parseAuditEvent } from './api';
 import { changePairs } from './copy';
 
@@ -358,5 +366,70 @@ describe('audit log page', () => {
     expect(screen.queryByText('Minh Tran')).toBeNull();
     const after = requests.slice(requests.indexOf('POST /api/workspace/active') + 1);
     expect(after.filter((r) => r.includes(`org=${ORG_ID}`))).toEqual([]);
+  });
+});
+
+describe('a GitHub App installation as the actor (F222, ADR 0055)', () => {
+  const rows = [...AUDIT_EVENTS, ...INSTALLATION_AUDIT_EVENTS];
+
+  it('parses the installation actor, with or without an account login', () => {
+    const [named, unnamed] = INSTALLATION_AUDIT_EVENTS.map(parseAuditEvent);
+    expect(named?.actor).toEqual({ kind: 'installation', account: 'acme' });
+    expect(unnamed?.actor).toEqual({ kind: 'installation', account: null });
+    // An empty or malformed login is "unknown", never rendered as a blank name.
+    expect(
+      parseAuditEvent({ ...INSTALLATION_AUDIT_EVENTS[0], actor: { kind: 'installation', account: '' } })
+        .actor,
+    ).toEqual({ kind: 'installation', account: null });
+    expect(
+      parseAuditEvent({ ...INSTALLATION_AUDIT_EVENTS[0], actor: { kind: 'installation', account: 7 } }).actor,
+    ).toEqual({ kind: 'installation', account: null });
+  });
+
+  it('names the account and says it is the GitHub App installation, never Noti or a raw id', async () => {
+    await renderApp('/audit', { api: { audit: rows } });
+    const table = await screen.findByRole('table', { name: 'Audit events, newest first' });
+    const named = within(table)
+      .getAllByRole('row')
+      .find((r) => r.textContent?.includes('gi_1'));
+    const who = within(named as HTMLElement).getAllByRole('cell')[2];
+    expect(within(who).getByText('acme')).toBeTruthy();
+    expect(within(who).getByText('GitHub App installation')).toBeTruthy();
+    expect(who.textContent).not.toContain('Noti');
+    const unnamed = within(table)
+      .getAllByRole('row')
+      .find((r) => r.textContent?.includes('gi_old'));
+    const whoUnnamed = within(unnamed as HTMLElement).getAllByRole('cell')[2];
+    expect(whoUnnamed.textContent).toBe('GitHub App installation');
+    const { blocking } = await audit();
+    expect(blocking, describeViolations(blocking)).toEqual([]);
+  });
+
+  it('is labelled in Vietnamese with the diacritics intact', async () => {
+    await renderApp('/audit', { api: { audit: rows }, locale: 'vi' });
+    const table = await screen.findByRole('table');
+    expect(within(table).getAllByText('Bản cài đặt GitHub App').length).toBe(2);
+    expect(within(table).getAllByText('acme').length).toBeGreaterThan(0);
+    const { blocking } = await audit();
+    expect(blocking, describeViolations(blocking)).toEqual([]);
+  });
+
+  it('writes one plain label in the CSV', () => {
+    setLocale('en', { persist: false });
+    expect(actorLabel({ kind: 'installation', account: 'acme' })).toBe('acme (GitHub App installation)');
+    expect(actorLabel({ kind: 'installation', account: null })).toBe('GitHub App installation');
+    expect(eventsToCsv(rows.map(parseAuditEvent))).toContain('acme (GitHub App installation)');
+  });
+
+  it('can be chosen in the Who filter, which keeps it in the URL and sends it to the server', async () => {
+    const user = userEvent.setup();
+    expect(validateAuditSearch({ actor: '~github-installation' })).toEqual({ actor: '~github-installation' });
+    const rendered = await renderApp('/audit', { api: { audit: rows } });
+    await screen.findByRole('table');
+    await user.selectOptions(screen.getByLabelText('Who'), '~github-installation');
+    await waitFor(() =>
+      expect(rendered.router.state.location.search).toMatchObject({ actor: '~github-installation' }),
+    );
+    await waitFor(() => expect(requests.some((r) => r.includes('actor=%7Egithub-installation'))).toBe(true));
   });
 });

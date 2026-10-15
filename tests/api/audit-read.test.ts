@@ -527,4 +527,81 @@ describe('fails closed', () => {
   });
 });
 
+describe('a GitHub App installation as the actor (F222, ADR 0055)', () => {
+  const lifecycle = { action: 'github.installation.lifecycle', subjectType: 'github_installation' };
+
+  beforeEach(() => {
+    const install = db.raw.prepare(
+      `INSERT INTO github_installations(id,organization_id,installation_id,app_id,account_login,account_type,repository_selection)
+       VALUES(?,?,?,?,?,?,?)`,
+    );
+    install.run('gi-a', 'org-a', '11', '1', 'acme-now', 'Organization', 'all');
+    install.run('gi-b', 'org-b', '22', '1', 'rival', 'Organization', 'all');
+    // Written by this release: the login is frozen into the row.
+    event({
+      id: 'l1',
+      org: 'org-a',
+      ...lifecycle,
+      subject: 'gi-a',
+      at: '2026-10-10 10:00:00',
+      metadata: { action: 'suspend', account: 'acme' },
+    });
+    // Written before the login was recorded: the installation's current login is shown.
+    event({
+      id: 'l2',
+      org: 'org-a',
+      ...lifecycle,
+      subject: 'gi-a',
+      at: '2026-10-09 10:00:00',
+      metadata: { action: 'deleted' },
+    });
+    // A row of this workspace that names ANOTHER workspace's installation row: that login is never read.
+    event({
+      id: 'l3',
+      org: 'org-a',
+      ...lifecycle,
+      subject: 'gi-b',
+      at: '2026-10-08 10:00:00',
+      metadata: { action: 'unsuspend' },
+    });
+    // Noti's own automatic action stays "system".
+    event({ id: 's1', org: 'org-a', action: 'integration.auto_pause', at: '2026-10-07 10:00:00' });
+  });
+
+  type Actor = { kind: string; account?: string | null };
+  const actors = async (): Promise<Record<string, Actor>> => {
+    const body = await (await get('/api/audit')).json<{ events: { id: string; actor: Actor }[] }>();
+    return Object.fromEntries(body.events.map((e) => [e.id, e.actor]));
+  };
+
+  it('renders lifecycle rows as the installation, by the frozen login or else the current one', async () => {
+    const byId = await actors();
+    expect(byId.l1).toEqual({ kind: 'installation', account: 'acme' });
+    expect(byId.l2).toEqual({ kind: 'installation', account: 'acme-now' });
+    expect(byId.s1).toEqual({ kind: 'system' });
+  });
+
+  it('never reads the login of another workspace’s installation', async () => {
+    expect((await actors()).l3).toEqual({ kind: 'installation', account: null });
+    expect(await (await get('/api/audit')).text()).not.toContain('rival');
+  });
+
+  it('filters the installation and Noti apart', async () => {
+    expect(await ids('?actor=~github-installation')).toEqual(['l1', 'l2', 'l3']);
+    expect(await ids('?actor=~system')).toEqual(['s1']);
+  });
+
+  it('shows a login stripped of control and bidi characters, like every other value', async () => {
+    event({
+      id: 'l4',
+      org: 'org-a',
+      ...lifecycle,
+      subject: 'gi-a',
+      at: '2026-10-11 10:00:00',
+      metadata: { action: 'renamed', account: 'ev‮il' },
+    });
+    expect((await actors()).l4).toEqual({ kind: 'installation', account: 'evil' });
+  });
+});
+
 afterEach(() => vi.restoreAllMocks());

@@ -602,3 +602,33 @@ export const AUDIT_EVENTS = [
     ],
   },
 ] as const;
+
+/**
+ * GitHub acting on the App installation (ADR 0055): one row with the account login, and one for an
+ * installation the workspace no longer holds, written before the login was recorded, so no login is known.
+ */
+export const INSTALLATION_AUDIT_EVENTS = [
+  {
+    id: 'au_6',
+    createdAt: '2026-10-12T19:00:00Z',
+    action: 'github.installation.lifecycle',
+    subjectType: 'github_installation',
+    subjectId: 'gi_1',
+    outcome: 'success',
+    actor: { kind: 'installation', account: 'acme' },
+    summary: [
+      { key: 'action', value: 'suspend' },
+      { key: 'account', value: 'acme' },
+    ],
+  },
+  {
+    id: 'au_7',
+    createdAt: '2026-10-12T18:00:00Z',
+    action: 'github.installation.lifecycle',
+    subjectType: 'github_installation',
+    subjectId: 'gi_old',
+    outcome: 'success',
+    actor: { kind: 'installation', account: null },
+    summary: [{ key: 'action', value: 'deleted' }],
+  },
+] as const;

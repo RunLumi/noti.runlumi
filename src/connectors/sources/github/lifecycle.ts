@@ -33,6 +33,8 @@ interface InstallationRow {
   organization_id: string;
   status: string;
   repository_selection: string;
+  /** The GitHub account the installation belongs to, frozen into each row so the actor reads by name. */
+  account_login: string | null;
 }
 
 function lifecycleAudit(
@@ -48,7 +50,9 @@ function lifecycleAudit(
     subjectType: 'github_installation',
     subjectId: row.id,
     outcome: 'success',
-    metadata: { action, ...metadata },
+    // The account is the actor's name in the audit view (F222: "GitHub installation acme"). A rename's own
+    // metadata carries the new login and wins.
+    metadata: { action, account: row.account_login, ...metadata },
   });
 }
 
@@ -179,7 +183,7 @@ export async function handleLifecycle(
 
   const row = await db
     .prepare(
-      'SELECT id,organization_id,status,repository_selection FROM github_installations WHERE installation_id=? AND app_id=?',
+      'SELECT id,organization_id,status,repository_selection,account_login FROM github_installations WHERE installation_id=? AND app_id=?',
     )
     .bind(block.installationId, appId)
     .first<InstallationRow>();

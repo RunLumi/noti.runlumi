@@ -304,6 +304,18 @@ describe('Discord end to end', () => {
     ).toEqual({ n: 1 });
   });
 
+  it('does not pause when the pause cannot be audited, and the delivery outcome stands (F236)', async () => {
+    const { id } = await integration('discord');
+    db.raw.exec(
+      "CREATE TRIGGER fail_pause_audit BEFORE INSERT ON audit_events WHEN NEW.action='integration.auto_pause' BEGIN SELECT RAISE(ABORT,'audit down'); END",
+    );
+    fetchMock.mockResolvedValueOnce(new Response('{"code":10015}', { status: 404 }));
+    await consume(enqueue('d1', id));
+    // The pause and its row are one batch: neither happened. The next failure pauses it.
+    expect(enabled(id)).toBe(1);
+    expect(row('d1')).toMatchObject({ state: 'dead_lettered', last_error_code: 'destination_revoked' });
+  });
+
   it('429 honours the body retry_after and does not pause; 5xx retries and does not pause', async () => {
     const { id } = await integration('discord');
     fetchMock.mockResolvedValueOnce(

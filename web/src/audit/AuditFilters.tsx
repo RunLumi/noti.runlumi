@@ -7,7 +7,7 @@ import { useLocale } from '../i18n/LocaleProvider';
 import { AUDIT_ACTIONS, isAuditAction } from './api';
 import { actionLabel, outcomeLabel } from './copy';
 import type { AuditMember } from './hooks';
-import { hasAuditFilters, isValidRequestId, isValidTarget, type AuditSearch } from './search';
+import { hasAuditFilters, isNamedActor, isValidRequestId, isValidTarget, type AuditSearch } from './search';
 
 interface AuditFiltersProps {
   readonly search: AuditSearch;
@@ -32,7 +32,7 @@ export function AuditFilters({ search, members, onChange }: AuditFiltersProps) {
   // A member who left is still the actor of old rows, but cannot be chosen: only current members.
   const knownActor =
     search.actor === undefined ||
-    search.actor === '~system' ||
+    isNamedActor(search.actor) ||
     members.some((m) => m.userId === search.actor);
   return (
     <form
@@ -72,6 +72,7 @@ export function AuditFilters({ search, members, onChange }: AuditFiltersProps) {
         >
           <option value="">{t('audit.filter.actor.all')}</option>
           <option value="~system">{t('audit.actor.system')}</option>
+          <option value="~github-installation">{t('audit.actor.installation')}</option>
           {members.map((m) => (
             <option key={m.userId} value={m.userId}>
               {m.name}

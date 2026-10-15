@@ -129,6 +129,8 @@ export interface ApiState {
   /** Make `POST .../sessions/:id/revoke` answer with this status. */
   revokeStatus?: 404 | 429 | 500;
   deletion: unknown;
+  /** Make `GET /api/workspace/export` fail; by default it answers a small file. */
+  exportFails?: boolean;
   /** `GET /api/setup/progress`; `'error'` makes it fail. */
   setup: unknown;
   /** Answer to `POST /api/integrations/:id/test`: accepted, or a failing status. */
@@ -489,7 +491,25 @@ export function installFetch(state: ApiState): void {
       }
       if (path === '/api/workspace/team') return Promise.resolve(json({ members }));
       if (path === '/api/workspace/deletion') return Promise.resolve(json(state.deletion));
+      if (path === '/api/workspace/export')
+        return Promise.resolve(
+          state.exportFails
+            ? json({ error: 'boom' }, 500)
+            : json({ format: 'lumi-noti-export/v1', truncated: { deliveries: false } }, 200, {
+                'content-disposition': `attachment; filename="lumi-noti-export-${org ?? ORG_ID}.json"`,
+              }),
+        );
       if (path.endsWith('/passkey/list-user-passkeys')) return Promise.resolve(json(state.passkeys));
+    }
+    if (method === 'POST' && path === '/api/workspace/deletion') {
+      // Like the server: scheduled for seven days from now; nothing is purged yet.
+      state.deletion = {
+        scheduled: true,
+        requestedAt: '2026-10-15T09:00:00.000Z',
+        purgeAfter: '2026-10-22T09:00:00.000Z',
+        purgeStarted: false,
+      };
+      return Promise.resolve(json(state.deletion, 202));
     }
     if (method === 'POST' && path === '/api/deliveries/replay-plan')
       return Promise.resolve(

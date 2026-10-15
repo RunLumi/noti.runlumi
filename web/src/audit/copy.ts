@@ -33,6 +33,10 @@ export function actorLabel(actor: AuditEvent['actor']): string {
       return t('audit.actor.former');
     case 'other':
       return t('audit.actor.other');
+    case 'installation':
+      return actor.account
+        ? t('audit.actor.installation.named', { account: actor.account })
+        : t('audit.actor.installation');
   }
 }
 

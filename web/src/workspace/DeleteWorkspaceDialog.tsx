@@ -2,12 +2,12 @@ import { StaleWorkspaceNotice, useBoundWorkspace } from './bound';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { AlertDialog } from '@base-ui/react/alert-dialog';
 import { useMutation } from '@tanstack/react-query';
-import { IconTrash } from '@tabler/icons-react';
+import { IconDownload, IconTrash } from '@tabler/icons-react';
 import { ApiError } from '../lib/api';
 import { Button, Input, Notice } from '../components/ui';
 import { t } from '../i18n';
 import { describeError } from '../integrations/errors';
-import { workspaceApi } from './api';
+import { downloadExport, workspaceApi } from './api';
 import { useLocale } from '../i18n/LocaleProvider';
 
 interface DeleteWorkspaceDialogProps {
@@ -26,6 +26,9 @@ function failure(error: unknown): string {
 /**
  * Typing the workspace name is the confirmation (it matches the server's check). Focus starts
  * on the cancel button, so a stray Enter cannot schedule a deletion (F221).
+ *
+ * Export before delete (F30, F222; ADR 0055): the dialog offers the same workspace export as the
+ * Settings panel, first, as a choice and never as a step. Scheduling works whether or not it was used.
  */
 export function DeleteWorkspaceDialog({
   orgId: liveOrgId,
@@ -48,6 +51,9 @@ export function DeleteWorkspaceDialog({
       onScheduled();
     },
   });
+  // The same request as the export panel (GET /api/workspace/export for the bound workspace), audited by
+  // the server as `workspace.export`.
+  const exporter = useMutation({ mutationFn: () => downloadExport(orgId), gcTime: 0 });
   const matches = typed === orgName;
 
   const onOpenChange = (next: boolean) => {
@@ -56,6 +62,7 @@ export function DeleteWorkspaceDialog({
     if (!next) {
       setTyped('');
       schedule.reset();
+      exporter.reset();
     }
   };
   const onSubmit = (e: FormEvent) => {
@@ -76,6 +83,35 @@ export function DeleteWorkspaceDialog({
             {t('workspace.danger.dialog.title', { name: orgName })}
           </AlertDialog.Title>
           <AlertDialog.Description>{t('workspace.danger.dialog.body')}</AlertDialog.Description>
+          <section className="impact delete-export" aria-labelledby={`${inputId}-export`}>
+            <p id={`${inputId}-export`} className="impact-title">
+              {t('workspace.danger.dialog.export.title')}
+            </p>
+            <p>{t('workspace.danger.dialog.export.body')}</p>
+            <div>
+              <Button
+                variant="outline"
+                type="button"
+                // aria-disabled keeps it reachable by keyboard while the file is being prepared.
+                aria-disabled={exporter.isPending || ws.stale || undefined}
+                onClick={() => {
+                  if (!exporter.isPending && !ws.stale) exporter.mutate();
+                }}
+              >
+                <IconDownload size={18} aria-hidden="true" />
+                {exporter.isPending
+                  ? t('workspace.export.exporting')
+                  : t('workspace.danger.dialog.export.button')}
+              </Button>
+            </div>
+            {exporter.isSuccess && (
+              <Notice kind="success">
+                <p>{t('workspace.export.done', { file: exporter.data.file })}</p>
+                {exporter.data.truncated && <p>{t('workspace.export.truncated')}</p>}
+              </Notice>
+            )}
+            {exporter.isError && <Notice kind="error">{t('workspace.export.error')}</Notice>}
+          </section>
           <form className="form-stack" onSubmit={onSubmit}>
             <StaleWorkspaceNotice show={ws.stale} />
             <div className="field">

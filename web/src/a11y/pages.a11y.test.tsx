@@ -6,6 +6,8 @@ import { cleanup, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { audit, describeViolations } from './testing/axe';
 import {
+  AUDIT_EVENTS,
+  INSTALLATION_AUDIT_EVENTS,
   MEMBER,
   MULTI,
   NO_WORKSPACE,
@@ -186,6 +188,12 @@ const SCENARIOS: readonly Scenario[] = [
   {
     name: 'audit log (actor, target and request filters, with a field diff)',
     path: '/audit?actor=user_9&target=int_1&targetType=integration&correlationId=req_8f3a2c91',
+    ready: () => screen.findByRole('table', { name: /Audit events|Các sự kiện kiểm toán/ }),
+  },
+  {
+    name: 'audit log (a GitHub App installation as the actor, ADR 0055)',
+    path: '/audit',
+    options: { api: { audit: [...AUDIT_EVENTS, ...INSTALLATION_AUDIT_EVENTS] } },
     ready: () => screen.findByRole('table', { name: /Audit events|Các sự kiện kiểm toán/ }),
   },
   {

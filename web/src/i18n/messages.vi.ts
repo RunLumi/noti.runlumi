@@ -637,6 +637,10 @@ export const vi = {
   'workspace.danger.dialog.title': 'Xóa {name}?',
   'workspace.danger.dialog.body':
     'Việc này tạm dừng mọi tích hợp ngay bây giờ và xóa vĩnh viễn không gian làm việc sau 7 ngày, trừ khi bạn hủy. Hãy nhập tên không gian làm việc để xác nhận.',
+  'workspace.danger.dialog.export.title': 'Giữ một bản sao trước (không bắt buộc)',
+  'workspace.danger.dialog.export.body':
+    'Tải tệp xuất của không gian làm việc này trước khi lên lịch xóa: thành viên, tích hợp, kết nối GitHub, các lượt gửi và sự kiện kiểm toán gần đây, không kèm bất kỳ thông tin xác thực nào. Bạn vẫn có thể lên lịch xóa mà không cần tệp này.',
+  'workspace.danger.dialog.export.button': 'Tải tệp xuất',
   'workspace.danger.dialog.label': 'Nhập {name} để xác nhận',
   'workspace.danger.dialog.keep': 'Giữ không gian làm việc',
   'workspace.danger.dialog.confirm': 'Lên lịch xóa',

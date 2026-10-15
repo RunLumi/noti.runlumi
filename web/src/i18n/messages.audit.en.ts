@@ -27,7 +27,8 @@ export const auditEn = {
   'audit.filter.dateHint': 'Dates are in UTC and include the whole day.',
   'audit.filter.actor': 'Who',
   'audit.filter.actor.all': 'Anyone',
-  'audit.filter.actor.hint': 'Current members, or Noti for automatic events.',
+  'audit.filter.actor.hint':
+    'Current members, Noti for automatic events, or the GitHub App installation for changes GitHub reported.',
   'audit.filter.target': 'About (id)',
   'audit.filter.target.hint': 'The id shown under “About”, such as an integration or source id.',
   'audit.filter.target.invalid': 'That is not a valid id.',
@@ -99,6 +100,8 @@ export const auditEn = {
   'audit.actor.system': 'Noti (automatic)',
   'audit.actor.former': 'Former member',
   'audit.actor.other': 'Outside user',
+  'audit.actor.installation': 'GitHub App installation',
+  'audit.actor.installation.named': '{account} (GitHub App installation)',
   'audit.outcome.success': 'Done',
   'audit.outcome.denied': 'Refused',
   'audit.noDetails': 'No further details recorded.',

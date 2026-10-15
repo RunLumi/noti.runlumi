@@ -431,6 +431,32 @@ sign-up states in `pages.a11y.test.tsx`, the remove dialog's focus contract in `
 stylesheet tests. **Not verified:** a real browser at 320 px, a screen reader, a real verification email returning to the invitation,
 and a native-speaker review of the Vietnamese.
 
+## Installation actor and export before delete (ADR 0055)
+
+**GitHub App installation as the actor.** `AuditActor` (`web/src/audit/api.ts`) has a fifth kind, `{kind: 'installation', account}`,
+for the lifecycle rows GitHub caused (uninstalled, suspended, repositories changed). The Who cell shows the account login as
+`cell-main` with "GitHub App installation" as `cell-sub` under it, the same pair the subject cell uses, so it reads as a name and a
+role and stacks the same way in the 320 px card layout; with no known login it shows "GitHub App installation" alone. It is never
+blank, never the row id and no longer "Noti (automatic)". The CSV uses one string, "acme (GitHub App installation)" (`actorLabel`).
+The Who filter has a third fixed option, "GitHub App installation" (`~github-installation`, validated by `isNamedActor` in
+`search.ts`), after "Noti (automatic)"; the hint says what each fixed option means. No new colour, icon or control size.
+
+**Export before delete.** `DeleteWorkspaceDialog` opens with an opaque block, "Keep a copy first (optional)", between the description
+and the confirmation form: one sentence (what the export holds, no credentials, and that the deletion can be scheduled without it) and
+an outline "Download export" button (Tabler `IconDownload`, 44 px) that calls the same `downloadExport` as the Settings panel for the
+workspace the dialog is bound to. The block is a labelled `section` (a region named by its title) styled with the `.impact` block of
+ADR 0050 (Paper White, hairline, Civic Navy title), not a new pattern. Its success or error `Notice` appears inside the block; the
+dialog stays open. It is a choice, not a step: initial focus stays on "Keep workspace", the confirm button does not depend on it, and a
+failed export leaves scheduling available. The button uses `aria-disabled` while the file is prepared, so it stays reachable.
+Strings: `workspace.danger.dialog.export.{title,body,button}` in `messages.{en,vi}.ts`; the progress, done and error lines reuse
+`workspace.export.*`.
+
+Verified: `web/src/audit/audit.test.tsx` (parsing, the two-line cell, Vietnamese labels, the CSV label, the filter in the URL and the
+request), a new audit scenario with installation rows in `web/src/a11y/pages.a11y.test.tsx` (axe in English and Vietnamese), and in
+`web/src/a11y/dialogs.a11y.test.tsx` the dialog with the block (axe in both languages, focus still on Keep workspace, an export that
+schedules nothing, a deletion scheduled without an export, a failed export). **Not verified:** a real browser download, a real 320 px
+device, a screen reader, and a native-speaker review of the Vietnamese.
+
 ## Current truth
 
 Signup, sign-in, verify, forgot/reset, sign-out, `/me`, onboarding, invitations and team

@@ -175,8 +175,58 @@ describe('delete workspace (alert dialog)', () => {
     const user = userEvent.setup();
     await renderApp('/settings', { locale: 'vi' });
     await user.click(await screen.findByRole('button', { name: /Xóa không gian làm việc/ }));
-    await screen.findByRole('alertdialog');
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText('Giữ một bản sao trước (không bắt buộc)')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: 'Tải tệp xuất' })).toBeTruthy();
     await expectClean('delete workspace dialog (vi)');
+  });
+
+  it('offers the workspace export first, as a choice: it downloads without scheduling anything', async () => {
+    const user = userEvent.setup();
+    clearRequests();
+    await renderApp('/settings');
+    await user.click(await screen.findByRole('button', { name: /Delete workspace/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    const region = within(dialog).getByRole('region', { name: 'Keep a copy first (optional)' });
+    // Focus still starts on Keep workspace: the export is offered, not a step that takes the focus.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Keep workspace' })),
+    );
+    await user.click(within(region).getByRole('button', { name: 'Download export' }));
+    expect(
+      await within(region).findByText(`Export downloaded as lumi-noti-export-${ORG_ID}.json.`),
+    ).toBeTruthy();
+    expect(requests).toContain(`GET /api/workspace/export?org=${ORG_ID}`);
+    expect(requests.some((r) => r.startsWith('POST /api/workspace/deletion'))).toBe(false);
+    // The dialog stays open and the confirmation is unchanged.
+    expect(screen.getByRole('alertdialog')).toBe(dialog);
+    await expectClean('delete workspace dialog after an export');
+  });
+
+  it('schedules the deletion without the export: the export is never a forced step', async () => {
+    const user = userEvent.setup();
+    clearRequests();
+    await renderApp('/settings');
+    await user.click(await screen.findByRole('button', { name: /Delete workspace/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.type(within(dialog).getByLabelText(/Type .* to confirm/), 'Acme Studio');
+    await user.click(within(dialog).getByRole('button', { name: 'Schedule deletion' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(await screen.findByText('Deletion is scheduled')).toBeTruthy();
+    expect(requests.some((r) => r.startsWith('GET /api/workspace/export'))).toBe(false);
+  });
+
+  it('says so when the export fails, and the deletion can still be scheduled or kept', async () => {
+    const user = userEvent.setup();
+    await renderApp('/settings', { api: { exportFails: true } });
+    await user.click(await screen.findByRole('button', { name: /Delete workspace/ }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Download export' }));
+    expect(
+      (await within(dialog).findByRole('alert')).textContent?.includes('couldn’t prepare the export'),
+    ).toBe(true);
+    expect(within(dialog).getByRole('button', { name: 'Schedule deletion' })).toBeTruthy();
+    await expectClean('delete workspace dialog with a failed export');
   });
 });
 

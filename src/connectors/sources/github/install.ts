@@ -13,6 +13,7 @@
  * is used for the check only, then revoked; we never store it.
  */
 
+import { auditStatement } from '../../../audit/audit';
 import { insertRepositories } from './repos';
 
 export const STATE_TTL_MS = 10 * 60 * 1000;
@@ -413,7 +414,12 @@ export type WorkspaceCheck = (organizationId: string, userId: string) => Promise
 export async function completeVerification(
   db: D1Database,
   config: GithubAppConfig,
-  params: { state: string | undefined; code: string | undefined },
+  params: {
+    state: string | undefined;
+    code: string | undefined;
+    /** Request attribution for the `github.installation.bind` row, written in the bind's own batch. */
+    origin?: { ip: string | null; userAgent: string | null };
+  },
   userId: string,
   now: number,
   mayConnect: WorkspaceCheck,
@@ -449,6 +455,7 @@ export async function completeVerification(
       verify.organization_id,
       userId,
       installation,
+      params.origin ?? { ip: null, userAgent: null },
     );
     return { organizationId: verify.organization_id, installation, installationRowId };
   } catch (e) {
@@ -462,7 +469,9 @@ export async function completeVerification(
 /**
  * Insert or refresh the installation for this workspace. A row bound to another workspace
  * is refused (the trigger in 0010 would also refuse it), as is an installation GitHub has
- * already told us was deleted. The repository set is replaced in the same batch.
+ * already told us was deleted. The repository set is replaced in the same batch, and the
+ * `github.installation.bind` audit row is written in it too (F236: if the row cannot be written,
+ * nothing is bound).
  */
 export async function bindInstallation(
   db: D1Database,
@@ -470,6 +479,7 @@ export async function bindInstallation(
   organizationId: string,
   userId: string,
   installation: VerifiedInstallation,
+  origin: { ip: string | null; userAgent: string | null },
 ): Promise<string> {
   const tombstone = await db
     .prepare('SELECT 1 AS x FROM github_installation_tombstones WHERE installation_id=? AND app_id=?')
@@ -523,6 +533,26 @@ export async function bindInstallation(
 
   const results = await db.batch([
     upsert,
+    // Directly after the upsert, so it exists only if the upsert changed the row.
+    auditStatement(
+      db,
+      {
+        organizationId,
+        actorId: userId,
+        action: 'github.installation.bind',
+        subjectType: 'github_installation',
+        subjectId: rowId,
+        outcome: 'success',
+        ...origin,
+        metadata: {
+          account: installation.accountLogin,
+          selection: installation.repositorySelection,
+          repositories: installation.repositories.length,
+        },
+      },
+      undefined,
+      { onlyIfPreviousStatementChangedRows: true },
+    ),
     db.prepare('DELETE FROM github_installation_repositories WHERE installation_row_id=?').bind(rowId),
     ...insertRepositories(db, rowId, installation.repositories),
   ]);
