@@ -28,6 +28,13 @@ import { createJobRecorder, type JobReport } from './observability/job-runs';
 import type { StallCounts } from './observability/stall';
 import { countStalls, detectStalls } from './observability/stall';
 import { purgeEventDedup } from './delivery/dedup';
+import { purgeEgressBuckets } from './delivery/egress-guard';
+import { genericWebhookEnabled } from './connectors/destinations/features';
+import { ownHostsOf } from './connectors/destinations/url-policy';
+import {
+  purgeStaleResolutions,
+  reresolveDueHosts,
+} from './connectors/destinations/generic-webhook/host-control';
 import { purgeExpiredRecords } from './pipeline/retention';
 import { dispatchOutbox, purgeOutbox } from './pipeline/outbox';
 import { existingLegacyTables, purgeDueWorkspace } from './pipeline/purge';
@@ -331,6 +338,26 @@ async function purgeDedup(env: Bindings): Promise<JobReport> {
   return { counters: { purged: report.purged } };
 }
 
+/** Egress guard buckets, and re-resolution of custom-webhook hosts (ADR 0029). Counts only in the report. */
+async function maintainEgress(env: Bindings): Promise<JobReport> {
+  const now = Date.now();
+  const buckets = await purgeEgressBuckets(env.DB, now);
+  if (!genericWebhookEnabled(env)) return { counters: { buckets_purged: buckets } };
+  const report = await reresolveDueHosts(
+    { db: env.DB, urlPolicy: { ownHosts: ownHostsOf(env.APP_ORIGIN) } },
+    now,
+  );
+  const stale = await purgeStaleResolutions(env.DB, now);
+  return {
+    counters: {
+      buckets_purged: buckets,
+      hosts_checked: report.checked,
+      hosts_refused: report.refused,
+      resolutions_purged: stale,
+    },
+  };
+}
+
 /** The hourly throttle makes most ticks a no-op: those record `skipped`, so "ran" and "worked" differ. */
 async function purgeRetention(env: Bindings): Promise<JobReport> {
   const retention = await purgeExpiredRecords(env);
@@ -432,6 +459,7 @@ export default {
       { name: 'noise_purge', run: () => purgeNoiseState(env) },
       { name: 'expired_auth_purge', run: () => purgeExpiredAuth(env) },
       { name: 'dedup_purge', run: () => purgeDedup(env) },
+      { name: 'egress_maintenance', run: () => maintainEgress(env) },
     ];
     await runCronJobs(jobs, { recorder: createJobRecorder(env.DB) });
   },

@@ -8,6 +8,7 @@ import { Time, absoluteTime } from './Time';
 const REASON_COPY: Readonly<Record<string, MessageId>> = {
   circuit_open: 'attempts.reason.circuit_open',
   destination_paced: 'attempts.reason.destination_paced',
+  platform_paused: 'attempts.reason.platform_paused',
   circuit_open_timeout: 'attempts.reason.circuit_open_timeout',
   destination_paced_timeout: 'attempts.reason.destination_paced_timeout',
   claim_expired: 'attempts.reason.claim_expired',

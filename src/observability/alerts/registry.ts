@@ -25,6 +25,7 @@ export const ALERT_IDS = [
   'ingress_drop_rate',
   'cron_heartbeat_missing',
   'dlq_consumer_no_progress',
+  'egress_breaker_open',
 ] as const;
 export type AlertId = (typeof ALERT_IDS)[number];
 
@@ -189,5 +190,18 @@ export const ALERTS: readonly AlertDef[] = [
     confirmTicks: 2,
     clearTicks: CLEAR_TICKS,
     settlesAfterMaintenance: true,
+  },
+  {
+    id: 'egress_breaker_open',
+    severity: 'critical',
+    summary:
+      'The platform-wide Discord guard is open: too many 401, 403 or 429 answers, so no Discord request leaves for any tenant.',
+    unit: 'count',
+    threshold: THRESHOLDS.egressGuardsOpen,
+    read: (s) => s.egressGuardsOpen,
+    renotifyMs: RENOTIFY_MS.critical,
+    confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
   },
 ];

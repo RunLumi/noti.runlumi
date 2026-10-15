@@ -343,7 +343,7 @@ supply, not values from the event body.
 
 ## F108 — Discord failure semantics and the shared-egress budget
 
-**Priority** P0 · **Status** 🟡 slice 8a: 404/410 and 401/403 with Discord code 10015/50027 are permanent with zero retries and auto-pause the integration with an `integration.auto_pause` audit (`src/connectors/destinations/discord/classify.ts`, `src/pipeline/consumer.ts`, `tests/destinations/discord.test.ts`); 429 honours body then header. Not built: global persisted cross-workspace breaker, customer notice, `X-RateLimit-*` pacing; per-route limit UNVERIFIED · **This is the highest-consequence destination bug
+**Priority** P0 · **Status** 🟡 slice 8a: 404/410 and 401/403 with Discord code 10015/50027 are permanent with zero retries and auto-pause the integration with an `integration.auto_pause` audit (`src/connectors/destinations/discord/classify.ts`, `src/pipeline/consumer.ts`, `tests/destinations/discord.test.ts`); 429 honours body then header. From ADR 0029: a global, persisted, cross-workspace guard (`src/delivery/egress-guard.ts`, migration 0029) trips at 1,000 invalid (401/403/429) answers in ten minutes and holds every tenant's Discord request, paces to 40 requests a second, and raises the `egress_breaker_open` alert; `X-RateLimit-*` pacing is per integration (ADR 0023). Not built: a customer-facing notice, any observation against real Discord, the guard for providers other than Discord; per-route limit UNVERIFIED · **This is the highest-consequence destination bug
 available**
 
 **Story** As an operator, I want one customer's dead Discord webhook to not degrade everyone
@@ -1041,7 +1041,7 @@ security reviewer can see exactly what was trusted and what was not.
 
 ## F115 — Generic customer webhook: URL policy and SSRF
 
-**Priority** P0 · **Status** 🟡 slice 8a: one URL-shape policy at save and send, save-time DNS-over-HTTPS check against a private-range table, no redirects, port 443, own-domain block (`src/connectors/destinations/url-policy.ts`, `dns-check.ts`, `tests/destinations/generic-webhook.test.ts`). Not built: per-workspace host allowlist, periodic re-resolution, recorded addresses; DNS rebinding not defeated (AR-30). Off by default (ADR 0014) · **Fixes** the customer-URL part of D9
+**Priority** P0 · **Status** 🟡 slice 8a: one URL-shape policy at save and send, save-time DNS-over-HTTPS check against a private-range table, no redirects, port 443, own-domain block (`src/connectors/destinations/url-policy.ts`, `dns-check.ts`, `tests/destinations/generic-webhook.test.ts`). From ADR 0029: a per-workspace host allowlist enforced at save and at send, recorded resolved addresses, re-resolution before a send when the record is five minutes old and by the `egress_maintenance` job, refusal of a host that turns private (`src/connectors/destinations/generic-webhook/host-control.ts`). Not built: a management API and screen for the allowlist, pinning the connected address (DNS rebinding is narrowed, NOT defeated: AR-30), any run against a real resolver or customer endpoint. Off by default (ADR 0014) and stays off · **Fixes** the customer-URL part of D9
 
 **Story** As a security engineer, I want a customer's webhook URL to be impossible to point at
 anything but the public internet, so that a connection cannot be used to read our internals or

@@ -44,6 +44,8 @@ export const ledgerEn = {
   'attempts.code': 'Code {code}',
   'attempts.reason.circuit_open': 'Paused automatically because the destination keeps failing.',
   'attempts.reason.destination_paced': 'Waited because the destination asked Noti to slow down.',
+  'attempts.reason.platform_paused':
+    'Waited because Noti paused sending to this service for everyone while it recovers. Nothing was sent.',
 
   'delivery.detail.possibleDuplicate.title': 'This may have arrived more than once',
   'delivery.detail.possibleDuplicate.body':
@@ -63,6 +65,9 @@ export const ledgerEn = {
     'Paused automatically because the destination keeps failing. Noti will try again by itself. Nothing is lost, and nothing was turned off.',
   'delivery.detail.paused.destination_paced':
     'Waiting because the destination asked Noti to slow down. Noti sends it as soon as that time has passed.',
+
+  'delivery.detail.paused.platform_paused':
+    'Waiting because Noti paused sending to this service for all workspaces for a short while. Noti sends it by itself afterwards. Nothing is lost, and nothing was turned off.',
 
   'health.open.title': 'Paused automatically',
   'health.open.body':

@@ -387,7 +387,13 @@ integrations.post('/', async (c) => {
     if (!repo) return invalid(c, [{ field: 'repo', message: REPO_NOT_CONNECTED }]);
   }
   const input = { ...parsed.value, repo };
-  const unverified = await hostVerificationError(input.destination, input.webhookUrl, parseOptions(c.env));
+  const unverified = await hostVerificationError(
+    input.destination,
+    input.webhookUrl,
+    parseOptions(c.env),
+    undefined,
+    { db: c.env.DB, organizationId: who.orgId },
+  );
   if (unverified) return invalid(c, [unverified]);
   if (input.destination === 'generic_webhook') {
     const hooks = await c.env.DB.prepare(
@@ -520,7 +526,10 @@ integrations.patch('/:id', async (c) => {
         ? `https://${existing.destination_host}/`
         : null;
     const unverified = target
-      ? await hostVerificationError(existing.destination, target, options)
+      ? await hostVerificationError(existing.destination, target, options, undefined, {
+          db: c.env.DB,
+          organizationId: who.orgId,
+        })
       : ({ field: 'enabled', message: DESTINATION_UNAVAILABLE } satisfies FieldError);
     if (unverified) return invalid(c, [unverified]);
   } else if (input.credentials) {
@@ -528,6 +537,8 @@ integrations.patch('/:id', async (c) => {
       existing.destination,
       input.credentials.webhookUrl,
       options,
+      undefined,
+      { db: c.env.DB, organizationId: who.orgId },
     );
     if (unverified) return invalid(c, [unverified]);
   }

@@ -239,6 +239,27 @@ describe('dns-check.ts: the lookup URL is built from the constant (F228)', () =>
   });
 });
 
+describe('generic-webhook/host-control.ts: resolution goes only through dns-check (F228, ADR 0029)', () => {
+  const file = 'src/connectors/destinations/generic-webhook/host-control.ts';
+  const sf = parse(read(file), file);
+
+  it('makes no outbound call of its own: it only calls checkResolvedHost, twice, with the injected fetcher', () => {
+    expect(findOutbound(read(file), file)).toEqual([]);
+    const calls = callsTo(sf, 'checkResolvedHost');
+    expect(calls).toHaveLength(2);
+    for (const c of calls) expect(c.arguments[1]?.getText(sf)).toBe('deps.fetcher');
+  });
+
+  it('the consumer verifies the host before it sends a custom webhook request', () => {
+    const text = read('src/pipeline/consumer.ts');
+    const verify = text.indexOf('verifyHostAtSend(');
+    const send = text.indexOf('await sendRequest(');
+    expect(verify).toBeGreaterThan(0);
+    expect(send).toBeGreaterThan(verify);
+    expect(text).toContain("config.kind === 'generic_webhook'");
+  });
+});
+
 describe('github/install.ts: every request URL starts from a GitHub constant (F228)', () => {
   const file = 'src/connectors/sources/github/install.ts';
   const sf = parse(read(file), file);

@@ -44,6 +44,8 @@ export const ledgerVi = {
   'attempts.code': 'Mã {code}',
   'attempts.reason.circuit_open': 'Tự động tạm dừng vì nơi nhận liên tục lỗi.',
   'attempts.reason.destination_paced': 'Đã chờ vì nơi nhận yêu cầu Noti gửi chậm lại.',
+  'attempts.reason.platform_paused':
+    'Đã chờ vì Noti tạm dừng gửi tới dịch vụ này cho mọi không gian làm việc trong lúc nó phục hồi. Chưa có gì được gửi.',
 
   'delivery.detail.possibleDuplicate.title': 'Tin này có thể đã đến nhiều lần',
   'delivery.detail.possibleDuplicate.body':
@@ -62,6 +64,9 @@ export const ledgerVi = {
     'Tự động tạm dừng vì nơi nhận liên tục lỗi. Noti sẽ tự thử lại. Không có gì bị mất, và không có gì bị tắt.',
   'delivery.detail.paused.destination_paced':
     'Đang chờ vì nơi nhận yêu cầu Noti gửi chậm lại. Noti sẽ gửi ngay khi hết thời gian đó.',
+
+  'delivery.detail.paused.platform_paused':
+    'Đang chờ vì Noti tạm dừng gửi tới dịch vụ này cho mọi không gian làm việc trong một lúc. Noti sẽ tự gửi sau đó. Không có gì bị mất, và không có gì bị tắt.',
 
   'health.open.title': 'Tự động tạm dừng',
   'health.open.body':

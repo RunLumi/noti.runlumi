@@ -228,7 +228,7 @@ export interface DeliveryView {
    * Why a waiting delivery has not been sent yet although nothing failed this time (F183, F187): the
    * breaker is open because the destination kept failing, or the destination asked to be left alone.
    */
-  readonly pausedReason: 'circuit_open' | 'destination_paced' | null;
+  readonly pausedReason: 'circuit_open' | 'destination_paced' | 'platform_paused' | null;
   /**
    * The id minted when the request that created this delivery arrived (the `x-request-id` the sender
    * got back), so a support question starts from one id. Null when the row has none.
@@ -335,7 +335,10 @@ export function toDeliveryView(row: DeliveryRowRecord, mayReplay: boolean): Deli
           }
         : null,
     pausedReason:
-      state === 'retrying' && (row.last_error === 'circuit_open' || row.last_error === 'destination_paced')
+      state === 'retrying' &&
+      (row.last_error === 'circuit_open' ||
+        row.last_error === 'destination_paced' ||
+        row.last_error === 'platform_paused')
         ? row.last_error
         : null,
     correlationId: row.correlation_id,

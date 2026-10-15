@@ -1739,3 +1739,17 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
   **Not verified:** any real mail, real WebAuthn device, real browser (320 px, screen reader), Vietnamese review by a native
   speaker; the restore script against a real D1; the purge on D1 (Node SQLite stand-in only); nothing here is a real-provider
   or staging result.
+
+## Slice 1.16: Discord global guard and custom-webhook host controls (ADR 0029)
+
+- **Discord:** `src/delivery/egress-guard.ts` and migration `0029` (`egress_guard_buckets`, `egress_guard_state`, no tenant columns).
+  Trips at 1,000 invalid (401/403/429) answers in ten minutes, holds every tenant's Discord request for eleven minutes, paces to 2,400
+  a minute, fails open, defers without spending an attempt (`platform_paused`), alert `egress_breaker_open` with a runbook entry.
+- **Custom webhook (flag stays OFF):** per-workspace host allowlist at save and send, recorded resolved addresses, re-resolution before
+  a send when five minutes old and by the new `egress_maintenance` job, refusal of a host that turns private or leaves the allowlist.
+  Egress test extended (host-control makes no call of its own; the consumer verifies before sending).
+- **Verified here:** unit and consumer-level tests with fixture DNS and fixture Discord responses; the migration chain, retention matrix,
+  tenant-query-scope and egress tests.
+- **Not verified:** anything against real Discord or a real resolver; D1 concurrency of the counter; the trip point and pacing numbers
+  (engineering judgment). **Still blockers for the flag:** allowlist management API and UI, pinning the connected address, real-endpoint
+  run (see the ADR).

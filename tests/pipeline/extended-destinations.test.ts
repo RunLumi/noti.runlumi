@@ -50,6 +50,19 @@ async function integration(
       secret ? await legacySeal(secret, K_LEGACY) : null,
       'org-a',
     );
+  if (kind === 'generic_webhook') {
+    // Allowlisted host with a fresh recorded resolution (ADR 0029): no DNS lookup on the send path here.
+    const host = new URL(options.url ?? GENERIC_URL).hostname;
+    db.raw
+      .prepare('INSERT OR IGNORE INTO workspace_webhook_hosts(organization_id,host,created_at) VALUES(?,?,1)')
+      .run('org-a', host);
+    db.raw
+      .prepare(
+        `INSERT INTO webhook_host_resolutions(organization_id,integration_id,host,addresses,status,resolved_at)
+         VALUES('org-a',?,?,'["93.184.216.34"]','ok',?)`,
+      )
+      .run(id, host, NOW);
+  }
   return { id, secret };
 }
 
@@ -532,6 +545,84 @@ describe('custom webhook: feature flag, own hosts and tenant-visible reasons (AD
         last_error_code: 'destination_unavailable',
       });
     }
+  });
+
+  describe('host controls on the send path (ADR 0029)', () => {
+    const doh = (answers: Record<string, string[]>) =>
+      fetchMock.mockImplementation((input) => {
+        const url = new URL(input as string);
+        if (url.origin === 'https://cloudflare-dns.com') {
+          const data =
+            url.searchParams.get('type') === 'A' ? (answers[url.searchParams.get('name') ?? ''] ?? []) : [];
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ Status: 0, Answer: data.map((d) => ({ name: 'x', type: 1, data: d })) }),
+            ),
+          );
+        }
+        return Promise.resolve(new Response('{"ok":true}', { status: 200 }));
+      });
+    const sends = () =>
+      fetchMock.mock.calls.filter((c) => !(c[0] as string).startsWith('https://cloudflare-dns.com'));
+
+    it('refuses a host the workspace has not approved, without any request', async () => {
+      const { id } = await integration('generic_webhook');
+      db.raw.prepare('DELETE FROM workspace_webhook_hosts').run();
+      await consume(enqueue('h1', id));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(row('h1')).toMatchObject({
+        state: 'dead_lettered',
+        last_error: 'host_not_allowed',
+        last_error_code: 'destination_url_rejected',
+      });
+    });
+
+    it("another workspace's approval does not approve this one", async () => {
+      const { id } = await integration('generic_webhook');
+      db.raw.prepare('DELETE FROM workspace_webhook_hosts').run();
+      seedOrganization(db.raw, 'org-b');
+      db.raw
+        .prepare(
+          "INSERT INTO workspace_webhook_hosts(organization_id,host,created_at) VALUES('org-b','hooks.example.com',1)",
+        )
+        .run();
+      await consume(enqueue('h2', id));
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(row('h2').state).toBe('dead_lettered');
+    });
+
+    it('rebinding: a stale record is re-resolved, and a host now pointing at a private address is not sent to', async () => {
+      const { id } = await integration('generic_webhook');
+      db.raw.prepare('UPDATE webhook_host_resolutions SET resolved_at = ?').run(NOW - 10 * 60_000);
+      doh({ 'hooks.example.com': ['169.254.169.254'] });
+      await consume(enqueue('h3', id));
+      expect(sends()).toHaveLength(0);
+      expect(row('h3')).toMatchObject({
+        last_error: 'host_blocked_address',
+        last_error_code: 'destination_url_rejected',
+      });
+    });
+
+    it('a stale record that still resolves publicly is refreshed and the send goes ahead', async () => {
+      const { id } = await integration('generic_webhook');
+      db.raw.prepare('UPDATE webhook_host_resolutions SET resolved_at = ?').run(NOW - 10 * 60_000);
+      doh({ 'hooks.example.com': ['93.184.216.34'] });
+      await consume(enqueue('h4', id));
+      expect(sends()).toHaveLength(1);
+      expect(row('h4').state).toBe('sent');
+      expect(
+        (db.raw.prepare('SELECT resolved_at FROM webhook_host_resolutions').get() as { resolved_at: number })
+          .resolved_at,
+      ).toBe(NOW);
+    });
+
+    it('a failed lookup is retryable, never a send', async () => {
+      const { id } = await integration('generic_webhook');
+      db.raw.prepare('UPDATE webhook_host_resolutions SET resolved_at = ?').run(NOW - 10 * 60_000);
+      fetchMock.mockResolvedValue(new Response('', { status: 503 }));
+      await consume(enqueue('h5', id));
+      expect(row('h5')).toMatchObject({ state: 'retrying', last_error_code: 'destination_unavailable' });
+    });
   });
 
   it('keeps HTTP statuses visible: the customer needs them to fix their endpoint', async () => {

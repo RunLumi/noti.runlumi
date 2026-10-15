@@ -17,6 +17,8 @@ export const THRESHOLDS = {
   deadLettersRecent: 20,
   /** `breaker_open_many`: integrations whose breaker is open or half-open right now. */
   breakersOpen: 3,
+  /** `egress_breaker_open`: platform-wide guards (Discord) that are holding every tenant's requests. */
+  egressGuardsOpen: 1,
   /** `key_config_fault`: any required binding fault in the boot report. */
   keyConfigFaults: 1,
   /** `credentials_quarantined_nonzero`: any integration whose credentials the Worker cannot open. */

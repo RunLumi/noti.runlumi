@@ -612,7 +612,7 @@ Each delivery also carries, from [ADR 0023](adr/0023-delivery-ledger-depth.md):
   `suppressed` row, the record of a repeat that was detected and not sent again. Today only `duplicate`
   is written, for a provider redelivery within the dedup window (7 days, `event_dedup`); the repeat is a
   row of its own, pointing at the original.
-- `pausedReason`: `"circuit_open"` or `"destination_paced"` on a `retrying` delivery that has not been
+- `pausedReason`: `"circuit_open"`, `"destination_paced"` or `"platform_paused"` (a platform-wide safeguard, ADR 0029) on a `retrying` delivery that has not been
   sent again yet because the destination keeps failing or asked to be left alone. No attempt is spent
   and nothing is dead-lettered by a short wait. After 24 hours with no real attempt it is dead-lettered
   (`destination_unavailable`, reason `circuit_open_timeout` or `destination_paced_timeout`) and can be

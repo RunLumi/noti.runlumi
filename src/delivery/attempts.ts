@@ -34,6 +34,11 @@ export interface AttemptReport {
   /** How long the destination asked to be left alone, in ms (rate-limit headers, 429), or null. */
   readonly paceMs: number | null;
   readonly providerMessageId: string | null;
+  /**
+   * Set instead of a result when a platform-wide guard (egress-guard.ts) held the request back BEFORE it
+   * was sent: the consumer defers the delivery without spending an attempt.
+   */
+  readonly deferred?: { readonly untilMs: number; readonly reason: 'platform_paused' };
 }
 
 /** HTTP status (or its absence) to the bucket we store. */

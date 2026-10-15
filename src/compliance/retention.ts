@@ -16,6 +16,8 @@ import { RETENTION_DAYS as WORKSPACE_DELETION_GRACE_DAYS } from '../api/workspac
 import { STATE_TTL_MS } from '../connectors/sources/github/install';
 import { OUTBOX_RETENTION_MS } from '../delivery/claim';
 import { DEDUP_TTL_MS } from '../delivery/dedup';
+import { BUCKET_RETENTION_MS } from '../delivery/egress-guard';
+import { RESOLUTION_RETENTION_MS } from '../connectors/destinations/generic-webhook/host-control';
 import { HEALTH_RETENTION_MS } from '../delivery/health';
 import { AUTH_RATE_LIMIT_MAX_AGE_MS, AUTH_STATE_GRACE_MS } from '../pipeline/expired-records';
 import { AUDIT_RETENTION, DELIVERY_RETENTION } from '../pipeline/retention';
@@ -821,6 +823,81 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     inWorkspaceExport: false,
     inAccountExport: false,
     exportNote: 'Excluded on purpose: platform operations data that belongs to no workspace.',
+    ...placeholders,
+  },
+  {
+    id: 'egress_guard_buckets',
+    table: 'egress_guard_buckets',
+    category: 'platform_state',
+    personalData: 'none',
+    dataHeld:
+      'Per provider and minute: how many outbound requests the platform made and how many came back 401, 403 or 429. Counts only: no workspace, integration, host or URL.',
+    purpose: 'Protects the shared outbound address from a provider ban (the Discord global breaker, F108).',
+    retention: {
+      kind: 'fixed',
+      ms: BUCKET_RETENTION_MS,
+      basis: 'BUCKET_RETENTION_MS (src/delivery/egress-guard.ts)',
+    },
+    deletion: [{ kind: 'cron_job', job: 'egress_maintenance' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Excluded on purpose: platform operations data that belongs to no workspace.',
+    ...placeholders,
+  },
+  {
+    id: 'egress_guard_state',
+    table: 'egress_guard_state',
+    category: 'platform_state',
+    personalData: 'none',
+    dataHeld:
+      'One row per guarded provider: until when the global breaker is open, when it last opened, how often.',
+    purpose: 'Holds the platform-wide breaker state between requests and cron ticks.',
+    retention: {
+      kind: 'indefinite',
+      reason: 'A fixed set of rows (one per guarded provider) overwritten in place.',
+    },
+    deletion: [{ kind: 'none', reason: 'Fixed keys, no personal or tenant data.' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Excluded on purpose: platform operations data that belongs to no workspace.',
+    ...placeholders,
+  },
+  {
+    id: 'workspace_webhook_hosts',
+    table: 'workspace_webhook_hosts',
+    category: 'tenant_configuration',
+    personalData: 'indirect',
+    dataHeld:
+      'The hostnames (or *.domain rules) a workspace approved for custom webhooks, who added each and when.',
+    purpose:
+      'A workspace allowlist: a custom webhook may only point at an approved host (SSRF control, F115).',
+    retention: workspaceLifetime,
+    deletion: [{ kind: 'workspace_purge', route: 'tenant_tables' }],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Not exported yet: the feature is off and has no management surface.',
+    ...placeholders,
+  },
+  {
+    id: 'webhook_host_resolutions',
+    table: 'webhook_host_resolutions',
+    category: 'delivery_metadata',
+    personalData: 'none',
+    dataHeld:
+      'Per custom-webhook integration: the host, the addresses it last resolved to, the result, when, and how many times the address set changed. Never the URL path, query or secret.',
+    purpose: 'Re-resolution and rebinding defence for a customer-chosen host (F115).',
+    retention: {
+      kind: 'fixed',
+      ms: RESOLUTION_RETENTION_MS,
+      basis: 'RESOLUTION_RETENTION_MS (generic-webhook/host-control.ts)',
+      note: 'Counted from the last resolution.',
+    },
+    deletion: [
+      { kind: 'cron_job', job: 'egress_maintenance' },
+      { kind: 'workspace_purge', route: 'tenant_tables' },
+    ],
+    inWorkspaceExport: false,
+    inAccountExport: false,
     ...placeholders,
   },
   {

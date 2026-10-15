@@ -1,5 +1,6 @@
 import { auditStatement } from '../audit/audit';
 import { isDeadWebhook } from '../connectors/destinations/discord/classify';
+import { verifyHostAtSend } from '../connectors/destinations/generic-webhook/host-control';
 import { genericWebhookEnabled } from '../connectors/destinations/features';
 import { ownHostsOf, type UrlPolicyOptions } from '../connectors/destinations/url-policy';
 import {
@@ -32,6 +33,7 @@ import {
   paceFromResponse,
   type Gate,
 } from '../delivery/health';
+import { guardGate, recordEgress } from '../delivery/egress-guard';
 import { attemptFromClassification, failed, type AttemptResult } from '../delivery/classify';
 import {
   DELIVERY_CLAIM_LEASE_MS,
@@ -182,6 +184,38 @@ async function attemptDelivery(
       null,
     );
   }
+  // A custom webhook goes only to a host the workspace approved, re-resolved when its record is stale and
+  // refused if it now points at a private or reserved address (host-control.ts, ADR 0029). Fails closed.
+  if (config.kind === 'generic_webhook') {
+    const hostCheck = await verifyHostAtSend(
+      { db: env.DB, urlPolicy: urlPolicyOf(env) },
+      d.organizationId,
+      d.integrationId,
+      new URL(prepared.request.url).hostname,
+      deps.now(),
+    );
+    if (!hostCheck.ok)
+      return reportOf(
+        hostCheck.reason === 'lookup_failed'
+          ? failed('destination_unavailable', 'host_lookup_failed')
+          : failed(
+              'destination_url_rejected',
+              hostCheck.reason === 'host_not_allowed' ? 'host_not_allowed' : `host_${hostCheck.reason}`,
+            ),
+        null,
+        null,
+      );
+  }
+  // Platform-wide, cross-tenant guard (egress-guard.ts): a Discord request that would feed the shared
+  // invalid-request budget, or exceed the shared rate, waits instead of leaving the platform.
+  if (config.kind === 'discord') {
+    const guard = await guardGate(env.DB, 'discord', deps.now());
+    if (guard.action === 'defer')
+      return {
+        ...reportOf(failed('destination_unavailable', 'platform_paused'), null, null),
+        deferred: { untilMs: guard.untilMs, reason: guard.reason },
+      };
+  }
   const seen: { res: ProviderResponse | null } = { res: null };
   const sent = await sendRequest(
     prepared.request,
@@ -191,6 +225,7 @@ async function attemptDelivery(
     },
     { timeoutMs: OUTBOUND_TIMEOUT_MS, now: deps.now, urlPolicy: urlPolicyOf(env) },
   );
+  if (config.kind === 'discord') await recordEgress(env.DB, 'discord', deps.now(), seen.res?.status ?? null);
   const classification = config.kind === 'discord' ? capDiscordAuthRetries(sent, attempt) : sent;
   if (config.kind === 'discord' && seen.res && isDeadWebhook(seen.res.status, classification)) {
     try {
@@ -605,7 +640,7 @@ async function deferDelivery(
     });
     return;
   }
-  const code = gate.reason === 'circuit_open' ? 'destination_unavailable' : 'destination_rate_limited';
+  const code = gate.reason === 'destination_paced' ? 'destination_rate_limited' : 'destination_unavailable';
   const wait = secondsUntil(gate.untilMs, nowMs);
   const viaQueue = queueRetriesLeft(msg) && wait <= QUEUE_MAX_DELAY_SECONDS;
   const untilMs = nowMs + wait * 1000;
@@ -672,6 +707,17 @@ async function handleMessage(
     return;
   }
   const report = await attemptSafely(env, keyring, d, deps, attempt);
+  if (report.deferred) {
+    await deferDelivery(
+      env,
+      msg,
+      d,
+      claim,
+      { action: 'defer', untilMs: report.deferred.untilMs, reason: report.deferred.reason },
+      deps.now(),
+    );
+    return;
+  }
   const result = report.result;
   const decision = effectiveDecision(
     decideRetry({ attempt, outcome: result.outcome, random: deps.random }),

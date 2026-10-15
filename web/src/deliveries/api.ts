@@ -60,7 +60,7 @@ export interface DeliveryItem {
     readonly originalState: DeliveryState | null;
   } | null;
   /** Why a waiting delivery has not been sent although nothing failed this time. */
-  readonly pausedReason?: 'circuit_open' | 'destination_paced' | null;
+  readonly pausedReason?: 'circuit_open' | 'destination_paced' | 'platform_paused' | null;
 }
 
 export interface DeliveryPage {

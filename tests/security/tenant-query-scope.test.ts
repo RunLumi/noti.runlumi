@@ -40,6 +40,10 @@ const NOT_TENANT_TABLES: Readonly<Record<string, string>> = {
   job_runs:
     'history of cron job failures and outcome changes (F192): job name, times, outcome, counters; platform-wide',
   job_state: 'one row per cron job, upserted each run (F192): times, outcome, counters; platform-wide',
+  egress_guard_buckets:
+    'per-provider per-minute request and invalid-response counts (F108); counts only; platform-wide by design: the Discord breaker is cross-tenant',
+  egress_guard_state:
+    'one row per guarded provider: when the global breaker is open; platform-wide by design',
   alert_state: 'one row per alert in the fixed registry (F200); counts and times only; platform-wide',
   github_installation_tombstones: 'installation ids that were deleted, so a replay cannot rebind them',
   github_installation_repositories: 'child of github_installations; scoped through installation_row_id',
@@ -520,6 +524,20 @@ const ALLOWLIST: readonly Allowed[] = [
       "DELETE FROM destination_health WHERE rowid IN ( SELECT rowid FROM destination_health WHERE state='closed' AND updated_at < ?1",
     category: 'retention',
     reason: 'PURGE_DESTINATION_HEALTH_SQL: idle closed breakers, for every tenant alike.',
+  },
+  // --- custom-webhook host re-resolution (0029, ADR 0029): a maintenance sweep across tenants ---
+  {
+    file: 'src/connectors/destinations/generic-webhook/host-control.ts',
+    includes: 'FROM webhook_host_resolutions WHERE resolved_at < ?1 ORDER BY resolved_at LIMIT ?2',
+    category: 'retention',
+    reason:
+      'DUE_RESOLUTIONS_SQL: the cron sweep lists the oldest stale records of every tenant; each row is then re-read, checked and rewritten with its own organization_id and integration_id.',
+  },
+  {
+    file: 'src/connectors/destinations/generic-webhook/host-control.ts',
+    includes: 'DELETE FROM webhook_host_resolutions WHERE resolved_at < ?1',
+    category: 'retention',
+    reason: 'Resolution records nothing has refreshed for the retention period, for every tenant alike.',
   },
   // --- correlated by primary key to an org-scoped outer row ---
   {
