@@ -1008,8 +1008,9 @@ written, because none exist.
   `/.well-known/security.txt` with the right content type, Time Travel, `Clear-Site-Data`.
 - A second factor or an undo window for erasure (AR-41); scrubbing audit IP and user agent on erasure
   (AR-40, blocked by the append-only trigger); correction and restriction mechanisms.
-- Expired invitations and the retired `auth_*` tables are not purged; no per-workspace retention
-  setting; no staleness alerts on purge jobs; the workspace export omits notification content.
+- The retired `auth_*` tables are not purged; no per-workspace retention setting; the workspace export
+  omits notification content. (Expired invitations are purged 30 days after expiry, ADR 0044; purge-job
+  staleness is alerted through `job_stale`, ADR 0024.)
 - Rehearsal of the incident playbooks, a monitored security contact, response targets, an
   automatic evidence hold, a sign-up kill switch.
 
@@ -1761,3 +1762,28 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
 - **Verified:** unit and integration tests on the Node SQLite fake (`npm run check`), including axe scans of the revoke dialog in en and vi. **Not verified:** a real D1 (empty-blob binding,
   D1 error strings), a real browser, a deployed Worker's readiness view, the CI jobs of ADR 0027 on this PR.
 
+## Spec slice round: 1.3, 1.7, 1.10, 1.19, 1.22, 2.3, 2.13, 2.17, 2.18, 2.21, 2.22 (ADRs 0037 to 0046)
+
+Ten parallel slices, each on its own worktree, merged into this branch as one commit per slice. The
+authoritative per-feature state is `docs/specs/STATUS.md` (generated); the remaining work is
+`docs/specs/REMAINING.md`. This section records what each slice actually did.
+
+- **Done (tested, no migration):** 2.18 ADR URL check (ADR 0037). 2.21 design-drift and no-fake-number
+  tests, shared Skeleton and EmptyState (ADR 0038). 2.22 audit append-only test, recorded audit reads,
+  secret scrubbing (ADR 0039). 1.19/1.24 credential host binding and no-token-in-logs tests (ADR 0040).
+  2.17 ack ordering, rollback, `waitUntil` lint rule, Slack Web API error classification (ADR 0041).
+  1.7/1.3 `breaker_open` alert and mail boot warnings (ADR 0042). 2.13 `maxWaitSec`, summary rendering
+  tests (ADR 0043). 1.22 retention matrix and invitation purge (ADR 0044). 2.3 pending invitations with
+  cancel on the Team page (ADR 0045). 1.10 correlation for held events and delivery logs (ADR 0046).
+- **Not done, each needs a migration or real evidence:** per-connection retry policy (F180), ingress id on
+  held events, unmapped-provider flag persistence, per-attempt fingerprint, audit heartbeat and
+  completeness counter, per-workspace retention, `delivery_attempts` provider message id.
+- **Open decisions:** ledger retention is 90 days per ADR 0011, which differs from the wording of
+  F237 in spec 15 (flagged for the owner). `AUTH_EMAIL` absence makes `createAuth` throw, so sign-in
+  fails when it is missing while boot only warns (needs a decision: fail boot or fail sign-in with a
+  clear message).
+- **Known gaps from the slices:** Better Auth invite, accept and role writes are not atomic with our
+  audit rows; Team "Remove" still uses `window.confirm`; the Slack error mapping comes from
+  `docs/DESTINATION_API_REFERENCE.md` and was not re-verified against live Slack documentation.
+- **Not verified:** no real browser or 320 px pass, no screen-reader pass, Vietnamese strings not reviewed
+  by a native speaker, no real-provider or staging evidence, the restore script against a real D1.
