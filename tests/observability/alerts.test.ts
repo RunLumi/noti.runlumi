@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Bindings } from '../../src/env';
 import { evaluateAlerts } from '../../src/observability/alerts/engine';
 import { ALERTS, ALERT_IDS, type AlertId } from '../../src/observability/alerts/registry';
-import { collectSignals, type Signals } from '../../src/observability/alerts/signals';
+import { BREAKERS_HOLDING_SQL, collectSignals, type Signals } from '../../src/observability/alerts/signals';
 import {
   ALERT_WEBHOOK_TIMEOUT_MS,
   formatAlertText,
@@ -32,6 +32,7 @@ const QUIET: Signals = {
   outboxStalled: 0,
   deadLettersRecent: 0,
   breakersOpen: 0,
+  breakersHolding: 0,
   keyConfigFaults: 0,
   credentialsQuarantined: 0,
   oldestPendingAgeMs: 0,
@@ -111,7 +112,7 @@ describe('alert state machine (pure)', () => {
 });
 
 describe('the registry', () => {
-  it('has the ten alerts, unique, each with a threshold, a severity, a cadence and a signal', () => {
+  it('has the eleven alerts, unique, each with a threshold, a severity, a cadence and a signal', () => {
     expect(ALERTS.map((a) => a.id)).toEqual([...ALERT_IDS]);
     expect(new Set(ALERT_IDS).size).toBe(ALERT_IDS.length);
     for (const a of ALERTS) {
@@ -279,6 +280,111 @@ describe('the engine over D1', () => {
     expect(report.unknown).toBe(1);
     expect(events.map((e) => e.kind)).toEqual(['firing']);
     expect((await loadAlertStates(db.d1)).get('breaker_open_many')?.state).toBe('firing');
+  });
+});
+
+describe('breaker_open: a breaker opening is an incident, read from the rows the consumer gates on', () => {
+  const MIN_ = 60_000;
+  const setBreaker = (
+    integration: string,
+    state: string,
+    openUntil: number | null,
+    probeUntil: number | null,
+    at: number,
+  ) =>
+    db.raw
+      .prepare(
+        `INSERT INTO destination_health(organization_id,integration_id,state,open_until,probe_until,updated_at)
+         VALUES('org-a',?,?,?,?,?)
+         ON CONFLICT(organization_id,integration_id) DO UPDATE SET state=excluded.state,
+           open_until=excluded.open_until, probe_until=excluded.probe_until, updated_at=excluded.updated_at`,
+      )
+      .run(integration, state, openUntil, probeUntil, at);
+  const breakerEvents = () => events.filter((e) => e.alertId === 'breaker_open');
+  const evaluate = (at: number) => evaluateAlerts(env(), at, { sinks: [recording] });
+
+  beforeEach(() => seedOrganization(db.raw, 'org-a'));
+
+  it('opens once, dedupes repeated opens, and resolves after the breakers close', async () => {
+    const t0 = Date.now();
+    setBreaker('i1', 'open', t0 + 5 * MIN_, null, t0);
+    await evaluate(t0);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing']);
+    expect(breakerEvents()[0]).toMatchObject({
+      value: 1,
+      threshold: 1,
+      severity: 'warning',
+      dedupeKey: `breaker_open:${t0}`,
+    });
+
+    // A second integration opens while the first is still open: the same incident, nothing new is sent.
+    setBreaker('i2', 'open', t0 + 6 * MIN_, null, t0 + MIN_);
+    await evaluate(t0 + MIN_);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing']);
+
+    // Both close, then one reopens inside the clear window: still one incident (hysteresis resets the clear count).
+    setBreaker('i1', 'closed', null, null, t0 + 2 * MIN_);
+    setBreaker('i2', 'closed', null, null, t0 + 2 * MIN_);
+    await evaluate(t0 + 2 * MIN_);
+    setBreaker('i1', 'open', t0 + 8 * MIN_, null, t0 + 3 * MIN_);
+    await evaluate(t0 + 3 * MIN_);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing']);
+
+    // Closed for three evaluations in a row: one RESOLVED, for the one incident.
+    setBreaker('i1', 'closed', null, null, t0 + 4 * MIN_);
+    await evaluate(t0 + 4 * MIN_);
+    await evaluate(t0 + 5 * MIN_);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing']);
+    await evaluate(t0 + 6 * MIN_);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing', 'resolved']);
+    expect(breakerEvents()[1]?.dedupeKey).toBe(`breaker_open:${t0}`);
+
+    // A later open is a new incident with a new key.
+    setBreaker('i2', 'open', t0 + 20 * MIN_, null, t0 + 10 * MIN_);
+    await evaluate(t0 + 10 * MIN_);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing', 'resolved', 'firing']);
+    expect(breakerEvents()[2]?.dedupeKey).toBe(`breaker_open:${t0 + 10 * MIN_}`);
+  });
+
+  it('an open breaker whose window has passed holds nothing: the alert resolves with no traffic to probe it', async () => {
+    const t0 = Date.now();
+    setBreaker('i1', 'open', t0 + 5 * MIN_, null, t0);
+    await evaluate(t0);
+    // Nothing sent to this integration, so the stored state is still 'open'; the window is over.
+    await evaluate(t0 + 5 * MIN_);
+    await evaluate(t0 + 6 * MIN_);
+    await evaluate(t0 + 7 * MIN_);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing', 'resolved']);
+    expect(db.raw.prepare("SELECT state FROM destination_health WHERE integration_id='i1'").get()).toEqual({
+      state: 'open',
+    });
+  });
+
+  it('a half-open probe holds the alert only while its lease is live', async () => {
+    const t0 = Date.now();
+    setBreaker('i1', 'half_open', t0 - 5 * MIN_, t0 + MIN_, t0);
+    await evaluate(t0);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing']);
+    // The probe's consumer died and its lease ran out: nothing is probing, so nothing is held.
+    await evaluate(t0 + 2 * MIN_);
+    await evaluate(t0 + 3 * MIN_);
+    await evaluate(t0 + 4 * MIN_);
+    expect(breakerEvents().map((e) => e.kind)).toEqual(['firing', 'resolved']);
+  });
+
+  it('the signal counts exactly the rows the gate defers on, and the stored-state alert is unchanged', async () => {
+    const t0 = Date.now();
+    setBreaker('a', 'open', t0 + MIN_, null, t0); // holding
+    setBreaker('b', 'open', t0 - MIN_, null, t0); // window over
+    setBreaker('c', 'half_open', null, t0 + MIN_, t0); // probing
+    setBreaker('d', 'half_open', null, t0 - MIN_, t0); // lease over
+    setBreaker('e', 'closed', null, null, t0); // closed
+    // The signal is capped at its threshold (1), so the exact count comes from the same query with a wider cap.
+    const exact = await db.d1.prepare(BREAKERS_HOLDING_SQL).bind(t0, 100).first<{ n: number }>();
+    expect(exact?.n).toBe(2);
+    const s = await collectSignals(env(), t0);
+    expect(s.breakersHolding).toBe(1);
+    expect(s.breakersOpen).toBe(3); // breaker_open_many still reads the stored state (capped at its threshold)
   });
 });
 

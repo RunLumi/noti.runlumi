@@ -20,7 +20,7 @@ import { log } from './log';
  *  | credentials | `KEK_V1/2`, `KMS_ACTIVE_VERSION`, `ENVIRONMENT_NAME`, `KEK_CHECK_V<n>`, and a KEK that does not match its check value | writes under `/api/integrations` and `/api/sources` (they seal credentials), the queue consumer and `scheduled`. NOT webhook ingress, auth or any read |
  *  | queue       | `DELIVERY_QUEUE`                                                   | the queue consumer and `scheduled` (dispatch). Ingress already persists to the outbox without it |
  *  | auth        | `APP_ORIGIN` (an absolute origin, https outside local development), `BETTER_AUTH_SECRET` (at least 32 characters, not a placeholder) | every `/api` and `/github` request except the probes (503). NOT webhook ingress, the queue consumer or `scheduled`: none of them needs a session |
- *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), `ALERT_WEBHOOK_URL` (optional, set but not a Slack, Discord, Lark or Teams webhook URL), a second KEK without a check value, the GitHub App bindings (`GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) while a placeholder or malformed | nothing; the GitHub routes already fail closed on their own. Names reach only the log and the platform operator's readiness view, never an anonymous caller |
+ *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), `ALERT_WEBHOOK_URL` (optional, set but not a Slack, Discord, Lark or Teams webhook URL), a second KEK without a check value, the GitHub App bindings (`GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) while a placeholder or malformed, the outbound mail binding `AUTH_EMAIL` when absent and `AUTH_FROM_EMAIL` when absent or a placeholder | nothing at this layer; the GitHub routes already fail closed on their own. Names reach only the log and the platform operator's readiness view, never an anonymous caller. (`AUTH_EMAIL` absence does make `createAuth` throw, so auth routes fail without it; that is an auth-tier fault NOT yet asserted here) |
  */
 
 type ConfigEnv = Partial<
@@ -34,6 +34,8 @@ type ConfigEnv = Partial<
     | 'ENCRYPTION_KEY'
     | 'FINGERPRINT_KEY'
     | 'ALERT_WEBHOOK_URL'
+    | 'AUTH_EMAIL'
+    | 'AUTH_FROM_EMAIL'
     | 'ENVIRONMENT_NAME'
     | 'KEK_CHECK_V1'
     | 'KEK_CHECK_V2'
@@ -143,6 +145,20 @@ function authFaults(env: ConfigEnv): string[] {
 }
 
 /**
+ * Outbound mail (Cloudflare Email Sending, `send_email` `AUTH_EMAIL`, src/auth/email.ts), as warnings. There is no
+ * inbound `email` handler in this Worker: no email source is built (ADR 0014), so there is no entrypoint to check.
+ * Without the binding, verification and reset mail cannot be sent; a binding that is present is NOT proof that
+ * the sending domain is verified or that mail arrives (docs/EMAIL_LIMITS.md, F17).
+ */
+function mailFaults(env: ConfigEnv): string[] {
+  const faults: string[] = [];
+  if (!hasFunction(env.AUTH_EMAIL, 'send')) faults.push('AUTH_EMAIL');
+  if (isPlaceholder(env.AUTH_FROM_EMAIL) || !/^[^@\s]+@[^@\s]+$/.test(env.AUTH_FROM_EMAIL ?? ''))
+    faults.push('AUTH_FROM_EMAIL');
+  return faults;
+}
+
+/**
  * The GitHub App bindings, as warnings: while any is a placeholder the install flow and webhook route
  * answer 503 on their own (src/connectors/sources/github), and `scripts/predeploy-check.mjs` allows them
  * unset because the feature stays closed by design. They are named so an operator sees WHICH is missing.
@@ -209,6 +225,7 @@ export function assessConfig(env: ConfigEnv): ConfigAssessment {
   if (env.ALERT_WEBHOOK_URL && resolveWebhookTarget(env.ALERT_WEBHOOK_URL, env.APP_ORIGIN) === null)
     warnings.push('ALERT_WEBHOOK_URL');
   warnings.push(...githubFaults(env));
+  warnings.push(...mailFaults(env));
   return { storage, credentials: [...new Set(credentials)], queue, auth: authFaults(env), warnings };
 }
 

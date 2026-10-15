@@ -5,7 +5,7 @@
  * fails when one is missing). Alert text carries the id, severity, value and threshold only: never a
  * tenant id, a payload, a URL or a binding value.
  *
- * Built: ten alerts from signals D1 and the boot report can answer. NOT built (needs data we do not have):
+ * Built: eleven alerts from signals D1 and the boot report can answer. NOT built (needs data we do not have):
  * the spec's other alerts that read Analytics Engine, queue depth or provider health endpoints.
  */
 import type { Signals } from './signals';
@@ -18,6 +18,7 @@ export const ALERT_IDS = [
   'job_stale',
   'outbox_stall',
   'dead_letter_spike',
+  'breaker_open',
   'breaker_open_many',
   'key_config_fault',
   'credentials_quarantined_nonzero',
@@ -100,6 +101,18 @@ export const ALERTS: readonly AlertDef[] = [
     unit: 'count',
     threshold: THRESHOLDS.deadLettersRecent,
     read: (s) => s.deadLettersRecent,
+    renotifyMs: RENOTIFY_MS.warning,
+    confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
+  },
+  {
+    id: 'breaker_open',
+    severity: 'warning',
+    summary: 'A destination circuit breaker is holding deliveries back right now (open, or probing).',
+    unit: 'count',
+    threshold: THRESHOLDS.breakersHolding,
+    read: (s) => s.breakersHolding,
     renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,

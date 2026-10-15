@@ -44,6 +44,10 @@ function makeEnv(over: Record<string, unknown> = {}): Bindings {
     ...BOOT_ENV,
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
+    AUTH_EMAIL: {
+      send: () => Promise.resolve({ messageId: 'hygiene' }),
+    } as unknown as Bindings['AUTH_EMAIL'],
+    AUTH_FROM_EMAIL: 'noreply@noti.test',
     GITHUB_WEBHOOK_SECRET: 'scan-fixture-github-webhook-value',
     GITHUB_APP_ID: '777',
     GITHUB_APP_SLUG: 'noti-test',
@@ -214,6 +218,28 @@ describe('GitHub App bindings: named warnings, never a fault', () => {
   it('rejects a non-numeric app id', () => {
     expect(assessConfig(makeEnv({ GITHUB_APP_ID: 'abc' })).warnings).toEqual(['GITHUB_APP_ID']);
     expect(assessConfig(makeEnv({ GITHUB_APP_ID: '0' })).warnings).toEqual(['GITHUB_APP_ID']);
+  });
+});
+
+describe('outbound mail: named warnings, never a fault (the Worker has no email entrypoint)', () => {
+  it('the default export has no inbound email handler: no email source is built (ADR 0014)', () => {
+    // If one is added, the boot check must cover it (F04 "every entrypoint"): change this test with it.
+    expect(Object.keys(worker).sort()).toEqual(['fetch', 'queue', 'scheduled']);
+  });
+
+  it('a missing AUTH_EMAIL binding is a named warning, and blocks no entrypoint', () => {
+    const env = makeEnv({ AUTH_EMAIL: undefined });
+    expect(assessConfig(env).warnings).toEqual(['AUTH_EMAIL']);
+    expect(assertConfig(env)).toEqual([]);
+  });
+
+  it('a sender that is unset, a placeholder or not an address is named', () => {
+    for (const AUTH_FROM_EMAIL of [undefined, 'REPLACE_WITH_SENDER', 'not-an-address', 'a b@c.d']) {
+      expect(assessConfig(makeEnv({ AUTH_FROM_EMAIL })).warnings, String(AUTH_FROM_EMAIL)).toEqual([
+        'AUTH_FROM_EMAIL',
+      ]);
+    }
+    expect(assessConfig(makeEnv({ AUTH_FROM_EMAIL: 'noreply@runlumi.app' })).warnings).toEqual([]);
   });
 });
 

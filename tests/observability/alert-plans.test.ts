@@ -68,6 +68,7 @@ describe('every alert signal query is an index seek', () => {
 
   it('the breaker count seeks by state, the pending age and the stuck rows by (state, created_at)', () => {
     expect(plan(SIGNAL_QUERIES.BREAKERS_SQL ?? '').join('\n')).toMatch(/destination_health_state/);
+    expect(plan(SIGNAL_QUERIES.BREAKERS_HOLDING_SQL ?? '').join('\n')).toMatch(/destination_health_state/);
     expect(plan(SIGNAL_QUERIES.OLDEST_PENDING_SQL ?? '').join('\n')).toMatch(/deliveries_state_created/);
     expect(plan(SIGNAL_QUERIES.DEAD_LETTER_STUCK_SQL ?? '').join('\n')).toMatch(/deliveries_state_created/);
   });

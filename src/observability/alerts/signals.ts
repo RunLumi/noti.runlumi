@@ -31,6 +31,8 @@ export interface Signals {
   readonly outboxStalled: number | null;
   readonly deadLettersRecent: number | null;
   readonly breakersOpen: number | null;
+  /** Breakers holding deliveries back now (see BREAKERS_HOLDING_SQL). */
+  readonly breakersHolding: number | null;
   readonly keyConfigFaults: number | null;
   readonly credentialsQuarantined: number | null;
   readonly oldestPendingAgeMs: number | null;
@@ -46,6 +48,19 @@ export const DEAD_LETTERS_SQL = `SELECT COUNT(*) AS n FROM (
 /** ?1 cap. Seeks `destination_health_state`. */
 export const BREAKERS_SQL = `SELECT COUNT(*) AS n FROM (
   SELECT 1 FROM destination_health WHERE state IN ('open','half_open') LIMIT ?1)`;
+
+/**
+ * Breakers holding deliveries back RIGHT NOW: open inside its window (`open_until` in the future), or half-open
+ * with a probe lease still live. This is the same test `gateAttempt` applies (src/delivery/health.ts), so the
+ * alert reads what the consumer does. An `open` row whose window has passed is NOT counted: nothing is held
+ * back, and a stored state that nothing has probed would otherwise keep the alert firing for an idle integration.
+ * ?1 now (epoch ms) · ?2 cap. Seeks `destination_health_state`.
+ */
+export const BREAKERS_HOLDING_SQL = `SELECT COUNT(*) AS n FROM (
+  SELECT 1 FROM destination_health
+  WHERE state IN ('open','half_open')
+    AND ((state='open' AND COALESCE(open_until,0) > ?1) OR (state='half_open' AND COALESCE(probe_until,0) > ?1))
+  LIMIT ?2)`;
 
 /** ?1 cap. Seeks the partial index `integrations_quarantined`. */
 export const QUARANTINED_SQL = `SELECT COUNT(*) AS n FROM (
@@ -75,6 +90,7 @@ export const DEAD_LETTER_STUCK_SQL = `SELECT
 export const SIGNAL_QUERIES: Readonly<Record<string, string>> = {
   DEAD_LETTERS_SQL,
   BREAKERS_SQL,
+  BREAKERS_HOLDING_SQL,
   QUARANTINED_SQL,
   OLDEST_PENDING_SQL,
   SOURCES_DROPPING_SQL,
@@ -153,6 +169,7 @@ export async function collectSignals(
     outboxStalled,
     deadLettersRecent,
     breakersOpen,
+    breakersHolding,
     keyConfigFaults,
     credentialsQuarantined,
     oldestPendingAgeMs,
@@ -169,6 +186,7 @@ export async function collectSignals(
       count(db, DEAD_LETTERS_SQL, nowMs - THRESHOLDS.deadLetterWindowMs, THRESHOLDS.deadLettersRecent),
     ),
     safely('breakers_open', () => count(db, BREAKERS_SQL, THRESHOLDS.breakersOpen)),
+    safely('breakers_holding', () => count(db, BREAKERS_HOLDING_SQL, nowMs, THRESHOLDS.breakersHolding)),
     safely('key_config_faults', async () => (await bootReport(env as Bindings)).names.length),
     safely('credentials_quarantined', () => count(db, QUARANTINED_SQL, THRESHOLDS.credentialsQuarantined)),
     safely('oldest_pending_age', async () => {
@@ -193,6 +211,7 @@ export async function collectSignals(
     outboxStalled,
     deadLettersRecent,
     breakersOpen,
+    breakersHolding,
     keyConfigFaults,
     credentialsQuarantined,
     oldestPendingAgeMs,

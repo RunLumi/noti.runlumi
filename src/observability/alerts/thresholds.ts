@@ -15,7 +15,12 @@ export const THRESHOLDS = {
   /** `dead_letter_spike`: attempts that dead-lettered a delivery inside the window. */
   deadLetterWindowMs: 15 * MINUTE,
   deadLettersRecent: 20,
-  /** `breaker_open_many`: integrations whose breaker is open or half-open right now. */
+  /**
+   * `breaker_open`: integrations whose breaker is holding deliveries back RIGHT NOW (open inside its window, or a
+   * half-open probe in flight). An open row whose window has passed holds nothing, so it does not keep this alert up.
+   */
+  breakersHolding: 1,
+  /** `breaker_open_many`: integrations whose breaker is open or half-open right now (stored state). */
   breakersOpen: 3,
   /** `key_config_fault`: any required binding fault in the boot report. */
   keyConfigFaults: 1,

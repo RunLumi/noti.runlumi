@@ -53,7 +53,7 @@ No security audit has been performed (docs/SECURITY.md).
 | Security | Any suspicion of exposure | leaked URL in a log, cross-tenant read | Stop; follow `INCIDENT_RESPONSE.md` (classes S1 to S4 there; a Security row here is S1 or S2 until shown otherwise) |
 
 These tiers are this runbook's own judgement. No on-call rota or paging integration exists, so
-today **nobody is paged**: ten alerts are evaluated every minute (see "Alerts" below) and announced
+today **nobody is paged**: eleven alerts are evaluated every minute (see "Alerts" below) and announced
 to the log and, when `ALERT_WEBHOOK_URL` is set, to a Slack, Discord, Lark or Teams channel. That
 is a message to a channel someone must be watching, not an acknowledged page; PagerDuty or
 Opsgenie style paging is not built (ADR 0024).
@@ -232,6 +232,33 @@ GROUP BY error_code ORDER BY n DESC;
 ```
 
 **What to do.** Follow "Dead-letter inspection and redelivery". Replay only after the cause is fixed.
+
+### Alert: breaker_open
+
+**What it means.** At least one destination circuit breaker is holding deliveries back right now: open inside
+its five-minute window, or a half-open probe in flight. Severity warning. It fires on the first evaluation that
+sees a breaker open (within a minute) and resolves after three clear evaluations in a row. It is one platform-wide
+alert: it does not name the integration, because an alert carries no tenant id. One breaker is one customer's
+endpoint failing, not a platform fault. An open row whose window has passed holds nothing, so it does not keep
+this alert up; an integration nothing sends to resolves on its own.
+
+**Check.** The breakers holding deliveries now (the operator's own query, so the tenant id is shown here and only here):
+
+```sql
+SELECT organization_id, integration_id, destination_host, state, consecutive_failures, last_failure_code,
+       opened_count, datetime(open_until/1000,'unixepoch') AS open_until,
+       datetime(probe_until/1000,'unixepoch') AS probe_until
+FROM destination_health
+WHERE (state='open' AND open_until > strftime('%s','now')*1000)
+   OR (state='half_open' AND probe_until > strftime('%s','now')*1000)
+ORDER BY updated_at DESC LIMIT 20;
+```
+
+**What to do.** `destination_unavailable` or `destination_timeout` as `last_failure_code` means the customer's
+endpoint is down or slow; the customer sees it in the dashboard and nothing on our side needs fixing. If several
+rows share one `destination_host`, check that provider's status page first. Nothing is disabled: a successful
+probe closes the breaker and the held deliveries run. Clear a breaker by hand only when the destination is known
+to be fixed (see "Per-attempt history, duplicates and the circuit breaker").
 
 ### Alert: breaker_open_many
 
@@ -530,7 +557,8 @@ there is nothing to re-enable. To clear a breaker by hand (the destination was f
 problem): `UPDATE destination_health SET state='closed', consecutive_failures=0, open_until=NULL,
 probe_until=NULL WHERE organization_id=? AND integration_id=?`; the waiting deliveries then run at their
 next scheduled time. `paused_until` is the destination's own rate-limit request; it expires by itself.
-No alert fires when a breaker opens yet (see Gaps).
+The `breaker_open` alert fires when a breaker holds deliveries back (see "Alerts"). It is platform-wide and does not
+name the integration; the query above does.
 
 **The dedup table** is purged by the `dedup_purge` cron job (7-day TTL, 500 rows per statement, 5 rounds per
 tick, resumable). A backlog after an outage drains over the next ticks; check `SELECT COUNT(*) FROM

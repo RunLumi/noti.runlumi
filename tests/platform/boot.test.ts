@@ -38,6 +38,8 @@ async function makeEnv(over: Partial<Bindings> = {}): Promise<Bindings> {
     } as unknown as Queue<DeliveryMessage>,
     APP_ORIGIN: 'https://noti.test',
     BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
+    AUTH_EMAIL: { send: () => Promise.resolve({ messageId: 'boot-test' }) },
+    AUTH_FROM_EMAIL: 'noreply@noti.test',
     GITHUB_WEBHOOK_SECRET: 'scan-fixture-github-webhook-value',
     GITHUB_APP_ID: '777',
     FINGERPRINT_KEY: '44'.repeat(32),
@@ -52,7 +54,7 @@ async function makeEnv(over: Partial<Bindings> = {}): Promise<Bindings> {
     KEK_CHECK_V1: await check(KEK_1, 'production'),
     KEK_CHECK_V2: '',
     ...over,
-  } as Bindings;
+  };
 }
 
 const get = (path: string, env: Bindings) =>

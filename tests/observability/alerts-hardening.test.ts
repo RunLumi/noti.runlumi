@@ -26,6 +26,7 @@ const QUIET: Signals = {
   outboxStalled: 0,
   deadLettersRecent: 0,
   breakersOpen: 0,
+  breakersHolding: 0,
   keyConfigFaults: 0,
   credentialsQuarantined: 0,
   oldestPendingAgeMs: 0,
