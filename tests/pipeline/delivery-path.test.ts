@@ -13,6 +13,7 @@ import { createFakeD1, seedOrganization, type FakeD1 } from '../support/d1';
 import { legacySeal } from '../support/legacy';
 import { RELEASE_BACKOFF_MS } from '../../src/delivery/claim';
 import { dispatchOutbox } from '../../src/pipeline/outbox';
+import { recentDecryptFailures } from '../../src/observability/credential-decrypt';
 
 /**
  * The real delivery path, end to end over the real migrations: signed webhook → tenant
@@ -528,6 +529,61 @@ describe('consumer', () => {
     await consume([msg], makeEnv({ KEK_V1: '', KEK_V2: K2, KMS_ACTIVE_VERSION: '2', ENCRYPTION_KEY: '' }));
     expect(msg.retried).toBe(true);
     expect(delivery(m.id)).toEqual({ state: 'retrying', last_error: 'provider_config_unknown_kek_version' });
+  });
+
+  it('counts every send-time decrypt failure for the alert and logs the code, never the URL (F97)', async () => {
+    const m = await queued();
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const count = () => recentDecryptFailures(db.d1, Date.now());
+    // A delivery that opens its credentials counts nothing.
+    await consume([message(m)]);
+    expect(delivery(m.id)?.state).toBe('sent');
+    expect(await count()).toBe(0);
+
+    // An unknown KEK version (a deployment fault): retried, and counted.
+    await postWebhook(issueEvent(100), 'gh-delivery-2');
+    const second = sent[1];
+    if (!second) throw new Error('nothing queued');
+    await migrateLegacyCredentials(db.d1, keyringFromEnv(env), K_LEGACY);
+    await consume(
+      [message(second)],
+      makeEnv({ KEK_V1: '', KEK_V2: K2, KMS_ACTIVE_VERSION: '2', ENCRYPTION_KEY: '' }),
+    );
+    expect(delivery(second.id)?.state).toBe('retrying');
+    expect(await count()).toBe(1);
+
+    // A damaged envelope (one flipped byte): permanent, and counted too.
+    const env1 = db.raw.prepare("SELECT webhook_envelope FROM integrations WHERE id='int-a'").get() as {
+      webhook_envelope: Uint8Array;
+    };
+    const damaged = Uint8Array.from(env1.webhook_envelope);
+    damaged[damaged.length - 1] = (damaged[damaged.length - 1] ?? 0) ^ 0xff;
+    db.raw.prepare("UPDATE integrations SET webhook_envelope=? WHERE id='int-a'").run(damaged);
+    await postWebhook(issueEvent(100), 'gh-delivery-3');
+    const third = sent[2];
+    if (!third) throw new Error('nothing queued');
+    await consume([message(third)]);
+    expect(delivery(third.id)).toEqual({
+      state: 'dead_lettered',
+      last_error: 'destination_credentials_invalid',
+    });
+    expect(await count()).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // The attempt rows carry the crypto code the runbook query looks for.
+    const reasons = db.raw
+      .prepare('SELECT reason FROM delivery_attempts WHERE delivery_id IN (?,?) ORDER BY started_at')
+      .all(second.id, third.id) as { reason: string }[];
+    expect(reasons.map((r) => r.reason)).toEqual([
+      'provider_config_unknown_kek_version',
+      'destination_credentials_invalid',
+    ]);
+    const lines = errors.mock.calls
+      .map((c) => String(c[0]))
+      .filter((l) => l.includes('credential_decrypt_failed'));
+    expect(lines).toHaveLength(2);
+    expect(lines.join('\n')).toContain('"code":"unknown_kek_version"');
+    expect(lines.join('\n')).not.toContain('larksuite');
   });
 
   it('refuses a destination outside the allowlist', async () => {

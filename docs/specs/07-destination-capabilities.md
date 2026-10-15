@@ -261,7 +261,7 @@ the same repo would collapse. Never rely on multiple embeds.
 
 ## F96 — Credential validation at write time
 
-**Priority** P0 · **Status** ✅ one validator `validateDestinationConfig` used by the integrations API (create and credential change), the consumer before every send and `sendRequest` (`src/connectors/destinations/config.ts`, `src/pipeline/consumer.ts`, `tests/destinations/url-policy.test.ts`, `tests/destinations/conformance.test.ts`). Gap: a PATCH leaving credentials unchanged does not re-run policy (send time does). No real-provider test · **Fixes** D9
+**Priority** P0 · **Status** ✅ one validator `validateDestinationConfig` used by the integrations API (create and credential change), the consumer before every send and `sendRequest` (`src/connectors/destinations/config.ts`, `src/pipeline/consumer.ts`, `tests/destinations/url-policy.test.ts`, `tests/destinations/conformance.test.ts`). A PATCH without new credentials that leaves the integration sending re-runs the URL policy on the saved URL (only the URL is decrypted) and refuses with a field error when it no longer passes; pausing and renaming are never refused (ADR 0054, `tests/api/integration-destination-recheck.test.ts`). No real-provider test · **Fixes** D9
 
 **Story** As a security engineer, I want an invalid or malicious destination rejected when it
 is saved, so that a hostile URL is never persisted in the first place.
@@ -298,7 +298,7 @@ may be logged or shown to another workspace member.
 
 ## F97 — Destination credential storage and rotation
 
-**Priority** P0 · **Status** ✅ envelope encryption sealed before D1 with AAD binding and per-row `kek_version` (`src/crypto/envelope.ts`, `src/pipeline/credentials.ts`, `tests/crypto/envelope.test.ts`, ADR 0004); rotation via PATCH issues fresh key material, reads return host only, disable and delete stop delivery at once (`tests/api/integrations.test.ts`). Gap: no alert on decrypt failure beyond quarantine
+**Priority** P0 · **Status** ✅ envelope encryption sealed before D1 with AAD binding and per-row `kek_version` (`src/crypto/envelope.ts`, `src/pipeline/credentials.ts`, `tests/crypto/envelope.test.ts`, ADR 0004); rotation via PATCH issues fresh key material, reads return host only, disable and delete stop delivery at once (`tests/api/integrations.test.ts`); a send-time decrypt failure is counted in `ops_state` and raises the critical `credential_decrypt_failures` alert with a runbook entry (ADR 0054, `tests/observability/credential-decrypt-alert.test.ts`, `tests/pipeline/delivery-path.test.ts`). The alert has reached fakes only
 
 **Acceptance**
 - [ ] Credential material is encrypted **before** D1, never after.

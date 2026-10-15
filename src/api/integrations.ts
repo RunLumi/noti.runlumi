@@ -11,6 +11,7 @@ import {
   sealCredentials,
   blob,
   openCredentials,
+  openWebhookUrl,
   CREDENTIAL_COLUMNS,
   REVOKED_REASON,
   type CredentialRow,
@@ -20,7 +21,8 @@ import { can } from '../auth/permissions';
 import { sameSecret } from '../lib/digest';
 import type { DestinationKind } from '../pipeline/allowlist';
 import { genericWebhookEnabled } from '../connectors/destinations/features';
-import { ownHostsOf } from '../connectors/destinations/url-policy';
+import { checkDestinationUrl, ownHostsOf } from '../connectors/destinations/url-policy';
+import { CryptoError } from '../crypto/envelope';
 import { hostVerificationError } from './destination-host';
 import {
   DESTINATION_UNAVAILABLE,
@@ -28,6 +30,7 @@ import {
   parseUpdateIntegration,
   type FieldError,
   type ParseOptions,
+  type UpdateIntegrationInput,
 } from './integration-input';
 import {
   decideNoise,
@@ -579,6 +582,11 @@ integrations.patch('/:id', async (c) => {
     );
     if (problem) return invalid(c, [problem]);
   }
+  // F96: a change that leaves the integration sending re-checks the SAVED destination against today's policy.
+  if (needsStoredDestinationRecheck(existing, input)) {
+    const issue = await storedDestinationIssue(c, who.orgId, id, existing.destination);
+    if (issue) return invalid(c, [issue]);
+  }
 
   type SqlValue = string | number | ArrayBuffer | null;
   const assignments: [column: string, value: SqlValue][] = [];
@@ -768,6 +776,81 @@ integrations.patch('/:id', async (c) => {
     issued ? { 'cache-control': 'no-store' } : {},
   );
 });
+
+/**
+ * F96 (ADR 0054): the update fields that decide WHETHER, WHAT or WHEN the integration sends to its saved
+ * destination. A `PATCH` without new credentials that sets any of these, and leaves the integration enabled,
+ * re-runs the destination URL policy against the stored URL, so a host removed from the allowlist (or a
+ * policy rule added) since the URL was saved is refused before the change is committed, rather than only at
+ * the next send. Keyed by every field of the input type, so a new field does not compile until someone
+ * decides. `name` changes nothing about sending; `credentials` bring a new URL that the parser validates in full.
+ */
+export const RECHECK_STORED_DESTINATION_ON: Readonly<
+  Record<Exclude<keyof UpdateIntegrationInput, 'credentials'>, boolean>
+> = {
+  name: false,
+  repo: true,
+  eventTypes: true,
+  sourceEventTypes: true,
+  enabled: true,
+  filters: true,
+  noise: true,
+};
+
+/**
+ * Whether this update must re-check the saved destination. Never for an update that ends paused (pausing a
+ * destination must always be possible, above all one the policy now refuses; re-enabling it later runs the
+ * check), nor for a quarantined or revoked row (nothing is sent to it until a new credential is entered, and
+ * that one is validated), nor when the update carries new credentials.
+ */
+export function needsStoredDestinationRecheck(
+  existing: Pick<IntegrationRow, 'enabled' | 'credentials_quarantined_at'>,
+  input: UpdateIntegrationInput,
+): boolean {
+  if (input.credentials) return false;
+  if (existing.credentials_quarantined_at !== null) return false;
+  if (!(input.enabled ?? existing.enabled === 1)) return false;
+  return Object.keys(input).some(
+    (k) =>
+      k !== 'credentials' && RECHECK_STORED_DESTINATION_ON[k as keyof typeof RECHECK_STORED_DESTINATION_ON],
+  );
+}
+
+export const STORED_DESTINATION_REFUSED =
+  'The saved webhook URL is no longer allowed for this destination, so this change was not saved. Enter a new webhook URL, or pause the integration.';
+export const STORED_DESTINATION_UNREADABLE =
+  'The saved webhook URL could not be read to check it, so this change was not saved. Enter the webhook URL again, or pause the integration.';
+
+/**
+ * Open the saved webhook URL (the URL only; the signing secret is not decrypted) and run the URL policy the
+ * consumer runs before every send. The URL is never logged or returned: a refusal logs the rule, an
+ * unreadable row logs the crypto code. A row deleted meanwhile is not an issue here: the UPDATE answers 404.
+ */
+async function storedDestinationIssue(
+  c: Ctx,
+  orgId: string,
+  id: string,
+  kind: DestinationKind,
+): Promise<FieldError | null> {
+  const row = await c.env.DB.prepare(
+    `SELECT ${CREDENTIAL_COLUMNS} FROM integrations WHERE id=? AND organization_id=?`,
+  )
+    .bind(id, orgId)
+    .first<CredentialRow>();
+  if (!row) return null;
+  let url: string;
+  try {
+    url = await openWebhookUrl(row, keyringFromEnv(c.env), c.env.ENCRYPTION_KEY ?? '');
+  } catch (e) {
+    if (!(e instanceof CryptoError)) throw e;
+    log('warn', 'destination_recheck_unreadable', { integration_id: id, code: e.code });
+    return { field: 'webhookUrl', message: STORED_DESTINATION_UNREADABLE };
+  }
+  const checked = checkDestinationUrl(kind, url, { ownHosts: ownHostsOf(c.env.APP_ORIGIN) });
+  if (checked.ok) return null;
+  log('warn', 'destination_recheck_refused', { integration_id: id, rule: checked.rule });
+  return { field: 'webhookUrl', message: STORED_DESTINATION_REFUSED };
+}
 
 /**
  * Revoke a connection's credentials (F40): the customer says this webhook URL / signing secret

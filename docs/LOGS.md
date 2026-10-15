@@ -74,6 +74,8 @@ Event names are the existing snake_case names. Spec 13 F194 sketches dotted name
 | `config_invalid` | Required configuration is missing or invalid; requests answer 503 and jobs stop. | `misconfigured`, `code` |
 | `config_unknown_keys` | The Worker has bindings the config schema does not know. | `unknown_bindings` |
 | `correlation_missing` | A queued delivery carried no correlation id; a fresh one is used. | `delivery_id`, `workspace_id` |
+| `credential_decrypt_count_failed` | A send-time credential decrypt failure could not be counted for its alert; the delivery is unaffected. | `error` |
+| `credential_decrypt_failed` | Stored destination credentials could not be opened at send time (wrong key or damaged row); counted for an alert. | `delivery_id`, `workspace_id`, `integration_id`, `code` |
 | `credential_destroy_sweep_failed` | The scheduled credential-destruction sweep failed. | `error` |
 | `credential_maintenance` | Summary of one credential maintenance run (migrate, rewrap, destroy, backfill). | `migrated`, `rewrapped`, `sourcesRewrapped`, `destroyed`, `backfilled`, `remaining` |
 | `cron_job_failed` | One scheduled job threw; the other jobs in the tick still ran. | `job`, `error` |
@@ -93,6 +95,8 @@ Event names are the existing snake_case names. Spec 13 F194 sketches dotted name
 | `delivery_stall` | Deliveries are stalled (old outbox rows, stale claims or overdue retries). | `outbox_pending_over_threshold`, `claimed_stale`, `retry_overdue`, `firing_for_ms`, `renotify` |
 | `delivery_stall_recovered` | A delivery stall cleared. | `firing_for_ms` |
 | `destination_health_unreadable` | Destination health could not be read; the attempt proceeds without the gate. | `delivery_id`, `error` |
+| `destination_recheck_refused` | An integration update was refused because its saved destination URL no longer passes the URL policy. | `integration_id`, `rule` |
+| `destination_recheck_unreadable` | An integration update was refused because its saved destination could not be opened to re-check it. | `integration_id`, `code` |
 | `discord_auto_pause_failed` | Pausing a Discord destination after a permanent failure did not persist. | `delivery_id`, `error` |
 | `egress_guard_opened` | The platform-wide Discord guard opened: every Discord request is held until it closes (ADR 0029). | `provider`, `invalid_in_window`, `trip` |
 | `egress_guard_record_failed` | A Discord egress count could not be recorded; the delivery outcome is unchanged and the fault is counted (ADR 0029). | `provider`, `error` |

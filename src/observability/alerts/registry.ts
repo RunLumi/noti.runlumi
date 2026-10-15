@@ -5,7 +5,7 @@
  * fails when one is missing). Alert text carries the id, severity, value and threshold only: never a
  * tenant id, a payload, a URL or a binding value.
  *
- * Built: eleven alerts from signals D1 and the boot report can answer. NOT built (needs data we do not have):
+ * Built: twelve alerts from signals D1 and the boot report can answer. NOT built (needs data we do not have):
  * the spec's other alerts that read Analytics Engine, queue depth or provider health endpoints.
  */
 import type { Signals } from './signals';
@@ -22,6 +22,7 @@ export const ALERT_IDS = [
   'breaker_open_many',
   'key_config_fault',
   'credentials_quarantined_nonzero',
+  'credential_decrypt_failures',
   'queue_backlog',
   'ingress_drop_rate',
   'cron_heartbeat_missing',
@@ -152,6 +153,19 @@ export const ALERTS: readonly AlertDef[] = [
     threshold: THRESHOLDS.credentialsQuarantined,
     read: (s) => s.credentialsQuarantined,
     renotifyMs: RENOTIFY_MS.warning,
+    confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
+  },
+  {
+    id: 'credential_decrypt_failures',
+    severity: 'critical',
+    summary:
+      'The consumer could not open stored destination credentials at send time (wrong key or a damaged row).',
+    unit: 'count',
+    threshold: THRESHOLDS.credentialDecryptFailures,
+    read: (s) => s.credentialDecryptFailures,
+    renotifyMs: RENOTIFY_MS.critical,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,
     settlesAfterMaintenance: false,

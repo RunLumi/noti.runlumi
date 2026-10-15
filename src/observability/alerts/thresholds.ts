@@ -30,6 +30,13 @@ export const THRESHOLDS = {
   keyConfigFaults: 1,
   /** `credentials_quarantined_nonzero`: any integration whose credentials the Worker cannot open. */
   credentialsQuarantined: 1,
+  /**
+   * `credential_decrypt_failures`: stored credentials the consumer could not open at send time. Any one fires
+   * it: in normal operation decryption never fails, so one failure is a wrong key or a damaged row (ADR 0054).
+   */
+  credentialDecryptFailures: 1,
+  /** ...counted in bursts of failures less than this apart; the alert clears this long after the last one. */
+  decryptFailureWindowMs: 15 * MINUTE,
   /** `queue_backlog`: age of the oldest delivery still `pending` (age, not depth: F198). */
   oldestPendingAgeMs: 15 * MINUTE,
   /** `ingress_drop_rate`: provider sources that dropped events inside the window. */

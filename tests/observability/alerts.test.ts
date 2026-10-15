@@ -35,6 +35,7 @@ const QUIET: Signals = {
   breakersHolding: 0,
   keyConfigFaults: 0,
   credentialsQuarantined: 0,
+  credentialDecryptFailures: 0,
   oldestPendingAgeMs: 0,
   sourcesDropping: 0,
   heartbeatMaxGapMs: 0,
@@ -114,7 +115,7 @@ describe('alert state machine (pure)', () => {
 });
 
 describe('the registry', () => {
-  it('has the eleven alerts, unique, each with a threshold, a severity, a cadence and a signal', () => {
+  it('has the twelve alerts, unique, each with a threshold, a severity, a cadence and a signal', () => {
     expect(ALERTS.map((a) => a.id)).toEqual([...ALERT_IDS]);
     expect(new Set(ALERT_IDS).size).toBe(ALERT_IDS.length);
     for (const a of ALERTS) {

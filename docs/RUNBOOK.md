@@ -55,7 +55,7 @@ No security audit has been performed (docs/SECURITY.md).
 | Security | Any suspicion of exposure | leaked URL in a log, cross-tenant read | Stop; follow `INCIDENT_RESPONSE.md` (classes S1 to S4 there; a Security row here is S1 or S2 until shown otherwise) |
 
 These tiers are this runbook's own judgement. No on-call rota or paging integration exists, so
-today **nobody is paged**: eleven alerts are evaluated every minute (see "Alerts" below) and announced
+today **nobody is paged**: twelve alerts are evaluated every minute (see "Alerts" below) and announced
 to the log and, when `ALERT_WEBHOOK_URL` is set, to a Slack, Discord, Lark or Teams channel. That
 is a message to a channel someone must be watching, not an acknowledged page; PagerDuty or
 Opsgenie style paging is not built (ADR 0024).
@@ -297,6 +297,44 @@ means a key ring or KEK fault (`key_config_fault` fires too).
 **Check.** The queries in "Quarantined credentials".
 
 **What to do.** Follow "Quarantined credentials".
+
+### Alert: credential_decrypt_failures
+
+**What it means.** The consumer could not open an integration's stored credentials at send time: the
+KEK it needs is wrong or missing, the row names a KEK version that is not configured, or the envelope is
+damaged or was moved from another row. Severity critical. In normal operation decryption never fails, so
+one failure fires it (ADR 0054). The count lives in `ops_state` (`credential_decrypt_failures`: the failures
+of the current burst, failures less than 15 minutes apart); it resolves once nothing has failed for 15
+minutes and three evaluations in a row are clear. It is platform-wide and names no tenant. Many failures
+across many workspaces right after a deploy or a secret change is a key fault (`key_config_fault` may fire
+too); failures on one integration are that row's bytes.
+
+**Check.** The burst, then the attempts behind it (the operator's own query, so tenant ids are shown here
+and only here; `reason` is the crypto code, never a key or a URL):
+
+```sql
+SELECT value, datetime(updated_at/1000,'unixepoch') AS updated FROM ops_state
+WHERE key='credential_decrypt_failures';
+
+SELECT organization_id, integration_id, error_code, reason, COUNT(*) AS n,
+       datetime(MAX(started_at)/1000,'unixepoch') AS last_at
+FROM delivery_attempts
+WHERE started_at >= (strftime('%s','now') - 3600) * 1000
+  AND reason IN ('destination_credentials_invalid', 'malformed_envelope',
+                 'provider_config_unknown_kek_version', 'provider_config_config_invalid')
+GROUP BY organization_id, integration_id, error_code, reason ORDER BY n DESC LIMIT 20;
+```
+
+`wrangler tail` shows each failure as `credential_decrypt_failed` with the delivery, workspace, integration
+and `code`.
+
+**What to do.** `provider_config_*` reasons, or `destination_credentials_invalid` on many integrations at
+once, are a key fault: those deliveries are retried (a wrong key with a valid shape dead-letters as
+`destination_credentials_invalid`), so stop and follow "KEK check value and environment mismatch" and "What a
+configuration fault stops"; replay the dead letters after the fix ("Dead-letter inspection and
+redelivery"). `malformed_envelope`, or `destination_credentials_invalid` on one integration while others
+deliver, is that row: follow "Quarantined credentials" (the customer re-enters the destination). Never copy
+key material between rows to make one open.
 
 ### Alert: queue_backlog
 

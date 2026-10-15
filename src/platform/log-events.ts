@@ -110,6 +110,16 @@ export const LOG_EVENTS = {
     description: 'A queued delivery carried no correlation id; a fresh one is used.',
     fields: ['delivery_id', 'workspace_id'],
   },
+  credential_decrypt_count_failed: {
+    description:
+      'A send-time credential decrypt failure could not be counted for its alert; the delivery is unaffected.',
+    fields: ['error'],
+  },
+  credential_decrypt_failed: {
+    description:
+      'Stored destination credentials could not be opened at send time (wrong key or damaged row); counted for an alert.',
+    fields: ['delivery_id', 'workspace_id', 'integration_id', 'code'],
+  },
   credential_destroy_sweep_failed: {
     description: 'The scheduled credential-destruction sweep failed.',
     fields: ['error'],
@@ -195,6 +205,16 @@ export const LOG_EVENTS = {
   destination_health_unreadable: {
     description: 'Destination health could not be read; the attempt proceeds without the gate.',
     fields: ['delivery_id', 'error'],
+  },
+  destination_recheck_refused: {
+    description:
+      'An integration update was refused because its saved destination URL no longer passes the URL policy.',
+    fields: ['integration_id', 'rule'],
+  },
+  destination_recheck_unreadable: {
+    description:
+      'An integration update was refused because its saved destination could not be opened to re-check it.',
+    fields: ['integration_id', 'code'],
   },
   discord_auto_pause_failed: {
     description: 'Pausing a Discord destination after a permanent failure did not persist.',

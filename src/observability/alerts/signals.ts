@@ -20,6 +20,7 @@ import type { Bindings } from '../../env';
 import { bootReport } from '../../platform/config';
 import { log } from '../../platform/log';
 import { GAP_KEY } from '../cron';
+import { recentDecryptFailures } from '../credential-decrypt';
 import { readJobHealth } from '../job-health';
 import { countStalls, type StallCounts } from '../stall';
 import { THRESHOLDS } from './thresholds';
@@ -36,6 +37,8 @@ export interface Signals {
   readonly breakersHolding: number | null;
   readonly keyConfigFaults: number | null;
   readonly credentialsQuarantined: number | null;
+  /** Credential decrypt failures at send time in the current burst (credential-decrypt.ts). */
+  readonly credentialDecryptFailures: number | null;
   readonly oldestPendingAgeMs: number | null;
   readonly sourcesDropping: number | null;
   readonly heartbeatMaxGapMs: number | null;
@@ -177,6 +180,7 @@ export async function collectSignals(
     breakersHolding,
     keyConfigFaults,
     credentialsQuarantined,
+    credentialDecryptFailures,
     oldestPendingAgeMs,
     sourcesDropping,
     heartbeatMaxGapMs,
@@ -196,6 +200,7 @@ export async function collectSignals(
     safely('breakers_holding', () => count(db, BREAKERS_HOLDING_SQL, nowMs, THRESHOLDS.breakersHolding)),
     safely('key_config_faults', async () => (await bootReport(env as Bindings)).names.length),
     safely('credentials_quarantined', () => count(db, QUARANTINED_SQL, THRESHOLDS.credentialsQuarantined)),
+    safely('credential_decrypt_failures', () => recentDecryptFailures(db, nowMs)),
     safely('oldest_pending_age', async () => {
       const row = await db.prepare(OLDEST_PENDING_SQL).first<{ at: string | null }>();
       if (!row?.at) return 0;
@@ -226,6 +231,7 @@ export async function collectSignals(
     breakersHolding,
     keyConfigFaults,
     credentialsQuarantined,
+    credentialDecryptFailures,
     oldestPendingAgeMs,
     sourcesDropping,
     heartbeatMaxGapMs,

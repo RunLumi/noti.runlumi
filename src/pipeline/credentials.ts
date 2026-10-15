@@ -104,6 +104,22 @@ export async function openCredentials(
   };
 }
 
+/**
+ * Open ONLY a row's webhook URL, for a policy re-check that has no use for the signing secret (F96, ADR 0054).
+ * Same key path and the same `CryptoError`s as `openCredentials`; the signing-secret envelope is not touched.
+ */
+export async function openWebhookUrl(
+  row: CredentialRow,
+  keyring: Keyring,
+  legacyKeyHex: string,
+): Promise<string> {
+  if (!isSealed(row)) return openLegacyV0(row.webhook_ciphertext, legacyKeyHex);
+  const dek = await unwrapConnectionKey(keyring, material(row));
+  const webhook = toBytes(row.webhook_envelope);
+  if (!webhook) throw new CryptoError('malformed_envelope');
+  return open(dek, webhook, fieldContext(row, 'url'));
+}
+
 export interface SealedCredentials {
   readonly keySalt: Uint8Array;
   readonly dekWrapped: Uint8Array;

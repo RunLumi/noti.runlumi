@@ -56,6 +56,7 @@ import {
 } from '../delivery/retry';
 import { isTerminal, transition, type DeliveryEvent } from '../delivery/state';
 import type { Bindings, DeliveryMessage } from '../env';
+import { recordDecryptFailure } from '../observability/credential-decrypt';
 import { withMessageCorrelation } from '../platform/correlation';
 import { log } from '../platform/log';
 import type { DestinationKind } from './allowlist';
@@ -135,8 +136,17 @@ async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage
   try {
     credentials = await openCredentials(row, keyring, env.ENCRYPTION_KEY);
   } catch (e) {
-    if (e instanceof CryptoError) return classifyCryptoError(e);
-    throw e;
+    if (!(e instanceof CryptoError)) throw e;
+    // F97: decryption never fails in normal operation, so every failure is counted for the
+    // `credential_decrypt_failures` alert (ADR 0054). The code only: never a key, ciphertext or URL.
+    log('error', 'credential_decrypt_failed', {
+      delivery_id: d.id,
+      workspace_id: d.organizationId,
+      integration_id: d.integrationId,
+      code: e.code,
+    });
+    await recordDecryptFailure(env.DB, Date.now());
+    return classifyCryptoError(e);
   }
   const checked = validateDestinationConfig(
     {
