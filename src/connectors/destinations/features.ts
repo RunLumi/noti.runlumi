@@ -1,4 +1,4 @@
-import type { DestinationKind } from './types';
+import { DESTINATION_REGISTRY, type DestinationKind } from './kind-registry';
 
 /**
  * Destination kinds that are built but not available to customers until their release
@@ -15,6 +15,8 @@ export function genericWebhookEnabled(env: FeatureEnv): boolean {
   return env.GENERIC_WEBHOOK_ENABLED === 'true';
 }
 
+/** Reads the kind's registered availability (F105): ungated kinds are always available. */
 export function destinationAvailable(kind: DestinationKind, env: FeatureEnv): boolean {
-  return kind === 'generic_webhook' ? genericWebhookEnabled(env) : true;
+  const availability = DESTINATION_REGISTRY[kind].availability;
+  return availability.gate === 'none' || env[availability.variable] === 'true';
 }

@@ -1,3 +1,4 @@
+import { DESTINATION_KINDS, DESTINATION_REGISTRY } from '../../../src/connectors/destinations/kind-registry';
 import type { DestinationKind } from '../lib/api';
 import type { MessageId } from '../i18n';
 
@@ -29,10 +30,14 @@ export interface DestinationInfo {
   readonly notes?: readonly MessageId[];
 }
 
-export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = {
+/** The copy and provider docs per kind; the facts come from the registry (`withRegistry`). */
+type DestinationCopy = Omit<
+  DestinationInfo,
+  'kind' | 'name' | 'supportsSigningSecret' | 'issuesSigningSecret' | 'gated'
+>;
+
+const COPY: Readonly<Record<DestinationKind, DestinationCopy>> = {
   lark: {
-    kind: 'lark',
-    name: 'destination.lark',
     where: 'destination.lark.where',
     what: 'destination.lark.what',
     urlHint: 'destination.lark.urlHint',
@@ -46,13 +51,8 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     ],
     docsLabel: 'destination.lark.docs',
     docsUrl: 'https://open.larksuite.com/document/client-docs/bot-v3/add-custom-bot',
-    supportsSigningSecret: true,
-    issuesSigningSecret: false,
-    gated: false,
   },
   slack: {
-    kind: 'slack',
-    name: 'destination.slack',
     where: 'destination.slack.where',
     what: 'destination.slack.what',
     urlHint: 'destination.slack.urlHint',
@@ -65,13 +65,8 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     ],
     docsLabel: 'destination.slack.docs',
     docsUrl: 'https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks',
-    supportsSigningSecret: false,
-    issuesSigningSecret: false,
-    gated: false,
   },
   teams: {
-    kind: 'teams',
-    name: 'destination.teams',
     where: 'destination.teams.where',
     what: 'destination.teams.what',
     urlHint: 'destination.teams.urlHint',
@@ -86,14 +81,9 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     docsLabel: 'destination.teams.docs',
     docsUrl:
       'https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498',
-    supportsSigningSecret: false,
-    issuesSigningSecret: false,
-    gated: false,
     notes: ['destination.teams.noteOwner', 'destination.teams.noteAccepted'],
   },
   discord: {
-    kind: 'discord',
-    name: 'destination.discord',
     where: 'destination.discord.where',
     what: 'destination.discord.what',
     urlHint: 'destination.discord.urlHint',
@@ -106,14 +96,9 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     ],
     docsLabel: 'destination.discord.docs',
     docsUrl: 'https://discord.com/developers/docs/resources/webhook',
-    supportsSigningSecret: false,
-    issuesSigningSecret: false,
-    gated: false,
     notes: ['destination.discord.noteMentions', 'destination.discord.noteDeleted'],
   },
   generic_webhook: {
-    kind: 'generic_webhook',
-    name: 'destination.generic_webhook',
     where: 'destination.generic_webhook.where',
     what: 'destination.generic_webhook.what',
     urlHint: 'destination.generic_webhook.urlHint',
@@ -127,17 +112,30 @@ export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = 
     ],
     docsLabel: 'destination.generic_webhook.docs',
     docsUrl: 'https://github.com/standard-webhooks/standard-webhooks/blob/main/spec/standard-webhooks.md',
-    supportsSigningSecret: false,
-    issuesSigningSecret: true,
-    gated: true,
     notes: ['destination.generic_webhook.noteChecked', 'destination.generic_webhook.noteEvidence'],
   },
 };
 
-export const DESTINATION_ORDER: readonly DestinationKind[] = [
-  'lark',
-  'slack',
-  'teams',
-  'discord',
-  'generic_webhook',
-];
+function withRegistry(kind: DestinationKind): DestinationInfo {
+  const r = DESTINATION_REGISTRY[kind];
+  return {
+    ...COPY[kind],
+    kind,
+    name: r.nameKey,
+    supportsSigningSecret: r.signingSecret === 'customer_optional',
+    issuesSigningSecret: r.signingSecret === 'noti_generated',
+    gated: r.availability.gate !== 'none',
+  };
+}
+
+/**
+ * What the dashboard shows per kind. The kind list, display-name key, signing-secret rule and
+ * availability gate are read from the server's registry (F105, ADR 0052), so the picker cannot
+ * offer a kind the API does not know or describe a secret rule the API does not apply.
+ */
+export const DESTINATIONS: Readonly<Record<DestinationKind, DestinationInfo>> = Object.fromEntries(
+  DESTINATION_KINDS.map((kind) => [kind, withRegistry(kind)]),
+) as Record<DestinationKind, DestinationInfo>;
+
+/** Offer order is the registry's order. */
+export const DESTINATION_ORDER: readonly DestinationKind[] = DESTINATION_KINDS;

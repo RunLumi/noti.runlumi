@@ -33,7 +33,7 @@ attacker-chosen shape. F115 is the security feature; F116 and F117 are its conse
 
 ## F105 — Destination registry and plugin model
 
-**Priority** P0 · **Status** ❌ not started: destinations are dispatched by closed exhaustive `switch (config.kind)` in `src/connectors/destinations/index.ts` and a `BY_KIND` table, `DestinationKind` is a hand-edited union (ADR 0014 lists this as not done). No registration surface, rollout stage, egress policy field, no-branch CI check or registry-driven limits · **Enables** F91/F92/F93
+**Priority** P0 · **Status** 🟡 typed kind registry (`src/connectors/destinations/kind-registry.ts`: kind list, name key, label, capabilities, limits with reference citations, availability flag, signing-secret rule) read by the adapters, the integrations API, the consumer's gate and the dashboard picker; adapter table `adapters.ts` replaces the `index.ts` switches; every kind has an adapter and every adapter module is registered (`tests/destinations/kind-registry.test.ts`, ADR 0052). Not built: per-configured-destination capabilities, `destination_id` column, rollout stage, limiter and budget keys, egress policy and setup docs on the registration, the no-branch CI check · **Enables** F91/F92/F93
 
 **Story** As a maintainer, I want every destination registered through one table-driven
 registry, so that adding a destination touches no routing, queueing or UI code.
@@ -1499,7 +1499,7 @@ revoked rather than merely forgotten.
 
 ## F119 — P2 destination conformance and fixture suite
 
-**Priority** P1 · **Status** 🟡 Discord and generic webhook run in the shared conformance suite and golden capability table (`tests/destinations/conformance.test.ts`, `discord.test.ts`, `generic-webhook.test.ts`). Not built: limits recorded in a registry (F105), per-credential-mode resolution, captured real-payload fixture corpus (F79), Email and Telegram (not built)
+**Priority** P1 · **Status** 🟡 Discord and generic webhook run in the shared conformance suite and golden capability table (`tests/destinations/conformance.test.ts`, `discord.test.ts`, `generic-webhook.test.ts`). Provider limits are recorded in the kind registry with a cited, verbatim-checked reference excerpt and asserted equal to the enforced caps (`tests/destinations/kind-registry.test.ts`, ADR 0052). Not built: per-credential-mode resolution, captured real-payload fixture corpus (F79), Email and Telegram (not built)
 
 **Story** As a maintainer, I want every P2 destination to pass the same conformance and
 fixture bar as Lark and Slack, so that "it mostly works" is impossible to ship.
@@ -1589,7 +1589,7 @@ destination use `https://example.invalid` hosts and never a routable address.
 
 ## F120 — Customer-facing capability matrix
 
-**Priority** P1 · **Status** ❌ not started: no generated `docs/CAPABILITIES.md` and no UI capability matrix; depends on F105 registry data and F92 per-mode capabilities
+**Priority** P1 · **Status** 🟡 `docs/CAPABILITIES.md` generated from the kind registry (`npm run docs:capabilities`, `src/connectors/destinations/render-capabilities.ts`) with matrix, cited limits, unknowns, the confirmation row and a not-offered section with Telegram; a stale page fails `tests/destinations/kind-registry.test.ts` (ADR 0052). Not built: per-credential-mode columns (one built mode per kind), setup-doc links per row, a matrix in the wizard (its summary reads the same data)
 
 **Story** As a customer choosing where my notifications go, I want to know what each
 destination can actually do before I choose it, so that I pick based on my needs.

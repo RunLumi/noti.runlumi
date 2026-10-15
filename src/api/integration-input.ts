@@ -3,6 +3,12 @@ import type { UrlPolicyOptions } from '../connectors/destinations/url-policy';
 import { generateSigningSecret } from '../connectors/sources/generic/encoding';
 import { isGithubEventType, type GithubEventType } from '../connectors/sources/github/catalog';
 import { asRecord } from '../lib/json';
+import {
+  destinationLabels,
+  isDestinationKind,
+  registrationOf,
+  requestedFeatureIssues,
+} from '../connectors/destinations/kind-registry';
 import type { DestinationKind } from '../pipeline/allowlist';
 import { coverageIssue, parseFilters } from '../routing/filter-input';
 import type { FilterConfig } from '../routing/filters';
@@ -66,6 +72,9 @@ export interface ParseOptions extends UrlPolicyOptions {
   /** `GENERIC_WEBHOOK_ENABLED` (ADR 0014). Off by default. */
   readonly genericWebhook?: boolean;
 }
+
+/** Lists the registered kinds (F105), so a new kind needs no edit here. */
+const CHOOSE_DESTINATION = `Choose one of: ${destinationLabels().join(', ')}.`;
 
 /** One message for every refusal of a gated kind, so it reveals nothing about why. */
 export const DESTINATION_UNAVAILABLE = 'This destination type is not available yet.';
@@ -133,20 +142,11 @@ function parseDestination(
   errors: FieldError[],
   options: ParseOptions,
 ): DestinationKind | undefined {
-  if (
-    value !== 'lark' &&
-    value !== 'slack' &&
-    value !== 'teams' &&
-    value !== 'discord' &&
-    value !== 'generic_webhook'
-  ) {
-    errors.push({
-      field: 'destination',
-      message: 'Choose Lark, Slack, Microsoft Teams, Discord or a custom webhook.',
-    });
+  if (!isDestinationKind(value)) {
+    errors.push({ field: 'destination', message: CHOOSE_DESTINATION });
     return undefined;
   }
-  if (value === 'generic_webhook' && options.genericWebhook !== true) {
+  if (registrationOf(value).availability.gate === 'deployment_flag' && options.genericWebhook !== true) {
     // Refused before the URL or anything else about it is looked at: a gated kind must not
     // double as an oracle for what its policy accepts.
     errors.push({ field: 'destination', message: DESTINATION_UNAVAILABLE });
@@ -239,7 +239,11 @@ function parseCredentials(
   }
   const secret = r.signingSecret;
   const hasSecret = secret !== undefined && secret !== null && secret !== '';
-  if (hasSecret && destination !== undefined && destination !== 'lark') {
+  if (
+    hasSecret &&
+    destination !== undefined &&
+    registrationOf(destination).signingSecret !== 'customer_optional'
+  ) {
     errors.push({
       field: 'signingSecret',
       message: NO_SECRET_INPUT[destination] ?? 'This destination does not use a signing secret.',
@@ -254,7 +258,7 @@ function parseCredentials(
       kind: destination,
       webhookUrl: url,
       // A custom webhook is always signed, with a secret we generate (and show once).
-      ...(destination === 'generic_webhook'
+      ...(registrationOf(destination).signingSecret === 'noti_generated'
         ? { signingSecret: generateSigningSecret() }
         : hasSecret
           ? { signingSecret: secret }
@@ -270,9 +274,22 @@ function parseCredentials(
   const { config } = checked;
   return {
     webhookUrl: config.webhookUrl,
-    signingSecret:
-      config.kind === 'lark' || config.kind === 'generic_webhook' ? (config.signingSecret ?? null) : null,
+    signingSecret: 'signingSecret' in config ? (config.signingSecret ?? null) : null,
   };
+}
+
+/**
+ * Save-time feature validation (F93). A request for a message format or feature the kind does not
+ * support is refused here with the reason, never stored and silently degraded at delivery. No
+ * column stores a choice (ADR 0052), so only the default format is accepted, as a no-op.
+ */
+function checkFeatureRequest(
+  r: Record<string, unknown>,
+  destination: DestinationKind | undefined,
+  errors: FieldError[],
+): void {
+  if (destination === undefined || !('format' in r || 'features' in r)) return;
+  errors.push(...requestedFeatureIssues(destination, { format: r.format, features: r.features }));
 }
 
 /** `filters` absent is "none"; `null` or `{}` clears. Errors carry dotted field paths. */
@@ -318,6 +335,7 @@ function parseSourceIntegration(
   const name = parseName(r.name, errors);
   const destination = parseDestination(r.destination, errors, options);
   const credentials = parseCredentials(r, destination, errors, options);
+  checkFeatureRequest(r, destination, errors);
   const noise = parseNoiseField(r, errors) ?? null;
   if (noise?.resolution)
     errors.push({
@@ -356,6 +374,7 @@ export function parseCreateIntegration(
   const eventTypes = parseEventTypes(r.eventTypes, errors);
   const destination = parseDestination(r.destination, errors, options);
   const credentials = parseCredentials(r, destination, errors, options);
+  checkFeatureRequest(r, destination, errors);
   const filters = parseFilterField(r, errors) ?? {};
   const noise = parseNoiseField(r, errors) ?? null;
   if (eventTypes && errors.length === 0) {
@@ -400,6 +419,8 @@ export function parseUpdateIntegration(
     'webhookUrl',
     'signingSecret',
     'triggerAuth',
+    'format',
+    'features',
   ]);
   const unknownField = Object.keys(r).find((k) => !allowed.has(k));
   if (unknownField)
@@ -451,6 +472,7 @@ export function parseUpdateIntegration(
       message: 'Send the webhook URL together with the new credentials.',
     });
   }
+  checkFeatureRequest(r, destination, errors);
   if (errors.length) return { ok: false, errors };
   if (Object.keys(out).length === 0)
     return { ok: false, errors: [{ field: 'body', message: 'Nothing to change.' }] };

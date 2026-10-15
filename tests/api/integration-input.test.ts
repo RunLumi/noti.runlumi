@@ -209,3 +209,47 @@ describe('gated destination and own hosts', () => {
     ).toBe(true);
   });
 });
+
+describe('save-time feature validation (F93, ADR 0052)', () => {
+  it('refuses a feature the destination cannot provide, on create and on a source integration', () => {
+    const r = parseCreateIntegration({ ...valid, features: ['update_in_place'] });
+    expect(r.ok ? [] : r.errors).toEqual([
+      { field: 'features', message: 'Slack in Noti does not support updating a message in place.' },
+    ]);
+    const source = parseCreateIntegration({
+      name: 'Stripe alerts',
+      sourceId: 'src-12345678',
+      destination: 'lark',
+      webhookUrl: LARK,
+      features: ['mentions'],
+    });
+    expect(source.ok ? [] : source.errors).toEqual([
+      { field: 'features', message: 'Lark in Noti does not support @mentions.' },
+    ]);
+  });
+
+  it('refuses a format the kind cannot render, and accepts the default as a no-op', () => {
+    const plain = parseCreateIntegration(
+      {
+        ...valid,
+        destination: 'generic_webhook',
+        webhookUrl: 'https://hooks.example.com/noti',
+        format: 'plain',
+      },
+      { genericWebhook: true },
+    );
+    expect(fields(plain)).toEqual(['format']);
+    const card = parseCreateIntegration({ ...valid, format: 'card', features: [] });
+    expect(card.ok).toBe(true);
+    expect(card.ok && 'format' in card.value).toBe(false);
+  });
+
+  it('checks a PATCH against the stored kind; a default-only request changes nothing', () => {
+    const r = parseUpdateIntegration({ features: ['thread_replies'] }, 'teams');
+    expect(r.ok ? [] : r.errors).toEqual([
+      { field: 'features', message: 'Microsoft Teams in Noti does not support replying in a thread.' },
+    ]);
+    const noop = parseUpdateIntegration({ format: 'card' }, 'teams');
+    expect(noop.ok ? [] : noop.errors).toEqual([{ field: 'body', message: 'Nothing to change.' }]);
+  });
+});

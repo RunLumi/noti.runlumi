@@ -1,9 +1,11 @@
+import { DESTINATION_KINDS, DESTINATION_REGISTRY } from '../../../src/connectors/destinations/kind-registry';
+import type { DestinationCapabilities } from '../../../src/connectors/destinations/types';
 import type { DestinationKind } from '../lib/api';
 
 /**
  * What each destination can show, in the words a person needs before choosing one (spec 14
- * F211). These are static client facts that mirror `src/connectors/destinations/capabilities.ts`
- * (the verified matrix); `abilities.test.ts` compares every field to it, so the screen cannot
+ * F211). They are derived from the registry's capabilities (`src/connectors/destinations/kind-registry.ts`,
+ * the verified matrix); `setup.test.ts` still compares every field to it, so the screen cannot
  * drift into promising something an adapter does not do. Describes what Noti's adapter sends,
  * not everything the provider could do (Noti sends no @mentions and no buttons).
  */
@@ -24,50 +26,20 @@ export interface DestinationAbilities {
   readonly redactsContactDetails: boolean;
 }
 
-export const ABILITIES: Readonly<Record<DestinationKind, DestinationAbilities>> = {
-  slack: {
-    layout: 'card',
-    links: true,
-    mentions: false,
-    confirmation: 'delivered',
-    plainFallback: true,
-    signed: false,
-    redactsContactDetails: false,
-  },
-  teams: {
-    layout: 'card',
-    links: true,
-    mentions: false,
-    confirmation: 'accepted',
-    plainFallback: true,
-    signed: false,
-    redactsContactDetails: false,
-  },
-  lark: {
-    layout: 'card',
-    links: true,
-    mentions: false,
-    confirmation: 'delivered',
-    plainFallback: true,
-    signed: true,
-    redactsContactDetails: true,
-  },
-  discord: {
-    layout: 'card',
-    links: true,
-    mentions: false,
-    confirmation: 'delivered',
-    plainFallback: true,
-    signed: false,
-    redactsContactDetails: false,
-  },
-  generic_webhook: {
-    layout: 'json',
-    links: true,
-    mentions: false,
-    confirmation: 'delivered',
-    plainFallback: false,
-    signed: true,
-    redactsContactDetails: false,
-  },
-};
+/** The person-facing reading of one mode's capabilities. Pure; no fact is restated here. */
+export function abilitiesOf(caps: DestinationCapabilities): DestinationAbilities {
+  return {
+    layout: caps.mode === 'signed_https' ? 'json' : 'card',
+    links: caps.supportsLinks,
+    mentions: caps.supportsMentions,
+    confirmation: caps.successSemantics,
+    plainFallback: caps.formats.includes('plain'),
+    signed: caps.signing !== 'none',
+    redactsContactDetails: caps.redactsContactDetails,
+  };
+}
+
+/** Read from the registry (F105, ADR 0052), so the summary and `docs/CAPABILITIES.md` agree. */
+export const ABILITIES: Readonly<Record<DestinationKind, DestinationAbilities>> = Object.fromEntries(
+  DESTINATION_KINDS.map((kind) => [kind, abilitiesOf(DESTINATION_REGISTRY[kind].capabilities)]),
+) as Record<DestinationKind, DestinationAbilities>;

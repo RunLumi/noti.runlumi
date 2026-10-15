@@ -190,7 +190,7 @@ Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
 | `filters/` | Routing filters ([ADR 0010](adr/0010-routing-filters.md)): `model.ts` (lines to API shape, error mapping, "Try it"), `FiltersEditor`, `FilterTester`, `RoutingLog` |
 | `noise/` | Quiet hours and summaries ([ADR 0016](adr/0016-noise-control.md)): `model.ts` (draft, validation with the server parser, the preview sentences from the server's `decideNoise`, time-zone list), `NoiseEditor`, `NoiseSection`, `hooks.ts` (waiting count), `noise.css` |
 | `settings/` | Per-integration screen: details form, filters, quiet hours and summaries, credential section (state, fingerprint, replacement, `RevokeDialog`), delete dialog |
-| `destinations.ts` | One entry per destination: copy ids, numbered setup steps, docs link, `supportsSigningSecret` (Lark: a pasted secret) and `issuesSigningSecret` (custom webhook: server-generated, shown once) |
+| `destinations.ts` | One entry per destination: copy ids, numbered setup steps, docs link. The kind list and order, name key, `gated`, `supportsSigningSecret` (Lark: a pasted secret) and `issuesSigningSecret` (custom webhook: server-generated, shown once) are read from the server's kind registry (`src/connectors/destinations/kind-registry.ts`, [ADR 0052](adr/0052-destination-kind-registry.md)), as are `DestinationKind` and `isDestinationKind` in `lib/api.ts` |
 | `IssuedSecret.tsx` | The custom webhook's one-time signing secret (create wizard and credential rotation); same behaviour as `sources/SecretReveal.tsx` |
 | `validation.ts` | Client checks mirroring `src/api/integration-input.ts` (imports the Worker allowlist) |
 | `events.ts` | Plain-language label map keyed by `src/connectors/sources/github/catalog.ts` |
@@ -297,8 +297,10 @@ Decisions: [ADR 0025](adr/0025-setup-and-shell-ux.md) (supersedes the setup part
   `returnTo` goes through `safeReturnTo` (relative, same origin only). Breadcrumbs (`Breadcrumbs`, `crumbs.ts`) on
   integration settings, the create wizard and setup steps; delivery detail and source detail are not routes. A
   failed-deliveries link appears under Activity when the server counts failed deliveries.
-- **Destination abilities** (`CapabilitySummary`, `abilities.ts`): static client facts, compared field by field to
-  `src/connectors/destinations/capabilities.ts` by `setup.test.ts`.
+- **Destination abilities** (`CapabilitySummary`, `abilities.ts`): derived by `abilitiesOf` from the kind registry's
+  capabilities (ADR 0052), the same constants `docs/CAPABILITIES.md` is generated from, so the summary and that page
+  cannot disagree; `setup.test.ts` checks the derivation field by field. No visual change: the rendered rows,
+  markup, copy and styles are the same, so no new layout, focus, contrast or 320 px check was needed.
 - **Integration settings order**: status (+ repair panel), source and updates, filters, destination, test, quiet
   hours, credentials, health, history, delete. Health and the repair panel read `/api/deliveries?integration=`.
 - **Shared states**: `Skeleton`, `EmptyState`, `ErrorPanel` (what happened, why, what to do, how to get help). The

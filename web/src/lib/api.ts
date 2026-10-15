@@ -1,3 +1,4 @@
+import { isDestinationKind, type DestinationKind } from '../../../src/connectors/destinations/kind-registry';
 import { parseFilters } from '../../../src/routing/filter-input';
 import type { FilterConfig } from '../../../src/routing/filters';
 import { parseNoise, type NoiseSettings } from '../../../src/routing/noise';
@@ -109,11 +110,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 // --- Integrations (docs/API.md) -------------------------------------------------------------
 
-export type DestinationKind = 'lark' | 'slack' | 'teams' | 'discord' | 'generic_webhook';
-
-const DESTINATION_KINDS: readonly string[] = ['lark', 'slack', 'teams', 'discord', 'generic_webhook'];
-export const isDestinationKind = (value: unknown): value is DestinationKind =>
-  typeof value === 'string' && DESTINATION_KINDS.includes(value);
+// The kinds come from the server's registry (F105, ADR 0052), so the two cannot disagree.
+export { isDestinationKind, type DestinationKind } from '../../../src/connectors/destinations/kind-registry';
 export type CredentialsState = 'ok' | 'legacy' | 'quarantined';
 
 /** The closed reasons the server accepts for a revoke; it never takes free text. */

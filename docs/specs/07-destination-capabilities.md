@@ -140,7 +140,7 @@ if a documented provider limit changes without a spec update.
 
 ## F93 — Honest degradation ladder
 
-**Priority** P0 · **Status** 🟡 card, markdown, plain ladder in `src/connectors/destinations/render.ts` reports rung used and skipped, tested (`tests/destinations/conformance.test.ts`). Not built: rung stored on the delivery row or shown in delivery detail, save-time feature validation, disabled setup options, `capability_unavailable` record; update and reply degradations have no feature behind them
+**Priority** P0 · **Status** 🟡 card, markdown, plain ladder in `src/connectors/destinations/render.ts` reports rung used and skipped, tested (`tests/destinations/conformance.test.ts`). Save-time validation: the integrations API refuses a `format` or `features` request the kind cannot provide, with the reason (`src/connectors/destinations/kind-registry.ts`, `tests/api/integration-input.test.ts`, `tests/api/integrations.test.ts`, ADR 0052). Not built: storing a chosen format (needs a migration, so only the default is accepted), rung stored on the delivery row or shown in delivery detail, disabled setup options, `capability_unavailable` record; update and reply degradations have no feature behind them
 
 **Story** As a user, I want to know when a feature I enabled is not available on my
 destination, so that I am not surprised that my CI card did not update in place.

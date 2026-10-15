@@ -1,4 +1,5 @@
 import type { DestinationAdapter, RenderOptions } from './adapter';
+import { adapterFor, adapterOfKind } from './adapters';
 import type { ValidatedDestinationConfig } from './config';
 import { discordAdapter } from './discord/adapter';
 import { genericWebhookAdapter } from './generic-webhook/adapter';
@@ -32,6 +33,13 @@ import type {
 
 export * from './types';
 export { capabilitiesFor } from './capabilities';
+export { ADAPTERS, adapterFor, adapterOfKind } from './adapters';
+export {
+  DESTINATION_REGISTRY,
+  registrationOf,
+  requestedFeatureIssues,
+  type DestinationRegistration,
+} from './kind-registry';
 export { checkDestinationUrl, larkDomainOf, type UrlRejectionRule, type UrlPolicyResult } from './url-policy';
 export {
   validateDestinationConfig,
@@ -84,18 +92,7 @@ export function prepareDelivery(
   n: CanonicalNotification,
   options: PrepareOptions,
 ): Promise<PreparedDelivery> {
-  switch (config.kind) {
-    case 'slack':
-      return prepareWith(slackAdapter, config, n, options);
-    case 'teams':
-      return prepareWith(teamsAdapter, config, n, options);
-    case 'lark':
-      return prepareWith(larkAdapter, config, n, options);
-    case 'discord':
-      return prepareWith(discordAdapter, config, n, options);
-    case 'generic_webhook':
-      return prepareWith(genericWebhookAdapter, config, n, options);
-  }
+  return prepareWith(adapterFor(config), config, n, options);
 }
 
 /** Map a provider response onto the closed outcome/reason taxonomy. */
@@ -104,18 +101,7 @@ export function classifyDeliveryResponse(
   res: ProviderResponse,
   now: number,
 ): ClassifiedResponse {
-  switch (kind) {
-    case 'slack':
-      return slackAdapter.classifyResponse(res, now);
-    case 'teams':
-      return teamsAdapter.classifyResponse(res, now);
-    case 'lark':
-      return larkAdapter.classifyResponse(res, now);
-    case 'discord':
-      return discordAdapter.classifyResponse(res, now);
-    case 'generic_webhook':
-      return genericWebhookAdapter.classifyResponse(res, now);
-  }
+  return adapterOfKind(kind).classifyResponse(res, now);
 }
 
 export type DeliveryResult =

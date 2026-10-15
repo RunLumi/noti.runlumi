@@ -232,6 +232,25 @@ describe('integrations API', () => {
     expect(await res.text()).not.toContain('leak-me');
   });
 
+  it('refuses at save time a feature the destination cannot provide, and stores nothing (F93)', async () => {
+    const res = await create('bob', { features: ['update_in_place'] });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({
+      fields: [{ field: 'features', message: 'Slack in Noti does not support updating a message in place.' }],
+    });
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM integrations').get()).toEqual({ n: 0 });
+    const { integration } = await json<{ integration: View }>(await create('bob', { format: 'card' }));
+    const patch = await call('PATCH', `/api/integrations/${integration.id}`, {
+      as: 'bob',
+      body: { name: 'Renamed', format: 'markdown' },
+    });
+    expect(patch.status).toBe(422);
+    expect(await patch.json()).toMatchObject({ fields: [{ field: 'format' }] });
+    expect(db.raw.prepare('SELECT name FROM integrations WHERE id=?').get(integration.id)).toEqual({
+      name: 'Alerts',
+    });
+  });
+
   it('updates fields and rotates credentials with fresh key material', async () => {
     const { integration } = await json<{ integration: View }>(await create('bob'));
     const before = db.raw.prepare('SELECT dek_wrapped FROM integrations WHERE id=?').get(integration.id) as {

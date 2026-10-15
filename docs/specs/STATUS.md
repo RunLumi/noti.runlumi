@@ -14,9 +14,9 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 40 | 153 | 42 | 4 | 23 | 262 |
-| P0 | 35 | 104 | 4 | 3 | 12 | 158 |
-| P1 | 5 | 43 | 20 | 0 | 4 | 72 |
+| All features | 40 | 155 | 40 | 4 | 23 | 262 |
+| P0 | 35 | 105 | 3 | 3 | 12 | 158 |
+| P1 | 5 | 44 | 19 | 0 | 4 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
 ## Per spec
@@ -30,7 +30,7 @@
 | [05-source-github.md](05-source-github.md) | 8 | 7 | 1 | 2 | 0 | 18 |
 | [06-source-generic-and-more.md](06-source-generic-and-more.md) | 2 | 12 | 3 | 0 | 1 | 18 |
 | [07-destination-capabilities.md](07-destination-capabilities.md) | 4 | 10 | 0 | 0 | 0 | 14 |
-| [09-destinations-extended.md](09-destinations-extended.md) | 0 | 8 | 4 | 0 | 4 | 16 |
+| [09-destinations-extended.md](09-destinations-extended.md) | 0 | 10 | 2 | 0 | 4 | 16 |
 | [10-routing-and-filtering.md](10-routing-and-filtering.md) | 0 | 10 | 6 | 0 | 4 | 20 |
 | [11-grouping-and-noise.md](11-grouping-and-noise.md) | 1 | 13 | 14 | 0 | 0 | 28 |
 | [12-delivery-reliability.md](12-delivery-reliability.md) | 7 | 15 | 0 | 0 | 0 | 22 |
@@ -135,7 +135,7 @@
 | F90 | Cloudflare Alerts: the weakest auth we ship | [06](06-source-generic-and-more.md) | P2 | ❌ | no Cloudflare Alerts connector exists (not in `src/connectors/sources/registry.ts`); needs the static-bearer weak-auth UI labelling and untrusted-payload rules built first. |
 | F91 | Destination adapter contract | [07](07-destination-capabilities.md) | P0 | ✅ | adapter contract (kind, capabilities, validateConfig, render, buildRequest, classifyResponse; I/O in `send.ts`) for all five kinds in `src/connectors/destinations/`, consumer wired, conformance suite … |
 | F92 | Capability contract | [07](07-destination-capabilities.md) | P0 | 🟡 | per-mode capability table with golden test (`src/connectors/destinations/capabilities.ts`, `tests/destinations/conformance.test.ts`; ADR 0014). Not built: per-configured-destination resolution (one constant per kind), any UI … |
-| F93 | Honest degradation ladder | [07](07-destination-capabilities.md) | P0 | 🟡 | card, markdown, plain ladder in `src/connectors/destinations/render.ts` reports rung used and skipped, tested (`tests/destinations/conformance.test.ts`). Not built: rung stored on the delivery row or shown in delivery detail, … |
+| F93 | Honest degradation ladder | [07](07-destination-capabilities.md) | P0 | 🟡 | card, markdown, plain ladder in `src/connectors/destinations/render.ts` reports rung used and skipped, tested (`tests/destinations/conformance.test.ts`). Save-time validation: the integrations API refuses a `format` or `features` … |
 | F94 | Rendering safety | [07](07-destination-capabilities.md) | P0 | 🟡 | per-dialect escaping, mention neutralisation, Discord `allowed_mentions` empty, https and length-capped links, visible truncation (`src/connectors/destinations/markup.ts`, `tests/destinations/markup.test.ts`, … |
 | F95 | Body size budget per destination | [07](07-destination-capabilities.md) | P0 | 🟡 | renderers honour `maxBodyBytes` with `payload_too_large`, Slack top-level `text` always set, Discord emits one embed (`src/connectors/destinations/render.ts`, `tests/destinations/slack.test.ts`, … |
 | F96 | Credential validation at write time | [07](07-destination-capabilities.md) | P0 | ✅ | one validator `validateDestinationConfig` used by the integrations API (create and credential change), the consumer before every send and `sendRequest` (`src/connectors/destinations/config.ts`, `src/pipeline/consumer.ts`, … |
@@ -147,7 +147,7 @@
 | F102 | Lark DLP and rate-limit handling | [07](07-destination-capabilities.md) | P1 | 🟡 | DLP masking of emails and phones in the renderer, `230028` permanent, throttling classified by code and `x-ogw-ratelimit-reset` not HTTP status, unmapped codes flagged in logs (`src/connectors/destinations/redact.ts`, … |
 | F103 | Slack dual-mode credentials | [07](07-destination-capabilities.md) | P0 | 🟡 | incoming-webhook adapter with Block Kit and text fallback, classifier, no identity override (`src/connectors/destinations/slack/`, `tests/destinations/slack.test.ts`). Not built: Slack OAuth install with `incoming-webhook` scope … |
 | F104 | Teams Workflows as the only MVP path | [07](07-destination-capabilities.md) | P0 | 🟡 | Workflows-only adapter: Adaptive Cards, host-pattern allowlist, `anyone` auth only, 28 KB budget, 202 reported accepted (`src/connectors/destinations/teams/`, `tests/destinations/teams.test.ts`, `tests/api/integrations.test.ts`, … |
-| F105 | Destination registry and plugin model | [09](09-destinations-extended.md) | P0 | ❌ | not started: destinations are dispatched by closed exhaustive `switch (config.kind)` in `src/connectors/destinations/index.ts` and a `BY_KIND` table, `DestinationKind` is a hand-edited union (ADR 0014 lists this as not done). No … |
+| F105 | Destination registry and plugin model | [09](09-destinations-extended.md) | P0 | 🟡 | typed kind registry (`src/connectors/destinations/kind-registry.ts`: kind list, name key, label, capabilities, limits with reference citations, availability flag, signing-secret rule) read by the adapters, the integrations API, … |
 | F106 | Destination liveness and active health detection | [09](09-destinations-extended.md) | P1 | ❌ | not started: no scheduled probe, `degraded` state, last-probe line or probe budget. Only the manual send-a-test (F98, ADR 0018) exists; also depends on F98 gaps and the rate-limit budget (F187) |
 | F107 | Discord destination | [09](09-destinations-extended.md) | P2 | 🟡 | slice 8a, ADR 0014: adapter, `discord.com`-only URL policy with optional `thread_id`, `wait=true`, `allowed_mentions` on every payload, classifier, wizard and setup copy (`src/connectors/destinations/discord/`, … |
 | F108 | Discord failure semantics and the shared-egress budget | [09](09-destinations-extended.md) | P0 | 🟡 | slice 8a: 404/410 and 401/403 with Discord code 10015/50027 are permanent with zero retries and auto-pause the integration with an `integration.auto_pause` audit (`src/connectors/destinations/discord/classify.ts`, … |
@@ -161,8 +161,8 @@
 | F116 | Generic customer webhook: outbound delivery semantics | [09](09-destinations-extended.md) | P2 | 🟡 | slice 8a: Standard Webhooks v1 signing with stable `webhook-id`, canonical JSON envelope, never unsigned, one-time sealed secret (`src/connectors/destinations/generic-webhook/`, `tests/destinations/generic-webhook.test.ts`). Not … |
 | F117 | Generic customer webhook: response classification | [09](09-destinations-extended.md) | P2 | 🟡 | slice 8a: total status mapping, `Retry-After`, unknown 4xx permanent and flagged, body never read (`src/connectors/destinations/generic-webhook/classify.ts`, `tests/destinations/generic-webhook.test.ts`). Not built: configurable … |
 | F118 | Destination disable, deprecation and removal | [09](09-destinations-extended.md) | P1 | 🟡 | only fragments: pause and resume via PATCH `enabled` (audited), Discord auto-pause with audit, credential quarantine hides rows from delivery (`src/api/integrations.ts`, `src/pipeline/consumer.ts`). Not built: four-state model … |
-| F119 | P2 destination conformance and fixture suite | [09](09-destinations-extended.md) | P1 | 🟡 | Discord and generic webhook run in the shared conformance suite and golden capability table (`tests/destinations/conformance.test.ts`, `discord.test.ts`, `generic-webhook.test.ts`). Not built: limits recorded in a registry (F105), … |
-| F120 | Customer-facing capability matrix | [09](09-destinations-extended.md) | P1 | ❌ | not started: no generated `docs/CAPABILITIES.md` and no UI capability matrix; depends on F105 registry data and F92 per-mode capabilities |
+| F119 | P2 destination conformance and fixture suite | [09](09-destinations-extended.md) | P1 | 🟡 | Discord and generic webhook run in the shared conformance suite and golden capability table (`tests/destinations/conformance.test.ts`, `discord.test.ts`, `generic-webhook.test.ts`). Provider limits are recorded in the kind … |
+| F120 | Customer-facing capability matrix | [09](09-destinations-extended.md) | P1 | 🟡 | `docs/CAPABILITIES.md` generated from the kind registry (`npm run docs:capabilities`, `src/connectors/destinations/render-capabilities.ts`) with matrix, cited limits, unknowns, the confirmation row and a not-offered section with … |
 | F121 | Routing rule model | [10](10-routing-and-filtering.md) | P0 | 🚫 | deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no rule object: only a closed per-integration filter set in … |
 | F122 | Rule persistence, tenancy and audit | [10](10-routing-and-filtering.md) | P0 | 🚫 | deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no rules table, versions or rule audit; filters are one JSON column on `integrations` … |
 | F123 | Condition groups: `all` / `any` | [10](10-routing-and-filtering.md) | P0 | 🚫 | deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no `all`/`any` condition groups; filters are a fixed implicit AND of five typed … |

@@ -3,8 +3,9 @@
  * F91–F104). Everything here is data: no I/O, no clock, no hidden state.
  */
 
-export const DESTINATION_KINDS = ['lark', 'slack', 'teams', 'discord', 'generic_webhook'] as const;
-export type DestinationKind = (typeof DESTINATION_KINDS)[number];
+// The kind list lives with the registry (F105, ADR 0052); re-exported here for existing importers.
+import type { DestinationKind } from './kind-registry';
+export { DESTINATION_KINDS, isDestinationKind, type DestinationKind } from './kind-registry';
 
 export type NotificationStatus = 'success' | 'failure' | 'warning' | 'info';
 

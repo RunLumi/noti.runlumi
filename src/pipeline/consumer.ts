@@ -1,6 +1,7 @@
 import { auditStatement } from '../audit/audit';
 import { isDeadWebhook } from '../connectors/destinations/discord/classify';
-import { genericWebhookEnabled } from '../connectors/destinations/features';
+import { destinationAvailable } from '../connectors/destinations/features';
+import { DESTINATION_REGISTRY } from '../connectors/destinations/kind-registry';
 import { ownHostsOf, type UrlPolicyOptions } from '../connectors/destinations/url-policy';
 import {
   type ClassifiedResponse,
@@ -125,7 +126,7 @@ async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage
     return failed('config_invalid', 'integration_unavailable');
   // A gated kind never reaches the network while its feature is off, even for a row that was
   // stored while it was on (ADR 0014). Permanent: turning the feature on and redelivering works.
-  if (row.destination === 'generic_webhook' && !genericWebhookEnabled(env))
+  if (!destinationAvailable(row.destination, env))
     return failed('config_invalid', 'destination_type_disabled');
   let credentials;
   try {
@@ -138,9 +139,9 @@ async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage
     {
       kind: row.destination,
       webhookUrl: credentials.webhookUrl,
-      // Only Lark and the custom webhook have a signing secret; a stray value on another row
-      // is ignored. A custom webhook with no secret fails validation and is never sent.
-      ...((row.destination === 'lark' || row.destination === 'generic_webhook') && credentials.signingSecret
+      // Only kinds registered with a signing secret (Lark, the custom webhook) get one; a stray
+      // value on another row is ignored. A custom webhook with no secret fails validation.
+      ...(DESTINATION_REGISTRY[row.destination].signingSecret !== 'none' && credentials.signingSecret
         ? { signingSecret: credentials.signingSecret }
         : {}),
     },
