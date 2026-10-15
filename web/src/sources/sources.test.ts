@@ -239,6 +239,13 @@ describe('secret handling in the Sources UI', () => {
     expect(hooks).not.toMatch(/setQueryData/);
     expect(hooks.match(/gcTime: 0/g)?.length).toBeGreaterThanOrEqual(3);
   });
+
+  it('the source page (ADR 0056) holds a rotated secret the same way and navigates only to the list', () => {
+    const page = sources.find(([f]) => f === 'SourceDetailPage.tsx')?.[1] ?? '';
+    expect(page).toMatch(/useSourceOutcome\(\)/);
+    expect([...page.matchAll(/navigate\(([^)]*)\)/g)].map((m) => m[1])).toEqual(["{ to: '/sources' }"]);
+    expect(page).not.toMatch(/setQueryData|history\.|search:/);
+  });
 });
 
 describe('copy', () => {

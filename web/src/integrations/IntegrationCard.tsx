@@ -55,7 +55,7 @@ export function IntegrationCard({ orgId, integration }: IntegrationCardProps) {
           </dt>
           {integration.sourceId ? (
             <dd>
-              <Link to="/sources" className="text-link">
+              <Link to="/sources/$sourceId" params={{ sourceId: integration.sourceId }} className="text-link">
                 {t('integration.source.value')}
               </Link>
             </dd>

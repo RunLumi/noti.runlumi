@@ -12,6 +12,8 @@ interface RedeliverPanelProps {
   readonly delivery: DeliveryItem;
   /** Called with the new delivery's id so the log can open it. */
   readonly onShowNew: (id: string) => void;
+  /** `h3` in the dialog, `h2` on the delivery's own page (ADR 0056). */
+  readonly heading?: 'h2' | 'h3';
 }
 
 const IN_FLIGHT = new Set(['pending', 'claimed', 'retrying']);
@@ -21,7 +23,7 @@ const IN_FLIGHT = new Set(['pending', 'claimed', 'retrying']);
  * enabled, and a click asks first because the destination may receive the message twice.
  * Not optimistic: what is shown is what the server said happened.
  */
-export function RedeliverPanel({ orgId, delivery, onShowNew }: RedeliverPanelProps) {
+export function RedeliverPanel({ orgId, delivery, onShowNew, heading: H = 'h3' }: RedeliverPanelProps) {
   useLocale();
   const replay = useReplay(orgId);
   const [confirming, setConfirming] = useState(false);
@@ -52,7 +54,7 @@ export function RedeliverPanel({ orgId, delivery, onShowNew }: RedeliverPanelPro
 
   return (
     <section className="detail-section" aria-labelledby="redeliver-title">
-      <h3 id="redeliver-title">{t('deliveries.redelivery')}</h3>
+      <H id="redeliver-title">{t('deliveries.redelivery')}</H>
       {replay.isSuccess && (
         <Notice kind="success">
           <p>{replay.data.created ? t('redeliver.queued') : t('redeliver.already')}</p>

@@ -199,8 +199,15 @@ export function RotateDialog({
   );
 }
 
-/** Delete destroys the secret and the connected chats, so the name is typed to confirm. */
-export function DeleteSourceDialog({ orgId: liveOrgId, source }: DialogProps) {
+/**
+ * Delete destroys the secret and the connected chats, so the name is typed to confirm. On the list the card simply
+ * disappears; the source's own page passes `onDeleted` to go back to the list (ADR 0056).
+ */
+export function DeleteSourceDialog({
+  orgId: liveOrgId,
+  source,
+  onDeleted,
+}: DialogProps & { readonly onDeleted?: () => void }) {
   useLocale();
   const ws = useBoundWorkspace(liveOrgId);
   const remove = useDeleteSource(ws.orgId);
@@ -215,6 +222,7 @@ export function DeleteSourceDialog({ orgId: liveOrgId, source }: DialogProps) {
     if (!matches || remove.isPending || ws.stale) return;
     try {
       await remove.mutateAsync(source);
+      onDeleted?.();
     } catch {
       // Rendered from `remove.error`; the dialog stays open.
     }

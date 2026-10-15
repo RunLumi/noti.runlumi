@@ -264,13 +264,11 @@ function CreateForm({
   );
 }
 
-export function SourcesPage() {
-  useLocale();
-  const orgId = useOrgId();
-  const list = useSources(orgId);
-  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
-  const isAdmin = me.data?.user.role === 'admin';
-  // The secret lives only here, in memory. Dismissing it, or leaving the page, discards it.
+/**
+ * What a create or rotate left to show. The secret lives only in this component state, in memory: dismissing it, or
+ * leaving the page, discards it. The list and a source's own page (ADR 0056) both hold it this way.
+ */
+export function useSourceOutcome() {
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const show = (kind: 'created' | 'rotated', result: SourceWithSecret) => {
@@ -278,6 +276,40 @@ export function SourcesPage() {
     setReveal(outcome.type === 'reveal' ? outcome.reveal : null);
     setNotice(outcome.type === 'notice' ? outcome.message : null);
   };
+  return { reveal, notice, show, dismiss: () => setReveal(null) };
+}
+
+export function SourceOutcome({ outcome }: { readonly outcome: ReturnType<typeof useSourceOutcome> }) {
+  useLocale();
+  const { reveal, notice, dismiss } = outcome;
+  return (
+    <>
+      {reveal && (
+        <SecretReveal
+          key={reveal.source.id + reveal.kind}
+          sourceName={reveal.source.name}
+          secret={reveal.secret}
+          kind={reveal.kind}
+          onDismiss={dismiss}
+        />
+      )}
+      {notice && (
+        <Notice kind="success">
+          <p>{notice}</p>
+        </Notice>
+      )}
+    </>
+  );
+}
+
+export function SourcesPage() {
+  useLocale();
+  const orgId = useOrgId();
+  const list = useSources(orgId);
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
+  const isAdmin = me.data?.user.role === 'admin';
+  const outcome = useSourceOutcome();
+  const { show } = outcome;
   const sources = list.data ?? [];
   return (
     <>
@@ -286,20 +318,7 @@ export function SourcesPage() {
         title={t('sources.title')}
         description={t('sources.description')}
       />
-      {reveal && (
-        <SecretReveal
-          key={reveal.source.id + reveal.kind}
-          sourceName={reveal.source.name}
-          secret={reveal.secret}
-          kind={reveal.kind}
-          onDismiss={() => setReveal(null)}
-        />
-      )}
-      {notice && (
-        <Notice kind="success">
-          <p>{notice}</p>
-        </Notice>
-      )}
+      <SourceOutcome outcome={outcome} />
       {orgId && <CreateForm orgId={orgId} onCreated={(result) => show('created', result)} />}
       {list.isPending ? (
         <Skeleton label={t('sources.loading')} rows={2} />

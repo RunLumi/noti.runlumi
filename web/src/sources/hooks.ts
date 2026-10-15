@@ -7,6 +7,7 @@ import { sourcesApi, type Source } from './api';
 export const sourceKeys = {
   all: (orgId: string) => ['sources', orgId] as const,
   list: (orgId: string) => ['sources', orgId, 'list'] as const,
+  detail: (orgId: string, id: string) => ['sources', orgId, 'detail', id] as const,
 };
 
 export function useSources(orgId: string | null) {
@@ -14,6 +15,23 @@ export function useSources(orgId: string | null) {
     queryKey: sourceKeys.list(orgId ?? ''),
     queryFn: () => sourcesApi.list(orgId ?? ''),
     enabled: orgId !== null,
+  });
+}
+
+/**
+ * One source, for its own page (ADR 0056). The row from the list is shown at once when it is
+ * cached; the request still confirms it, and a 404 (deleted, or another workspace's id) wins.
+ * Rotate, toggle and revoke invalidate `sourceKeys.all`, so this refetches with the list.
+ */
+export function useSource(orgId: string | null, id: string) {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: sourceKeys.detail(orgId ?? '', id),
+    queryFn: () => sourcesApi.get(orgId ?? '', id),
+    enabled: orgId !== null && id !== '',
+    initialData: () =>
+      qc.getQueryData<readonly Source[]>(sourceKeys.list(orgId ?? ''))?.find((s) => s.id === id),
+    initialDataUpdatedAt: () => qc.getQueryState(sourceKeys.list(orgId ?? ''))?.dataUpdatedAt,
   });
 }
 
@@ -68,9 +86,12 @@ export function useDeleteSource(orgId: string) {
   return useMutation({
     // The dialog states how many chats go with the source; confirming it is the cascade.
     mutationFn: (source: Source) => sourcesApi.remove(orgId, source.id, source.integrationCount > 0),
-    onSuccess: () =>
+    onSuccess: (_result, source) =>
       Promise.all([
-        qc.invalidateQueries({ queryKey: sourceKeys.all(orgId) }),
+        qc.invalidateQueries({ queryKey: sourceKeys.list(orgId) }),
+        // Marked stale but not refetched now: the source's own page is leaving (it navigates to the list), and a
+        // refetch would flash "not found" first. Opening the page again refetches and shows the 404.
+        qc.invalidateQueries({ queryKey: sourceKeys.detail(orgId, source.id), refetchType: 'none' }),
         // Deleting a source deletes the integrations bound to it.
         qc.invalidateQueries({ queryKey: integrationKeys.all(orgId) }),
       ]),

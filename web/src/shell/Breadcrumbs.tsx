@@ -1,6 +1,7 @@
 import { Link, useRouterState } from '@tanstack/react-router';
 import { IconChevronRight } from '@tabler/icons-react';
 import { useIntegration, useOrgId } from '../integrations/hooks';
+import { useSource } from '../sources/hooks';
 import { t } from '../i18n';
 import { useLocale } from '../i18n/LocaleProvider';
 import { crumbsFor, type Crumb } from './crumbs';
@@ -13,9 +14,19 @@ function IntegrationName({ id }: { id: string }) {
   return <>{integration.data?.name ?? t('route.title.integration')}</>;
 }
 
+/** The source's own name once loaded; "Source" while it is not, or when the id is not this workspace's. */
+function SourceName({ id }: { id: string }) {
+  useLocale();
+  const orgId = useOrgId();
+  const source = useSource(orgId, id);
+  return <>{source.data?.name ?? t('route.title.source')}</>;
+}
+
 function CrumbLabel({ crumb }: { crumb: Crumb }) {
   useLocale();
-  return crumb.integrationId ? <IntegrationName id={crumb.integrationId} /> : <>{t(crumb.label)}</>;
+  if (crumb.integrationId) return <IntegrationName id={crumb.integrationId} />;
+  if (crumb.sourceId) return <SourceName id={crumb.sourceId} />;
+  return <>{t(crumb.label)}</>;
 }
 
 /**
@@ -38,10 +49,10 @@ export function Breadcrumbs() {
           )}
         </li>
         {crumbs.map((crumb) => (
-          <li key={crumb.label + (crumb.integrationId ?? '')}>
+          <li key={crumb.label + (crumb.integrationId ?? crumb.sourceId ?? '')}>
             <IconChevronRight size={14} aria-hidden="true" />
             {crumb.to ? (
-              <Link to={crumb.to as '/integrations'}>
+              <Link to={crumb.to as '/integrations' | '/activity' | '/sources'}>
                 <CrumbLabel crumb={crumb} />
               </Link>
             ) : (

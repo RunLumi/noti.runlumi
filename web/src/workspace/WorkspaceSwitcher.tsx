@@ -16,6 +16,9 @@ type User = Me['user'];
 function pathAfterSwitch(pathname: string): string | null {
   // `/integrations/<id>` and `/integrations/new` belong to the workspace just left.
   if (pathname.startsWith('/integrations/')) return '/integrations';
+  // A source's or a delivery's page names a row of the workspace just left (ADR 0056).
+  if (pathname.startsWith('/sources/')) return '/sources';
+  if (pathname.startsWith('/activity/')) return '/activity';
   return null;
 }
 

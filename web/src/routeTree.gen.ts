@@ -10,8 +10,8 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as DestinationsRouteImport } from './routes/destinations'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
@@ -19,28 +19,31 @@ import { Route as ResetRouteImport } from './routes/reset'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SigninRouteImport } from './routes/signin'
 import { Route as SignupRouteImport } from './routes/signup'
-import { Route as SourcesRouteImport } from './routes/sources'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as VerifyRouteImport } from './routes/verify'
+import { Route as ActivityIndexRouteImport } from './routes/activity.index'
+import { Route as ActivityDeliveryIdRouteImport } from './routes/activity.$deliveryId'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as IntegrationsIdRouteImport } from './routes/integrations.$id'
 import { Route as IntegrationsNewRouteImport } from './routes/integrations.new'
 import { Route as SetupIndexRouteImport } from './routes/setup.index'
 import { Route as SetupStepRouteImport } from './routes/setup.$step'
+import { Route as SourcesIndexRouteImport } from './routes/sources.index'
+import { Route as SourcesSourceIdRouteImport } from './routes/sources.$sourceId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ActivityRoute = ActivityRouteImport.update({
-  id: '/activity',
-  path: '/activity',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuditRoute = AuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DestinationsRoute = DestinationsRouteImport.update({
+  id: '/destinations',
+  path: '/destinations',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
@@ -78,11 +81,6 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SourcesRoute = SourcesRouteImport.update({
-  id: '/sources',
-  path: '/sources',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const TeamRoute = TeamRouteImport.update({
   id: '/team',
   path: '/team',
@@ -91,6 +89,16 @@ const TeamRoute = TeamRouteImport.update({
 const VerifyRoute = VerifyRouteImport.update({
   id: '/verify',
   path: '/verify',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActivityIndexRoute = ActivityIndexRouteImport.update({
+  id: '/activity/',
+  path: '/activity/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ActivityDeliveryIdRoute = ActivityDeliveryIdRouteImport.update({
+  id: '/activity/$deliveryId',
+  path: '/activity/$deliveryId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
@@ -118,11 +126,21 @@ const SetupStepRoute = SetupStepRouteImport.update({
   path: '/setup/$step',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SourcesIndexRoute = SourcesIndexRouteImport.update({
+  id: '/sources/',
+  path: '/sources/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SourcesSourceIdRoute = SourcesSourceIdRouteImport.update({
+  id: '/sources/$sourceId',
+  path: '/sources/$sourceId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/activity': typeof ActivityRoute
   '/audit': typeof AuditRoute
+  '/destinations': typeof DestinationsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/onboarding': typeof OnboardingRoute
@@ -130,19 +148,22 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/signin': typeof SigninRoute
   '/signup': typeof SignupRoute
-  '/sources': typeof SourcesRoute
   '/team': typeof TeamRoute
   '/verify': typeof VerifyRoute
+  '/activity/$deliveryId': typeof ActivityDeliveryIdRoute
   '/integrations/$id': typeof IntegrationsIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/setup/$step': typeof SetupStepRoute
+  '/sources/$sourceId': typeof SourcesSourceIdRoute
+  '/activity/': typeof ActivityIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/setup/': typeof SetupIndexRoute
+  '/sources/': typeof SourcesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/activity': typeof ActivityRoute
   '/audit': typeof AuditRoute
+  '/destinations': typeof DestinationsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/onboarding': typeof OnboardingRoute
@@ -150,20 +171,23 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/signin': typeof SigninRoute
   '/signup': typeof SignupRoute
-  '/sources': typeof SourcesRoute
   '/team': typeof TeamRoute
   '/verify': typeof VerifyRoute
+  '/activity/$deliveryId': typeof ActivityDeliveryIdRoute
   '/integrations/$id': typeof IntegrationsIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/setup/$step': typeof SetupStepRoute
+  '/sources/$sourceId': typeof SourcesSourceIdRoute
+  '/activity': typeof ActivityIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/setup': typeof SetupIndexRoute
+  '/sources': typeof SourcesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/activity': typeof ActivityRoute
   '/audit': typeof AuditRoute
+  '/destinations': typeof DestinationsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/invite': typeof InviteRoute
   '/onboarding': typeof OnboardingRoute
@@ -171,21 +195,24 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/signin': typeof SigninRoute
   '/signup': typeof SignupRoute
-  '/sources': typeof SourcesRoute
   '/team': typeof TeamRoute
   '/verify': typeof VerifyRoute
+  '/activity/$deliveryId': typeof ActivityDeliveryIdRoute
   '/integrations/$id': typeof IntegrationsIdRoute
   '/integrations/new': typeof IntegrationsNewRoute
   '/setup/$step': typeof SetupStepRoute
+  '/sources/$sourceId': typeof SourcesSourceIdRoute
+  '/activity/': typeof ActivityIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/setup/': typeof SetupIndexRoute
+  '/sources/': typeof SourcesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/activity'
     | '/audit'
+    | '/destinations'
     | '/forgot-password'
     | '/invite'
     | '/onboarding'
@@ -193,19 +220,22 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signin'
     | '/signup'
-    | '/sources'
     | '/team'
     | '/verify'
+    | '/activity/$deliveryId'
     | '/integrations/$id'
     | '/integrations/new'
     | '/setup/$step'
+    | '/sources/$sourceId'
+    | '/activity/'
     | '/integrations/'
     | '/setup/'
+    | '/sources/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/activity'
     | '/audit'
+    | '/destinations'
     | '/forgot-password'
     | '/invite'
     | '/onboarding'
@@ -213,19 +243,22 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signin'
     | '/signup'
-    | '/sources'
     | '/team'
     | '/verify'
+    | '/activity/$deliveryId'
     | '/integrations/$id'
     | '/integrations/new'
     | '/setup/$step'
+    | '/sources/$sourceId'
+    | '/activity'
     | '/integrations'
     | '/setup'
+    | '/sources'
   id:
     | '__root__'
     | '/'
-    | '/activity'
     | '/audit'
+    | '/destinations'
     | '/forgot-password'
     | '/invite'
     | '/onboarding'
@@ -233,20 +266,23 @@ export interface FileRouteTypes {
     | '/settings'
     | '/signin'
     | '/signup'
-    | '/sources'
     | '/team'
     | '/verify'
+    | '/activity/$deliveryId'
     | '/integrations/$id'
     | '/integrations/new'
     | '/setup/$step'
+    | '/sources/$sourceId'
+    | '/activity/'
     | '/integrations/'
     | '/setup/'
+    | '/sources/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ActivityRoute: typeof ActivityRoute
   AuditRoute: typeof AuditRoute
+  DestinationsRoute: typeof DestinationsRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   InviteRoute: typeof InviteRoute
   OnboardingRoute: typeof OnboardingRoute
@@ -254,14 +290,17 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SigninRoute: typeof SigninRoute
   SignupRoute: typeof SignupRoute
-  SourcesRoute: typeof SourcesRoute
   TeamRoute: typeof TeamRoute
   VerifyRoute: typeof VerifyRoute
+  ActivityDeliveryIdRoute: typeof ActivityDeliveryIdRoute
   IntegrationsIdRoute: typeof IntegrationsIdRoute
   IntegrationsNewRoute: typeof IntegrationsNewRoute
   SetupStepRoute: typeof SetupStepRoute
+  SourcesSourceIdRoute: typeof SourcesSourceIdRoute
+  ActivityIndexRoute: typeof ActivityIndexRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   SetupIndexRoute: typeof SetupIndexRoute
+  SourcesIndexRoute: typeof SourcesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -273,18 +312,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/activity': {
-      id: '/activity'
-      path: '/activity'
-      fullPath: '/activity'
-      preLoaderRoute: typeof ActivityRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/audit': {
       id: '/audit'
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/destinations': {
+      id: '/destinations'
+      path: '/destinations'
+      fullPath: '/destinations'
+      preLoaderRoute: typeof DestinationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forgot-password': {
@@ -336,13 +375,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/sources': {
-      id: '/sources'
-      path: '/sources'
-      fullPath: '/sources'
-      preLoaderRoute: typeof SourcesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/team': {
       id: '/team'
       path: '/team'
@@ -355,6 +387,20 @@ declare module '@tanstack/react-router' {
       path: '/verify'
       fullPath: '/verify'
       preLoaderRoute: typeof VerifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/activity/': {
+      id: '/activity/'
+      path: '/activity'
+      fullPath: '/activity/'
+      preLoaderRoute: typeof ActivityIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/activity/$deliveryId': {
+      id: '/activity/$deliveryId'
+      path: '/activity/$deliveryId'
+      fullPath: '/activity/$deliveryId'
+      preLoaderRoute: typeof ActivityDeliveryIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations/': {
@@ -392,13 +438,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupStepRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sources/': {
+      id: '/sources/'
+      path: '/sources'
+      fullPath: '/sources/'
+      preLoaderRoute: typeof SourcesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sources/$sourceId': {
+      id: '/sources/$sourceId'
+      path: '/sources/$sourceId'
+      fullPath: '/sources/$sourceId'
+      preLoaderRoute: typeof SourcesSourceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ActivityRoute: ActivityRoute,
   AuditRoute: AuditRoute,
+  DestinationsRoute: DestinationsRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   InviteRoute: InviteRoute,
   OnboardingRoute: OnboardingRoute,
@@ -406,14 +466,17 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SigninRoute: SigninRoute,
   SignupRoute: SignupRoute,
-  SourcesRoute: SourcesRoute,
   TeamRoute: TeamRoute,
   VerifyRoute: VerifyRoute,
+  ActivityDeliveryIdRoute: ActivityDeliveryIdRoute,
   IntegrationsIdRoute: IntegrationsIdRoute,
   IntegrationsNewRoute: IntegrationsNewRoute,
   SetupStepRoute: SetupStepRoute,
+  SourcesSourceIdRoute: SourcesSourceIdRoute,
+  ActivityIndexRoute: ActivityIndexRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   SetupIndexRoute: SetupIndexRoute,
+  SourcesIndexRoute: SourcesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

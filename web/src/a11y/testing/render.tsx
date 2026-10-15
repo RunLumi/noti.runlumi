@@ -13,6 +13,9 @@ import { AppShell, Overview, Activity, Team, Settings, AuthPage, VerifyPage, Res
 import { OnboardingPage, InvitePage } from '../../onboarding';
 import { IntegrationsPage } from '../../integrations/IntegrationsPage';
 import { SourcesPage } from '../../sources/SourcesPage';
+import { SourceDetailPage } from '../../sources/SourceDetailPage';
+import { DeliveryPage } from '../../deliveries/DeliveryPage';
+import { DestinationsHealthPage } from '../../destinations/DestinationsHealthPage';
 import { SetupFlow } from '../../setup/SetupFlow';
 import { SetupResume } from '../../setup/SetupResume';
 import { RootNotFound } from '../../shell/NotFound';
@@ -57,9 +60,12 @@ export const ROUTE_PATHS = [
   '/setup',
   '/setup/$step',
   '/sources',
+  '/sources/$sourceId',
   '/onboarding',
   '/invite',
   '/activity',
+  '/activity/$deliveryId',
+  '/destinations',
   '/audit',
   '/team',
   '/settings',
@@ -81,15 +87,20 @@ function buildRouter(initialPath: string) {
     route('/integrations/$id', IntegrationSettings),
     route('/setup', SetupResume),
     route('/setup/$step', SetupFlow),
-    route('/sources', SourcesPage),
+    // Index routes keep their trailing slash, as in the generated tree: `/activity/` is the route
+    // id `DeliveryLogPage` reads its search from.
+    route('/sources/', SourcesPage),
+    route('/sources/$sourceId', SourceDetailPage),
     route('/onboarding', OnboardingPage),
     route('/invite', InvitePage),
     createRoute({
       getParentRoute: () => root,
-      path: '/activity',
+      path: '/activity/',
       component: Activity,
       validateSearch: validateActivitySearch,
     }),
+    route('/activity/$deliveryId', DeliveryPage),
+    route('/destinations', DestinationsHealthPage),
     createRoute({
       getParentRoute: () => root,
       path: '/audit',
@@ -413,6 +424,13 @@ export function installFetch(state: ApiState): void {
         return Promise.resolve(
           state.sources === 'error' ? json({ error: 'boom' }, 500) : json({ sources: state.sources }),
         );
+      // One source: 404 for an id this workspace does not hold, whoever holds it (as the server answers).
+      const oneSource = /^\/api\/sources\/([^/]+)$/.exec(path);
+      if (oneSource) {
+        if (state.sources === 'error') return Promise.resolve(json({ error: 'boom' }, 500));
+        const found = (state.sources as { id: string }[]).find((s) => s.id === oneSource[1]);
+        return Promise.resolve(found ? json({ source: found }) : json({ error: 'Not found' }, 404));
+      }
       const noise = /^\/api\/integrations\/([^/]+)\/noise-status$/.exec(path);
       // Only the quiet-hours fixture has updates waiting.
       if (noise)
@@ -587,6 +605,16 @@ export function installFetch(state: ApiState): void {
       // Only a generic source gets a generated secret back; a provider's pasted credential is never returned.
       return Promise.resolve(
         json(current.kind === 'generic' ? { source: rotated, secret: fixtureSecret() } : { source: rotated }),
+      );
+    }
+    const deleteSource = /^\/api\/sources\/([^/]+)$/.exec(path);
+    if (method === 'DELETE' && deleteSource && Array.isArray(state.sources)) {
+      const before = state.sources.length;
+      state.sources = (state.sources as { id: string }[]).filter((s) => s.id !== deleteSource[1]);
+      return Promise.resolve(
+        state.sources.length < before
+          ? new Response(null, { status: 204 })
+          : json({ error: 'Not found' }, 404),
       );
     }
     if (method === 'POST' && path === '/api/integrations') {

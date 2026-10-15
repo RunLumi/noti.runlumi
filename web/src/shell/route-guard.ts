@@ -36,8 +36,11 @@ export const ROUTE_RULES: readonly RouteRule[] = [
   { path: '/', match: 'exact', access: 'authenticated' },
   { path: '/setup', match: 'prefix', access: 'authenticated' },
   { path: '/integrations', match: 'prefix', access: 'authenticated' },
-  { path: '/sources', match: 'exact', access: 'authenticated' },
-  { path: '/activity', match: 'exact', access: 'authenticated' },
+  // `prefix`: a source's page (`/sources/src_1`) and a delivery's page (`/activity/del_1`) live
+  // beneath the list (ADR 0056). An id the workspace does not own answers with the shell 404.
+  { path: '/sources', match: 'prefix', access: 'authenticated' },
+  { path: '/activity', match: 'prefix', access: 'authenticated' },
+  { path: '/destinations', match: 'exact', access: 'authenticated' },
   { path: '/team', match: 'exact', access: 'authenticated' },
   { path: '/audit', match: 'exact', access: 'admin' },
   { path: '/settings', match: 'exact', access: 'authenticated' },
@@ -68,7 +71,8 @@ export function mayOpen(access: Access, role: Role): boolean {
 }
 
 export interface NavEntry {
-  readonly to: '/' | '/integrations' | '/sources' | '/activity' | '/team' | '/audit' | '/settings';
+  readonly to:
+    '/' | '/integrations' | '/sources' | '/activity' | '/destinations' | '/team' | '/audit' | '/settings';
   readonly label: MessageId;
 }
 
@@ -78,6 +82,7 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { to: '/integrations', label: 'nav.integrations' },
   { to: '/sources', label: 'sources.nav' },
   { to: '/activity', label: 'nav.activity' },
+  { to: '/destinations', label: 'nav.destinations' },
   { to: '/team', label: 'nav.team' },
   { to: '/audit', label: 'nav.audit' },
   { to: '/settings', label: 'nav.settings' },

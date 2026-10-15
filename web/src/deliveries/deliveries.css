@@ -203,6 +203,7 @@
   border-top: var(--border-hairline);
 }
 
+.detail-section h2,
 .detail-section h3 {
   margin: 0;
   font-size: 14px;
@@ -431,4 +432,36 @@
 
 .request-id .text-link {
   min-height: var(--touch-target);
+}
+
+/* --- A delivery's own page and the link to it (ADR 0056) ------------------ */
+.drawer-permalink {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.drawer-permalink .text-link {
+  min-height: var(--touch-target);
+}
+
+/* The same body as the dialog, on an opaque sheet: a reading surface, never glass (DESIGN.md §8.4). */
+.delivery-page {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  max-width: 760px;
+}
+
+@media (max-width: 480px) {
+  .delivery-page {
+    padding: var(--space-4);
+  }
+}
+
+@media (forced-colors: active) {
+  .delivery-page {
+    border: 1px solid CanvasText;
+  }
 }

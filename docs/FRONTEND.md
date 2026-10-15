@@ -109,8 +109,8 @@ Rules for new UI:
 ## Pages
 
 `/signup` `/signin` `/forgot-password` `/verify` `/reset` ·
-`/` (overview) `/integrations` `/integrations/new` `/integrations/:id` `/sources` `/activity` `/team`
-`/audit` (admins) `/settings` `/onboarding` `/invite`
+`/` (overview) `/integrations` `/integrations/new` `/integrations/:id` `/sources` `/sources/:sourceId` `/activity`
+`/activity/:deliveryId` `/destinations` `/team` `/audit` (admins) `/settings` `/onboarding` `/invite`
 
 ## Delivery log and workspace data (`web/src/deliveries/`, `web/src/workspace/`)
 
@@ -120,7 +120,8 @@ Decisions and verification: [ADR 0009](adr/0009-delivery-log-ux.md).
 | --- | --- |
 | `deliveries/DeliveryLogPage.tsx` | `/activity`: filters, table, load more, empty/error/loading states |
 | `deliveries/DeliveryTable.tsx` | TanStack Table; rows stack into labelled cards at narrow widths |
-| `deliveries/DeliveryDetail.tsx`, `RedeliverPanel.tsx` | Detail dialog, plain-language cause, admin-only confirmed redelivery, duplicate disclosure; "Details for support" holds the delivery ID, the error code and the request ID (monospace, copyable, linked to the log filtered by it; ADR 0050) |
+| `deliveries/DeliveryPage.tsx` | `/activity/:deliveryId` (ADR 0056): the dialog's body at its own address, from `GET /api/deliveries/:id` alone; a 404 (unknown or another workspace's id) is the shell 404 |
+| `deliveries/DeliveryDetail.tsx`, `RedeliverPanel.tsx` | Detail dialog (with an "Open as a page" link) and the shared `DeliveryDetailBody`, plain-language cause, admin-only confirmed redelivery, duplicate disclosure; "Details for support" holds the delivery ID, the error code and the request ID (monospace, copyable, linked to the log filtered by it; ADR 0050) |
 | `deliveries/AttemptTimeline.tsx` | Per-attempt history in the detail dialog: one line per try or wait, oldest first, outcome in words, status class and a minted code, never what the destination answered (ADR 0023) |
 | `deliveries/BulkRedeliver.tsx` | "Redeliver all failed" on the Failed view: count from the server first, then confirm; the number is typed above 20; a stale plan is refused and re-counted; not optimistic |
 | `integrations/HealthNotice.tsx` | The circuit breaker and rate-limit hold on an integration card and its settings: shown in words, never enforced (ADR 0023) |
@@ -308,8 +309,9 @@ Decisions: [ADR 0025](adr/0025-setup-and-shell-ux.md) (supersedes the setup part
 - **Shell.** `shell/route-guard.ts` lists routes as rows (`public`, `authenticated`, `admin`); an address with no row
   gets the 404 page inside the shell when signed in (`RootNotFound`, also the router's `notFoundComponent`). Sign-in
   `returnTo` goes through `safeReturnTo` (relative, same origin only). Breadcrumbs (`Breadcrumbs`, `crumbs.ts`) on
-  integration settings, the create wizard and setup steps; delivery detail and source detail are not routes. A
-  failed-deliveries link appears under Activity when the server counts failed deliveries.
+  integration settings, the create wizard, setup steps, a delivery's page and a source's page (ADR 0056; the source
+  crumb fills in the name, the delivery crumb stays "Delivery"). A failed-deliveries link appears under Activity when
+  the server counts failed deliveries.
 - **Destination abilities** (`CapabilitySummary`, `abilities.ts`): derived by `abilitiesOf` from the kind registry's
   capabilities (ADR 0052), the same constants `docs/CAPABILITIES.md` is generated from, so the summary and that page
   cannot disagree; `setup.test.ts` checks the derivation field by field. No visual change: the rendered rows,
@@ -332,7 +334,8 @@ sheet, switch, field, destination-choice and dialog styles and the `validation.t
 | Path | Role |
 | --- | --- |
 | `SourcesPage.tsx` | `/sources`: create form, one-time secret reveal, list, empty / error / loading states |
-| `SourceCard.tsx` | Endpoint URL with copy, last event, connected chats, credential fingerprint and revoked state, pause switch, actions (rotate, revoke, delete) |
+| `SourceDetailPage.tsx` | `/sources/:sourceId` (ADR 0056): the same card in `standalone` mode under a page heading with the name; rotate reveals once as on the list (`useSourceOutcome`); delete goes back to the list; a 404 is the shell 404 |
+| `SourceCard.tsx` | "Open page" link to the source's own address (hidden on that page), endpoint URL with copy, last event, connected chats, credential fingerprint and revoked state, pause switch, actions (rotate, revoke, delete) |
 | `SecretReveal.tsx`, `CopyButton.tsx` | One-time secret (persistent warning, focus moves in, explicit dismiss); copy with a stated outcome and a manual-copy fallback |
 | `SourceDialogs.tsx` | Rotate (states the cutover, or after a revoke that it turns the source back on) and delete (typed name, states the chats deleted with it); focus starts on the safe choice. Revoke uses the shared `RevokeDialog` (ADR 0049) |
 | `ConnectChat.tsx`, `connect.ts` | Connect a Lark, Slack or Teams chat to a source; pure validation mirrors `src/api/integration-input.ts` |
@@ -361,6 +364,30 @@ explains that updates cannot be chosen. `web/src/sources/sources.test.ts` runs t
 Node examples and checks their output with the Worker's verifier. **Not verified:** a browser
 pass at desktop and 320 px, keyboard and screen-reader walkthrough, contrast and Vietnamese
 rendering of the new screens; they were checked only through types, lint and unit tests.
+
+## Detail routes and Destinations health (ADR 0056, `web/src/destinations/`)
+
+Decisions and verification: [ADR 0056](adr/0056-detail-routes-and-destinations-health.md).
+
+- **Deep links.** `/activity/:deliveryId` and `/sources/:sourceId` render the same content as the Activity dialog
+  (`DeliveryDetailBody`) and the Sources card (`SourceCard standalone`). The dialog is kept as the quick look from the
+  list (it keeps the loaded pages, filters and focus return) and links to the page; each source card links to its page.
+  Both pages read only their own endpoint, so a reload works; both are `prefix` rows of the route guard; a 404 from the
+  API (the same answer for a deleted id and another workspace's) renders `RootNotFound` inside the shell and never
+  echoes the id. Section headings are `h2` on the page and `h3` in the dialog. The two list routes are index routes
+  (`activity.index.tsx`, `sources.index.tsx`), so `DeliveryLogPage` reads its search from `/activity/`.
+- **Destinations health** (`DestinationsHealthPage.tsx`, `health.ts`, nav item after Activity, Tabler `heartbeat`): one
+  table row per integration with the destination kind and host, the switch, the breaker and pacing state, failures in a
+  row and the webhook URL state, exactly as `GET /api/integrations` reports them. No `health` object means "Not
+  reported" in words (never `0`), explained in a note under the table. Each row links to the integration. The table
+  reuses `.delivery-table` (explicit roles, rows stack into labelled cards below 760px); the integration link is a 44px
+  target; states are words with icons, colour only a rail. Copy in `i18n/messages.shell.en.ts` and `.vi.ts`.
+- **Verified** by `shell/detail-routes.test.tsx` (cold load, guard redirect with `returnTo`, 404 for a foreign id,
+  breadcrumbs, dialog link, delete back to the list, the health rows and "Not reported"), `shell/shell.test.ts`, seven
+  axe scenarios in English and Vietnamese in `a11y/pages.a11y.test.tsx`, `a11y/keyboard.test.tsx` (tab order with the
+  new item) and `a11y/reflow.test.ts` (the new stylesheet). **Not verified:** a real browser at desktop or 320px, a
+  screen reader, forced colours, and a native-speaker review of the Vietnamese. The admin navigation now has eight
+  items; F205's six-item cap is not met.
 
 ## Sessions panel (`web/src/account/`, ADR 0030)
 

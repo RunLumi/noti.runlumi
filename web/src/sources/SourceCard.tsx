@@ -1,5 +1,13 @@
 import { useId, useRef, useState } from 'react';
-import { IconClock, IconFingerprint, IconLink, IconSend, IconShieldOff } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
+import {
+  IconChevronRight,
+  IconClock,
+  IconFingerprint,
+  IconLink,
+  IconSend,
+  IconShieldOff,
+} from '@tabler/icons-react';
 import { Badge, Notice } from '../components/ui';
 import { Time } from '../deliveries/Time';
 import { t, tp } from '../i18n';
@@ -22,6 +30,12 @@ interface SourceCardProps {
   readonly onRotated: (result: SourceWithSecret) => void;
   /** Rotating and deleting are admin-only (the server enforces it; the buttons are hidden). */
   readonly isAdmin: boolean;
+  /**
+   * On the source's own page (ADR 0056) the page heading names the source, so the card drops its own heading and
+   * its link to that page, and a delete goes back to the list through `onDeleted`.
+   */
+  readonly standalone?: boolean;
+  readonly onDeleted?: () => void;
 }
 
 function ReceivingSwitch({ orgId, source }: { readonly orgId: string; readonly source: Source }) {
@@ -127,7 +141,7 @@ function SourceRevokeDialog({
 }
 
 /** One source as an opaque work sheet: where to send events, what happened last, what to do. */
-export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProps) {
+export function SourceCard({ orgId, source, onRotated, isAdmin, standalone, onDeleted }: SourceCardProps) {
   useLocale();
   const headingId = 'source-' + source.id;
   const provider = isProviderKind(source.kind) ? t(KIND_LABEL[source.kind].name) : null;
@@ -142,13 +156,25 @@ export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProp
   return (
     <article
       className={source.enabled ? 'integration-card' : 'integration-card integration-card-paused'}
-      aria-labelledby={headingId}
+      aria-labelledby={standalone ? undefined : headingId}
+      aria-label={standalone ? source.name : undefined}
     >
-      <header className="integration-card-head">
-        <h3 id={headingId} className="integration-name" title={source.name}>
-          {source.name}
-        </h3>
-      </header>
+      {!standalone && (
+        <header className="integration-card-head">
+          <h3 id={headingId} className="integration-name" title={source.name}>
+            {source.name}
+          </h3>
+          <Link
+            to="/sources/$sourceId"
+            params={{ sourceId: source.id }}
+            className="btn btn-outline integration-manage"
+            aria-label={t('sources.card.openLabel', { name: source.name })}
+          >
+            {t('sources.card.open')}
+            <IconChevronRight size={18} aria-hidden="true" />
+          </Link>
+        </header>
+      )}
       <dl className="integration-facts">
         <div>
           <dt>{t('sources.card.type')}</dt>
@@ -314,7 +340,7 @@ export function SourceCard({ orgId, source, onRotated, isAdmin }: SourceCardProp
               }}
             />
             {!source.revoked && <SourceRevokeDialog orgId={orgId} source={source} onRevoked={onRevoked} />}
-            <DeleteSourceDialog orgId={orgId} source={source} />
+            <DeleteSourceDialog orgId={orgId} source={source} {...(onDeleted ? { onDeleted } : {})} />
           </>
         ) : (
           <p className="field-hint">{t('sources.adminOnly')}</p>

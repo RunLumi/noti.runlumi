@@ -2,6 +2,8 @@ import { en as coreEn, type PluralMessage } from './messages.en';
 import { appEn } from './messages.app.en';
 import { vi as coreVi } from './messages.vi';
 import { appVi } from './messages.app.vi';
+import { shellEn } from './messages.shell.en';
+import { shellVi } from './messages.shell.vi';
 import { getLocale, type Locale } from './locale';
 
 /**
@@ -14,7 +16,7 @@ import { getLocale, type Locale } from './locale';
  * `vi` is checked against it by type and by `catalogue.test.ts`. If a Vietnamese id were ever
  * missing at runtime the English text is shown rather than a blank.
  */
-export const en = { ...coreEn, ...appEn } as const;
+export const en = { ...coreEn, ...appEn, ...shellEn } as const;
 export type MessageId = keyof typeof en;
 export type { PluralMessage };
 export type Params = Readonly<Record<string, string | number>>;
@@ -22,7 +24,7 @@ export type Catalogue = Readonly<Record<MessageId, string | PluralMessage>>;
 
 export const catalogues: Readonly<Record<Locale, Catalogue>> = {
   en,
-  vi: { ...coreVi, ...appVi },
+  vi: { ...coreVi, ...appVi, ...shellVi },
 };
 
 const pluralRules = new Map<Locale, Intl.PluralRules>();

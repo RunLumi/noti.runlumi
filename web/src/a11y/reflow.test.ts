@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
  * it, grids use `minmax(0, 1fr)` so long text can shrink, and long values may wrap.
  */
 const SRC = join(__dirname, '..');
-const FILES = ['setup/setup.css', 'components/state.css'].map(
+const FILES = ['setup/setup.css', 'components/state.css', 'destinations/destinations.css'].map(
   (f) => [f, readFileSync(join(SRC, f), 'utf8')] as const,
 );
 const topLevel = (css: string): string => css.replace(/@media[^{]+\{(?:[^{}]|\{[^{}]*\})*\}/g, '');

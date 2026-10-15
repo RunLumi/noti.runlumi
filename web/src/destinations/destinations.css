@@ -1,0 +1,15 @@
+/* Destinations health (ADR 0056). The table reuses the delivery log's `.delivery-table`, which
+ * stacks each row into a labelled card below 760px, so nothing scrolls sideways at 320px. */
+
+/* The row's link to its integration is the row's one action: a full-height touch target. */
+.delivery-table .destination-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  overflow-wrap: anywhere;
+}
+
+.destinations-note {
+  margin: var(--space-3) 0 0;
+  max-width: 72ch;
+}

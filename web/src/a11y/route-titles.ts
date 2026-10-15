@@ -12,6 +12,8 @@ export function routeTitleId(pathname: string): MessageId {
   if (path === '/integrations') return 'route.title.integrations';
   if (path === '/integrations/new') return 'route.title.integrationNew';
   if (path.startsWith('/integrations/')) return 'route.title.integration';
+  if (path.startsWith('/activity/')) return 'route.title.delivery';
+  if (path.startsWith('/sources/')) return 'route.title.source';
   if (path === '/setup') return 'route.title.setup';
   if (path.startsWith('/setup/')) {
     const slug = path.slice('/setup/'.length);
@@ -22,6 +24,8 @@ export function routeTitleId(pathname: string): MessageId {
       return 'sources.title';
     case '/activity':
       return 'route.title.activity';
+    case '/destinations':
+      return 'route.title.destinations';
     case '/audit':
       return 'route.title.audit';
     case '/team':

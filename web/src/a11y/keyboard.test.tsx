@@ -89,8 +89,8 @@ describe('tab order of the shell', () => {
     const user = userEvent.setup();
     await renderApp('/integrations');
     await screen.findByText('Website builds');
-    const order = await tabOrder(user, 15);
-    expect(order.slice(0, 14)).toEqual([
+    const order = await tabOrder(user, 16);
+    expect(order.slice(0, 15)).toEqual([
       'Skip to content',
       'Noti', // logo link back to the overview
       'Create another workspace', // one workspace: a static label, then a way to add another
@@ -99,6 +99,7 @@ describe('tab order of the shell', () => {
       'Sources',
       'Activity',
       '2 failed deliveries', // appears only while the server counts failed deliveries
+      'Destinations health', // ADR 0056
       'Team',
       'Audit log', // admins only
       'Settings',

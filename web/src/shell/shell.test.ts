@@ -19,6 +19,23 @@ describe('route guard list', () => {
     expect(accessFor('/audit/')).toBe('admin');
   });
 
+  it('covers the detail pages and the Destinations health page (ADR 0056)', () => {
+    expect(accessFor('/activity/del_1')).toBe('authenticated');
+    expect(accessFor('/sources/src_1')).toBe('authenticated');
+    expect(accessFor('/destinations')).toBe('authenticated');
+    expect(isShellRoute('/activity/del_1')).toBe(true);
+    expect(isShellRoute('/sources/src_1')).toBe(true);
+    // The section prefix does not swallow look-alike addresses.
+    expect(accessFor('/activityx')).toBeNull();
+    expect(accessFor('/sourcesfoo')).toBeNull();
+    expect(accessFor('/destinations/x')).toBeNull();
+  });
+
+  it('offers Destinations health to members and admins alike', () => {
+    expect(visibleNav('member').map((e) => e.to)).toContain('/destinations');
+    expect(visibleNav('admin').map((e) => e.to)).toContain('/destinations');
+  });
+
   it('answers unknown addresses with null (the 404), not a guess', () => {
     expect(accessFor('/nope')).toBeNull();
     expect(accessFor('/integrationsfoo')).toBeNull();
@@ -32,10 +49,7 @@ describe('route guard list', () => {
       .filter((f) => f.endsWith('.tsx') && !f.startsWith('__'))
       .flatMap((f) =>
         [...readFileSync(join(dir, f), 'utf8').matchAll(/createFileRoute\('([^']+)'\)/g)].map((m) =>
-          (m[1] ?? '')
-            .replace('$id', 'x')
-            .replace('$step', 'x')
-            .replace(/(.)\/$/, '$1'),
+          (m[1] ?? '').replace(/\$\w+/g, 'x').replace(/(.)\/$/, '$1'),
         ),
       );
     expect(paths.length).toBeGreaterThan(10);
@@ -158,5 +172,16 @@ describe('breadcrumbs', () => {
     expect(integration[0]?.to).toBe('/integrations');
     expect(integration[1]).toMatchObject({ to: null, integrationId: 'int_9' });
     expect(crumbsFor('/setup/destination')[0]).toEqual({ label: 'route.title.setup', to: '/setup' });
+  });
+  it('gives a delivery page and a source page their section crumb (ADR 0056)', () => {
+    expect(crumbsFor('/activity/del_1')).toEqual([
+      { label: 'route.title.activity', to: '/activity' },
+      { label: 'route.title.delivery', to: null },
+    ]);
+    expect(crumbsFor('/sources/src_1/')).toEqual([
+      { label: 'sources.title', to: '/sources' },
+      { label: 'route.title.source', to: null, sourceId: 'src_1' },
+    ]);
+    expect(crumbsFor('/destinations')).toEqual([{ label: 'route.title.destinations', to: null }]);
   });
 });

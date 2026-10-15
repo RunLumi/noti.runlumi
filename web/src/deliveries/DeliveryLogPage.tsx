@@ -26,8 +26,8 @@ interface Selected {
 export function DeliveryLogPage() {
   useLocale();
   const orgId = useOrgId();
-  const search: ActivitySearch = useSearch({ from: '/activity' });
-  const navigate = useNavigate({ from: '/activity' });
+  const search: ActivitySearch = useSearch({ from: '/activity/' });
+  const navigate = useNavigate({ from: '/activity/' });
   const integrations = useIntegrations(orgId);
   const list = useDeliveryList(orgId, toFilters(search));
   const [selected, setSelected] = useState<Selected | null>(null);

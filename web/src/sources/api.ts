@@ -123,6 +123,12 @@ export const sourcesApi = {
     if (!isRecord(body) || !Array.isArray(body.sources)) throw new ApiError('Unexpected response', 500);
     return body.sources.map(parseSource);
   },
+  /** One source of the workspace; 404 for an id another workspace owns (the server never says which). */
+  get: async (orgId: string, id: string): Promise<Source> => {
+    const body = await api<unknown>(withOrg(item(id), orgId));
+    if (!isRecord(body)) throw new ApiError('Unexpected response', 500);
+    return parseSource(body.source);
+  },
   create: async (orgId: string, body: Record<string, unknown>): Promise<SourceWithSecret> =>
     parseSourceWithSecret(
       await api<unknown>(withOrg(base, orgId), { method: 'POST', body: JSON.stringify(body) }),

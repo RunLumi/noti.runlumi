@@ -140,6 +140,16 @@ const SCENARIOS: readonly Scenario[] = [
   },
   { name: 'sources list', path: '/sources', ready: text('CI pipeline') },
   {
+    name: 'source page (deep link, ADR 0056)',
+    path: '/sources/src_1',
+    ready: heading('CI pipeline'),
+  },
+  {
+    name: 'source page, id not in this workspace (shell 404)',
+    path: '/sources/src_elsewhere',
+    ready: heading(/We can’t find that page|Không tìm thấy trang này/),
+  },
+  {
     name: 'sources empty',
     path: '/sources',
     options: { api: { sources: [] } },
@@ -173,6 +183,34 @@ const SCENARIOS: readonly Scenario[] = [
     name: 'activity error',
     path: '/activity',
     options: { api: { deliveries: 'error' } },
+    ready: () => screen.findByRole('alert'),
+  },
+  {
+    name: 'delivery page (failed, with redelivery and request id)',
+    path: '/activity/del_3',
+    ready: heading(/Delivery to Website builds|Lượt gửi đến Website builds/),
+  },
+  {
+    name: 'delivery page, id not in this workspace (shell 404)',
+    path: '/activity/del_elsewhere',
+    ready: heading(/We can’t find that page|Không tìm thấy trang này/),
+  },
+  {
+    name: 'destinations health',
+    path: '/destinations',
+    ready: () =>
+      screen.findByRole('table', { name: /Destinations and their health|Các nơi nhận và tình trạng/ }),
+  },
+  {
+    name: 'destinations health empty',
+    path: '/destinations',
+    options: { api: { integrations: [] } },
+    ready: () => screen.findByRole('heading', { name: /No destinations yet|Chưa có nơi nhận nào/ }),
+  },
+  {
+    name: 'destinations health error',
+    path: '/destinations',
+    options: { api: { integrations: 'error' } },
     ready: () => screen.findByRole('alert'),
   },
   {
@@ -354,7 +392,13 @@ describe('route coverage', () => {
     const scanned = new Set(SCENARIOS.map((s) => s.path.split('?')[0]));
     for (const path of ROUTE_PATHS)
       expect(
-        scanned.has(path.replace('$id', 'int_1').replace('$step', 'github')),
+        scanned.has(
+          path
+            .replace('$id', 'int_1')
+            .replace('$step', 'github')
+            .replace('$deliveryId', 'del_3')
+            .replace('$sourceId', 'src_1'),
+        ),
         `no axe scenario for ${path}`,
       ).toBe(true);
   });

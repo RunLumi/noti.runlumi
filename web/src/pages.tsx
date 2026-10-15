@@ -30,6 +30,7 @@ import {
   IconUsers,
   IconWebhook,
   IconBolt,
+  IconHeartbeat,
 } from '@tabler/icons-react';
 import { authApi, fetchSignupMode, invitationIdFrom, invitationPath } from './lib/api';
 import { Badge, Button, Card, Input, Notice } from './components/ui';
@@ -68,6 +69,7 @@ const NAV_ICONS = {
   '/integrations': IconWebhook,
   '/sources': IconPlugConnected,
   '/activity': IconActivity,
+  '/destinations': IconHeartbeat,
   '/team': IconUsers,
   '/audit': IconHistory,
   '/settings': IconSettings,
