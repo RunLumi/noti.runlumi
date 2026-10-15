@@ -1499,6 +1499,33 @@ table {
 .auth-form .btn {
   width: 100%;
 }
+/* Sign-up mode notice (ADR 0048): opaque, body-size text, above the form it qualifies. */
+.signup-mode-notice {
+  margin-bottom: var(--space-5);
+  font-size: 16px;
+}
+.signup-mode-notice p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.signup-mode-notice p + p {
+  margin-top: var(--space-2);
+}
+.signup-mode-title {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.signup-mode-title svg {
+  flex: none;
+  margin-top: 2px;
+}
+.notice.signup-mode-notice.notice-warning {
+  background: var(--color-amber-soft);
+  border-left-color: var(--color-signal-amber);
+}
 .auth-form label,
 .input,
 .btn {

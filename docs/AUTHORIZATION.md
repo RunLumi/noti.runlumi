@@ -117,13 +117,16 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `POST /webhooks/stripe/:endpointId` | signed webhook (`verify`) | `src/connectors/sources/provider-route.ts` |
 | `GET /health` | public | `src/index.ts` |
 | `GET /health/ready` | public | `src/index.ts` |
+| `GET /api/public/signup-mode` | public | `src/api/signup-mode.ts` |
 
 <!-- END GENERATED: routes -->
 
 Guard kinds: **capability** (a workspace member whose role holds it), **any member**, **signed-in
 session** (the handler then checks the specific membership from the database), **signed webhook**
-(signature over the raw body, tenant from our row), **Better Auth**, and **public** (`/health`
-only, which returns whether the keyring is configured and never a value).
+(signature over the raw body, tenant from our row), **Better Auth**, and **public**: the two probes,
+which return whether the Worker is configured and never a value, and `GET /api/public/signup-mode`
+(ADR 0048), which takes no input, reads no row and returns only the deployment-wide sign-up mode, never
+anything about an address.
 
 ## Adding a route
 

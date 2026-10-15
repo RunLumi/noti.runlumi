@@ -46,6 +46,24 @@ const SCENARIOS: readonly Scenario[] = [
     ready: () => screen.findByRole('button', { name: /Create account|Tạo tài khoản/ }),
   },
   {
+    name: 'sign up (by invitation only)',
+    path: '/signup',
+    options: { api: { signupMode: 'invite_only' } },
+    ready: text(/Sign-up is by invitation|Chỉ đăng ký được khi có lời mời/),
+  },
+  {
+    name: 'sign up (from an invitation link)',
+    path: '/signup?invite=inv_1',
+    options: { api: { signupMode: 'invite_only' } },
+    ready: text(/signing up from an invitation|đăng ký từ một lời mời/),
+  },
+  {
+    name: 'sign up (closed)',
+    path: '/signup',
+    options: { api: { signupMode: 'closed' } },
+    ready: text(/New accounts are not being created|Hiện không tạo tài khoản mới/),
+  },
+  {
     name: 'forgot password',
     path: '/forgot-password',
     ready: () => screen.findByRole('button', { name: /reset link|liên kết đặt lại/ }),

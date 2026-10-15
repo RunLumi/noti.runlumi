@@ -699,8 +699,9 @@ postpones; it does not make loss impossible:
   the Cloudflare dashboard, which takes effect on the next request). Reopen by setting `invite_only` again.
 - **First operator:** `wrangler secret put SIGNUP_ALLOWLIST` with your exact address (comma-separated for several; no
   domains or wildcards). Remove it once the first workspace exists and invitations take over.
-- **What a refused person sees:** the same "check your email" answer as a successful sign-up, and no mail arrives (Better
-  Auth does not reveal whether an address may sign up). The log line `signup_refused` carries only the reason
+- **What a refused person sees:** the sign-up page says up front that sign-up is by invitation or closed (it reads
+  `GET /api/public/signup-mode`, cached for a minute, ADR 0048; `closed` disables the form). A refused submit gets the same
+  answer as a successful one, and no mail arrives (Better Auth does not reveal whether an address may sign up). The log line `signup_refused` carries only the reason
   (`signup_closed` or `signup_invite_only`), never the address. If an invited person reports no verification mail, check
   that their invitation is still pending and unexpired.
 

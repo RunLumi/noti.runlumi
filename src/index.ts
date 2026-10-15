@@ -43,6 +43,7 @@ import { pruneRateLimits, RATE_LIMIT_RETENTION_MS } from './security/rate-limit'
 import { purgeExpiredAuthRecords } from './pipeline/expired-records';
 import account from './api/account';
 import sessions from './api/sessions';
+import { signupModeRoute } from './api/signup-mode';
 import { purgeRoutingDecisions } from './routing/provenance';
 import { purgeNoiseRecords, releaseHeldEvents } from './pipeline/noise-release';
 import { sweepStaleClaims } from './pipeline/sweep';
@@ -134,6 +135,8 @@ app.route('/api/integrations', testSend);
 app.route('/api/setup', setupProgress);
 app.route('/api/github', githubApi);
 app.route('/github', githubBrowser);
+// Public, deployment-wide, cacheable: the sign-up page's notice reads it (ADR 0048).
+app.get('/api/public/signup-mode', signupModeRoute);
 
 /**
  * Liveness plus configuration (F04, F10): cheap, public, and it touches no dependency, so it stays

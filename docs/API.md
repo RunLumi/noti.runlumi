@@ -829,6 +829,14 @@ is reported as `outcomeKind: "accepted"`. Latency is `last_attempt_at` minus `cr
 `created_at` has one-second resolution. Every response from the Worker carries an
 `x-request-id` header (our own id; a caller-supplied one is only logged beside it).
 
+## Sign-up mode (public)
+
+`GET /api/public/signup-mode` answers `200 {"mode": "open" | "invite_only" | "closed"}` with `Cache-Control: public,
+max-age=60` ([ADR 0048](adr/0048-signup-mode-notice-and-remove-member-dialog.md)). Unauthenticated and deployment-wide: it reads
+no input and no database row, and it never says anything about an address (whether one holds an invitation stays behind Better
+Auth's uniform sign-up answer, ADR 0047). An unset `SIGNUP_MODE` reads `open`; an unknown value reads `closed`, as enforced. Like
+every `/api` route it answers 503 in maintenance mode or when the auth tier is misconfigured; the sign-up page then shows no notice.
+
 ## Health and readiness
 
 Public, unauthenticated, `Cache-Control: no-store`, carrying the same security headers and

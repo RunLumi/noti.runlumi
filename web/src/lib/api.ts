@@ -1,6 +1,7 @@
 import { parseFilters } from '../../../src/routing/filter-input';
 import type { FilterConfig } from '../../../src/routing/filters';
 import { parseNoise, type NoiseSettings } from '../../../src/routing/noise';
+import { SIGNUP_MODES, type SignupMode } from '../../../src/auth/signup-policy';
 import { authClient, assertAuthSuccess } from './auth-client';
 import { t } from '../i18n';
 
@@ -496,6 +497,32 @@ export const githubApi = {
   },
 };
 
+/**
+ * `GET /api/public/signup-mode` (ADR 0048): whether this deployment creates accounts for anyone, only for invited
+ * addresses, or for nobody. Deployment-wide, the same for every visitor; it says nothing about an address. An
+ * answer this client does not recognise is an error, so the page shows no notice rather than a wrong one.
+ */
+export async function fetchSignupMode(): Promise<SignupMode> {
+  const body: unknown = await api<unknown>('/api/public/signup-mode');
+  const mode = isRecord(body) ? body.mode : undefined;
+  if (typeof mode !== 'string' || !(SIGNUP_MODES as readonly string[]).includes(mode))
+    // Never shown: an unreadable mode means no notice (ADR 0048).
+    throw new ApiError('unexpected_signup_mode', 500);
+  return mode as SignupMode;
+}
+
+/** An invitation id as it appears in an invitation link: short, URL-safe, nothing else (ADR 0048). */
+const INVITATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+/** The invitation id a sign-up page was opened with (`/signup?invite=<id>`), or null when there is none or it is malformed. */
+export function invitationIdFrom(search: string): string | null {
+  const id = new URLSearchParams(search).get('invite');
+  return id && INVITATION_ID.test(id) ? id : null;
+}
+
+/** Where an invitation link lives, so sign-in after verification can return to it. */
+export const invitationPath = (id: string) => '/invite?id=' + encodeURIComponent(id);
+
 export const authApi = {
   me: () => api<Me>('/api/workspace/me'),
   /** Makes `organizationId` the session's active workspace. 404 for one the caller is not in. */
@@ -512,13 +539,19 @@ export const authApi = {
     assertAuthSuccess(await authClient.signIn.passkey({}));
     return { authenticated: true };
   },
-  signup: async (email: string, password: string, name: string) => {
+  /**
+   * `invitationId` (from `/signup?invite=<id>`) makes the verification link land on sign-in with a `returnTo` of
+   * that invitation, so the new account goes straight back to accepting it. `returnTo` is validated again on
+   * sign-in (`safeReturnTo`), and the id is URL-safe by construction (`invitationIdFrom`).
+   */
+  signup: async (email: string, password: string, name: string, invitationId: string | null = null) => {
+    const after = invitationId ? '&returnTo=' + encodeURIComponent(invitationPath(invitationId)) : '';
     assertAuthSuccess(
       await authClient.signUp.email({
         name: name.trim() || email.split('@')[0],
         email,
         password,
-        callbackURL: window.location.origin + '/signin?verified=1',
+        callbackURL: window.location.origin + '/signin?verified=1' + after,
       }),
     );
     return { message: t('auth.signup.sent') };

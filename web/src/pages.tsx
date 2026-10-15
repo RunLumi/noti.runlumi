@@ -20,6 +20,8 @@ import {
   IconBell,
   IconHistory,
   IconLayoutDashboard,
+  IconLock,
+  IconMailForward,
   IconLogout,
   IconPlugConnected,
   IconPlus,
@@ -29,7 +31,7 @@ import {
   IconWebhook,
   IconBolt,
 } from '@tabler/icons-react';
-import { authApi } from './lib/api';
+import { authApi, fetchSignupMode, invitationIdFrom, invitationPath } from './lib/api';
 import { Badge, Button, Card, Input, Notice } from './components/ui';
 import { t, tp } from './i18n';
 import { LocaleSwitcher } from './i18n/LocaleSwitcher';
@@ -383,15 +385,29 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
     [busy, setBusy] = useState(false);
   const signup = mode === 'signup',
     forgot = mode === 'forgot';
+  // Sign-up says up front when it is limited (ADR 0048): Better Auth answers a refused sign-up with the same 200
+  // as an accepted one, so the page cannot learn it from the submit. Until the mode is known, or if it cannot be
+  // read, the form behaves as before and the server still decides.
+  const signupMode = useQuery({
+    queryKey: ['signup-mode'],
+    queryFn: fetchSignupMode,
+    enabled: signup,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const invitationId = signup ? invitationIdFrom(window.location.search) : null;
+  const closed = signup && signupMode.data === 'closed';
+  const inviteOnly = signup && signupMode.data === 'invite_only';
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (closed) return;
     setError('');
     setMessage('');
     setBusy(true);
     try {
       if (signup) {
-        const r = await authApi.signup(email, password, orgName);
-        setMessage(r.message);
+        const r = await authApi.signup(email, password, orgName, invitationId);
+        setMessage(inviteOnly && !invitationId ? t('auth.signup.sentInviteOnly') : r.message);
       } else if (forgot) {
         const r = await authApi.forgot(email);
         setMessage(r.message);
@@ -414,11 +430,29 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
         signup ? 'auth.signup.description' : forgot ? 'auth.forgot.description' : 'auth.signin.description',
       )}
     >
+      {closed && (
+        <Notice kind="warning" className="signup-mode-notice">
+          <p className="signup-mode-title">
+            <IconLock size={20} aria-hidden="true" /> {t('auth.signup.closed.title')}
+          </p>
+          <p>{t('auth.signup.closed.body')}</p>
+        </Notice>
+      )}
+      {inviteOnly && (
+        <Notice className="signup-mode-notice">
+          <p className="signup-mode-title">
+            <IconMailForward size={20} aria-hidden="true" />{' '}
+            {t(invitationId ? 'auth.signup.invited.title' : 'auth.signup.inviteOnly.title')}
+          </p>
+          <p>{t(invitationId ? 'auth.signup.invited.body' : 'auth.signup.inviteOnly.body')}</p>
+        </Notice>
+      )}
       <form className="auth-form" onSubmit={(e) => void submit(e)}>
         {signup && (
           <label>
             {t('auth.field.name')}
             <Input
+              disabled={closed}
               required
               maxLength={100}
               autoComplete="name"
@@ -431,6 +465,7 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
         <label>
           {t('auth.field.email')}
           <Input
+            disabled={closed}
             required
             type="email"
             autoComplete="email"
@@ -443,6 +478,7 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
           <label>
             {t('auth.field.password')}
             <Input
+              disabled={closed}
               required
               type="password"
               minLength={signup ? 12 : undefined}
@@ -456,7 +492,7 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
         )}
         {error && <Notice kind="error">{error}</Notice>}
         {message && <Notice>{message}</Notice>}
-        <Button type="submit" disabled={busy}>
+        <Button type="submit" disabled={busy || closed}>
           {busy
             ? t('auth.busy')
             : t(signup ? 'auth.submit.signup' : forgot ? 'auth.submit.forgot' : 'auth.submit.signin')}{' '}
@@ -498,7 +534,15 @@ export function AuthPage({ mode }: { mode: 'signin' | 'signup' | 'forgot' }) {
       )}
       {signup && (
         <p className="auth-switch">
-          {t('auth.haveAccount')} <Link to="/signin">{t('auth.signinLink')}</Link>
+          {t('auth.haveAccount')}{' '}
+          {invitationId ? (
+            // Back to the invitation after signing in; a plain link, as the invitation page itself uses.
+            <a href={'/signin?returnTo=' + encodeURIComponent(invitationPath(invitationId))}>
+              {t('auth.signinLink')}
+            </a>
+          ) : (
+            <Link to="/signin">{t('auth.signinLink')}</Link>
+          )}
         </p>
       )}
       {forgot && (

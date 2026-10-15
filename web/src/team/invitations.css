@@ -1,3 +1,10 @@
+/* Remove-member confirmation (ADR 0048): the four-part message, one paragraph per part, at body size. */
+.remove-member-body p {
+  margin: 0 0 var(--space-3);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
 /* Pending invitations on the Team page (ADR 0045). A reading surface: it sits on the opaque card and uses no glass. */
 .invitation-list {
   list-style: none;

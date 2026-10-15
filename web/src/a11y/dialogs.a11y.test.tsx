@@ -180,6 +180,28 @@ describe('delete workspace (alert dialog)', () => {
   });
 });
 
+describe('remove team member (alert dialog, ADR 0048)', () => {
+  it('is accessible, focuses Keep member first, traps Tab, closes on Escape and restores focus', async () => {
+    const user = userEvent.setup();
+    await renderApp('/team');
+    const trigger = await screen.findByRole('button', {
+      name: 'Remove minh@acme.test from your organization',
+    });
+    await user.click(trigger);
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove Minh Tran from Acme Studio?' });
+    await expectClean('remove member dialog open');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Keep member' })),
+    );
+    expect(await tabStaysWithin(user, dialog, 4)).toBe(true);
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});
+
 describe('delivery detail (dialog)', () => {
   const openFailed = async (user: ReturnType<typeof userEvent.setup>) => {
     await renderApp('/activity');

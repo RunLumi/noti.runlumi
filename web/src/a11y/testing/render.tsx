@@ -148,6 +148,12 @@ export interface ApiState {
   invitations: Record<string, unknown>[] | 'error';
   /** Make `POST .../invitations/:id/cancel` answer with this status instead (404 = already finished). */
   cancelInvitationStatus?: 404 | 500;
+  /** `GET /api/public/signup-mode` (ADR 0048): the deployment's mode, or `'error'` to make it fail. */
+  signupMode: 'open' | 'invite_only' | 'closed' | 'error';
+  /** Make Better Auth's `POST /api/auth/organization/remove-member` refuse with this status and message. */
+  removeMemberStatus?: 400 | 403 | 500;
+  /** The body of the last `POST /api/auth/sign-up/email`, answered with Better Auth's uniform 200. */
+  lastSignUp?: Record<string, unknown>;
   /**
    * Request paths (prefixes) that never answer, so a test can see the loading state a person sees
    * while a list is still on its way. Everything else answers at once, as before.
@@ -179,6 +185,7 @@ export const defaultApi = (): ApiState => ({
   testSend: 'ok',
   testDelivery: { state: 'sent' },
   audit: [...AUDIT_EVENTS],
+  signupMode: 'open',
 });
 
 /** A made-up value in the real `whsec_` shape; built at runtime so no literal looks like a credential. */
@@ -270,6 +277,34 @@ export function installFetch(state: ApiState): void {
       return Promise.resolve(
         state.sessions.length < before ? json({ revoked: 1 }) : json({ error: 'Not found' }, 404),
       );
+    }
+    if (method === 'GET' && path === '/api/public/signup-mode')
+      return Promise.resolve(
+        state.signupMode === 'error' ? json({ error: 'boom' }, 500) : json({ mode: state.signupMode }),
+      );
+    if (method === 'POST' && path === '/api/auth/sign-up/email') {
+      // Better Auth answers an accepted and a refused sign-up alike while verification is required (ADR 0047).
+      state.lastSignUp = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<
+        string,
+        unknown
+      >;
+      return Promise.resolve(json({ token: null, user: { id: 'user_new', email: state.lastSignUp.email } }));
+    }
+    if (method === 'POST' && path === '/api/auth/organization/remove-member') {
+      if (state.removeMemberStatus)
+        return Promise.resolve(
+          json(
+            { message: 'You are not allowed to remove this member', code: 'FORBIDDEN' },
+            state.removeMemberStatus,
+          ),
+        );
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+        memberIdOrEmail?: string;
+      };
+      const removed = (state.members as { id: string }[]).find((m) => m.id === body.memberIdOrEmail);
+      if (!removed) return Promise.resolve(json({ message: 'Member not found', code: 'NOT_FOUND' }, 400));
+      state.members = (state.members as { id: string }[]).filter((m) => m.id !== removed.id);
+      return Promise.resolve(json({ member: removed }));
     }
     if (method === 'POST' && path === '/api/workspace/active' && state.failActivate)
       return Promise.resolve(json({ error: 'boom' }, 500));

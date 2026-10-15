@@ -150,7 +150,8 @@ export function InvitePage() {
               {t('invite.signinAction')}
             </a>
             <p>
-              <Link to="/signup">{t('invite.signupLink')}</Link>
+              {/* Carries the invitation, so sign-up says so and verification returns here (ADR 0048). */}
+              <a href={'/signup?invite=' + encodeURIComponent(id)}>{t('invite.signupLink')}</a>
             </p>
           </>
         ) : (

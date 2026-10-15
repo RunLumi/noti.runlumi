@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { IconUserPlus, IconUsers, IconLogout } from '@tabler/icons-react';
@@ -10,6 +10,7 @@ import { dropOtherWorkspaces } from './workspace/switching';
 import { roleLabel } from './lib/role-label';
 import { useLocale } from './i18n/LocaleProvider';
 import { PendingInvitations } from './team/PendingInvitations';
+import { RemoveMemberDialog } from './team/RemoveMemberDialog';
 
 /** Query key for a workspace's member list. */
 export const teamKey = (orgId: string) => ['team', orgId] as const;
@@ -39,6 +40,7 @@ export function TeamManagement() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(''),
     [message, setMessage] = useState('');
+  const membersHeadingRef = useRef<HTMLHeadingElement>(null);
   const isAdmin = me.data?.user.role === 'admin';
   const refresh = () => qc.invalidateQueries({ queryKey: teamKey(orgId ?? '') });
 
@@ -81,20 +83,21 @@ export function TeamManagement() {
       setError(e instanceof Error ? e.message : t('team.members.roleError'));
     }
   }
-  async function remove(memberId: string) {
-    if (!orgId || !window.confirm(t('team.members.removeConfirm'))) return;
+  /** Confirmed in `RemoveMemberDialog`; a refusal throws back to it, so the dialog shows it and stays open. */
+  async function remove(member: Member) {
+    if (!orgId) return;
     setError('');
-    try {
-      assertAuthSuccess(
-        await authClient.organization.removeMember({
-          memberIdOrEmail: memberId,
-          organizationId: orgId,
-        }),
-      );
-      await refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : t('team.members.removeError'));
-    }
+    setMessage('');
+    assertAuthSuccess(
+      await authClient.organization.removeMember({
+        memberIdOrEmail: member.id,
+        organizationId: orgId,
+      }),
+    );
+  }
+  function removed(member: Member) {
+    setMessage(t('team.members.removed', { email: member.email }));
+    void refresh();
   }
   async function leave() {
     if (!orgId || !window.confirm(t('team.membership.leaveConfirm'))) return;
@@ -162,7 +165,7 @@ export function TeamManagement() {
         </Card>
       )}
       <Card className="panel" style={{ marginTop: 20 }}>
-        <h2>
+        <h2 ref={membersHeadingRef} tabIndex={-1}>
           <IconUsers size={19} aria-hidden="true" /> {t('team.members.title')}
         </h2>
         {team.isLoading ? (
@@ -193,13 +196,15 @@ export function TeamManagement() {
                 <Badge>{roleLabel(m.role)}</Badge>
               )}
               {isAdmin && m.userId !== me.data?.user.id && (
-                <Button
-                  variant="ghost"
-                  aria-label={t('team.members.removeFor', { email: m.email })}
-                  onClick={() => void remove(m.id)}
-                >
-                  {t('team.members.remove')}
-                </Button>
+                <RemoveMemberDialog
+                  email={m.email}
+                  name={m.name || m.email}
+                  workspace={me.data?.user.org_name ?? t('team.members.thisWorkspace')}
+                  onConfirm={() => remove(m)}
+                  onRemoved={() => removed(m)}
+                  // The row that opened the dialog goes away; the list heading takes focus instead.
+                  focusAfterRemove={membersHeadingRef}
+                />
               )}
             </div>
           ))

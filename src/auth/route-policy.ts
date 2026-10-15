@@ -439,6 +439,17 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
         'Readiness probe: reports only that D1 and the queue answer, cached for seconds; never a value, name or count.',
     },
   },
+  {
+    method: 'GET',
+    path: '/api/public/signup-mode',
+    file: 'src/api/signup-mode.ts',
+    handler: { name: 'signupModeRoute' },
+    access: {
+      kind: 'public',
+      reason:
+        'The sign-up page must say before submitting whether sign-up is open, by invitation or closed (ADR 0048). Takes no input, reads no row, answers only the deployment-wide mode; never anything about an address.',
+    },
+  },
 ];
 
 /**

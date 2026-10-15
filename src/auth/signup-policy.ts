@@ -16,8 +16,8 @@
  * What the caller sees: Better Auth answers a refused password sign-up with the same 200 it gives a
  * successful one (its anti-enumeration behaviour while email verification is required), so a refusal
  * reveals nothing, not even whether an address holds an invitation. No account row is written and no mail
- * is sent. The cost is that a refused stranger is told to check their email and nothing arrives; the sign-up
- * page does not yet say that sign-up is by invitation (ADR 0047, follow-up).
+ * is sent. So the sign-up page says up front when sign-up is limited: it reads the mode, and only the mode, from
+ * `GET /api/public/signup-mode` (src/api/signup-mode.ts, ADR 0048).
  */
 export const SIGNUP_MODES = ['open', 'invite_only', 'closed'] as const;
 export type SignupMode = (typeof SIGNUP_MODES)[number];

@@ -139,6 +139,17 @@ export const appVi = {
   'auth.error.passkey': 'Đăng nhập bằng passkey không thành công',
   'auth.signup.sent':
     'Hãy kiểm tra email để tìm liên kết xác minh. Sau đó đăng nhập để tạo hoặc tham gia không gian làm việc của bạn.',
+  'auth.signup.sentInviteOnly':
+    'Nếu địa chỉ này có lời mời, hãy kiểm tra email để tìm liên kết xác minh. Nếu không có lời mời, sẽ không có tài khoản nào được tạo và không có email nào được gửi.',
+  'auth.signup.inviteOnly.title': 'Chỉ đăng ký được khi có lời mời',
+  'auth.signup.inviteOnly.body':
+    'Nếu bạn được mời, hãy mở liên kết trong email mời và tạo tài khoản từ đó, bằng đúng địa chỉ đã nhận lời mời. Nếu không có lời mời, sẽ không có tài khoản nào được tạo và không có email nào được gửi.',
+  'auth.signup.invited.title': 'Bạn đang đăng ký từ một lời mời',
+  'auth.signup.invited.body':
+    'Hãy dùng đúng địa chỉ email đã nhận lời mời. Liên kết xác minh trong email sẽ đưa bạn tới trang đăng nhập, rồi quay lại lời mời này để chấp nhận.',
+  'auth.signup.closed.title': 'Hiện không tạo tài khoản mới',
+  'auth.signup.closed.body':
+    'Dịch vụ này đang tạm đóng đăng ký. Nếu bạn đã có tài khoản, hãy đăng nhập. Nếu chưa, hãy hỏi người vận hành dịch vụ này.',
   'auth.resend.sent': 'Nếu đủ điều kiện, một email xác minh mới đã được gửi.',
   'auth.forgot.sent': 'Nếu tài khoản tồn tại, một liên kết đặt lại sẽ được gửi.',
   'auth.verify.title': 'Xác minh email',
@@ -199,7 +210,18 @@ export const appVi = {
   'team.members.roleFor': 'Vai trò của {email}',
   'team.members.remove': 'Xóa khỏi nhóm',
   'team.members.removeFor': 'Xóa {email} khỏi tổ chức của bạn',
-  'team.members.removeConfirm': 'Xóa người này khỏi tổ chức của bạn?',
+  'team.members.thisWorkspace': 'không gian làm việc này',
+  'team.members.confirmTitle': 'Xóa {name} khỏi {workspace}?',
+  'team.members.confirmLoses':
+    '{email} mất quyền truy cập không gian làm việc này ngay lập tức: các tích hợp, nguồn, hoạt động và nhóm.',
+  'team.members.confirmKeeps':
+    'Tài khoản Lumi Noti của họ không bị xóa, và các tích hợp cùng nguồn trong không gian làm việc này vẫn tiếp tục chạy.',
+  'team.members.confirmUndo':
+    'Để đưa họ trở lại, hãy gửi lời mời mới; họ tự quyết định chấp nhận. Việc xóa được ghi vào nhật ký kiểm toán.',
+  'team.members.keep': 'Giữ thành viên',
+  'team.members.confirm': 'Xóa thành viên',
+  'team.members.removing': 'Đang xóa…',
+  'team.members.removed': 'Đã xóa {email} khỏi không gian làm việc này.',
   'team.members.removeError': 'Không xóa được thành viên',
   'team.members.roleError': 'Thay đổi vai trò bị từ chối',
   'team.invitations.title': 'Lời mời đang chờ',

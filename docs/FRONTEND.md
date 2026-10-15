@@ -375,8 +375,8 @@ cannot load is the shared four-part `ErrorPanel` with "Try again" when the failu
 Cancel is an alert dialog in the pattern of `RevokeDialog`: focus starts on "Keep invitation", Escape closes it, and only the confirm
 button sends `POST …/cancel?org=`. On success a status line names the address and says the link no longer works, and focus moves to the
 section heading, because the row that had focus has gone. A 404 (already finished, or not in this workspace) refreshes the list and
-shows the error panel; any other failure shows the error panel and keeps the list as it was. The Team page's older "Remove" control still
-uses `window.confirm`; it is not changed here.
+shows the error panel; any other failure shows the error panel and keeps the list as it was. The Team page's "Remove" control used
+`window.confirm` until ADR 0048 (next section).
 
 Controls use `.btn` (44 px). The address is 16 px, metadata 13 px, and rows wrap under the text at narrow widths (the `.team-entry`
 pattern). Strings are `team.invitations.*` in `web/src/i18n/messages.app.{en,vi}.ts`.
@@ -386,6 +386,35 @@ error and retry, cancel with focus, the 404 refresh, axe in English and Vietname
 (`pages.a11y.test.tsx`: nothing pending, list unavailable), the workspace-parameter test, and the server tests in `tests/api/invitations.test.ts`.
 **Not verified:** a real browser at 320 px, a screen reader, and a native-speaker review of the Vietnamese strings, which were written
 by the engineer and need that review before they are relied on.
+
+## Sign-up mode notice and remove-member confirmation (ADR 0048)
+
+**Sign-up notice.** `AuthPage` in sign-up mode reads `GET /api/public/signup-mode` (`fetchSignupMode` in `web/src/lib/api.ts`,
+React Query key `['signup-mode']`, one-minute `staleTime`, no retry). `invite_only` shows an info `Notice` ("Sign-up is by
+invitation": an invited person opens the link in their invitation email; without one no account is created and no email is sent)
+and keeps the form usable; after submitting, the message is conditional ("If this address has an invitation…"). `closed` shows a
+warning `Notice` ("New accounts are not being created") and disables every field and the submit button; the submit handler refuses as
+well. An unknown or unreadable answer shows no notice and leaves the decision to the server. The notice sits between the description
+and the form, at 16 px with a 20 px Tabler Outline icon (`IconMailForward`, `IconLock`), opaque, the warning in Signal Amber soft
+(`.signup-mode-notice` in `styles.css`).
+
+**Invitation flow.** The signed-out invitation page links to `/signup?invite=<id>`. With a valid id (`invitationIdFrom`: URL-safe,
+at most 128 characters, otherwise ignored), an invite-only page shows "You're signing up from an invitation" instead, the "Sign in"
+link carries `returnTo=/invite?id=<id>`, and the verification callback is `/signin?verified=1&returnTo=…`, re-validated by
+`safeReturnTo` on sign-in. `closed` disables the form with or without an invitation.
+
+**Remove member.** `web/src/team/RemoveMemberDialog.tsx` replaces `window.confirm` with the alert-dialog pattern of `RevokeDialog`:
+focus starts on "Keep member", Tab is trapped, Escape closes and returns focus to the trigger, and only "Remove member" sends. The
+description has one paragraph per part of the four-part message (who and from which workspace in the title; what they lose; what
+is kept; how to undo, and that it is audited), at 16 px (`.remove-member-body`). A refusal stays in the dialog as an error `Notice`;
+success closes it with focus on the Members heading (`finalFocus`, since the row is removed) and a status line names the address.
+"Leave organization" still uses `window.confirm` (not in scope). Strings: `auth.signup.*` and `team.members.*` in
+`web/src/i18n/messages.app.{en,vi}.ts`.
+
+Verified: jsdom with axe in English and Vietnamese (`web/src/signup-mode.test.tsx`, `web/src/team/remove-member.test.tsx`, three
+sign-up states in `pages.a11y.test.tsx`, the remove dialog's focus contract in `dialogs.a11y.test.tsx`), the hard-coded-string and
+stylesheet tests. **Not verified:** a real browser at 320 px, a screen reader, a real verification email returning to the invitation,
+and a native-speaker review of the Vietnamese.
 
 ## Current truth
 

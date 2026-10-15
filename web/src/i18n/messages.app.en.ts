@@ -137,6 +137,17 @@ export const appEn = {
   'auth.error.passkey': 'Passkey sign-in failed',
   'auth.signup.sent':
     'Check your email for a verification link. Then sign in to create or join your workspace.',
+  'auth.signup.sentInviteOnly':
+    'If this address has an invitation, check your email for a verification link. Without an invitation, no account is created and no email is sent.',
+  'auth.signup.inviteOnly.title': 'Sign-up is by invitation',
+  'auth.signup.inviteOnly.body':
+    'If you were invited, open the link in your invitation email and create your account from there, with the address the invitation was sent to. Without an invitation, no account is created and no email is sent.',
+  'auth.signup.invited.title': 'You’re signing up from an invitation',
+  'auth.signup.invited.body':
+    'Use the email address the invitation was sent to. The verification link in your email then takes you to sign in, and from there back to this invitation to accept it.',
+  'auth.signup.closed.title': 'New accounts are not being created',
+  'auth.signup.closed.body':
+    'Sign-up is closed on this service for now. If you already have an account, sign in. Otherwise, ask the person who runs this service.',
   'auth.resend.sent': 'If eligible, a new verification email has been sent.',
   'auth.forgot.sent': 'If the account exists, a reset link will be sent.',
   'auth.verify.title': 'Email verification',
@@ -197,7 +208,18 @@ export const appEn = {
   'team.members.roleFor': 'Role for {email}',
   'team.members.remove': 'Remove',
   'team.members.removeFor': 'Remove {email} from your organization',
-  'team.members.removeConfirm': 'Remove this person from your organization?',
+  'team.members.thisWorkspace': 'this workspace',
+  'team.members.confirmTitle': 'Remove {name} from {workspace}?',
+  'team.members.confirmLoses':
+    '{email} loses access to this workspace at once: its integrations, sources, activity and team.',
+  'team.members.confirmKeeps':
+    'Their Lumi Noti account is not deleted, and the integrations and sources in this workspace keep running.',
+  'team.members.confirmUndo':
+    'To bring them back, send a new invitation; they choose to accept it. The removal is recorded in the audit log.',
+  'team.members.keep': 'Keep member',
+  'team.members.confirm': 'Remove member',
+  'team.members.removing': 'Removing…',
+  'team.members.removed': '{email} was removed from this workspace.',
   'team.members.removeError': 'Cannot remove member',
   'team.members.roleError': 'Role change rejected',
   'team.invitations.title': 'Pending invitations',
