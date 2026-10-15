@@ -32,6 +32,15 @@ const { default: worker } = await import('../../src/index');
 const ORIGIN = 'https://noti.test';
 const HMAC_FIXTURE = ['test', 'hook', 'hmac'].join('-');
 const CLIENT_FIXTURE = ['test', 'client', 'value'].join('-');
+/** A plain record of a request's headers (the DOM lib in this project has no Headers iteration). */
+function headerRecord(init: HeadersInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  new Headers(init).forEach((value, key) => {
+    out[key] = value;
+  });
+  return out;
+}
+
 const INSTALLATION = 555;
 
 let db: FakeD1;
@@ -43,7 +52,7 @@ let github: {
   exchangeStatus: number;
   membership: { status: number; body: unknown };
   user: { login: string; id: number };
-  calls: { method: string; url: string; body?: string }[];
+  calls: { method: string; url: string; body?: string; headers: Record<string, string> }[];
 };
 
 function user(id: string): void {
@@ -177,6 +186,7 @@ beforeEach(() => {
       github.calls.push({
         method: init?.method ?? 'GET',
         url: url.toString(),
+        headers: headerRecord(init?.headers),
         ...(init?.body !== undefined && init.body !== null && { body: init.body as string }),
       });
       if (url.hostname === 'github.com' && url.pathname === '/login/oauth/access_token')
@@ -204,6 +214,35 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('install flow', () => {
+  it('credentials reach only GitHub, and the user token only api.github.com (spec 15 F228)', async () => {
+    await connect();
+    // Every request names one of two fixed GitHub origins (no tenant value chooses a host).
+    const origins = new Set(github.calls.map((c) => new URL(c.url).origin));
+    expect([...origins].sort()).toEqual(['https://api.github.com', 'https://github.com']);
+    expect(github.calls.length).toBeGreaterThanOrEqual(3);
+
+    const userToken = 'ghu_fixture';
+    // The OAuth user token is sent only to the API origin, as a bearer header or in the revoke body.
+    for (const call of github.calls) {
+      const origin = new URL(call.url).origin;
+      const carriesUserToken =
+        JSON.stringify(call.headers).includes(userToken) || String(call.body ?? '').includes(userToken);
+      if (carriesUserToken) expect(origin, `user token sent to ${origin}`).toBe('https://api.github.com');
+      // The client secret is ours and is used only against GitHub: the form exchange or the Basic-auth revoke.
+      const carriesClientSecret =
+        JSON.stringify(call.headers).includes(btoa(`Iv1.client:${CLIENT_FIXTURE}`)) ||
+        String(call.body ?? '').includes(encodeURIComponent(CLIENT_FIXTURE)) ||
+        String(call.body ?? '').includes(CLIENT_FIXTURE);
+      if (carriesClientSecret) expect(['https://github.com', 'https://api.github.com']).toContain(origin);
+    }
+    // Both credentials were in fact used, so the checks above are not vacuous.
+    expect(github.calls.some((c) => String(c.body ?? '').includes(CLIENT_FIXTURE))).toBe(true);
+    expect(
+      github.calls.some((c) => JSON.stringify(c.headers).includes(btoa(`Iv1.client:${CLIENT_FIXTURE}`))),
+    ).toBe(true);
+    expect(github.calls.some((c) => (c.headers.authorization ?? '') === `Bearer ${userToken}`)).toBe(true);
+  });
+
   it('binds the installation to the installing workspace after verifying access', async () => {
     const done = await connect();
     expect(done.pathname).toBe('/integrations');
