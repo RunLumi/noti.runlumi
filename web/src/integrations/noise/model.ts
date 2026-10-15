@@ -6,6 +6,7 @@ import {
   parseNoise,
   type DigestMode,
   type GroupWindow,
+  type MaxWaitSec,
   type NoiseSettings,
 } from '../../../../src/routing/noise';
 import { isValidTimeZone, localParts, nextLocalClock, parseClock } from '../../../../src/routing/noise-time';
@@ -25,6 +26,11 @@ export interface NoiseDraft {
   readonly quietEnd: string;
   readonly timezone: string;
   readonly groupWindowSec: GroupWindow;
+  /**
+   * Carried through so that saving this form does not clear a maximum wait set through the API.
+   * The form does not offer a control for it yet (ADR 0043), so it is never changed here.
+   */
+  readonly maxWaitSec: MaxWaitSec;
   readonly digest: DigestMode;
   readonly digestAt: string;
   readonly resolution: boolean;
@@ -50,6 +56,7 @@ export function emptyNoiseDraft(timezone: string = browserTimeZone()): NoiseDraf
     quietEnd: '08:00',
     timezone,
     groupWindowSec: 0,
+    maxWaitSec: 0,
     digest: 'off',
     digestAt: DEFAULT_NOISE.digestAt,
     // Off until chosen: spec 11 F152 asks for "default on", but a missing setting must never
@@ -67,6 +74,7 @@ export function draftFromSettings(settings: NoiseSettings | null): NoiseDraft {
     quietStart: settings.quietHours?.start ?? fresh.quietStart,
     quietEnd: settings.quietHours?.end ?? fresh.quietEnd,
     groupWindowSec: settings.groupWindowSec,
+    maxWaitSec: settings.maxWaitSec,
     digest: settings.digest,
     digestAt: settings.digestAt,
     resolution: settings.resolution,
@@ -79,6 +87,8 @@ function documentOf(draft: NoiseDraft, isSource: boolean): Record<string, unknow
     timezone: draft.timezone,
     quietHours: draft.quietOn ? { start: draft.quietStart, end: draft.quietEnd } : null,
     groupWindowSec: draft.groupWindowSec,
+    // A maximum wait needs a combine window; turning grouping off must always be savable.
+    maxWaitSec: draft.groupWindowSec > 0 ? draft.maxWaitSec : 0,
     digest: draft.digest,
     digestAt: draft.digestAt,
     // Resolved notices need workflow runs, which only a repository integration has.

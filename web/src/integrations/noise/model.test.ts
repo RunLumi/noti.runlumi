@@ -37,6 +37,19 @@ describe('draft and settings', () => {
   ])('round-trips through the form: %j', (s) => {
     expect(validateNoiseDraft(draftFromSettings(s), EVENTS, false)).toEqual({ ok: true, settings: s });
   });
+
+  it('keeps a maximum wait set through the API when the form saves, because the form has no control for it', () => {
+    const s = settings({ groupWindowSec: 300, maxWaitSec: 900 });
+    expect(validateNoiseDraft(draftFromSettings(s), EVENTS, false)).toEqual({ ok: true, settings: s });
+  });
+
+  it('turning grouping off is always savable, and the maximum wait goes with it', () => {
+    const draft = {
+      ...draftFromSettings(settings({ groupWindowSec: 300, maxWaitSec: 900 })),
+      groupWindowSec: 0 as const,
+    };
+    expect(validateNoiseDraft(draft, EVENTS, false)).toEqual({ ok: true, settings: null });
+  });
 });
 
 describe('validation uses the server parser and our own copy', () => {

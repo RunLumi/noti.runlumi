@@ -315,7 +315,7 @@ export function providerWebhook(kind: ProviderKind) {
       }
       if (plan.action === 'hold') {
         const [stored] = await c.env.DB.batch([
-          plan.statement,
+          ...plan.statements,
           ...dedupStatements(c.env.DB, {
             organizationId,
             integrationId: row.id,

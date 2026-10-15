@@ -37,6 +37,8 @@ export interface HeldRow {
 export interface HoldContext {
   readonly heldCount: number;
   readonly openGroupReleaseAt: number | null;
+  /** Earliest arrival still waiting in the open group (the maximum wait counts from it). */
+  readonly openGroupFirstHeldAt: number | null;
 }
 
 /** One read per noise-enabled integration per event: backlog size and the open group, if any. */
@@ -49,13 +51,39 @@ export async function readHoldContext(
   const row = await db
     .prepare(
       `SELECT COUNT(*) AS n,
-              MIN(CASE WHEN hold_reason='grouped' AND state='held' AND group_key=? THEN release_at END) AS g
+              MIN(CASE WHEN hold_reason='grouped' AND state='held' AND group_key=? THEN release_at END) AS g,
+              MIN(CASE WHEN hold_reason='grouped' AND state='held' AND group_key=? THEN held_at END) AS f
        FROM held_events
        WHERE organization_id=? AND integration_id=? AND state IN ('held','claimed')`,
     )
-    .bind(groupKey, organizationId, integrationId)
-    .first<{ n: number; g: number | null }>();
-  return { heldCount: row?.n ?? 0, openGroupReleaseAt: row?.g ?? null };
+    .bind(groupKey, groupKey, organizationId, integrationId)
+    .first<{ n: number; g: number | null; f: number | null }>();
+  return {
+    heldCount: row?.n ?? 0,
+    openGroupReleaseAt: row?.g ?? null,
+    openGroupFirstHeldAt: row?.f ?? null,
+  };
+}
+
+/**
+ * F142 maximum wait: a later update that restarts the wait moves the release of the rows already
+ * waiting in its group. Only ever later (`release_at < ?`), and only rows still `held`, so a group
+ * that a release run has claimed is not touched. Runs in the same batch as the new row's insert.
+ */
+export function extendGroupStatement(
+  db: D1Database,
+  organizationId: string,
+  integrationId: string,
+  groupKey: string,
+  releaseAt: number,
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `UPDATE held_events SET release_at=?
+       WHERE organization_id=? AND integration_id=? AND hold_reason='grouped' AND group_key=?
+         AND state='held' AND release_at<?`,
+    )
+    .bind(releaseAt, organizationId, integrationId, groupKey, releaseAt);
 }
 
 /** Display text is bounded to what the table's CHECKs admit; an over-long URL is dropped, not cut. */

@@ -27,6 +27,13 @@ export type GroupWindow = (typeof GROUP_WINDOWS)[number];
 export const DIGEST_MODES = ['off', 'hourly', 'daily'] as const;
 export type DigestMode = (typeof DIGEST_MODES)[number];
 
+/**
+ * F142 "send at least every": the longest a combined group may wait for more updates, in seconds.
+ * 0 = off. Only meaningful with a combine window (see {@link NoiseSettings.maxWaitSec}).
+ */
+export const MAX_WAIT_SECONDS = [0, 900, 3600, 14400] as const;
+export type MaxWaitSec = (typeof MAX_WAIT_SECONDS)[number];
+
 export interface NoiseSettings {
   /** IANA zone. Quiet hours, the daily digest time and the hourly boundary are all local to it. */
   readonly timezone: string;
@@ -34,6 +41,13 @@ export interface NoiseSettings {
   readonly quietHours: { readonly start: string; readonly end: string } | null;
   /** 0 = off. Otherwise: wait this long, then send what arrived as one notification. */
   readonly groupWindowSec: GroupWindow;
+  /**
+   * 0 = off: the group is sent `groupWindowSec` after its FIRST update. Otherwise each later update
+   * restarts the wait (the group is sent `groupWindowSec` after the latest one) but never later than
+   * this long after the first. When both apply the earlier time wins, so a maximum shorter than the
+   * window simply sends sooner. Requires a combine window, otherwise it would do nothing.
+   */
+  readonly maxWaitSec: MaxWaitSec;
   readonly digest: DigestMode;
   /** Local `HH:MM`, used by the daily digest. */
   readonly digestAt: string;
@@ -45,6 +59,7 @@ export const DEFAULT_NOISE: NoiseSettings = {
   timezone: 'UTC',
   quietHours: null,
   groupWindowSec: 0,
+  maxWaitSec: 0,
   digest: 'off',
   digestAt: '08:00',
   resolution: false,
@@ -58,7 +73,15 @@ export type NoiseParse =
   | { readonly ok: true; readonly value: NoiseSettings | null }
   | { readonly ok: false; readonly errors: NoiseIssue[] };
 
-const ALLOWED = new Set(['timezone', 'quietHours', 'groupWindowSec', 'digest', 'digestAt', 'resolution']);
+const ALLOWED = new Set([
+  'timezone',
+  'quietHours',
+  'groupWindowSec',
+  'maxWaitSec',
+  'digest',
+  'digestAt',
+  'resolution',
+]);
 
 /** Whether the settings change anything at all. */
 export function isActive(s: NoiseSettings): boolean {
@@ -120,6 +143,22 @@ export function parseNoise(value: unknown, path = 'noise'): NoiseParse {
     else groupWindowSec = found;
   }
 
+  let maxWaitSec: MaxWaitSec = 0;
+  if (r.maxWaitSec !== undefined) {
+    const found = MAX_WAIT_SECONDS.find((w) => w === r.maxWaitSec);
+    if (found === undefined)
+      errors.push({
+        field: `${path}.maxWaitSec`,
+        message: `Choose one of ${MAX_WAIT_SECONDS.join(', ')} seconds.`,
+      });
+    else if (found > 0 && groupWindowSec === 0)
+      errors.push({
+        field: `${path}.maxWaitSec`,
+        message: 'Turn on a combine window to use a maximum wait.',
+      });
+    else maxWaitSec = found;
+  }
+
   let digest: DigestMode = 'off';
   if (r.digest !== undefined) {
     const found = DIGEST_MODES.find((m) => m === r.digest);
@@ -142,7 +181,15 @@ export function parseNoise(value: unknown, path = 'noise'): NoiseParse {
   }
 
   if (errors.length > 0) return { ok: false, errors };
-  const settings: NoiseSettings = { timezone, quietHours, groupWindowSec, digest, digestAt, resolution };
+  const settings: NoiseSettings = {
+    timezone,
+    quietHours,
+    groupWindowSec,
+    maxWaitSec,
+    digest,
+    digestAt,
+    resolution,
+  };
   return { ok: true, value: isActive(settings) ? settings : null };
 }
 
@@ -228,6 +275,11 @@ export interface NoiseInput {
   readonly nowMs: number;
   /** Earliest release time of a still-held group row with this event's group key, if any. */
   readonly openGroupReleaseAt: number | null;
+  /**
+   * Earliest arrival of a still-held group row with this event's group key, if any. Only a
+   * maximum wait ({@link NoiseSettings.maxWaitSec}) reads it; absent means "no open group".
+   */
+  readonly openGroupFirstHeldAt?: number | null;
   /** Events currently waiting for this integration. */
   readonly heldCount: number;
 }
@@ -281,7 +333,9 @@ export function nextDigestAt(s: NoiseSettings, nowMs: number): number | null {
  *  4. inside quiet hours                            hold until quiet hours end, or the next
  *                                                   digest boundary after that if a digest is on
  *  5. a digest is on                                hold until the next digest boundary
- *  6. a group window is on                          join the open group, or open one
+ *  6. a group window is on                          join the open group, or open one; with a
+ *                                                   maximum wait the window restarts on each
+ *                                                   update, capped at the maximum from the first
  *
  * A group window that would end inside quiet hours is extended to the end of quiet hours.
  */
@@ -301,7 +355,16 @@ export function decideNoise(settings: NoiseSettings | null, input: NoiseInput): 
   // Only quiet hours and/or a digest were configured and neither applies right now.
   if (settings.groupWindowSec === 0) return { action: 'deliver', reason: 'no_noise' };
   const windowMs = settings.groupWindowSec * 1000;
-  const base = input.openGroupReleaseAt ?? input.nowMs + windowMs;
+  if (settings.maxWaitSec === 0) {
+    const base = input.openGroupReleaseAt ?? input.nowMs + windowMs;
+    return { action: 'hold', reason: 'grouped', releaseAt: outOfQuiet(settings, base) };
+  }
+  // F142 "send at least every": the wait restarts with each update, but the group is never sent
+  // later than the maximum wait after its first update. Monotone: a later update can only move the
+  // release later, and never past the cap. An overdue cap (the release job has not run) means
+  // "as soon as possible", kept strictly in the future like every other hold.
+  const cap = (input.openGroupFirstHeldAt ?? input.nowMs) + settings.maxWaitSec * 1000;
+  const base = Math.max(input.nowMs + 1, Math.min(input.nowMs + windowMs, cap));
   return { action: 'hold', reason: 'grouped', releaseAt: outOfQuiet(settings, base) };
 }
 

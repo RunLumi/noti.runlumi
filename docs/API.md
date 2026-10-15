@@ -335,6 +335,7 @@ type NoiseSettings = {
   timezone: string;                                   // IANA zone, e.g. "Asia/Ho_Chi_Minh"; default "UTC"
   quietHours: { start: string; end: string } | null;  // local "HH:MM"; may wrap midnight; start != end
   groupWindowSec: 0 | 60 | 300 | 900 | 3600;          // 0 = off (the default)
+  maxWaitSec: 0 | 900 | 3600 | 14400;                 // "send at least every": needs groupWindowSec > 0; 0 = off
   digest: 'off' | 'hourly' | 'daily';
   digestAt: string;                                   // local "HH:MM"; used by the daily digest
   resolution: boolean;                                // "Resolved" notice when a failing workflow passes again
@@ -357,7 +358,9 @@ type NoiseSettings = {
   4. Otherwise, with a group window, it joins the open group for its **group key** or opens one.
      The key is `(organization, integration, event type, repository, subject)` where subject is the
      pull request or issue number, workflow run id, pushed branch, deployment or release tag; updates
-     about different things are never combined.
+     about different things are never combined. With `maxWaitSec` set the wait restarts with each
+     update but the group is sent no later than that long after its first update (the earlier of the
+     two applies). Rows already waiting in the group move to the new time.
   5. Otherwise it is delivered.
   If 500 updates are already waiting for the integration the update is delivered instead.
 - A held update is stored as small display fields only (title, link, repo, actor, status, event

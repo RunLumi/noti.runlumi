@@ -105,6 +105,7 @@ export const INTEGRATIONS: readonly Integration[] = [
       timezone: 'Asia/Ho_Chi_Minh',
       quietHours: { start: '22:00', end: '08:00' },
       groupWindowSec: 300,
+      maxWaitSec: 0,
       digest: 'daily',
       digestAt: '08:00',
       resolution: true,

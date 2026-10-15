@@ -359,7 +359,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
       // Durable before the 2xx, exactly like a delivery. Nothing is dropped: it has a release time.
       const results = await c.env.DB.batch([
         ...opening,
-        plan.statement,
+        ...plan.statements,
         // A redelivery of an event already held or delivered is recorded as suppressed (F185).
         ...dedupStatements(c.env.DB, {
           organizationId,

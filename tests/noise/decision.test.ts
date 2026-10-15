@@ -50,6 +50,7 @@ describe('parseNoise', () => {
         timezone: HCM,
         quietHours: { start: '22:00', end: '08:00' },
         groupWindowSec: 300,
+        maxWaitSec: 0,
         digest: 'daily',
         digestAt: '09:30',
         resolution: true,
@@ -322,6 +323,138 @@ describe('decideNoise: grouping', () => {
   it('delivers immediately when grouping is off and quiet hours do not apply', () => {
     const s = settings({ timezone: 'UTC', quietHours: { start: '22:00', end: '08:00' } });
     expect(decideNoise(s, input(now))).toEqual({ action: 'deliver', reason: 'no_noise' });
+  });
+});
+
+describe('decideNoise: maximum wait (F142 "send at least every")', () => {
+  // A 5-minute combine window that restarts on each update, sent at the latest 15 minutes after the first.
+  const sliding = settings({ groupWindowSec: 300, maxWaitSec: 900, timezone: 'UTC' });
+  const t0 = utc('2026-10-14T10:00:00Z');
+  const at = (minutes: number) => t0 + minutes * 60_000;
+
+  it('without a maximum, the window stays fixed from the first update', () => {
+    const fixed = settings({ groupWindowSec: 300, timezone: 'UTC' });
+    const d = decideNoise(fixed, input(at(4), { openGroupReleaseAt: at(5), openGroupFirstHeldAt: t0 }));
+    expect(d).toEqual({ action: 'hold', reason: 'grouped', releaseAt: at(5) });
+  });
+
+  it('restarts the wait when another update joins before the maximum is reached', () => {
+    // Joining at minute 4 moves the release from minute 5 to minute 9, the window from that update.
+    const d = decideNoise(sliding, input(at(4), { openGroupReleaseAt: at(5), openGroupFirstHeldAt: t0 }));
+    expect(d).toEqual({ action: 'hold', reason: 'grouped', releaseAt: at(9) });
+  });
+
+  it('never runs past the maximum wait measured from the first update', () => {
+    // Minute 12 would restart to minute 17, but the first update was at minute 0 and the cap is 15.
+    const d = decideNoise(sliding, input(at(12), { openGroupReleaseAt: at(9), openGroupFirstHeldAt: t0 }));
+    expect(d).toEqual({ action: 'hold', reason: 'grouped', releaseAt: at(15) });
+  });
+
+  it('a later update can only move the release later, and holds at the cap', () => {
+    const d = decideNoise(sliding, input(at(14), { openGroupReleaseAt: at(15), openGroupFirstHeldAt: t0 }));
+    expect(d).toEqual({ action: 'hold', reason: 'grouped', releaseAt: at(15) });
+  });
+
+  it('the earlier of the window and the maximum applies: a long window is capped', () => {
+    const hour = settings({ groupWindowSec: 3600, maxWaitSec: 900, timezone: 'UTC' });
+    expect(decideNoise(hour, input(at(0)))).toEqual({ action: 'hold', reason: 'grouped', releaseAt: at(15) });
+  });
+
+  it('the first update of a group starts both timers', () => {
+    expect(decideNoise(sliding, input(at(2)))).toEqual({
+      action: 'hold',
+      reason: 'grouped',
+      releaseAt: at(7),
+    });
+  });
+
+  it('an overdue cap means "as soon as possible", still strictly in the future', () => {
+    const d = decideNoise(sliding, input(at(40), { openGroupReleaseAt: at(5), openGroupFirstHeldAt: t0 }));
+    expect(d).toEqual({ action: 'hold', reason: 'grouped', releaseAt: at(40) + 1 });
+  });
+
+  it('a cap that lands inside quiet hours is moved to the end of quiet hours', () => {
+    const night = settings({
+      groupWindowSec: 3600,
+      maxWaitSec: 900,
+      timezone: 'UTC',
+      quietHours: { start: '22:00', end: '08:00' },
+    });
+    // First update at 21:50 caps at 22:05, inside quiet hours (which start at 22:00). An update at
+    // 21:52 would restart the window to 22:52, so the cap decides, and the cap moves to 08:00.
+    const first = utc('2026-10-14T21:50:00Z');
+    const d = decideNoise(night, input(utc('2026-10-14T21:52:00Z'), { openGroupFirstHeldAt: first }));
+    expect(d.action).toBe('hold');
+    if (d.action === 'hold') expect(iso(d.releaseAt)).toBe('2026-10-15T08:00:00.000Z');
+  });
+
+  it('a steady stream is sent exactly at the maximum wait, group after group', () => {
+    // An update every 37 seconds for two hours. The release job sends a group once its release
+    // time has passed, so the simulation closes the group then, as the cron would.
+    let group: { first: number; release: number } | null = null;
+    const sentAfter: number[] = [];
+    for (let s = 0; s < 2 * 3600; s += 37) {
+      const now = t0 + s * 1000;
+      if (group && group.release <= now) {
+        sentAfter.push(group.release - group.first);
+        group = null;
+      }
+      const d = decideNoise(
+        sliding,
+        input(now, {
+          openGroupReleaseAt: group?.release ?? null,
+          openGroupFirstHeldAt: group?.first ?? null,
+        }),
+      );
+      if (d.action !== 'hold') throw new Error('expected a hold');
+      if (!group) group = { first: now, release: d.releaseAt };
+      else {
+        // Only ever later while the group is open.
+        expect(d.releaseAt).toBeGreaterThanOrEqual(group.release);
+        group.release = d.releaseAt;
+      }
+      expect(d.releaseAt).toBeGreaterThan(now);
+      expect(d.releaseAt).toBeLessThanOrEqual(group.first + 900_000);
+    }
+    expect(sentAfter.length).toBeGreaterThan(0);
+    // Every closed group went out at the cap: the stream never waited longer than 15 minutes.
+    expect(new Set(sentAfter)).toEqual(new Set([900_000]));
+  });
+});
+
+describe('maximum wait: parsing and storage', () => {
+  it('defaults to off and is stored with a combine window', () => {
+    expect(parseNoise({ groupWindowSec: 300 })).toMatchObject({ ok: true, value: { maxWaitSec: 0 } });
+    expect(parseNoise({ groupWindowSec: 300, maxWaitSec: 900 })).toMatchObject({
+      ok: true,
+      value: { groupWindowSec: 300, maxWaitSec: 900 },
+    });
+  });
+
+  it.each([
+    ['an off-menu maximum', { groupWindowSec: 300, maxWaitSec: 1200 }, 'noise.maxWaitSec'],
+    ['a string maximum', { groupWindowSec: 300, maxWaitSec: '900' }, 'noise.maxWaitSec'],
+    ['a maximum with no combine window', { maxWaitSec: 900 }, 'noise.maxWaitSec'],
+  ])('refuses %s', (_name, value, field) => {
+    const r = parseNoise(value);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.map((e) => e.field)).toContain(field);
+  });
+
+  it('a stored document with a maximum round-trips, and an old one without it reads as off', () => {
+    const doc = settings({ groupWindowSec: 300, maxWaitSec: 3600 });
+    expect(readStoredNoise(serializeNoise(doc))).toEqual({ kind: 'ok', settings: doc });
+    const old = JSON.stringify({
+      v: 1,
+      timezone: 'UTC',
+      groupWindowSec: 300,
+      digest: 'off',
+      digestAt: '08:00',
+    });
+    expect(readStoredNoise(old)).toEqual({
+      kind: 'ok',
+      settings: settings({ groupWindowSec: 300, maxWaitSec: 0 }),
+    });
   });
 });
 

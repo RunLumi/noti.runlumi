@@ -10,7 +10,7 @@ import {
   type HoldReason,
   type NoiseSettings,
 } from './noise';
-import { holdStatement, readHoldContext } from './noise-store';
+import { extendGroupStatement, holdStatement, readHoldContext, type HoldContext } from './noise-store';
 
 /**
  * The one place ingress asks "deliver now, or hold?" for a noise-enabled integration (ADR 0016).
@@ -47,7 +47,11 @@ export type NoisePlan =
       readonly action: 'hold';
       readonly reason: HoldReason;
       readonly releaseAt: number;
-      readonly statement: D1PreparedStatement;
+      /**
+       * The insert of the held row FIRST (routes read its result by position), then, for a maximum
+       * wait that restarted an open group, the statement that moves the group's waiting rows.
+       */
+      readonly statements: readonly D1PreparedStatement[];
     };
 
 /**
@@ -87,6 +91,7 @@ export function createNoisePlanner(db: D1Database, organizationId: string, nowMs
       const first = decideNoise(settings, { critical, nowMs, openGroupReleaseAt: null, heldCount: 0 });
       let decision = first;
       let groupKey = '';
+      let context: HoldContext | null = null;
       if (first.action === 'hold') {
         groupKey = await groupKeyOf({
           organizationId,
@@ -95,7 +100,7 @@ export function createNoisePlanner(db: D1Database, organizationId: string, nowMs
           repo: c.display.repo ?? '',
           subject: c.subject,
         });
-        const context = await readHoldContext(db, organizationId, c.integrationId, groupKey);
+        context = await readHoldContext(db, organizationId, c.integrationId, groupKey);
         decision = decideNoise(settings, { critical, nowMs, ...context });
       }
       if (decision.action === 'deliver') {
@@ -110,11 +115,8 @@ export function createNoisePlanner(db: D1Database, organizationId: string, nowMs
           settings,
         };
       }
-      return {
-        action: 'hold',
-        reason: decision.reason,
-        releaseAt: decision.releaseAt,
-        statement: holdStatement(db, {
+      const statements: D1PreparedStatement[] = [
+        holdStatement(db, {
           id: c.deliveryId,
           legacyId: c.legacyId ?? c.deliveryId,
           organizationId,
@@ -126,7 +128,18 @@ export function createNoisePlanner(db: D1Database, organizationId: string, nowMs
           resolved: c.resolved === true,
           display: c.display,
         }),
-      };
+      ];
+      // F142: a restarted window moves the rows already waiting in the group to the new release.
+      if (
+        decision.reason === 'grouped' &&
+        settings.maxWaitSec > 0 &&
+        context !== null &&
+        context.openGroupReleaseAt !== null
+      )
+        statements.push(
+          extendGroupStatement(db, organizationId, c.integrationId, groupKey, decision.releaseAt),
+        );
+      return { action: 'hold', reason: decision.reason, releaseAt: decision.releaseAt, statements };
     },
   };
 }

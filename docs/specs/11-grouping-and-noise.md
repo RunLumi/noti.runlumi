@@ -42,7 +42,7 @@ evaluated. Any pricing model that charges for suppression will make this product
 
 ## F141 — Grouping key
 
-**Priority** P1 · **Status** 🟡 SHA-256 key, organization first, 32 hex (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); `group_by` is not user-configurable, subject fixed per event kind
+**Priority** P1 · **Status** 🟡 SHA-256 key, organization first, 32 hex (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); `group_by` is not user-configurable: a configurable key was declined in ADR 0043, because every value on the closed list except narrowing would merge updates about different subjects, which F165 forbids
 
 **Story** As a user, I want related events combined, so that 40 comments on one PR produce one
 notification instead of 40.
@@ -82,7 +82,7 @@ structurally impossible rather than merely filtered.
 
 ## F142 — Group window
 
-**Priority** P1 · **Status** 🟡 Off/1/5/15/60 min window, default off, computed preview (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); not built: "Send at least every" maximum wait
+**Priority** P1 · **Status** 🟡 Off/1/5/15/60 min window, default off, computed preview (`src/routing/noise.ts`, `tests/noise/decision.test.ts`, ADR 0016); "Send at least every" maximum wait (15 min, 1 h, 4 h) in the decision, the stored document (`maxWaitSec`) and the API (ADR 0043, `tests/noise/ingress.test.ts`); not yet offered in the dashboard form, which preserves it
 
 **Story** As a user, I want a window I can reason about, so that grouping is predictable.
 
@@ -116,7 +116,7 @@ knobs are correct and opaque; ours ship as four labelled choices.
 
 ## F143 — Collapse into one message
 
-**Priority** P1 · **Status** 🟡 one message with newest item, count and capped list saying what is not shown (`src/routing/noise-render.ts`, `tests/noise/render.test.ts`, ADR 0016); Slack `text` and Discord URL rules not separately tested
+**Priority** P1 · **Status** 🟡 one message with newest item, count and capped list saying what is not shown (`src/routing/noise-render.ts`, `tests/noise/render.test.ts`, ADR 0016); Slack top-level `text` and Discord's single embed are now asserted through the renderers for group and digest summaries (`tests/noise/adapters.test.ts`, ADR 0043)
 
 **Story** As a user, I want one message listing related events, so that I can scan rather than
 scroll.

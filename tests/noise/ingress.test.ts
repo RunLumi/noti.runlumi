@@ -196,6 +196,49 @@ describe('burst grouping', () => {
   });
 });
 
+describe('maximum wait (F142)', () => {
+  // A 5-minute window that restarts on each update, sent at the latest 15 minutes after the first.
+  const sliding = settings({ groupWindowSec: 300, maxWaitSec: 900 });
+
+  it('moves every waiting row of the group to the restarted release, and never past the cap', async () => {
+    insertIntegration(h, 'i1', 'org-a', sliding);
+    const minute = (m: number) => Date.parse('2026-10-14T10:00:00Z') + m * 60_000;
+    const steps: [number, number][] = [
+      [0, 5], // the first update: release at minute 5
+      [4, 9], // restarts: minute 9
+      [8, 13], // minute 13
+      [12, 15], // would be 17, capped at 15 from the first update
+      [14, 15], // still capped
+    ];
+    for (const [i, [arrives, release]] of steps.entries()) {
+      setNow(new Date(minute(arrives)).toISOString());
+      await postGithub(h, 'issue_comment', comment(7), `gh-${i}`);
+      const rows = heldRows(h);
+      expect(rows).toHaveLength(i + 1);
+      expect(rows.every((r) => r.hold_reason === 'grouped')).toBe(true);
+      expect(new Set(rows.map((r) => r.release_at))).toEqual(new Set([minute(release)]));
+    }
+  });
+
+  it('leaves another group untouched when a different event type is grouped', async () => {
+    insertIntegration(h, 'i1', 'org-a', sliding);
+    setNow(new Date(Date.parse('2026-10-14T10:00:00Z')).toISOString());
+    await postGithub(h, 'issue_comment', comment(7), 'gh-1');
+    setNow('2026-10-14T10:04:00Z');
+    await postGithub(h, 'issue_comment', comment(8), 'gh-2');
+    const byIssue = h.db.raw
+      .prepare('SELECT group_key, release_at FROM held_events ORDER BY held_at')
+      .all() as { group_key: string; release_at: number }[];
+    const keys = new Set(byIssue.map((r) => r.group_key));
+    expect(keys.size).toBe(2);
+    // #8 opened its own window at minute 4; #7's rows did not move with it.
+    expect(byIssue.map((r) => r.release_at)).toEqual([
+      Date.parse('2026-10-14T10:05:00Z'),
+      Date.parse('2026-10-14T10:09:00Z'),
+    ]);
+  });
+});
+
 describe('digests', () => {
   it('holds non-critical updates until the next scheduled boundary', async () => {
     insertIntegration(h, 'i1', 'org-a', settings({ timezone: HCM, digest: 'daily', digestAt: '08:00' }));
