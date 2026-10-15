@@ -8,6 +8,7 @@ import {
   EXPIRED_BATCH,
   EXPIRED_INTERVAL_MS,
   EXPIRED_STATE_KEY,
+  INVITATION_PURGE_AFTER_EXPIRY_MS,
   MAJORITY_FLOOR,
   UNIT_CANARY_MS,
   purgeExpiredAuthRecords,
@@ -26,12 +27,67 @@ function session(id: string, expiresAt: number, createdAt: number = NOW - 60_000
     .run(id, 'u', `t-${id}`, expiresAt, createdAt, createdAt);
 }
 
+function invitation(id: string, expiresAt: number, status = 'pending'): void {
+  db.raw
+    .prepare(
+      'INSERT INTO invitation(id,organization_id,email,role,status,expires_at,inviter_id,created_at) VALUES(?,?,?,?,?,?,?,?)',
+    )
+    .run(id, 'org', `${id}@example.test`, 'member', status, expiresAt, 'u', NOW - 1);
+}
+
+const remainingInvitations = (): string[] =>
+  (db.raw.prepare('SELECT id FROM invitation ORDER BY id').all() as Array<{ id: string }>).map((r) => r.id);
+
 beforeEach(() => {
   db = createFakeD1();
   db.raw
     .prepare('INSERT INTO "user"(id,name,email,email_verified,created_at,updated_at) VALUES(?,?,?,?,?,?)')
     .run('u', 'U', 'u@example.test', 1, 1, 1);
   seedOrganization(db.raw, 'org');
+});
+
+describe('invitations are purged a fixed period after they expire (F237, ADR 0044)', () => {
+  it('removes an invitation of any status once it is older than the period, and keeps one inside it', async () => {
+    const edge = NOW - INVITATION_PURGE_AFTER_EXPIRY_MS;
+    invitation('inv-old-pending', edge - 1);
+    invitation('inv-old-accepted', edge - 1, 'accepted');
+    invitation('inv-old-declined', edge - 60_000, 'declined');
+    invitation('inv-inside-window', edge + 60_000, 'declined');
+    invitation('inv-recently-expired', NOW - 1000);
+    invitation('inv-live', NOW + 86_400_000);
+
+    const report = await purgeExpiredAuthRecords(db.d1, NOW);
+    expect(report).toMatchObject({ aborted: false, invitations: 3 });
+    expect(remainingInvitations()).toEqual(['inv-inside-window', 'inv-live', 'inv-recently-expired']);
+  });
+
+  it('aborts and deletes nothing when an invitation expiry is in seconds, not milliseconds', async () => {
+    invitation('inv-seconds', Math.floor((NOW - INVITATION_PURGE_AFTER_EXPIRY_MS * 2) / 1000));
+    invitation('inv-old', NOW - INVITATION_PURGE_AFTER_EXPIRY_MS * 2);
+    session('live', NOW + 60_000);
+
+    const report = await purgeExpiredAuthRecords(db.d1, NOW);
+    expect(report).toMatchObject({ aborted: true, invitations: 0, sessions: 0 });
+    expect(remainingInvitations()).toEqual(['inv-old', 'inv-seconds']);
+  });
+
+  it('is bounded per tick like the other deletes, and reports that more remain', async () => {
+    const old = NOW - INVITATION_PURGE_AFTER_EXPIRY_MS - 1;
+    const insert = db.raw.prepare(
+      'INSERT INTO invitation(id,organization_id,email,role,status,expires_at,inviter_id,created_at) VALUES(?,?,?,?,?,?,?,?)',
+    );
+    db.raw.exec('BEGIN');
+    for (let i = 0; i < EXPIRED_BATCH * 5 + 3; i++) {
+      insert.run(`bulk-${i}`, 'org', `b${i}@example.test`, 'member', 'pending', old, 'u', 1);
+    }
+    db.raw.exec('COMMIT');
+
+    const first = await purgeExpiredAuthRecords(db.d1, NOW);
+    expect(first).toMatchObject({ invitations: EXPIRED_BATCH * 5, more: true });
+    const second = await purgeExpiredAuthRecords(db.d1, NOW + EXPIRED_INTERVAL_MS);
+    expect(second).toMatchObject({ invitations: 3, more: false });
+    expect(n('invitation')).toBe(0);
+  });
 });
 
 describe('purgeExpiredAuthRecords', () => {
@@ -59,6 +115,7 @@ describe('purgeExpiredAuthRecords', () => {
       sessions: 1,
       overAgeSessions: 0,
       verifications: 1,
+      invitations: 0,
       authStates: 1,
       authRateLimits: 1,
       more: false,

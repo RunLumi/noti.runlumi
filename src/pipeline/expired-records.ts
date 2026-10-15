@@ -1,10 +1,12 @@
 /**
  * Expired authentication records (docs/specs/15 F237, docs/DATA_RETENTION.md).
  *
- * Four stores hold short-lived authentication data that nothing deleted once it expired:
+ * Five stores hold short-lived data that nothing deleted once it expired:
  *  - `session`: expired sessions (token, IP address, user agent), unusable once `expires_at` has passed, and
  *    sessions older than the absolute lifetime (`SESSION_ABSOLUTE_SECONDS`, ADR 0030) however recently used;
  *  - `verification`: one-time verification and reset records, unusable once `expires_at` has passed;
+ *  - `invitation` (F237, ADR 0044): invitations of any status, removed `INVITATION_PURGE_AFTER_EXPIRY_MS`
+ *    after their `expires_at`. An expired invitation cannot be accepted, so this removes nothing usable;
  *  - `github_auth_states`: single-use install/OAuth states (10-minute TTL), kept one day past expiry
  *    so a support question about a failed install can still be answered;
  *  - `rate_limit` (Better Auth's own counters): rows whose last request is older than a day. Its
@@ -18,9 +20,9 @@
  *
  * Sanity guard: the purge deletes by comparing a timestamp column with `Date.now()`. If a table held
  * seconds instead of milliseconds, every live row would look expired. Before deleting anything the
- * pass therefore aborts, logs `expired_purge_aborted` and deletes nothing when (a) any `session` or
- * `verification` expiry is below `UNIT_CANARY_MS` (a millisecond timestamp from this century is above
- * 1e12), or (b) a `session` table of at least `MAJORITY_FLOOR` rows would lose more than half its rows.
+ * pass therefore aborts, logs `expired_purge_aborted` and deletes nothing when (a) any `session`,
+ * `verification` or `invitation` expiry is below `UNIT_CANARY_MS` (a millisecond timestamp from this century
+ * is above 1e12), or (b) a `session` table of at least `MAJORITY_FLOOR` rows would lose more than half its rows.
  * An aborted pass does not advance the throttle, so it is retried and logs every hour until a person looks.
  *
  * UNVERIFIED: `meta.changes` for DELETE was exercised only through the Node SQLite fake, not real D1.
@@ -40,6 +42,12 @@ export const EXPIRED_STATE_KEY = 'last_expired_auth_purge_at';
 export const AUTH_STATE_GRACE_MS = 24 * 60 * 60 * 1000;
 /** A Better Auth rate-limit row untouched for this long can never be counted again. */
 export const AUTH_RATE_LIMIT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long an invitation row is kept after its `expires_at` (any status), ADR 0044. A period is needed
+ * because F237 requires every stored class to have one; 30 days leaves the invitee and the admin a month to
+ * ask about a stale invitation. Engineering judgment, for the operator to confirm.
+ */
+export const INVITATION_PURGE_AFTER_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
 
 type Db = Pick<D1Database, 'prepare'>;
 
@@ -49,6 +57,8 @@ export interface ExpiredAuthReport {
   /** Sessions removed for outliving the absolute lifetime although still being used. */
   readonly overAgeSessions: number;
   readonly verifications: number;
+  /** Invitation rows removed `INVITATION_PURGE_AFTER_EXPIRY_MS` after their expiry. */
+  readonly invitations: number;
   readonly authStates: number;
   readonly authRateLimits: number;
   readonly more: boolean;
@@ -65,6 +75,8 @@ export const PURGE_EXPIRED_SESSIONS_SQL = boundedDelete('session', 'expires_at')
 /** `?1` is `now - SESSION_ABSOLUTE_SECONDS`: a session signed in before it has reached its absolute end. */
 export const PURGE_OVER_AGE_SESSIONS_SQL = boundedDelete('session', 'created_at');
 export const PURGE_EXPIRED_VERIFICATIONS_SQL = boundedDelete('verification', 'expires_at');
+/** `?1` is `now - INVITATION_PURGE_AFTER_EXPIRY_MS`. Invitations of every status (ADR 0044). */
+export const PURGE_EXPIRED_INVITATIONS_SQL = boundedDelete('invitation', 'expires_at');
 export const PURGE_EXPIRED_AUTH_STATES_SQL = boundedDelete('github_auth_states', 'expires_at');
 export const PURGE_STALE_AUTH_RATE_LIMITS_SQL = boundedDelete('rate_limit', 'last_request');
 
@@ -123,7 +135,7 @@ async function countRows(db: Db, sql: string, ...binds: number[]): Promise<numbe
 
 /** Looks for a pass that would delete live rows; returns the first anomaly, or null. */
 async function findAnomaly(db: Db, nowMs: number): Promise<Anomaly | null> {
-  for (const table of ['session', 'verification'] as const) {
+  for (const table of ['session', 'verification', 'invitation'] as const) {
     const wrongUnit = await countRows(
       db,
       `SELECT COUNT(*) AS n FROM ${table} WHERE expires_at < ?1`,
@@ -163,6 +175,7 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
       sessions: 0,
       overAgeSessions: 0,
       verifications: 0,
+      invitations: 0,
       authStates: 0,
       authRateLimits: 0,
       more: false,
@@ -177,6 +190,7 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
       sessions: 0,
       overAgeSessions: 0,
       verifications: 0,
+      invitations: 0,
       authStates: 0,
       authRateLimits: 0,
       more: false,
@@ -190,6 +204,11 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
     nowMs - SESSION_ABSOLUTE_SECONDS * 1000,
   );
   const verifications = await drain(db, PURGE_EXPIRED_VERIFICATIONS_SQL, nowMs);
+  const invitations = await drain(
+    db,
+    PURGE_EXPIRED_INVITATIONS_SQL,
+    nowMs - INVITATION_PURGE_AFTER_EXPIRY_MS,
+  );
   const authStates = await drain(db, PURGE_EXPIRED_AUTH_STATES_SQL, nowMs - AUTH_STATE_GRACE_MS);
   const authRateLimits = await drain(
     db,
@@ -197,13 +216,19 @@ export async function purgeExpiredAuthRecords(db: Db, nowMs: number): Promise<Ex
     nowMs - AUTH_RATE_LIMIT_MAX_AGE_MS,
   );
   const more =
-    sessions.more || overAgeSessions.more || verifications.more || authStates.more || authRateLimits.more;
+    sessions.more ||
+    overAgeSessions.more ||
+    verifications.more ||
+    invitations.more ||
+    authStates.more ||
+    authRateLimits.more;
   if (!more) await markRun(db, nowMs);
   return {
     skipped: false,
     sessions: sessions.n,
     overAgeSessions: overAgeSessions.n,
     verifications: verifications.n,
+    invitations: invitations.n,
     authStates: authStates.n,
     authRateLimits: authRateLimits.n,
     more,

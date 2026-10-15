@@ -71,7 +71,10 @@ export const JOB_CADENCE: Readonly<Record<JobName, JobCadence>> = {
   ),
   routing_decisions_purge: every(CRON_INTERVAL_MS, 'Routing provenance retention.'),
   noise_purge: every(CRON_INTERVAL_MS, 'Released and failed noise-control records.'),
-  expired_auth_purge: every(CRON_INTERVAL_MS, 'Expired sessions, one-time tokens, install states.'),
+  expired_auth_purge: every(
+    CRON_INTERVAL_MS,
+    'Expired sessions, one-time tokens, invitations, install states (hourly throttle).',
+  ),
   dedup_purge: every(CRON_INTERVAL_MS, 'Expired dedup rows.'),
 };
 

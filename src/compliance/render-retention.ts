@@ -5,6 +5,7 @@
  */
 import {
   LEDGER_TABLES_OUTLIVING_PURGE,
+  NOT_STORED,
   OPERATOR_TO_DECIDE,
   PLATFORM_STORES,
   RETENTION_MATRIX,
@@ -148,6 +149,14 @@ export function renderRetentionDoc(): string {
     ...PLATFORM_STORES.map(
       (s) => `| ${cell(s.store)} | ${cell(s.holds)} | ${cell(s.retention)} | ${cell(s.enforcedBy)} |`,
     ),
+    '',
+    '## Not stored (spec rows that do not apply)',
+    '',
+    'The spec retention table (docs/specs/15 F237) names these. The code does not store them, so no period applies.',
+    '',
+    '| Spec row | Decision |',
+    '| --- | --- |',
+    ...NOT_STORED.map((n) => `| ${cell(n.spec)} | ${cell(n.reason)} |`),
     '',
     '## Deletion and its limits',
     '',

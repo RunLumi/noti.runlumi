@@ -11,13 +11,22 @@
  * Nothing in this file is a legal statement. Legal basis, controller/processor role and any
  * regulatory retention period are placeholders for the operator to decide.
  */
-import { SESSION_EXPIRES_IN_SECONDS } from '../auth/session-policy';
+import {
+  EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
+  RESET_PASSWORD_TOKEN_EXPIRES_IN_SECONDS,
+  SESSION_ABSOLUTE_SECONDS,
+  SESSION_EXPIRES_IN_SECONDS,
+} from '../auth/session-policy';
 import { RETENTION_DAYS as WORKSPACE_DELETION_GRACE_DAYS } from '../api/workspace-lifecycle';
 import { STATE_TTL_MS } from '../connectors/sources/github/install';
 import { OUTBOX_RETENTION_MS } from '../delivery/claim';
 import { DEDUP_TTL_MS } from '../delivery/dedup';
 import { HEALTH_RETENTION_MS } from '../delivery/health';
-import { AUTH_RATE_LIMIT_MAX_AGE_MS, AUTH_STATE_GRACE_MS } from '../pipeline/expired-records';
+import {
+  AUTH_RATE_LIMIT_MAX_AGE_MS,
+  AUTH_STATE_GRACE_MS,
+  INVITATION_PURGE_AFTER_EXPIRY_MS,
+} from '../pipeline/expired-records';
 import { AUDIT_RETENTION, DELIVERY_RETENTION } from '../pipeline/retention';
 import { LEGACY_OLD_TABLES } from '../pipeline/purge';
 import { FAILED_RETENTION_MS, HELD_RETENTION_MS, OPEN_FAILURE_RETENTION_MS } from '../routing/noise-store';
@@ -181,7 +190,8 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     dataHeld:
       'Session token (a usable credential, AR-1), IP address, user agent, active workspace, timestamps.',
     purpose: 'Keeps a person signed in; the IP address and user agent help a person recognise a session.',
-    retention: { kind: 'until_expiry', expiryMs: SESSION_EXPIRES_IN_SECONDS * 1000, afterExpiryMs: 0 },
+    // The outer bound: the row is removed at the first of the idle expiry and the absolute lifetime (see notes).
+    retention: { kind: 'until_expiry', expiryMs: SESSION_ABSOLUTE_SECONDS * 1000, afterExpiryMs: 0 },
     deletion: [
       { kind: 'cron_job', job: 'expired_auth_purge' },
       { kind: 'fk_cascade', parent: 'user' },
@@ -191,8 +201,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     inAccountExport: true,
     exportNote: 'Metadata only (times, IP address, user agent). The token and the row id are never exported.',
     ...placeholders,
-    notes:
-      'The session expires 30 days after its last refresh (refreshed at most daily) and 90 days after sign-in at the latest, whichever comes first (ADR 0030). The person can list and end their sessions (`/api/workspace/me/sessions`).',
+    notes: `A session is usable until ${String(SESSION_EXPIRES_IN_SECONDS / 86_400)} days after its last refresh (refreshed at most daily) and never beyond ${String(SESSION_ABSOLUTE_SECONDS / 86_400)} days after sign-in (SESSION_EXPIRES_IN_SECONDS and SESSION_ABSOLUTE_SECONDS, ADR 0030). The row is removed by the first of the two. The ${String(SESSION_ABSOLUTE_SECONDS / 86_400)}-day figure in the table is that outer bound, not the idle period. The person can list and end their sessions (\`/api/workspace/me/sessions\`).`,
   },
   {
     id: 'account',
@@ -216,14 +225,19 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     personalData: 'indirect',
     dataHeld: 'One-time verification and password-reset records (identifier, value, expiry).',
     purpose: 'Email verification and password reset.',
-    retention: { kind: 'until_expiry', expiryMs: null, afterExpiryMs: 0 },
+    retention: {
+      kind: 'until_expiry',
+      expiryMs:
+        Math.max(EMAIL_VERIFICATION_EXPIRES_IN_SECONDS, RESET_PASSWORD_TOKEN_EXPIRES_IN_SECONDS) * 1000,
+      afterExpiryMs: 0,
+    },
     deletion: [{ kind: 'cron_job', job: 'expired_auth_purge' }],
     inWorkspaceExport: false,
     inAccountExport: false,
     exportNote: 'Short-lived security records; not exported.',
     ...placeholders,
     notes:
-      'Each record carries its own expiry (UNVERIFIED: the exact lifetimes are Better Auth defaults). Rows still valid at the time of an account deletion survive until they expire.',
+      'Each record expires after its explicit lifetime, one hour for email verification and one hour for password reset (src/auth/session-policy.ts, ADR 0030), and is removed by the hourly pass after that. Rows still valid at the time of an account deletion survive until they expire.',
   },
   {
     id: 'passkey',
@@ -288,10 +302,13 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     dataHeld: 'Invitee email address, role, status, expiry, who invited them.',
     purpose: 'Lets a workspace admin invite a person.',
     retention: {
-      kind: 'not_enforced',
-      gap: 'Expired or declined invitations are kept until the workspace or the inviting account is deleted.',
+      kind: 'fixed',
+      ms: INVITATION_PURGE_AFTER_EXPIRY_MS,
+      basis: 'INVITATION_PURGE_AFTER_EXPIRY_MS (src/pipeline/expired-records.ts)',
+      note: 'Counted from the invitation expiry, whatever its status (accepted, declined or expired). Removed by the hourly expired-auth pass (ADR 0044).',
     },
     deletion: [
+      { kind: 'cron_job', job: 'expired_auth_purge' },
       { kind: 'fk_cascade', parent: 'organization' },
       { kind: 'fk_cascade', parent: 'user' },
       { kind: 'account_erasure' },
@@ -533,7 +550,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
       kind: 'fixed',
       ms: OUTBOX_RETENTION_MS,
       basis: 'OUTBOX_RETENTION_MS (src/delivery/claim.ts)',
-      note: 'Applies to rows whose delivery succeeded and to invalid rows. A row whose delivery is retained (dead-lettered, or inside the delivery retention window) is kept so it can be redelivered; orphans then go with the delivery retention.',
+      note: 'Applies to invalid rows, and to rows of deliveries that were sent, accepted or suppressed (those cannot be replayed, so the row is no longer needed). Rows of dead-lettered and failed deliveries are kept with their delivery, because a manual replay re-reads them (src/delivery/redeliver.ts). Orphans, with no delivery left, go with the delivery retention (retention_purge).',
     },
     deletion: [
       { kind: 'cron_job', job: 'outbox_reconcile' },
@@ -569,7 +586,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     exportNote: 'The most recent 2,000 rows.',
     ...placeholders,
     notes:
-      'Only terminal deliveries are purged; a dead-lettered row is kept until both its creation and its dead-lettering are older than the cutoff.',
+      'Only terminal deliveries are purged; a dead-lettered row is kept until both its creation and its dead-lettering are older than the cutoff. The spec table (docs/specs/15 F237) once said the ledger lasts as long as the workspace; the period is 90 days by default, set by ADR 0011, and that is the enforced value (ADR 0044).',
   },
   {
     id: 'delivery_attempts',
@@ -973,3 +990,35 @@ export const PLATFORM_STORES: readonly PlatformStore[] = [
 
 /** Tables that have an `organization_id` column but are deliberately not removed by the workspace purge. */
 export const LEDGER_TABLES_OUTLIVING_PURGE: readonly string[] = ['workspace_deletions'];
+
+/**
+ * Data classes the spec's retention table (docs/specs/15 F237) names that this code does not store, with the
+ * reason. A row here is a decision, not a gap. `tests/compliance/retention.test.ts` checks the schema for the
+ * claims it can check (no column named for a provider body, no table named `semantic_dedup`).
+ */
+export interface NotStored {
+  readonly id: string;
+  readonly spec: string;
+  readonly reason: string;
+}
+
+export const NOT_STORED: readonly NotStored[] = [
+  {
+    id: 'raw_provider_payload',
+    spec: 'F237: "Raw provider payload", 7 days',
+    reason:
+      'Not stored. The provider request body is verified and parsed for the request and is not written to D1 or to a queue message. What is kept is the rendered notification (notification_outbox, see its row) and routing metadata, so the payload period does not apply.',
+  },
+  {
+    id: 'normalized_envelope',
+    spec: 'F237: "Normalized envelope", same as the payload',
+    reason:
+      'The event as delivered is the rendered notification in notification_outbox, so its period is that row period, not the payload period.',
+  },
+  {
+    id: 'semantic_dedup',
+    spec: 'F237: "semantic_dedup", 7 days',
+    reason:
+      'No such table exists. Repeat events are recognised by event_dedup (the transport key) alone; an object-level dedup would need a decision and a table first.',
+  },
+];

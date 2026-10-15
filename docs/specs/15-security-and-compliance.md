@@ -663,7 +663,7 @@ passes through F12 before storage.
 
 ## F237 — Retention matrix and its enforcement
 
-**Priority** P0 · **Status** 🟡 matrix, enforcement checks and generated doc built (slice S3, `docs/DATA_RETENTION.md`); not built: per-workspace downward retention, job staleness alerts (F190), payload retention rows that do not apply (the raw payload is never stored), expired-invitation purge; the delivery ledger is purged at 90 days by default, unlike the spec's workspace lifetime · **Fixes** D15 (the magic-number half)
+**Priority** P0 · **Status** 🟡 slice 1.22 (ADR 0044): the matrix (`src/compliance/retention.ts`) has a row for every table and every removal mechanism is checked against the code (`tests/compliance/retention.test.ts`); `docs/DATA_RETENTION.md` is generated and checked; each fixed period names a constant the purge code uses; every deleting cron job is in the cadence table that the `job_stale` alert reads (F190, F192; the alert reports a count, the names are in the summary); the expired-invitation purge is built (30 days after expiry, `tests/pipeline/expired-records.test.ts`); the session, verification and outbox rows match the code; the raw payload, normalized envelope and `semantic_dedup` rows are recorded as not stored (`NOT_STORED`). **Ledger:** 90 days by default (ADR 0011), not the workspace lifetime; the table row below is amended to say so (ADR 0044). Not built: per-workspace downward retention (it needs a column, which slice 1.22 may not add without a migration; the purge statements are tenant-agnostic and would need a per-workspace cutoff), the job name inside the `job_stale` alert, a purge for accounts whose email is never verified (documented gap), drops of the retired `auth_*` tables and `legacy_orphaned_rows` (documented gaps). Legal review of the wording is out of scope (group 3). UNVERIFIED on real D1: `meta.changes` for DELETE. · **Fixes** D15 (the magic-number half)
 
 **Story** As a customer, I want to know how long you keep each kind of my data and to be able to
 ask for it to be kept for less, so that retention is a setting rather than a surprise.
@@ -675,7 +675,7 @@ ask for it to be kept for less, so that retention is a setting rather than a sur
 | --- | --- | --- | --- | --- |
 | Raw provider payload | private repo/issue content | configurable per workspace; **default 7 days** | F51 + purge job | the highest-sensitivity store |
 | Normalized envelope | the event as delivered | same as the payload | F51 | |
-| Delivery ledger + attempts | what we sent, when, with which code | as long as the workspace exists | F184 | customer-visible; required to answer "did you send this?" |
+| Delivery ledger + attempts | what we sent, when, with which code | **90 days by default**, configurable 30 to 365 (`DELIVERY_RETENTION_DAYS`, ADR 0011); amended from "as long as the workspace exists" (ADR 0044) | F184 | customer-visible; required to answer "did you send this?" |
 | `event_dedup` | transport ids and hashes | **7 days** | F171 | must exceed retry horizon + provider redelivery window |
 | `semantic_dedup` | object ids | 7 days | F171 | |
 | Dead-letter queue | delivery ids and codes | **14 d Paid / 24 h Free** | F180 | `01` records the Free ceiling |

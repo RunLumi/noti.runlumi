@@ -338,13 +338,14 @@ async function purgeNoiseState(env: Bindings): Promise<JobReport> {
   return { counters: { held: purged.held, open_failures: purged.openFailures } };
 }
 
-/** Expired sessions, one-time tokens, install states and auth rate-limit rows (F237); hourly, bounded. */
+/** Expired sessions, one-time tokens, invitations, install states and auth rate-limit rows (F237); hourly, bounded. */
 async function purgeExpiredAuth(env: Bindings): Promise<JobReport> {
   const purged = await purgeExpiredAuthRecords(env.DB, Date.now());
   const total =
     purged.sessions +
     purged.overAgeSessions +
     purged.verifications +
+    purged.invitations +
     purged.authStates +
     purged.authRateLimits;
   if (total > 0) log('info', 'expired_auth_records_purged', { ...purged });

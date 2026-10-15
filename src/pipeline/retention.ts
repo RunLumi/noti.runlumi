@@ -20,8 +20,10 @@
  *  - a delivery's attempt rows (`delivery_attempts`) are deleted first, and a delivery is only
  *    deleted once none remain, so an attempt row never outlives its delivery and a purge that is
  *    interrupted between the two statements loses nothing the next tick cannot finish;
- *  - outbox rows are only removed once no delivery row with the same id remains, so manual
- *    redelivery (which re-reads the outbox message) keeps working for every retained row.
+ *  - outbox rows of orphans (no delivery row left) are removed here. The outbox reconcile removes the
+ *    rows of sent, accepted or suppressed deliveries after 7 days; those cannot be replayed. Rows of
+ *    dead-lettered and failed deliveries stay until their delivery goes, so manual redelivery (which
+ *    re-reads the outbox message) keeps working for every retained row that can be replayed (ADR 0044).
  *
  * D1 Time Travel can still restore purged rows for up to 30 days; this is not erasure.
  *

@@ -1,16 +1,18 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   DATA_CATEGORIES,
   LEDGER_TABLES_OUTLIVING_PURGE,
+  NOT_STORED,
   OPERATOR_TO_DECIDE,
   PLATFORM_STORES,
   RETENTION_MATRIX,
   type Deletion,
 } from '../../src/compliance/retention';
 import { renderRetentionDoc } from '../../src/compliance/render-retention';
+import { JOB_CADENCE } from '../../src/observability/cadence';
 import {
   DRAINED_BEFORE_ORGANIZATION_DELETE,
   DRAINED_VIA_INSTALLATION,
@@ -26,6 +28,15 @@ import { createFakeD1 } from '../support/d1';
  */
 const root = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const read = (p: string): string => readFileSync(join(root, p), 'utf8');
+
+/** Every `.ts` file under a directory of the repository, as repository-relative paths. */
+function sourceFiles(dir: string): string[] {
+  return readdirSync(join(root, dir), { withFileTypes: true }).flatMap((entry) => {
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) return sourceFiles(rel);
+    return entry.name.endsWith('.ts') ? [rel] : [];
+  });
+}
 
 const { raw } = createFakeD1();
 
@@ -262,8 +273,71 @@ describe('periods are the ones the code and the configuration use', () => {
 
   it('keeps the documented session lifetime in step with the auth configuration', () => {
     const session = RETENTION_MATRIX.find((r) => r.id === 'session');
-    expect(session?.retention).toMatchObject({ kind: 'until_expiry', expiryMs: 30 * 86_400_000 });
+    // The row's period is the outer bound (90 days after sign-in); the 30-day idle expiry is in the notes.
+    expect(session?.retention).toMatchObject({ kind: 'until_expiry', expiryMs: 90 * 86_400_000 });
+    expect(session?.notes).toContain('30 days after its last refresh');
     expect(read('src/auth/better-auth.ts')).toContain('expiresIn: SESSION_EXPIRES_IN_SECONDS');
+    expect(read('src/auth/session-policy.ts')).toContain('SESSION_ABSOLUTE_SECONDS = 60 * 60 * 24 * 90');
+  });
+});
+
+describe('a fixed period names a constant that the code really uses', () => {
+  it('cites an exported constant in the file it names, and that constant is used by the purge code', () => {
+    const fixed = RETENTION_MATRIX.filter((r) => r.retention.kind === 'fixed');
+    expect(fixed.length).toBeGreaterThan(5);
+    for (const row of fixed) {
+      if (row.retention.kind !== 'fixed') continue;
+      const match = /^([A-Z][A-Z0-9_]+) \((src\/[^)]+)\)$/.exec(row.retention.basis);
+      expect(match, `${row.id}: basis "${row.retention.basis}" names a constant and a file`).not.toBeNull();
+      if (!match) continue;
+      const name = match[1] ?? '';
+      const file = match[2] ?? '';
+      const mentions = (path: string): number =>
+        (read(path).match(new RegExp(`\\b${name}\\b`, 'g')) ?? []).length;
+      expect(read(file), `${row.id}: ${file} exports ${name}`).toMatch(new RegExp(`export const ${name}\\b`));
+      // The declaration counts once; a use is any other mention in the file or in another source file
+      // outside the matrix, so a purge that hard-codes its own number leaves the constant unused.
+      const elsewhere = sourceFiles('src')
+        .filter((path) => path !== file && !path.startsWith('src/compliance/'))
+        .reduce((sum, path) => sum + mentions(path), 0);
+      expect(
+        mentions(file) - 1 + elsewhere,
+        `${row.id}: ${name} is used by the purge code`,
+      ).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
+
+describe('every purge job is also watched for staleness', () => {
+  it('each cron job that deletes data is in the cadence table the job_stale alert reads (F190, F192)', () => {
+    const jobs = deletions('cron_job');
+    expect(jobs.length).toBeGreaterThan(0);
+    for (const { row, d } of jobs) {
+      if (d.kind !== 'cron_job') continue;
+      expect(Object.keys(JOB_CADENCE), `${row.id}: ${d.job}`).toContain(d.job);
+    }
+  });
+});
+
+describe('data the spec lists that the code does not store', () => {
+  it('records each as a decision, with an id and a reason', () => {
+    expect(new Set(NOT_STORED.map((n) => n.id)).size).toBe(NOT_STORED.length);
+    for (const n of NOT_STORED) expect(n.reason.length, n.id).toBeGreaterThan(30);
+  });
+
+  it('has no table for the object-level dedup the spec mentions, and no column for a provider body', () => {
+    expect(tables).not.toContain('semantic_dedup');
+    const bodies = tables.flatMap((t) =>
+      columnsOf(t)
+        // A body or a raw payload is stored as itself; `body_hash` (a digest) is not one.
+        .filter((c) => /(^raw|raw_|_raw$|^body$|_body$|request_json|response_json)/i.test(c))
+        .map((c) => `${t}.${c}`),
+    );
+    expect(bodies).toEqual([]);
+  });
+
+  it('is rendered into the doc', () => {
+    expect(renderRetentionDoc()).toContain('## Not stored (spec rows that do not apply)');
   });
 });
 
