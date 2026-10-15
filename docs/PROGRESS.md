@@ -1762,6 +1762,21 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
 - **Verified:** unit and integration tests on the Node SQLite fake (`npm run check`), including axe scans of the revoke dialog in en and vi. **Not verified:** a real D1 (empty-blob binding,
   D1 error strings), a real browser, a deployed Worker's readiness view, the CI jobs of ADR 0027 on this PR.
 
+## Slice 1.16: Discord global guard and custom-webhook host controls (ADR 0029)
+
+- **Discord:** `src/delivery/egress-guard.ts` and migration `0029`. Global counters carry no tenant data. After the review of PR 63 a
+  tenant can no longer open the global breaker by itself: per-workspace (50) and per-integration (10) invalid-answer budgets in a tenant
+  table hold the offender first (`workspace_paused`); only within-budget answers count toward the global trip (1,000 per ten minutes);
+  a workspace has a fair share (600) of the pacing cap and light workspaces are admitted at the soft cap. Fails open and counts the
+  fault; alerts `egress_breaker_open` and `egress_guard_failing`. Alert-sink Discord requests bypass the guard on purpose.
+- **Custom webhook (flag stays OFF):** per-workspace allowlist (wildcards refused over shared hosting), recorded addresses,
+  re-resolution that catches a STATIC private flip only (DNS rebinding is NOT defended), records purged by last send and when the
+  integration is gone or disabled, bounded cron work, and `sendRequest` requires a branded host verification for this kind.
+- **Verified here:** fixture-based unit and consumer tests (attacker with 100 integrations does not open the breaker and a second
+  workspace keeps delivering; starvation; lifecycle; AST pins); full `npm run check`.
+- **Not verified:** real Discord or resolver; D1 concurrency of the counters; every number is engineering judgment; the shared-scope
+  429 exemption (UNVERIFIED, not applied). Blockers for the flag are in the ADR.
+
 ## Spec slice round: 1.3, 1.7, 1.10, 1.19, 1.22, 2.3, 2.13, 2.17, 2.18, 2.21, 2.22 (ADRs 0037 to 0046)
 
 Ten parallel slices, each on its own worktree, merged into this branch as one commit per slice. The

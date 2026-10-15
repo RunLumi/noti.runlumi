@@ -27,6 +27,7 @@ export const JOB_NAMES = [
   'noise_purge',
   'expired_auth_purge',
   'dedup_purge',
+  'egress_maintenance',
 ] as const;
 
 export type JobName = (typeof JOB_NAMES)[number];
@@ -76,6 +77,10 @@ export const JOB_CADENCE: Readonly<Record<JobName, JobCadence>> = {
     'Expired sessions, one-time tokens, invitations, install states (hourly throttle).',
   ),
   dedup_purge: every(CRON_INTERVAL_MS, 'Expired dedup rows.'),
+  egress_maintenance: every(
+    CRON_INTERVAL_MS,
+    'Egress-guard bucket purge; custom-webhook host re-resolution (only while the feature flag is on).',
+  ),
 };
 
 export function isJobName(value: string): value is JobName {

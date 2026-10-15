@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ERROR_CODES, ERROR_TAXONOMY } from '../../../src/platform/errors';
 import { ApiError } from '../lib/api';
 import { en } from '../i18n/messages.en';
+import { vi as viMessages } from '../i18n/messages.vi';
 import { t } from '../i18n';
 import { DELIVERY_STATES, parseDelivery, type DeliveryError } from './api';
 import { STATE_LABEL, STATE_MEANING, describeDeliveryError, failureCopy } from './copy';
@@ -122,6 +123,45 @@ describe('parseDelivery', () => {
     expect(parseDelivery(row({ correlationId: 'a b<script>' })).correlationId).toBeNull();
     expect(parseDelivery(row({ correlationId: 'x'.repeat(65) })).correlationId).toBeNull();
   });
+});
+
+describe('held-delivery reasons (ADR 0029)', () => {
+  const reasons = ['circuit_open', 'destination_paced', 'platform_paused', 'workspace_paused'] as const;
+
+  it.each(reasons)('parseDelivery keeps pausedReason %s', (reason) => {
+    expect(parseDelivery(row({ pausedReason: reason })).pausedReason).toBe(reason);
+  });
+
+  it('parseDelivery drops an unknown pausedReason', () => {
+    expect(parseDelivery(row({ pausedReason: 'exploded' })).pausedReason).toBeNull();
+  });
+
+  it.each(reasons)(
+    'the detail line and the attempt line for %s exist in English and Vietnamese',
+    (reason) => {
+      for (const catalogue of [en, viMessages] as Record<string, unknown>[]) {
+        expect(catalogue[`delivery.detail.paused.${reason}`], reason).toEqual(expect.any(String));
+        expect(catalogue[`attempts.reason.${reason}`], reason).toEqual(expect.any(String));
+      }
+    },
+  );
+
+  it('the attempt timeline maps every held reason and its 24-hour stop to a message', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./AttemptTimeline.tsx', import.meta.url), 'utf8');
+    for (const r of reasons) {
+      expect(source, r).toContain(`${r}: 'attempts.reason.${r}'`);
+      expect(source, `${r}_timeout`).toContain(`${r}_timeout: 'attempts.reason.${r}_timeout'`);
+    }
+  });
+
+  it.each(['circuit_open', 'destination_paced', 'platform_paused', 'workspace_paused'])(
+    'the 24-hour stop line for %s exists in English and Vietnamese',
+    (reason) => {
+      for (const catalogue of [en, viMessages] as Record<string, unknown>[])
+        expect(catalogue[`attempts.reason.${reason}_timeout`], reason).toEqual(expect.any(String));
+    },
+  );
 });
 
 describe('activity filters in the URL', () => {

@@ -14,6 +14,7 @@
  * What is NOT measurable without the Cloudflare Queues API or Analytics Engine and is therefore not a
  * signal: queue depth, consumer concurrency, real DLQ depth, CPU time (docs/specs/13 F198, F192).
  */
+import { FAULT_KEY, FAULT_SQL, GUARDS_OPEN_SQL, faultCount } from '../../delivery/egress-guard';
 import { sqliteTimestamp } from '../../delivery/claim';
 import type { Bindings } from '../../env';
 import { bootReport } from '../../platform/config';
@@ -39,6 +40,8 @@ export interface Signals {
   readonly sourcesDropping: number | null;
   readonly heartbeatMaxGapMs: number | null;
   readonly deadLetterStuckRows: number | null;
+  readonly egressGuardsOpen: number | null;
+  readonly egressGuardFaults: number | null;
 }
 
 /** ?1 window start (epoch ms) · ?2 cap. Seeks the partial index `delivery_attempts_dead`. */
@@ -95,6 +98,8 @@ export const SIGNAL_QUERIES: Readonly<Record<string, string>> = {
   OLDEST_PENDING_SQL,
   SOURCES_DROPPING_SQL,
   DEAD_LETTER_STUCK_SQL,
+  GUARDS_OPEN_SQL,
+  FAULT_SQL,
 };
 
 async function count(db: Db, sql: string, ...binds: readonly (string | number)[]): Promise<number> {
@@ -176,6 +181,8 @@ export async function collectSignals(
     sourcesDropping,
     heartbeatMaxGapMs,
     stuckRows,
+    egressGuardsOpen,
+    egressGuardFaults,
   ] = await Promise.all([
     safely('jobs_stale', async () => (await readJobHealth(db, nowMs)).filter((j) => j.stale).length),
     safely('outbox_stalled', async () => {
@@ -205,6 +212,11 @@ export async function collectSignals(
     ),
     safely('heartbeat_gap', () => heartbeatMaxGap(db, nowMs)),
     safely('dead_letter_stuck', () => deadLetterStuckRows(db, nowMs, THRESHOLDS.deadLetterStuckMs)),
+    safely('egress_guards_open', () => count(db, GUARDS_OPEN_SQL, nowMs, THRESHOLDS.egressGuardsOpen)),
+    safely('egress_guard_faults', async () => {
+      const row = await db.prepare(FAULT_SQL).bind(FAULT_KEY, 1).first<{ value: string }>();
+      return faultCount(row?.value, nowMs);
+    }),
   ]);
   return {
     jobsStale,
@@ -218,5 +230,7 @@ export async function collectSignals(
     sourcesDropping,
     heartbeatMaxGapMs,
     deadLetterStuckRows: stuckRows,
+    egressGuardsOpen,
+    egressGuardFaults,
   };
 }

@@ -200,6 +200,21 @@ export const LOG_EVENTS = {
     description: 'Pausing a Discord destination after a permanent failure did not persist.',
     fields: ['delivery_id', 'error'],
   },
+  egress_guard_opened: {
+    description:
+      'The platform-wide Discord guard opened: every Discord request is held until it closes (ADR 0029).',
+    fields: ['provider', 'invalid_in_window', 'trip'],
+  },
+  egress_guard_record_failed: {
+    description:
+      'A Discord egress count could not be recorded; the delivery outcome is unchanged and the fault is counted (ADR 0029).',
+    fields: ['provider', 'error'],
+  },
+  egress_guard_unreadable: {
+    description:
+      'The Discord guard could not read its counters and failed open; the fault is counted for egress_guard_failing (ADR 0029).',
+    fields: ['provider', 'error'],
+  },
   expired_auth_records_purged: {
     description: 'Expired sessions, tokens, invitations, install states and auth limits were purged.',
     fields: [
@@ -412,6 +427,11 @@ export const LOG_EVENTS = {
       'provider_status',
       'status_class',
     ],
+  },
+  webhook_host_addresses_changed: {
+    description:
+      "A custom webhook's host now resolves to different addresses (ids only, never the host or address; ADR 0029).",
+    fields: ['workspace_id', 'integration_id'],
   },
   webhook_probe_audit_capped: {
     description:

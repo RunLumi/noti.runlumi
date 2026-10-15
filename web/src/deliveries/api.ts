@@ -69,7 +69,8 @@ export interface DeliveryItem {
     readonly originalState: DeliveryState | null;
   } | null;
   /** Why a waiting delivery has not been sent although nothing failed this time. */
-  readonly pausedReason?: 'circuit_open' | 'destination_paced' | null;
+  readonly pausedReason?:
+    'circuit_open' | 'destination_paced' | 'platform_paused' | 'workspace_paused' | null;
   /**
    * The request id minted at ingress (F193): what the sender got back as `x-request-id`. Null for
    * rows older than migration 0027 and rows no request created.
@@ -247,7 +248,10 @@ export function parseDelivery(value: unknown): DeliveryItem {
     possibleDuplicate: value.possibleDuplicate === true,
     suppression: parseSuppression(value.suppression),
     pausedReason:
-      value.pausedReason === 'circuit_open' || value.pausedReason === 'destination_paced'
+      value.pausedReason === 'circuit_open' ||
+      value.pausedReason === 'destination_paced' ||
+      value.pausedReason === 'platform_paused' ||
+      value.pausedReason === 'workspace_paused'
         ? value.pausedReason
         : null,
     // A value the server would not accept as a filter is not shown as one either.

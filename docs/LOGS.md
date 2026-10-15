@@ -94,6 +94,9 @@ Event names are the existing snake_case names. Spec 13 F194 sketches dotted name
 | `delivery_stall_recovered` | A delivery stall cleared. | `firing_for_ms` |
 | `destination_health_unreadable` | Destination health could not be read; the attempt proceeds without the gate. | `delivery_id`, `error` |
 | `discord_auto_pause_failed` | Pausing a Discord destination after a permanent failure did not persist. | `delivery_id`, `error` |
+| `egress_guard_opened` | The platform-wide Discord guard opened: every Discord request is held until it closes (ADR 0029). | `provider`, `invalid_in_window`, `trip` |
+| `egress_guard_record_failed` | A Discord egress count could not be recorded; the delivery outcome is unchanged and the fault is counted (ADR 0029). | `provider`, `error` |
+| `egress_guard_unreadable` | The Discord guard could not read its counters and failed open; the fault is counted for egress_guard_failing (ADR 0029). | `provider`, `error` |
 | `expired_auth_records_purged` | Expired sessions, tokens, invitations, install states and auth limits were purged. | `skipped`, `sessions`, `overAgeSessions`, `verifications`, `invitations`, `installStates`, `rateLimitRows`, `more`, `aborted` |
 | `expired_purge_aborted` | The expired-records purge saw an anomaly and deleted nothing. | `table`, `reason`, `total`, `expired` |
 | `fingerprint_backfill_failed` | Backfilling one credential fingerprint failed; it is retried on the next sweep. | `integration_id`, `source_id`, `error` |
@@ -140,6 +143,7 @@ Event names are the existing snake_case names. Spec 13 F194 sketches dotted name
 | `summary_jobs_unreadable` | Job health could not be read for the observability summary. | `error` |
 | `summary_sink_health_unreadable` | Alert sink health could not be read for the observability summary. | `error` |
 | `unmapped_provider_response` | A destination replied with a response no classification maps (status only, never the body). | `delivery_id`, `workspace_id`, `integration_id`, `destination_kind`, `attempt`, `provider_status`, `status_class` |
+| `webhook_host_addresses_changed` | A custom webhook's host now resolves to different addresses (ids only, never the host or address; ADR 0029). | `workspace_id`, `integration_id` |
 | `webhook_probe_audit_capped` | GitHub webhook probe denials hit the per-minute audit cap; further probes are not recorded. | `limit` |
 | `workspace_purge` | A workspace past its deletion grace period was purged. | `organizationId`, `deleted`, `completed` |
 

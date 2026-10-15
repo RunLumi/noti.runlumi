@@ -33,6 +33,8 @@ const QUIET: Signals = {
   sourcesDropping: 0,
   heartbeatMaxGapMs: 0,
   deadLetterStuckRows: 0,
+  egressGuardsOpen: 0,
+  egressGuardFaults: 0,
 };
 
 let db: FakeD1;

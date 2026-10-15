@@ -1,4 +1,5 @@
 import { classifyTransportError, permanent } from './classify';
+import type { HostVerification } from './generic-webhook/verified';
 import { checkDestinationUrl, type UrlPolicyOptions } from './url-policy';
 import type { ClassifiedResponse, OutboundRequest, ProviderResponse } from './types';
 
@@ -21,6 +22,8 @@ export interface SendOptions {
   readonly timeoutMs?: number;
   /** Deployment-specific URL policy, re-applied here exactly as at write time. */
   readonly urlPolicy?: UrlPolicyOptions;
+  /** Required for `generic_webhook`: proof the host was allowlisted and resolved this send (ADR 0029). */
+  readonly hostVerification?: HostVerification;
 }
 
 /** Read at most `maxBytes` of the body, then cancel the rest of the stream. */
@@ -51,6 +54,12 @@ export async function sendRequest(
   options: SendOptions = {},
 ): Promise<ClassifiedResponse> {
   if (!checkDestinationUrl(request.kind, request.url, options.urlPolicy).ok)
+    return permanent('destination_url_rejected');
+  // A customer-chosen host is sent to only with proof of the host check for exactly this host.
+  if (
+    request.kind === 'generic_webhook' &&
+    options.hostVerification?.host !== new URL(request.url).hostname.toLowerCase()
+  )
     return permanent('destination_url_rejected');
   // EGRESS-ALLOWED: the only outbound request to a customer-configured URL (F228). The policy
   // check above and this call are one function, so nothing can change between check and use;

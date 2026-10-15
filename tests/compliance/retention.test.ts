@@ -133,7 +133,7 @@ describe('retention matrix completeness', () => {
 describe('every claimed removal mechanism exists', () => {
   it('cron_job: the job is scheduled in src/index.ts and its source file deletes from the table', () => {
     const scheduled = new Set([...read('src/index.ts').matchAll(/name: '([a-z_]+)'/g)].map((m) => m[1]));
-    const files: Record<string, string> = {
+    const files: Record<string, string | string[]> = {
       expired_auth_purge: 'src/pipeline/expired-records.ts',
       retention_purge: 'src/pipeline/retention.ts',
       outbox_reconcile: 'src/delivery/claim.ts',
@@ -141,6 +141,10 @@ describe('every claimed removal mechanism exists', () => {
       noise_purge: 'src/routing/noise-store.ts',
       dedup_purge: 'src/delivery/dedup.ts',
       rate_limit_prune: 'src/security/rate-limit.ts',
+      egress_maintenance: [
+        'src/delivery/egress-guard.ts',
+        'src/connectors/destinations/generic-webhook/host-control.ts',
+      ],
     };
     const claims = deletions('cron_job');
     expect(claims.length).toBeGreaterThan(0);
@@ -149,14 +153,14 @@ describe('every claimed removal mechanism exists', () => {
       expect(scheduled.has(d.job), `${row.id}: ${d.job} is not scheduled`).toBe(true);
       const file = files[d.job];
       expect(file, `${row.id}: no source file known for ${d.job}`).toBeDefined();
-      const source = read(file ?? '');
+      const source = [file ?? ''].flat().map(read).join('\n');
       const deletesFrom = new RegExp(
         `DELETE FROM (${row.table}|\\$\\{OUTBOX_TABLE\\}|\\$\\{table\\}|"?${row.table}"?)`,
       );
       const viaConstant = row.table === 'notification_outbox' && source.includes('${OUTBOX_TABLE}');
       expect(
         deletesFrom.test(source) || viaConstant,
-        `${row.id}: ${file} never deletes from ${row.table}`,
+        `${row.id}: ${[file ?? ''].flat().join(' and ')} never deletes from ${row.table}`,
       ).toBe(true);
     }
   });
