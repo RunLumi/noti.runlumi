@@ -30,6 +30,7 @@ interface Victim {
   sourceId: string;
   deliveryId: string;
   invitationId: string;
+  githubInstallationId: string;
 }
 interface Attack {
   name: string;
@@ -136,6 +137,7 @@ async function seedWorkspace(h: Harness, org: 'org-a' | 'org-b'): Promise<Victim
     sourceId: source.id,
     deliveryId: delivery.id,
     invitationId,
+    githubInstallationId: `gh-${org}`,
     markers: [
       org,
       integrationId,
@@ -267,6 +269,7 @@ describe.each(ATTACKERS)('$as ($own) against $victim: writes and actions', ({ as
     sourceId: 'x',
     deliveryId: 'x',
     invitationId: 'x',
+    githubInstallationId: 'x',
   })
     .filter((a) => !a.readOnly)
     .map((a) => a.name);
@@ -297,6 +300,7 @@ describe('control: the same requests succeed for their owner', () => {
     sourceId: 'x',
     deliveryId: 'x',
     invitationId: 'x',
+    githubInstallationId: 'x',
   }).filter((a) => a.vector === 'org-param' || a.vector === 'foreign-body-id');
 
   it.each(eligible.map((a) => [a.name] as const))('%s', async (name) => {

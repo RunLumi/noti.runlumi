@@ -20,7 +20,7 @@
  *   2. Sign in as the A member in a browser, copy the `Cookie` request header of any /api call.
  *   3. Write B's identifiers into a JSON file (never commit it):
  *        { "orgId": "...", "orgName": "...", "integrationId": "...", "sourceId": "...",
- *          "deliveryId": "...", "invitationId": "...",
+ *          "deliveryId": "...", "invitationId": "...", "githubInstallationId": "...",
  *          "markers": ["<B's names, endpoint id, destination tail, invitee address>"] }
  *
  * Run (Node 22.6+ strips the TypeScript policy files; the flag is needed on 22.x):
@@ -57,7 +57,14 @@ const cookie = need('DRILL_COOKIE');
 const victim = JSON.parse(readFileSync(need('DRILL_VICTIM_FILE'), 'utf8'));
 const role = process.env.DRILL_ATTACKER_ROLE ?? 'admin';
 const destructive = process.env.DRILL_ALLOW_DESTRUCTIVE === '1';
-for (const field of ['orgId', 'integrationId', 'sourceId', 'deliveryId', 'invitationId']) {
+for (const field of [
+  'orgId',
+  'integrationId',
+  'sourceId',
+  'deliveryId',
+  'invitationId',
+  'githubInstallationId',
+]) {
   if (typeof victim[field] !== 'string' || victim[field] === '') {
     console.error(`victim file is missing "${field}"`);
     process.exit(2);
@@ -69,6 +76,7 @@ const markers = [
   victim.sourceId,
   victim.deliveryId,
   victim.invitationId,
+  victim.githubInstallationId,
   ...(victim.markers ?? []),
 ];
 
