@@ -1,6 +1,7 @@
 import { repoSource } from '../../../events/canonical';
 import { SECRET_PREFIX, fromBase64 } from '../generic/encoding';
-import type { AuthMode, FieldError, SecretInput, SourceConnector } from '../types';
+import { TIMESTAMP_TOLERANCE_SECONDS } from '../generic/signature';
+import type { AuthMode, EndpointSourceConnector, FieldError, SecretInput } from '../types';
 import { GITLAB_EVENT_TYPES } from './catalog';
 import { mapGitlab } from './map';
 import { verifyGitlab } from './verify';
@@ -47,15 +48,24 @@ function parseSecret(body: Record<string, unknown>): SecretInput {
   return { ok: true, secret, authMode: mode as AuthMode, livemode: null };
 }
 
-export const gitlabConnector: SourceConnector = {
+export const gitlabConnector: EndpointSourceConnector = {
   kind: 'gitlab',
   label: 'GitLab',
   adapterVersion: '1.0.0',
   canonicalSource: (display) => repoSource('gitlab.com', display.repo),
   maxBodyBytes: MAX_BODY_BYTES,
-  // GitLab counts a 429 as a failed delivery and disables the webhook after four in a row, so a
-  // flood is absorbed with a 2xx instead (spec 06 F82).
-  onFlood: 'absorb',
+  tenantResolution: 'endpoint',
+  credentialScope: 'source',
+  // The signing-token mode (Standard Webhooks); the weaker secret-token mode signs no timestamp.
+  replayWindowSeconds: TIMESTAMP_TOLERANCE_SECONDS,
+  idempotencyKey: 'webhook-id (signed), else Idempotency-Key, else body hash',
+  ack: {
+    // GitLab counts a 429 as a failed delivery and disables the webhook after four in a row, so a
+    // flood is absorbed with a 2xx instead (spec 06 F82).
+    onFlood: 'absorb',
+    providerRetries: true,
+    ignored: 200,
+  },
   eventCatalog: GITLAB_EVENT_TYPES,
   parseSecret,
   verify: verifyGitlab,

@@ -2,7 +2,7 @@ import { canonicalFromDisplay, type CanonicalEvent } from '../../events/canonica
 import type { GenericEvent } from './generic/event';
 import { toCanonicalEvent } from './generic/event';
 import type { GithubEventType } from './github/catalog';
-import { mapGithubEvent } from './github/map';
+import { githubConnector } from './github';
 import { connectorFor } from './registry';
 import type { Display, ProviderKind } from './types';
 
@@ -28,11 +28,11 @@ export type BuildInput =
 export function buildCanonical(input: BuildInput): CanonicalEvent {
   switch (input.provider) {
     case 'github':
-      return mapGithubEvent({
-        kind: input.kind,
-        event: input.event,
+      return githubConnector.map({
+        name: input.kind,
+        body: input.event,
         eventType: input.eventType,
-        deliveryId: input.id,
+        id: input.id,
       });
     case 'generic':
       return toCanonicalEvent(input.event, input.id);

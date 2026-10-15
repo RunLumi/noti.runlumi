@@ -176,7 +176,7 @@ export function providerWebhook(kind: ProviderKind) {
     const limit = await sourceIngressLimiter(c.env, source.id, nowMs);
     if (limit.limited) {
       await recordIngressUsage(c.env.DB, source.organization_id, kind, { rateLimited: 1 }, nowMs);
-      if (connector.onFlood === 'retry')
+      if (connector.ack.onFlood === 'reject')
         return c.text('Too many requests', 429, { 'retry-after': String(limit.retryAfterSeconds) });
       // Absorb: a 4xx would count toward the provider disabling the webhook. The drop is logged
       // (source id only) and is the documented trade-off of this kind.

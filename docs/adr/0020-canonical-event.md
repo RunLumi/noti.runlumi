@@ -80,6 +80,7 @@ GitHub inside its route, generic through `toDisplayFields`, GitLab and Stripe th
    content type, deterministic mapping, no payload or personal data in the output (markers injected
    into the free-text and personal fields), bounded output under 200 KB fields, and the closed
    catalogue. A new source needs a descriptor, a case and a delivered fixture.
+   (ADR 0057 moved the descriptor into `src/` as `SourceContract`, read from the connectors themselves.)
 9. **Fixture replay (F72, F79).** `tests/fixtures/` holds documented examples (provenance table and
    rules in its README); `replay.test.ts` pushes each through the real route over the fake D1, signed
    with a run-time secret, and compares outcome, canonical event, per-integration routing and the

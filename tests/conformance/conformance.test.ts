@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SOURCE_DESCRIPTORS, type SourceDescriptor } from './descriptors';
+import { SOURCE_CONNECTORS, SOURCE_CONTRACTS } from '../../src/connectors/sources/contracts';
+import type { SourceContract } from '../../src/connectors/sources/types';
 import { CANONICAL_BUDGET_BYTES } from '../../src/events/canonical';
 import type { CanonicalEvent } from '../../src/events/canonical';
-import { EVENT_CATALOG, isCatalogSource } from '../../src/events/catalog';
+import { CATALOG_SOURCES, EVENT_CATALOG, isCatalogSource, type SourceId } from '../../src/events/catalog';
 import { canonicalSizeBytes, validateCanonicalEvent } from '../../src/events/validate';
 import { loadFixtureJson, loadManifest, type FixtureEntry } from '../fixtures/load';
 import { normalize } from './normalize';
@@ -14,8 +15,10 @@ const { default: worker } = await import('../../src/index');
 /**
  * The connector conformance suite (spec 05 F71, spec 06 F79): ONE table-driven suite that every
  * registered source must pass, run against the real ingress routes over the fake D1. A new
- * connector is not "supported" until it has a descriptor (src/connectors/sources/descriptors.ts),
- * a case below and a delivered fixture; the corpus gate in the replay suite then holds the rest.
+ * connector is not "supported" until it implements `SourceConnector` (src/connectors/sources/
+ * connector.ts), is listed in `SOURCE_CONTRACTS` (src/connectors/sources/contracts.ts), and has a
+ * case below and a delivered fixture; the corpus gate in the replay suite then holds the rest.
+ * Every contract value the suite reads is the connector's own, not a copy kept for the test.
  */
 interface Case {
   /** A delivered fixture used as the valid request. */
@@ -118,9 +121,48 @@ const writes = (rig: Rig): number => rig.count('deliveries') + rig.count('notifi
 const sameShape = async (res: Response): Promise<string> =>
   (await res.text()).replace(/,?"correlation_id":"[^"]*"/, '');
 
-describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
+const SOURCE_IDS: readonly SourceId[] = [...CATALOG_SOURCES, 'generic'];
+
+describe('the connector interface (spec 05 F71)', () => {
+  it('lists every source exactly once, and every connector is a listed contract', () => {
+    const kinds = SOURCE_CONTRACTS.map((d) => d.kind);
+    expect(new Set(kinds).size).toBe(kinds.length);
+    expect([...kinds].sort()).toEqual([...SOURCE_IDS].sort());
+    for (const connector of SOURCE_CONNECTORS) expect(SOURCE_CONTRACTS).toContain(connector);
+    // Only the generic source keeps a route that no connector object drives (ADR 0057).
+    expect(kinds.filter((k) => !SOURCE_CONNECTORS.some((x) => x.kind === k))).toEqual(['generic']);
+  });
+
+  it('pairs the tenant model with where the credential lives', () => {
+    for (const d of SOURCE_CONTRACTS)
+      expect([d.kind, d.credentialScope]).toEqual([
+        d.kind,
+        d.tenantResolution === 'installation' ? 'app' : 'source',
+      ]);
+  });
+
+  it.each(SOURCE_CONNECTORS.map((x) => [x.kind, x] as const))(
+    '%s: verify decides over raw bytes alone, without throwing on an unparseable body',
+    async (_kind, connector) => {
+      const secret = connector.tenantResolution === 'endpoint' ? connector.decoy.secret : 'app-secret';
+      const authMode = connector.tenantResolution === 'endpoint' ? connector.decoy.authMode : null;
+      for (const raw of [new TextEncoder().encode('{"truncated":'), new Uint8Array([0xff, 0xfe, 0x00])]) {
+        const verdict = await connector.verify({
+          secret,
+          authMode,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          raw,
+          nowSeconds: Math.floor(Date.now() / 1000),
+        });
+        expect(verdict.ok).toBe(false);
+      }
+    },
+  );
+});
+
+describe.each(SOURCE_CONTRACTS.map((d) => [d.kind, d] as const))(
   'connector conformance: %s',
-  (_kind, d: SourceDescriptor) => {
+  (_kind, d: SourceContract) => {
     const c = CASES[d.kind] as Case;
     const entry = entryOf(c.fixture);
     const valid = (rig: Rig) => rig.encode(loadFixtureJson(entry));
@@ -266,6 +308,29 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
         });
       }
 
+      it(`a flood after authentication is answered by the declared policy (${d.ack.onFlood}) and writes nothing`, async () => {
+        const rig = await createRig(d.kind, worker);
+        const now = Date.now();
+        // The current and the next window, so a minute boundary during the test cannot reset it.
+        for (const at of [now, now + 60_000])
+          rig.h.db.raw
+            .prepare('INSERT INTO api_rate_limits(key,window_start,count) VALUES(?,?,?)')
+            .run(rig.floodKey, Math.floor(at / 60_000) * 60_000, 1_000_000);
+        const res = await rig.post(valid(rig), { headers: entry.headers });
+        if (d.ack.onFlood === 'reject') {
+          expect(res.status).toBe(429);
+          expect(Number(res.headers.get('retry-after'))).toBeGreaterThan(0);
+        } else {
+          expect(res.status).toBe(200);
+          expect(await res.json()).toMatchObject({ accepted: false, dropped: 'rate_limited' });
+        }
+        expect(writes(rig)).toBe(0);
+        // Unauthenticated traffic never reaches the flood counter: a forged request is still 401.
+        expect((await rig.post(valid(rig), { headers: entry.headers, signature: 'forged' })).status).toBe(
+          401,
+        );
+      });
+
       it('the same event twice is delivered once per integration, and a fresh signature or timestamp is not a new identity', async () => {
         const rig = await createRig(d.kind, worker);
         const body = valid(rig);
@@ -410,8 +475,12 @@ describe.each(SOURCE_DESCRIPTORS.map((d) => [d.kind, d] as const))(
         const res = await rig.post(rig.encode(loadFixtureJson(unsupported as FixtureEntry)), {
           headers: (unsupported as FixtureEntry).headers,
         });
-        expect(res.status).toBeLessThan(300);
+        expect(res.status).toBe(d.ack.ignored);
         expect(writes(rig)).toBe(0);
+      });
+    } else {
+      it('declares no ignored outcome when it has no catalogue', () => {
+        expect(d.ack.ignored).toBeNull();
       });
     }
   },

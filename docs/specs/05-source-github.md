@@ -681,7 +681,7 @@ leaked token stays valid at GitHub.
 
 ## F71 — Connector contract conformance
 
-**Priority** P0 · **Status** 🟡 `SourceDescriptor` (`tests/conformance/descriptors.ts`) plus one conformance suite run against GitHub, generic, GitLab and Stripe (`tests/conformance/conformance.test.ts`); not built: the full `SourceAdapter` interface (`parse`, `capabilities`, `health`) as one type
+**Priority** P0 · **Status** 🟡 one typed `SourceConnector` (`src/connectors/sources/connector.ts`, endpoint and installation variants) implemented by GitHub, GitLab and Stripe, the GitHub route driven by it, contracts in `src/connectors/sources/contracts.ts` and one conformance suite run against all four sources including GitHub (`tests/conformance/conformance.test.ts`, `tests/github/connector.test.ts`, ADR 0057); not built: `parse`, `capabilities()`, `health()`, the generic route behind a connector object
 
 **Story** As a maintainer, I want every source to satisfy one interface, so that adding
 GitLab or Stripe does not mean re-learning the architecture.

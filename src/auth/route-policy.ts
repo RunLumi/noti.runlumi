@@ -399,7 +399,7 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
     path: '/webhooks/github',
     file: 'src/connectors/sources/github/route.ts',
     handler: { name: 'githubWebhook' },
-    access: { kind: 'signed-webhook', verifiedBy: 'verifyGithubSignature' },
+    access: { kind: 'signed-webhook', verifiedBy: 'verify' },
   },
   {
     method: 'POST',

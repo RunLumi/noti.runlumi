@@ -1,10 +1,12 @@
 import { gitlabConnector } from './gitlab';
 import { stripeConnector } from './stripe';
-import { PROVIDER_KINDS, type ProviderKind, type SourceConnector } from './types';
+import { PROVIDER_KINDS, type EndpointSourceConnector, type ProviderKind } from './types';
 
 /**
- * The provider connectors, by `sources.kind`. Registering a connector here is what makes its
- * route, API kind, event catalogue and setup guidance exist; there is no other switch.
+ * The endpoint provider connectors, by `sources.kind`. Registering a connector here is what makes
+ * its route, API kind, event catalogue and setup guidance exist; there is no other switch. The
+ * GitHub (installation) connector and the generic contract are listed with these in
+ * `./contracts.ts`, which this module does not import so the dashboard never pulls in Worker code.
  *
  * Sentry is intentionally NOT registered (spec 06 F89, ADR 0015): its webhook signature is
  * documented as an HMAC over a re-serialised body with a non-constant-time comparison and no
@@ -12,7 +14,7 @@ import { PROVIDER_KINDS, type ProviderKind, type SourceConnector } from './types
  * raw-bytes behaviour. `tests/sources/registry.test.ts` fails if a connector named `sentry`
  * appears without that evidence being recorded.
  */
-const CONNECTORS: Readonly<Record<ProviderKind, SourceConnector>> = {
+const CONNECTORS: Readonly<Record<ProviderKind, EndpointSourceConnector>> = {
   gitlab: gitlabConnector,
   stripe: stripeConnector,
 };
@@ -21,7 +23,7 @@ export function isProviderKind(value: unknown): value is ProviderKind {
   return typeof value === 'string' && (PROVIDER_KINDS as readonly string[]).includes(value);
 }
 
-export function connectorFor(kind: ProviderKind): SourceConnector {
+export function connectorFor(kind: ProviderKind): EndpointSourceConnector {
   return CONNECTORS[kind];
 }
 

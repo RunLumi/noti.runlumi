@@ -1,7 +1,7 @@
-import type { FieldError, SecretInput, SourceConnector } from '../types';
+import type { EndpointSourceConnector, FieldError, SecretInput } from '../types';
 import { STRIPE_EVENT_TYPES } from './catalog';
 import { mapStripe } from './map';
-import { verifyStripe } from './verify';
+import { STRIPE_TOLERANCE_SECONDS, verifyStripe } from './verify';
 
 /**
  * Stripe source (spec 06 F84–F86, ADR 0015), snapshot payloads. Stripe generates the endpoint
@@ -37,15 +37,23 @@ function parseSecret(body: Record<string, unknown>, mode: 'create' | 'rotate'): 
   return { ok: true, secret, authMode: null, livemode };
 }
 
-export const stripeConnector: SourceConnector = {
+export const stripeConnector: EndpointSourceConnector = {
   kind: 'stripe',
   label: 'Stripe',
   adapterVersion: '1.0.0',
   // Connect/account ids are never read, so the source is the product, not a tenant.
   canonicalSource: () => 'urn:lumi:noti:stripe',
   maxBodyBytes: MAX_BODY_BYTES,
-  // Stripe retries a 429 with backoff for up to three days, so asking it to retry loses nothing.
-  onFlood: 'retry',
+  tenantResolution: 'endpoint',
+  credentialScope: 'source',
+  replayWindowSeconds: STRIPE_TOLERANCE_SECONDS,
+  idempotencyKey: 'event id in the body',
+  ack: {
+    // Stripe retries a 429 with backoff for up to three days, so asking it to retry loses nothing.
+    onFlood: 'reject',
+    providerRetries: true,
+    ignored: 200,
+  },
   eventCatalog: STRIPE_EVENT_TYPES,
   parseSecret,
   verify: verifyStripe,

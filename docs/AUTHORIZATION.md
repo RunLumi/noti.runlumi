@@ -112,7 +112,7 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `GET /api/github/installations` | capability `integration.read` | `src/api/github.ts` |
 | `GET /github/setup` | signed-in session; membership checked in the handler | `src/api/github.ts` |
 | `GET /github/callback` | signed-in session; membership checked in the handler | `src/api/github.ts` |
-| `POST /webhooks/github` | signed webhook (`verifyGithubSignature`) | `src/connectors/sources/github/route.ts` |
+| `POST /webhooks/github` | signed webhook (`verify`) | `src/connectors/sources/github/route.ts` |
 | `POST /webhooks/generic/:endpointId` | signed webhook (`verifyStandardWebhook`) | `src/connectors/sources/generic/route.ts` |
 | `POST /webhooks/gitlab/:endpointId` | signed webhook (`verify`) | `src/connectors/sources/provider-route.ts` |
 | `POST /webhooks/stripe/:endpointId` | signed webhook (`verify`) | `src/connectors/sources/provider-route.ts` |

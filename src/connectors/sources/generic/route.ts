@@ -19,6 +19,7 @@ import { displayOf } from '../../../events/canonical';
 import { validateCanonicalEvent } from '../../../events/validate';
 import { boundedEventId } from '../../../events/id';
 import { buildCanonical } from '../build';
+import { GENERIC_MAX_BODY_BYTES } from './contract';
 import { parseGenericEvent } from './event';
 import { openSourceSecret, type SourceCredentialRow } from './secret';
 import { verifyStandardWebhook } from './signature';
@@ -33,8 +34,8 @@ import { verifyStandardWebhook } from './signature';
  * 202 is returned only after the delivery and outbox rows have committed.
  */
 
-/** Hard cap on an inbound body (256 KiB). Generic events are small by contract. */
-export const MAX_BODY_BYTES = 256 * 1024;
+/** Hard cap on an inbound body (256 KiB). Generic events are small by contract (./contract.ts). */
+export const MAX_BODY_BYTES = GENERIC_MAX_BODY_BYTES;
 
 const ENDPOINT_ID = /^[A-Za-z0-9_-]{22,64}$/;
 

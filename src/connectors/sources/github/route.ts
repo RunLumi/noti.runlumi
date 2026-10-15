@@ -3,16 +3,13 @@ import { SUMMARY_MAX_CHARS, type Bindings, type DeliveryMessage } from '../../..
 import { displayOf, routingFactsOf } from '../../../events/canonical';
 import { validateCanonicalEvent } from '../../../events/validate';
 import { isJsonContentType, readBodyCapped } from '../../../lib/body';
-import { asRecord, str } from '../../../lib/json';
+import { asRecord } from '../../../lib/json';
 import { newLeaseToken } from '../../../delivery/claim';
 import { dedupStatements } from '../../../delivery/dedup';
 import { dedupKey, deliveryId as deriveDeliveryId } from '../../../delivery/ids';
 import { dispatchOutbox } from '../../../pipeline/outbox';
-import { isGithubEventType } from './catalog';
-import { classifyGithubEvent, verifyGithubSignature } from './events';
+import { githubConnector as connector, MAX_BODY_BYTES } from './index';
 import { recordAudit } from '../../../audit/audit';
-import { handleLifecycle, LIFECYCLE_EVENTS } from './lifecycle';
-import { repositoryInScope, resolveTenant } from './tenant';
 import { log } from '../../../platform/log';
 import { settleBackground } from '../../../platform/background';
 import { buildCanonical } from '../build';
@@ -34,8 +31,8 @@ import { ingressLimiter } from '../../../security/rate-limit';
 import { recordIngressUsage } from '../../../security/ingress-usage';
 import { recordWebhookProbe } from './probe';
 
-/** Hard cap on an inbound body. See docs/specs/05-source-github.md F63. */
-export const MAX_BODY_BYTES = 1024 * 1024;
+/** Hard cap on an inbound body (the connector's; docs/specs/05-source-github.md F63). */
+export { MAX_BODY_BYTES };
 
 /**
  * The refusal is logged at most once a minute per isolate: the request is not authenticated yet, so
@@ -80,8 +77,14 @@ function resolvedDisplay(d: DisplayFields): DisplayFields {
   };
 }
 
+/**
+ * `POST /webhooks/github`. The steps are the connector's (`githubConnector`, ADR 0057); this
+ * handler only sequences them and owns the GitHub fan-out (repository match, routing filters,
+ * resolution notices, legacy ids), which no other source has yet.
+ */
 export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise<Response> {
-  if (!c.env.GITHUB_WEBHOOK_SECRET) return c.text('Not configured', 503);
+  const app = connector.appCredential(c.env);
+  if (!app) return c.text('Not configured', 503);
 
   // F50/F59: GitHub can be configured to send `application/x-www-form-urlencoded`, which wraps the
   // JSON in a `payload=` field. We read JSON only, so that configuration is refused up front and
@@ -91,7 +94,7 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
 
   // Size is checked against the declared header AND the encoded body; a header alone is
   // attacker-controlled and may be absent or wrong.
-  const read = await readBodyCapped(c.req.raw, MAX_BODY_BYTES);
+  const read = await readBodyCapped(c.req.raw, connector.maxBodyBytes);
   if (!read.ok) {
     // F63: say WHY, honestly. GitHub itself drops payloads over 25 MB and delivers nothing; a
     // delivery between this cap and that one reaches us and is refused here, which GitHub shows
@@ -99,15 +102,24 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     const now = Date.now();
     if (now - lastTooLargeLogAt >= TOO_LARGE_LOG_INTERVAL_MS) {
       lastTooLargeLogAt = now;
-      log('warn', 'github_event_too_large', { reason: 'over_ingress_cap', limit_bytes: MAX_BODY_BYTES });
+      log('warn', 'github_event_too_large', {
+        reason: 'over_ingress_cap',
+        limit_bytes: connector.maxBodyBytes,
+      });
     }
     return c.text('Too large', 413);
   }
-  const body = new TextDecoder().decode(read.bytes);
 
-  const signature = c.req.header('x-hub-signature-256') || '';
-  if (!(await verifyGithubSignature(body, signature, c.env.GITHUB_WEBHOOK_SECRET)))
-    return c.text('Unauthorized', 401);
+  // Authentication over the raw bytes, before anything is parsed.
+  const verdict = await connector.verify({
+    secret: app.secret,
+    authMode: null,
+    headers: c.req.raw.headers,
+    raw: read.bytes,
+    nowSeconds: Math.floor(Date.now() / 1000),
+  });
+  if (!verdict.ok) return c.text('Unauthorized', 401);
+  const body = new TextDecoder().decode(read.bytes);
 
   let parsed: unknown;
   try {
@@ -118,33 +130,34 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   const event = asRecord(parsed);
   if (!event) return c.text('Invalid event', 400);
 
-  // F59: the event name is a header, and a delivery without one cannot be classified.
-  const kind = c.req.header('x-github-event') || '';
-  if (!kind) return c.text('Invalid event', 400);
-  // GitHub pings the App webhook when it is configured. It carries no installation and
-  // routes nothing; acknowledging it is what makes "Redeliver" in GitHub's UI go green.
-  if (kind === 'ping') return c.json({ accepted: true, ping: true }, 202);
-  // Lifecycle events change installation state and never route a notification (F68).
-  if (LIFECYCLE_EVENTS.has(kind)) {
-    try {
-      const outcome = await handleLifecycle(c.env.DB, c.env.GITHUB_APP_ID, kind, event);
-      return c.json({ accepted: true, lifecycle: outcome.kind }, 202);
-    } catch {
-      // A 5xx makes the failure visible in GitHub's delivery log, where it can be
-      // redelivered; a revocation must never be silently dropped. No payload is logged.
-      log('error', 'github_lifecycle_failed', { kind });
-      return c.text('Lifecycle update failed', 500);
+  // Classification is pure: a delivery without an event header, a ping, an installation lifecycle
+  // event, or a routable event (with its repository and delivery id).
+  const classified = connector.classify(c.req.raw.headers, event);
+  switch (classified.kind) {
+    case 'invalid':
+      return c.text('Invalid event', 400);
+    case 'ping':
+      return c.json({ accepted: true, ping: true }, 202);
+    case 'lifecycle': {
+      const kind = classified.name;
+      try {
+        const outcome = await connector.applyLifecycle(c.env.DB, app.appId, kind, event);
+        return c.json({ accepted: true, lifecycle: outcome.kind }, 202);
+      } catch {
+        // A 5xx makes the failure visible in GitHub's delivery log, where it can be
+        // redelivered; a revocation must never be silently dropped. No payload is logged.
+        log('error', 'github_lifecycle_failed', { kind });
+        return c.text('Lifecycle update failed', 500);
+      }
     }
+    case 'event':
+      break;
   }
-
-  const repository = asRecord(event.repository);
-  const repo = str(repository?.full_name);
-  const deliveryId = c.req.header('x-github-delivery');
-  if (!repo || !deliveryId) return c.text('Invalid event', 400);
+  const { name: kind, repo, deliveryId } = classified;
 
   // The tenant comes ONLY from the verified installation (D3). Every failure rejects, and
   // the unknown/foreign/missing cases share one response so callers cannot probe which.
-  const tenant = await resolveTenant(c.env.DB, c.env.GITHUB_APP_ID, event);
+  const tenant = await connector.resolveTenant(c.env.DB, app.appId, event);
   switch (tenant.kind) {
     case 'ok':
       break;
@@ -176,7 +189,8 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   // pings returned earlier and are never limited. A limiter fault fails OPEN: losing a
   // notification to a bookkeeping error is worse than briefly skipping a flood guard.
   try {
-    const decision = await ingressLimiter(c.env, Number(asRecord(event.installation)?.id));
+    // The verified installation id (a positive safe integer), exactly the id in the body.
+    const decision = await ingressLimiter(c.env, Number(tenant.installationId));
     if (decision.limited) {
       await recordIngressUsage(c.env.DB, organizationId, 'github', { rateLimited: 1 });
       return c.text('Too many events; retry later', 429, {
@@ -188,8 +202,9 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
   }
 
   // Repository scope (F67): a restricted installation never routes an excluded repository.
-  const installationId = String(asRecord(event.installation)?.id);
-  if (!(await repositoryInScope(c.env.DB, c.env.GITHUB_APP_ID, installationId, repository?.id))) {
+  if (
+    !(await connector.repositoryInScope(c.env.DB, app.appId, tenant.installationId, classified.repositoryId))
+  ) {
     await recordAudit(c.env.DB, {
       organizationId,
       actorId: null,
@@ -200,9 +215,9 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     });
     return c.text('Repository not in scope', 403);
   }
-  const eventType = classifyGithubEvent(kind, event);
+  const eventType = classified.eventType;
   // Outside the closed catalog nothing can be subscribed, so nothing is looked up (D16).
-  if (!isGithubEventType(eventType)) return c.json({ accepted: true, persisted: 0 }, 202);
+  if (eventType === null) return c.json({ accepted: true, persisted: 0 }, 202);
 
   // Normalise before routing: from here on nothing reads the provider payload except the noise
   // facts below (ADR 0020). A mapper/validator mismatch is OUR fault, not the sender's: GitHub

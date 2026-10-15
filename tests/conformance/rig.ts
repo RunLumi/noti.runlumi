@@ -48,6 +48,8 @@ export interface Rig {
   readonly path: string;
   /** The integrations that subscribe to everything, by name. */
   readonly integrations: Readonly<Record<string, string>>;
+  /** The post-authentication flood counter of this rig's tenant (`api_rate_limits.key`). */
+  readonly floodKey: string;
   /** Make a fixture body deliverable to this rig (GitHub: add the installation block). */
   encode(json: Record<string, unknown>): string;
   post(body: string | Uint8Array, options?: PostOptions): Promise<Response>;
@@ -137,6 +139,7 @@ export async function createRig(
       h,
       path: '/webhooks/github',
       integrations,
+      floodKey: `ingress:github:${GITHUB_INSTALLATION}`,
       // App deliveries carry an `installation` block; the documented examples have a placeholder
       // one or none. The tenant must be ours, so the id (and the app id, where the payload has
       // one) is replaced. Everything else is the fixture as published.
@@ -202,6 +205,7 @@ export async function createRig(
     h,
     path,
     integrations,
+    floodKey: `ingress:source:${created.source.id}`,
     encode: (json) => JSON.stringify(json),
     async post(body, o = {}) {
       const headers = new Headers(o.headers);

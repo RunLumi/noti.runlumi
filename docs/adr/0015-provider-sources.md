@@ -28,6 +28,8 @@ Every provider claim below was read from the provider's own documentation on **2
    `POST /webhooks/<kind>/:endpointId` for every registered kind. The generic source keeps its own
    route (ADR 0012) and is not refactored; sharing the fan-out code between the two is a
    follow-up, not a risk taken in this change.
+   (ADR 0057 renamed this interface `EndpointSourceConnector`, moved `onFlood` under `ack` with `retry`
+   renamed `reject`, and added the installation variant GitHub implements.)
 
 2. **Route discipline is the generic route's.** Content type (415) and capped body (413) first;
    the source row is selected by the public endpoint id and is the only origin of the tenant;
