@@ -1,0 +1,43 @@
+/* Pending invitations on the Team page (ADR 0045). A reading surface: it sits on the opaque card and uses no glass. */
+.invitation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.invitation-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  padding: var(--space-4) 0;
+  border-top: var(--border-hairline);
+}
+
+.invitation-entry:first-child {
+  border-top: 0;
+}
+
+.invitation-main {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.invitation-email {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.invitation-meta {
+  margin: var(--space-1) 0 0;
+  font-size: 13px;
+  color: var(--color-soft-slate);
+  overflow-wrap: anywhere;
+}
+
+.invitation-main .badge {
+  margin-top: var(--space-2);
+}

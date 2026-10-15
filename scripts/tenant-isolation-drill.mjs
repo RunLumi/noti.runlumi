@@ -14,12 +14,14 @@
  * is what proves the deployed Worker, real D1 and real Better Auth sessions.
  *
  * Prepare (by hand, on staging, with two throwaway accounts that you own):
- *   1. Workspace A and workspace B, each with one source, one integration bound to it and one
- *      delivery (post a signed test event). Use a Slack destination you control for B.
+ *   1. Workspace A and workspace B, each with one source, one integration bound to it, one
+ *      delivery (post a signed test event) and one pending invitation (sent to an address you
+ *      own and left unaccepted). Use a Slack destination you control for B.
  *   2. Sign in as the A member in a browser, copy the `Cookie` request header of any /api call.
  *   3. Write B's identifiers into a JSON file (never commit it):
  *        { "orgId": "...", "orgName": "...", "integrationId": "...", "sourceId": "...",
- *          "deliveryId": "...", "markers": ["<B's names, endpoint id, destination tail>"] }
+ *          "deliveryId": "...", "invitationId": "...",
+ *          "markers": ["<B's names, endpoint id, destination tail, invitee address>"] }
  *
  * Run (Node 22.6+ strips the TypeScript policy files; the flag is needed on 22.x):
  *   DRILL_BASE_URL=https://staging.example \
@@ -55,7 +57,7 @@ const cookie = need('DRILL_COOKIE');
 const victim = JSON.parse(readFileSync(need('DRILL_VICTIM_FILE'), 'utf8'));
 const role = process.env.DRILL_ATTACKER_ROLE ?? 'admin';
 const destructive = process.env.DRILL_ALLOW_DESTRUCTIVE === '1';
-for (const field of ['orgId', 'integrationId', 'sourceId', 'deliveryId']) {
+for (const field of ['orgId', 'integrationId', 'sourceId', 'deliveryId', 'invitationId']) {
   if (typeof victim[field] !== 'string' || victim[field] === '') {
     console.error(`victim file is missing "${field}"`);
     process.exit(2);
@@ -66,6 +68,7 @@ const markers = [
   victim.integrationId,
   victim.sourceId,
   victim.deliveryId,
+  victim.invitationId,
   ...(victim.markers ?? []),
 ];
 

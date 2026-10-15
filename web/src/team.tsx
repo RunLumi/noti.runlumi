@@ -9,6 +9,7 @@ import { t } from './i18n';
 import { dropOtherWorkspaces } from './workspace/switching';
 import { roleLabel } from './lib/role-label';
 import { useLocale } from './i18n/LocaleProvider';
+import { PendingInvitations } from './team/PendingInvitations';
 
 /** Query key for a workspace's member list. */
 export const teamKey = (orgId: string) => ['team', orgId] as const;
@@ -204,6 +205,7 @@ export function TeamManagement() {
           ))
         )}
       </Card>
+      {isAdmin && orgId && <PendingInvitations orgId={orgId} />}
       <Card className="panel" style={{ marginTop: 20 }}>
         <h2>{t('team.membership.title')}</h2>
         <p className="muted">{t('team.membership.body')}</p>

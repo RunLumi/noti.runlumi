@@ -222,7 +222,7 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F21 — Invitations
 
-**Priority** P0 · **Status** 🟡 role validation, who may invite, accept only by the invited address (case-insensitive, once), no workspace created on accept, a second workspace allowed, explicit 7-day expiry, cancellation and the last-admin trigger are shown (`tests/auth/invitations.test.ts`, ADR 0030); invitation, acceptance, cancellation, role change and removal are audited (`tests/auth/audit-events.test.ts`). Not built: a check that the accept UI `web/src/onboarding.tsx` never creates a second workspace for an existing person
+**Priority** P0 · **Status** 🟡 role validation, who may invite, accept only by the invited address (case-insensitive, once), no workspace created on accept, a second workspace allowed, explicit 7-day expiry, cancellation and the last-admin trigger are shown (`tests/auth/invitations.test.ts`, ADR 0030); invitation, acceptance, cancellation, role change and removal are audited (`tests/auth/audit-events.test.ts`). Built in ADR 0045: an admin-only list of pending invitations on the Team page, with cancel (`src/api/invitations.ts`, `tests/api/invitations.test.ts`, `web/src/team/pending-invitations.test.tsx`); the cancel writes its audit row in the same batch as the change. Not built: a check that the accept UI `web/src/onboarding.tsx` never creates a second workspace for an existing person
 
 **Acceptance**
 - [x] `sendInvitationEmail` with a `/invite?id=` link.
@@ -404,7 +404,7 @@ through its verified installation, so that no event can be routed using sender-c
 
 ## F28 — Audit events
 
-**Priority** P1 · **Status** 🟡 `audit_events` append-only with integration, source, replay, denial, installation, workspace, member, invitation, role and session events (`src/audit/actions.ts`, ADR 0019, ADR 0030), admin `GET /api/audit` plus page; the request id is stamped on every row written in a request (migration 0028, ADR 0028). Not built: actor email by decision; IP and user agent stored but not shown; member and invitation rows are written by a Better Auth `after` hook, so they are not atomic with the change; session events have no workspace and are in the person's own export, not a workspace's log
+**Priority** P1 · **Status** 🟡 `audit_events` append-only with integration, source, replay, denial, installation, workspace, member, invitation, role and session events (`src/audit/actions.ts`, ADR 0019, ADR 0030), admin `GET /api/audit` plus page; the request id is stamped on every row written in a request (migration 0028, ADR 0028). Not built: actor email by decision; IP and user agent stored but not shown; member and invitation rows are written by a Better Auth `after` hook, so they are not atomic with the change, except invitation cancel from the Team page, which is one batch with its row (ADR 0045); session events have no workspace and are in the person's own export, not a workspace's log
 
 **Acceptance**
 - [ ] `audit_events(id, organization_id, actor_id, action, subject_type, subject_id,

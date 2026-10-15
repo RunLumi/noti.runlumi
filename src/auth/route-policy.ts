@@ -80,6 +80,20 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
   },
   {
     method: 'GET',
+    path: '/api/workspace/invitations',
+    file: 'src/api/invitations.ts',
+    handler: local('/'),
+    access: cap('invitation.read'),
+  },
+  {
+    method: 'POST',
+    path: '/api/workspace/invitations/:id/cancel',
+    file: 'src/api/invitations.ts',
+    handler: local('/:id/cancel'),
+    access: cap('invitation.cancel'),
+  },
+  {
+    method: 'GET',
     path: '/api/workspace/deletion',
     file: 'src/api/workspace-lifecycle.ts',
     handler: local('/deletion'),

@@ -1227,7 +1227,7 @@ To run it once a staging environment exists (F233 evidence item 2):
    integration bound to it (a Slack destination you control for B) and one delivery.
 2. Sign in as A, copy the `Cookie` request header of any `/api` call. Write B's ids and unique
    markers (names, endpoint id, destination tail) into a JSON file outside the repository:
-   `{ "orgId", "orgName", "integrationId", "sourceId", "deliveryId", "markers": [...] }`.
+   `{ "orgId", "orgName", "integrationId", "sourceId", "deliveryId", "invitationId", "markers": [...] }` (`invitationId`: a pending invitation in B, ADR 0045).
 3. `DRILL_BASE_URL=https://<staging> DRILL_COOKIE='...' DRILL_VICTIM_FILE=./victim.json
    DRILL_ATTACKER_ROLE=admin node --experimental-strip-types scripts/tenant-isolation-drill.mjs`
    (read-only attacks). Add `DRILL_ALLOW_DESTRUCTIVE=1` for the writes: if isolation is broken they

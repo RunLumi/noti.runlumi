@@ -30,6 +30,7 @@ import {
   DELIVERIES,
   INSTALLATIONS,
   INTEGRATIONS,
+  INVITATIONS,
   MEMBERS,
   NOISE_STATUS,
   ORG_ID,
@@ -143,6 +144,10 @@ export interface ApiState {
   failActivate?: boolean;
   /** The workspace a pending invitation would add the person to. */
   invitation?: { orgId: string; name: string; role: string };
+  /** `GET /api/workspace/invitations`: the pending list, or `'error'` to make it fail. Cancels remove rows. */
+  invitations: Record<string, unknown>[] | 'error';
+  /** Make `POST .../invitations/:id/cancel` answer with this status instead (404 = already finished). */
+  cancelInvitationStatus?: 404 | 500;
   /**
    * Per-workspace data, selected by the `?org=` the page asked for. When present it overrides
    * `integrations`, `deliveries`, `members` and `audit`, so a test can prove that workspace A's
@@ -161,6 +166,7 @@ export const defaultApi = (): ApiState => ({
   installations: [...INSTALLATIONS],
   githubConfigured: true,
   members: [...MEMBERS],
+  invitations: INVITATIONS.map((i) => ({ ...i })),
   passkeys: [...PASSKEYS],
   sessions: SESSIONS.map((s) => ({ ...s })),
   deletion: { scheduled: false },
@@ -212,6 +218,30 @@ export function installFetch(state: ApiState): void {
         return Promise.resolve(json({ error: 'You are the only admin', blockers: [] }, 409));
       if (mode === 'wrong') return Promise.resolve(json({ error: 'wrong email' }, 422));
       return Promise.resolve(json({ deleted: true }));
+    }
+    // Pending invitations: admin only, as the server enforces it (a member is refused, never shown an empty list).
+    const cancelInvitation = /^\/api\/workspace\/invitations\/([^/]+)\/cancel$/.exec(path);
+    if (path === '/api/workspace/invitations' && method === 'GET') {
+      if (state.me !== 'unauthenticated' && state.me.user.role !== 'admin')
+        return Promise.resolve(json({ error: 'Missing capability: invitation.read' }, 403));
+      const pending = state.invitations;
+      return Promise.resolve(
+        pending === 'error'
+          ? json({ error: 'boom' }, 500)
+          : json({ organizationId: org, invitations: pending, truncated: false }),
+      );
+    }
+    if (cancelInvitation && method === 'POST') {
+      if (state.me !== 'unauthenticated' && state.me.user.role !== 'admin')
+        return Promise.resolve(json({ error: 'Missing capability: invitation.cancel' }, 403));
+      if (state.cancelInvitationStatus)
+        return Promise.resolve(json({ error: 'nope' }, state.cancelInvitationStatus));
+      const pending = state.invitations;
+      if (pending === 'error') return Promise.resolve(json({ error: 'boom' }, 500));
+      const remaining = pending.filter((i) => i.id !== cancelInvitation[1]);
+      if (remaining.length === pending.length) return Promise.resolve(json({ error: 'Not found' }, 404));
+      state.invitations = remaining;
+      return Promise.resolve(json({ cancelled: true, id: cancelInvitation[1] }));
     }
     if (path === '/api/workspace/me/sessions' && method === 'GET')
       return Promise.resolve(

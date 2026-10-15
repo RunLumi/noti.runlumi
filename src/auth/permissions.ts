@@ -8,6 +8,8 @@ import { defaultStatements } from 'better-auth/plugins/organization/access';
  */
 const statements = {
   ...defaultStatements,
+  // `create` and `cancel` are Better Auth's own; `read` lets an admin list pending invitations (ADR 0045).
+  invitation: ['create', 'cancel', 'read'],
   integration: ['read', 'create', 'update', 'delete', 'revoke'],
   source: ['read', 'create', 'update', 'delete', 'rotate', 'revoke'],
   delivery: ['read', 'replay'],
@@ -21,7 +23,7 @@ export const roles = {
   admin: ac.newRole({
     organization: ['update'],
     member: ['create', 'update', 'delete'],
-    invitation: ['create', 'cancel'],
+    invitation: ['create', 'cancel', 'read'],
     integration: ['read', 'create', 'update', 'delete', 'revoke'],
     source: ['read', 'create', 'update', 'delete', 'rotate', 'revoke'],
     delivery: ['read', 'replay'],
@@ -63,3 +65,12 @@ export const DOMAIN_RESOURCES = ['integration', 'source', 'delivery', 'audit', '
 export const DOMAIN_CAPABILITIES: readonly Capability[] = DOMAIN_RESOURCES.flatMap((resource) =>
   statements[resource].map((action) => `${resource}.${action}` as Capability),
 );
+
+/**
+ * The Better Auth `invitation` capabilities that OUR routes check (ADR 0045: the pending list and cancel).
+ * The rest of `invitation` (`create`) is enforced by Better Auth's own invite route and is not a domain resource.
+ */
+export const ROUTE_CHECKED_INVITATION_CAPABILITIES: readonly Capability[] = [
+  'invitation.read',
+  'invitation.cancel',
+];

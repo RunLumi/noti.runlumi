@@ -349,6 +349,32 @@ are `web/src/i18n/messages.sessions.{en,vi}.ts`; audit labels for the new action
 Vietnamese (`sessions.test.tsx`), the stylesheet and hard-coded-string tests. **Not verified:** a real browser at 320 px, a
 screen reader, and a native-speaker review of the Vietnamese.
 
+## Pending invitations on the Team page (ADR 0045, `web/src/team/`)
+
+Admins see "Pending invitations" between Members and Membership. `PendingInvitations.tsx` lists `GET /api/workspace/invitations?org=`
+and is rendered only for an admin, so a member never calls it (the server would answer 403 anyway). Each row shows the address, the
+recorded role ("Role not recorded" when there is none, never a guessed one), "Sent {date}" and "Expires {date}", or "Expired {date}"
+with an Expired badge when the server says the expiry has passed. An expired invitation stays listed and can be cancelled, so an admin
+can clear it. Nothing is computed in the browser except the date formatting.
+
+States: nothing pending is the shared `EmptyState` (level 3, under the page heading); loading is the shared `Skeleton`; a list that
+cannot load is the shared four-part `ErrorPanel` with "Try again" when the failure kind allows a retry.
+
+Cancel is an alert dialog in the pattern of `RevokeDialog`: focus starts on "Keep invitation", Escape closes it, and only the confirm
+button sends `POST …/cancel?org=`. On success a status line names the address and says the link no longer works, and focus moves to the
+section heading, because the row that had focus has gone. A 404 (already finished, or not in this workspace) refreshes the list and
+shows the error panel; any other failure shows the error panel and keeps the list as it was. The Team page's older "Remove" control still
+uses `window.confirm`; it is not changed here.
+
+Controls use `.btn` (44 px). The address is 16 px, metadata 13 px, and rows wrap under the text at narrow widths (the `.team-entry`
+pattern). Strings are `team.invitations.*` in `web/src/i18n/messages.app.{en,vi}.ts`.
+
+Verified: jsdom component tests (`web/src/team/pending-invitations.test.tsx`: contents with no invented data, admin-only rendering, empty,
+error and retry, cancel with focus, the 404 refresh, axe in English and Vietnamese), the route-wide axe scenarios
+(`pages.a11y.test.tsx`: nothing pending, list unavailable), the workspace-parameter test, and the server tests in `tests/api/invitations.test.ts`.
+**Not verified:** a real browser at 320 px, a screen reader, and a native-speaker review of the Vietnamese strings, which were written
+by the engineer and need that review before they are relied on.
+
 ## Current truth
 
 Signup, sign-in, verify, forgot/reset, sign-out, `/me`, onboarding, invitations and team

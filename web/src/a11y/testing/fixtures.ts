@@ -429,6 +429,26 @@ export const SETUP_DONE = {
 /** The delivery a test send creates; its state is whatever a scenario needs. */
 export const TEST_DELIVERY_ID = 'del_test_1';
 
+/** Pending invitations as `GET /api/workspace/invitations` returns them: newest first, `expired` computed by the server. */
+export const INVITATIONS = [
+  {
+    id: 'inv_1',
+    email: 'hoa.tran@acme.test',
+    role: 'member',
+    createdAt: '2026-10-13T08:00:00Z',
+    expiresAt: '2026-10-20T08:00:00Z',
+    expired: false,
+  },
+  {
+    id: 'inv_2',
+    email: 'quang.le@acme.test',
+    role: 'admin',
+    createdAt: '2026-09-28T08:00:00Z',
+    expiresAt: '2026-10-05T08:00:00Z',
+    expired: true,
+  },
+];
+
 export const MEMBERS = [
   {
     id: 'mem_1',

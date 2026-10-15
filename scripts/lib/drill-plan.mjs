@@ -15,7 +15,7 @@
  *   foreign-body-id  act in A but name B's source in the request body
  *   own-scope        act in A on a collection route: the answer must contain nothing of B's
  *
- * @typedef {{ orgId: string, orgName?: string, integrationId: string, sourceId: string, deliveryId: string }} Victim
+ * @typedef {{ orgId: string, orgName?: string, integrationId: string, sourceId: string, deliveryId: string, invitationId: string }} Victim
  * @typedef {{ method: string, path: string, access: { kind: string, capability?: string } }} Route
  * @typedef {{
  *   name: string, key: string, method: string, path: string, body: unknown,
@@ -32,6 +32,7 @@ const ID_FIELD = [
   [/^\/api\/integrations\/:id/, 'integrationId'],
   [/^\/api\/sources\/:id/, 'sourceId'],
   [/^\/api\/deliveries\/:id/, 'deliveryId'],
+  [/^\/api\/workspace\/invitations\/:id/, 'invitationId'],
 ];
 
 /**
@@ -49,6 +50,8 @@ const BODIES = {
   'POST /api/deliveries/replay-plan': {},
   'POST /api/deliveries/replay': {},
   'POST /api/integrations/:id/test': {},
+  // Cancelling a pending invitation (ADR 0045): admins only, and the id must belong to the workspace named.
+  'POST /api/workspace/invitations/:id/cancel': {},
   'POST /api/integrations/:id/revoke-credentials': {},
   'POST /api/sources/:id/revoke-credentials': {},
   'POST /api/integrations/:id/filters/preview': { filters: { v: 1 } },

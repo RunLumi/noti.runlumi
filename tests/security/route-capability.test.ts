@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
-import { DOMAIN_CAPABILITIES } from '../../src/auth/permissions';
+import { DOMAIN_CAPABILITIES, ROUTE_CHECKED_INVITATION_CAPABILITIES } from '../../src/auth/permissions';
 import { MIDDLEWARE_PATHS, ROUTE_POLICY, type RoutePolicy } from '../../src/auth/route-policy';
 import { listTsFiles } from '../support/sql-scope';
 import { must } from '../support/must';
@@ -377,6 +377,7 @@ describe('every route has the guard its policy claims (F232)', () => {
       // `source.*`, `delivery.*`, `audit.read`, `workspace.*`, `integration.*` are all routed today.
       expect(used.has(capability), `${capability} is defined but no route requires it`).toBe(true);
     }
-    for (const capability of used) expect(DOMAIN_CAPABILITIES).toContain(capability);
+    const known = [...DOMAIN_CAPABILITIES, ...ROUTE_CHECKED_INVITATION_CAPABILITIES];
+    for (const capability of used) expect(known).toContain(capability);
   });
 });

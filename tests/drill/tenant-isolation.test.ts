@@ -29,6 +29,7 @@ interface Victim {
   integrationId: string;
   sourceId: string;
   deliveryId: string;
+  invitationId: string;
 }
 interface Attack {
   name: string;
@@ -109,18 +110,40 @@ async function seedWorkspace(h: Harness, org: 'org-a' | 'org-b'): Promise<Victim
       'INSERT INTO github_installation_repositories(installation_row_id,repository_id,full_name) VALUES(?,?,?)',
     )
     .run(`gh-${org}`, '1', `${org}-gh-account/private-repo`);
+  // A pending invitation in this workspace, sent by one of its admins (ADR 0045): the cancel route is attacked with it.
+  const inviter = h.db.raw
+    .prepare("SELECT user_id AS id FROM member WHERE organization_id=? AND role='admin' LIMIT 1")
+    .get(org) as { id: string };
+  const invitationId = `inv-${org}`;
+  h.db.raw
+    .prepare(
+      'INSERT INTO invitation(id,organization_id,email,role,status,expires_at,inviter_id,created_at) VALUES(?,?,?,?,?,?,?,?)',
+    )
+    .run(
+      invitationId,
+      org,
+      `pending-${org}@example.test`,
+      'member',
+      'pending',
+      Date.now() + 86_400_000,
+      inviter.id,
+      Date.now(),
+    );
   return {
     orgId: org,
     orgName: org,
     integrationId,
     sourceId: source.id,
     deliveryId: delivery.id,
+    invitationId,
     markers: [
       org,
       integrationId,
       source.id,
       source.endpointId,
       delivery.id,
+      invitationId,
+      `pending-${org}@example.test`,
       `int-${org}`,
       `src-${org}`,
       TAIL(org),
@@ -243,6 +266,7 @@ describe.each(ATTACKERS)('$as ($own) against $victim: writes and actions', ({ as
     integrationId: 'x',
     sourceId: 'x',
     deliveryId: 'x',
+    invitationId: 'x',
   })
     .filter((a) => !a.readOnly)
     .map((a) => a.name);
@@ -272,6 +296,7 @@ describe('control: the same requests succeed for their owner', () => {
     integrationId: 'x',
     sourceId: 'x',
     deliveryId: 'x',
+    invitationId: 'x',
   }).filter((a) => a.vector === 'org-param' || a.vector === 'foreign-body-id');
 
   it.each(eligible.map((a) => [a.name] as const))('%s', async (name) => {

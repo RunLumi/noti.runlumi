@@ -268,6 +268,18 @@ const SCENARIOS: readonly Scenario[] = [
     ready: heading(/We can’t find that page|Không tìm thấy trang này/),
   },
   { name: 'team (admin)', path: '/team', ready: text('Minh Tran') },
+  {
+    name: 'team (admin, nothing pending)',
+    path: '/team',
+    options: { api: { invitations: [] } },
+    ready: text(/No pending invitations|Không có lời mời đang chờ/),
+  },
+  {
+    name: 'team (admin, pending list unavailable)',
+    path: '/team',
+    options: { api: { invitations: 'error' } },
+    ready: text(/We couldn’t load the pending invitations\.|Chúng tôi không tải được các lời mời đang chờ\./),
+  },
   { name: 'team (member)', path: '/team', options: { api: { me: MEMBER } }, ready: text('Minh Tran') },
   { name: 'settings', path: '/settings', ready: text('Work laptop') },
 ];

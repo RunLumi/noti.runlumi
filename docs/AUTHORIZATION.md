@@ -69,6 +69,8 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `GET /api/workspace/me` | signed-in session; membership checked in the handler | `src/auth/workspace.ts` |
 | `POST /api/workspace/active` | signed-in session; membership checked in the handler | `src/auth/workspace.ts` |
 | `GET /api/workspace/team` | any member of the resolved workspace | `src/auth/workspace.ts` |
+| `GET /api/workspace/invitations` | capability `invitation.read` | `src/api/invitations.ts` |
+| `POST /api/workspace/invitations/:id/cancel` | capability `invitation.cancel` | `src/api/invitations.ts` |
 | `GET /api/workspace/deletion` | capability `workspace.delete` | `src/api/workspace-lifecycle.ts` |
 | `POST /api/workspace/deletion` | capability `workspace.delete` | `src/api/workspace-lifecycle.ts` |
 | `DELETE /api/workspace/deletion` | capability `workspace.delete` | `src/api/workspace-lifecycle.ts` |

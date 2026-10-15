@@ -18,6 +18,8 @@ const table: [Capability, admin: boolean, member: boolean][] = [
   ['audit.read', true, false],
   ['member.create', true, false],
   ['invitation.create', true, false],
+  ['invitation.read', true, false],
+  ['invitation.cancel', true, false],
   ['organization.update', true, false],
   ['organization.delete', false, false],
   ['workspace.export', true, false],
