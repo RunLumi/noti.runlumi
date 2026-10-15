@@ -252,6 +252,8 @@ describe('L5: export carries mode columns and still no credential material', () 
     expect(Object.keys(body.sources[0] ?? {}).sort()).toEqual([
       'auth_mode',
       'created_at',
+      'credential_fingerprint',
+      'credentials_revoked',
       'dropped_events',
       'enabled',
       'endpoint_id',

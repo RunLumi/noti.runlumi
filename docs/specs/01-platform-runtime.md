@@ -138,7 +138,7 @@ Lark/Slack/Teams group**. Confirm nothing lands in the production groups.
 
 ## F04 — Configuration validation at boot
 
-**Priority** P0 · **Status** 🟡 `src/platform/config.ts` `assertConfig(env)` returns binding names only and runs at the `fetch` (tiered guard: only D1 stops ingress), `queue` (per-message backoff) and `scheduled` (heartbeat first, then the tick fails visibly) entrypoints of `src/index.ts`; `/health` names misconfigured bindings, never a value (`tests/platform/boot.test.ts`, ADR 0022); `.dev.vars.example` vs source drift tests (`tests/config.dev_vars.test.ts`). Not built: `APP_ORIGIN`, `BETTER_AUTH_SECRET` and the GitHub bindings are not asserted at boot, there is no `email` entrypoint, unknown extra keys are not logged · **Fixes** D1
+**Priority** P0 · **Status** 🟡 `src/platform/config.ts` `assertConfig(env)` returns binding names only and runs at the `fetch` (tiered guard: only D1 stops ingress), `queue` (per-message backoff) and `scheduled` (heartbeat first, then the tick fails visibly) entrypoints of `src/index.ts`; `/health` names no binding to an anonymous caller (names go to the log and the operator readiness view; `tests/platform/boot.test.ts`, ADR 0022, ADR 0036); `APP_ORIGIN` and `BETTER_AUTH_SECRET` are an auth tier that stops `/api` and `/github` but not ingress, the GitHub App bindings are named warnings, and unknown extra keys are logged once per isolate (`src/platform/config.ts`, `src/platform/config-keys.ts`, `tests/platform/boot-hygiene.test.ts`, ADR 0036); `.dev.vars.example` vs source drift tests (`tests/config.dev_vars.test.ts`). Not built: there is no `email` entrypoint · **Fixes** D1
 
 **Story** As a maintainer, I want the Worker to fail loudly and immediately when its
 configuration is wrong, so that a wrong secret name is a crash, not a silent 503.
@@ -356,7 +356,7 @@ truncated path only (F12).
 
 ## F09 — D1 write discipline
 
-**Priority** P0 · **Status** 🟡 event, delivery and outbox rows are written in one `db.batch()` (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`) and no D1 `exec()` is used; `withD1Retry` with full jitter and an `idempotent` contract wraps the ingress batch (`src/db/retry.ts`, `tests/db/retry.test.ts`, ADR 0022); `tests/security/bound-parameters.test.ts` guards that no SQL interpolates request data. Not built: no retry on the outbox claim and dispatch writes, no `no_query_exceeds_100_bound_parameters` test (only per-site 75-param sizing in `src/connectors/sources/github/repos.ts`); overload is deliberately not retried (Cloudflare guidance), unlike the table above
+**Priority** P0 · **Status** 🟡 event, delivery and outbox rows are written in one `db.batch()` (`src/connectors/sources/github/route.ts`, `generic/route.ts`, `provider-route.ts`) and no D1 `exec()` is used; `withD1Retry` with full jitter and an `idempotent` contract wraps the ingress batch (`src/db/retry.ts`, `tests/db/retry.test.ts`, ADR 0022); `tests/security/bound-parameters.test.ts` guards that no SQL interpolates request data and holds `no_query_exceeds_100_bound_parameters`; the outbox claim, reclaim, dispatched mark, release and invalid-payload batch are retried with a per-statement `idempotent` choice (`src/pipeline/outbox.ts`, `tests/pipeline/outbox-retry.test.ts`, ADR 0036). Not built: overload is deliberately not retried (Cloudflare guidance), unlike the table above, and whether it should be is undecided until there is evidence
 
 **Story** As an operator, I want one round trip per event and a retry path for failed
 writes, so that D1's single-writer model does not become our throughput ceiling.
@@ -403,7 +403,7 @@ us or the event is silently lost.
 
 ## F10 — Health, readiness and diagnostics
 
-**Priority** P0 · **Status** 🟡 `GET /health` is configuration only and stays 200 while D1 is down; `GET /health/ready` probes config, D1 (`SELECT 1`) and the queue binding and returns booleans only, 503 on failure, cached 5 s, routed to the API in a deployment (`src/index.ts`, `src/web/shell.ts`, `tests/platform/boot.test.ts`, `tests/web/worker-health.test.ts`, ADR 0022). Not built: no per-dependency message or code beyond the booleans, no authenticated operator detail, `/health` still names misconfigured bindings publicly
+**Priority** P0 · **Status** 🟡 `GET /health` is configuration only and stays 200 while D1 is down; `GET /health/ready` probes config, D1 (`SELECT 1`) and the queue binding and returns booleans only, 503 on failure, cached 5 s, routed to the API in a deployment (`src/index.ts`, `src/web/shell.ts`, `tests/platform/boot.test.ts`, `tests/web/worker-health.test.ts`, ADR 0022). The authenticated operator view `GET /api/observability/readiness` (a user on `PLATFORM_OPERATOR_USER_IDS`, else 404) names the failing binding per tier, the warnings and the unknown keys; `/health` no longer names any binding (`tests/platform/boot-hygiene.test.ts`, ADR 0036). Not built: no per-dependency error code beyond the booleans for an anonymous caller (deliberate)
 
 **Story** As an operator, I want a health endpoint that distinguishes "process is up" from
 "dependencies work", so that an outage is diagnosable without shell access.

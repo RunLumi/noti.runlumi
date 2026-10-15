@@ -1,6 +1,6 @@
 # ADR 0022: Credential lifecycle, boot checks and D1 write discipline
 
-Status: Accepted · Date: 2026-10-14 (revised after independent review) · Implements parts of F04, F09, F10 (spec 01) and F34, F37, F39, F40 (spec 03); builds on ADR 0004 and ADR 0017
+Status: Accepted, partly completed by [ADR 0036](0036-credential-destruction-and-boot-hygiene.md) (drain-then-destroy, `destination_revoked`, boot checks for `APP_ORIGIN`, `BETTER_AUTH_SECRET` and the GitHub bindings, anonymous `/health` without names, outbox retry) · Date: 2026-10-14 (revised after independent review) · Implements parts of F04, F09, F10 (spec 01) and F34, F37, F39, F40 (spec 03); builds on ADR 0004 and ADR 0017
 
 ## Context
 
@@ -190,10 +190,10 @@ literal, and never reached through an aliased `prepare`.
 
 ## Not done
 
-- Secrets Store (tier 1) for the KEK.
-- Drain-then-destroy on revoke, `destination_revoked` in the consumer, per-connection `key_destroyed`
-  audit, and DEK destruction in workspace purge beyond the row deletion it already does.
-- A dashboard control for revoke and display of the fingerprint (API only).
-- `withD1Retry` on outbox claim and dispatch writes.
+(Items marked "done in 0036" were completed by ADR 0036; the rest is still open.)
+
+- Secrets Store (tier 1) for the KEK (assessed in 0036: not feasible without an async key ring).
+- Done in 0036: drain-then-destroy on revoke, `destination_revoked` in the consumer, per-connection `key_destroyed` audit, the dashboard revoke control and fingerprint (integrations), `withD1Retry` on outbox claim and dispatch writes.
+- DEK destruction in workspace purge beyond the row deletion it already does.
 - Automatic recovery of deliveries whose queue message dead-lettered (manual replay only) and a bulk replay.
 - Rotation rehearsal in staging; the new procedures have only run against the Node SQLite fake.

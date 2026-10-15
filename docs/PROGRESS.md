@@ -45,6 +45,7 @@ Each slice is one PR. A PR is merged only once CI passes.
 | 1.19 | Egress guards (ADR 0026): AST regression guard for the outbound surface, typed provider registry with a weekly 180-day staleness check, `unmapped_provider_response` event | F228, F229 (in part), F230 | — | 🟡 | this PR |
 | 2.1 / 2.2 / 2.3 / 1.24 | Auth behaviour tests and two defects they found (passkey session for an unverified email; implicit lifetimes), session and device list with revoke-one and revoke-others, 90-day absolute lifetime, audit of membership, invitation, role and session changes, restore-revokes-sessions script, token storage verified on Better Auth 1.7.7 (ADR 0030) | F16 to F22, F28, F234 (each in part; F20 and F22 done) | — | 🟡 | this PR |
 | 2.18 / 2.24 / 2.25 / 2.26 / 1.24 | Docs and ops: five missing decision ADRs (no Durable Objects, canonical envelope, key custody scope, single D1 with the F06 deferral, at-least-once contract), ADR heading and numbering check and control-ID check (`scripts/check-docs.mjs`), `npm audit signatures` and `npm ci --ignore-scripts` in CI with the install-script review (`docs/SUPPLY_CHAIN.md`), S4 playbook, evidence-preservation rule and postmortem template, email limits doc (`docs/EMAIL_LIMITS.md`). No migration | F14, F06 (deferral recorded), F235 (limits), F239, F241, F242 (each in part) | — | 🟡 | this PR |
+| 1.2 to 1.4 | Credential destruction, boot hygiene and outbox write discipline (ADR 0036): revoke then drain then destroy then audit (`key_destroyed`), `destination_revoked` consumer outcome, dashboard revoke control and fingerprint for integrations, fingerprint in exports and the delivery detail; auth tier and GitHub warnings in `assertConfig`, unknown-key log, `/health` without binding names, operator readiness view; outbox writes through `withD1Retry`, `no_query_exceeds_100_bound_parameters` | F34, F37, F39, F40, F04, F09, F10 (each in part) | — | 🟡 | this PR |
 | S | Security hardening: response headers and CSP, ingress limiter helper, CI supply chain, threat model, static guards | F29 (wired), F227 (partly), F231 (partly), F239 (partly), F240 (checklist), F241 (register), F242 (disclosure policy only) | — | 🟡 | #16 |
 
 AI features (F243–F262) stay out of scope until the delivery ledger is trustworthy. See
@@ -1739,3 +1740,24 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
   **Not verified:** any real mail, real WebAuthn device, real browser (320 px, screen reader), Vietnamese review by a native
   speaker; the restore script against a real D1; the purge on D1 (Node SQLite stand-in only); nothing here is a real-provider
   or staging result.
+## Slices 1.2 to 1.4: credential destruction, boot hygiene, outbox writes (ADR 0036)
+
+- **Revoke order (F40).** `src/pipeline/credential-destroy.ts`: revoke, then drain (no delivery of the integration `claimed` within the claim lease; a source waits 60 s),
+  then one statement wipes `dek_wrapped`, `key_salt`, `kek_version`, both envelopes and both ciphertexts (a source: empty blobs and `kek_version` 0, no migration), with an
+  `integration.key_destroyed` / `source.key_destroyed` audit insert in the same batch under the same predicate. Inline in the revoke request for an integration, and in the
+  `credential_maintenance` cron (25 per table per tick) for anything deferred; a repeated revoke retries. `credentialStatus.revokedKeysRemaining` is the zero-check.
+- **`destination_revoked`.** The consumer reads the row without a state filter and answers `destination_revoked` (`credentials_revoked`) for a revoked one before opening anything;
+  paused and quarantined rows keep `integration_unavailable`. The delivery view has `integrationStatus: 'revoked'` and the integration's current `credentialFingerprint`.
+- **Re-entering a burned value** after the key is gone is refused by its fingerprint (a limit without `FINGERPRINT_KEY`, documented). Source rotation after a destroy uses a
+  guard that does not bind an empty blob; `rewrapStaleSourceKeys` skips destroyed rows.
+- **Dashboard.** `RevokeDialog` (alert dialog, three fixed reasons), fingerprint and encrypted-copy state in the credentials section, revoked notice, fingerprint in the delivery
+  detail, audit labels, en and vi. Export carries `credential_fingerprint` and `credentials_revoked`.
+- **Boot.** `auth` tier (`APP_ORIGIN`, `BETTER_AUTH_SECRET`) stops `/api` and `/github`, not ingress, queue or cron; GitHub App bindings are named warnings; `config_unknown_keys` is logged
+  once per isolate (`src/platform/config-keys.ts`, completeness test against `src/env.ts` and `wrangler.jsonc`); `/health` is `{ok, service, code?}`; `GET /api/observability/readiness`
+  (operator only, else 404) has the names, per tier. Every test environment gained `BETTER_AUTH_SECRET`.
+- **Outbox.** Claim and reclaim `idempotent: false`, mark, release and invalid batch `idempotent: true` (reasoning in the ADR); `tests/pipeline/outbox-retry.test.ts` injects failures before
+  and after commit. `no_query_exceeds_100_bound_parameters` counts every SQL text and the run-time sized lists.
+- **Not done:** Secrets Store for the KEK (assessed: needs an async key ring), revoke control for sources in the dashboard, per-attempt fingerprint, staging rehearsal.
+- **Verified:** unit and integration tests on the Node SQLite fake (`npm run check`), including axe scans of the revoke dialog in en and vi. **Not verified:** a real D1 (empty-blob binding,
+  D1 error strings), a real browser, a deployed Worker's readiness view, the CI jobs of ADR 0027 on this PR.
+

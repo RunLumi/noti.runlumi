@@ -277,6 +277,41 @@ const ALLOWLIST: readonly Allowed[] = [
       'KEK rotation sweep over integrations; re-wraps each DEK without exposing plaintext across tenants.',
   },
   {
+    file: 'src/pipeline/credential-destroy.ts',
+    includes: 'SELECT id, organization_id FROM integrations',
+    category: 'cron sweep',
+    reason:
+      'Finds revoked integrations that still hold key material; each wipe that follows is scoped by id AND organization_id.',
+  },
+  {
+    file: 'src/pipeline/credential-destroy.ts',
+    includes: 'SELECT id, organization_id FROM sources',
+    category: 'cron sweep',
+    reason:
+      'Finds revoked sources that still hold key material; each wipe that follows is scoped by id AND organization_id.',
+  },
+  {
+    file: 'src/pipeline/credential-destroy.ts',
+    includes: 'SELECT (SELECT COUNT(*) FROM integrations',
+    category: 'cron sweep',
+    reason:
+      'Platform-wide count of revoked secrets still waiting for a fingerprint; a number for the operator, no row content.',
+  },
+  {
+    file: 'src/pipeline/fingerprint-backfill.ts',
+    includes: 'SELECT id, organization_id FROM integrations',
+    category: 'cron sweep',
+    reason:
+      'Finds revoked integrations that still hold a secret and have no fingerprint; each backfill that follows is scoped by id AND organization_id.',
+  },
+  {
+    file: 'src/pipeline/fingerprint-backfill.ts',
+    includes: 'SELECT id, organization_id FROM sources',
+    category: 'cron sweep',
+    reason:
+      'Finds revoked sources that still hold a secret and have no fingerprint; each backfill that follows is scoped by id AND organization_id.',
+  },
+  {
     file: 'src/pipeline/credentials.ts',
     includes: 'SELECT SUM(CASE WHEN webhook_envelope IS NULL',
     category: 'cron sweep',

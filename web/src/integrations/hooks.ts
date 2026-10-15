@@ -8,6 +8,7 @@ import {
   type DestinationKind,
   type Integration,
   type IntegrationList,
+  type RevokeReason,
   type RotateCredentialsBody,
   type UpdateIntegrationBody,
 } from '../lib/api';
@@ -130,6 +131,27 @@ export function useRotateCredentials(orgId: string, id: string) {
     onSuccess: ({ integration: saved }) => {
       putIntegration(qc, orgId, saved);
       void qc.invalidateQueries({ queryKey: setupKeys.all(orgId) });
+    },
+  });
+}
+
+/**
+ * Only workspace admins hold `integration.revoke` (src/auth/permissions.ts), so the control is not offered to
+ * anyone else. The server still decides: this only avoids showing a button that would answer 403.
+ */
+export function useCanRevoke(): boolean {
+  const me = useQuery({ queryKey: ['me'], queryFn: authApi.me });
+  return me.data?.user.role === 'admin';
+}
+
+export function useRevokeCredentials(orgId: string, id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reason: RevokeReason) => integrationsApi.revokeCredentials(orgId, id, reason),
+    onSuccess: (saved) => {
+      putIntegration(qc, orgId, saved);
+      void qc.invalidateQueries({ queryKey: setupKeys.all(orgId) });
+      void qc.invalidateQueries({ queryKey: integrationKeys.all(orgId) });
     },
   });
 }

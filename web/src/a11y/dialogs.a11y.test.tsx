@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { audit, describeViolations } from './testing/axe';
 import { renderApp } from './testing/render';
+import { MEMBER } from './testing/fixtures';
 
 /**
  * Dialogs, wizard steps and error states: the screens a person only reaches by acting. Each
@@ -71,6 +72,85 @@ describe('delete integration (alert dialog)', () => {
     expect(confirm.getAttribute('aria-disabled')).toBe('true');
     await user.type(within(dialog).getByLabelText(/Type Website builds to confirm/), 'Website builds');
     expect(confirm.getAttribute('aria-disabled')).toBeNull();
+  });
+});
+
+describe('revoke webhook URL (alert dialog)', () => {
+  it('is accessible, focuses Cancel first, traps Tab, closes on Escape and restores focus', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_1');
+    const trigger = await screen.findByRole('button', { name: 'Revoke webhook URL' });
+    await user.click(trigger);
+
+    const dialog = await screen.findByRole('alertdialog', { name: /Revoke the webhook URL for/ });
+    await expectClean('revoke dialog open');
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' })),
+    );
+    expect(within(dialog).getByRole('radio', { name: 'It may have been leaked or misused' })).toBeTruthy();
+    expect(await tabStaysWithin(user, dialog, 8)).toBe(true);
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it('revokes with the chosen reason, then says what happened and offers the new URL form', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_1');
+    await user.click(await screen.findByRole('button', { name: 'Revoke webhook URL' }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('radio', { name: 'We no longer use it' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke webhook URL' }));
+
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(await screen.findByText(/Webhook URL revoked\. Nothing more is sent/)).toBeTruthy();
+    expect(screen.getByText('Revoked')).toBeTruthy();
+    expect(screen.getByText(/Destroyed in the live database/)).toBeTruthy();
+    // The fingerprint outlives the key, and the replace form is open for the next step.
+    expect(screen.getByText('K3M7QXAZ')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save new webhook URL' })).toBeTruthy();
+    // Nothing left to revoke.
+    expect(screen.queryByRole('button', { name: 'Revoke webhook URL' })).toBeNull();
+    await expectClean('after revoke');
+  });
+
+  it('does not revoke when Enter is pressed on a reason: only the confirm button revokes', async () => {
+    const user = userEvent.setup();
+    await renderApp('/integrations/int_1');
+    await user.click(await screen.findByRole('button', { name: 'Revoke webhook URL' }));
+    const dialog = await screen.findByRole('alertdialog');
+    const radio = within(dialog).getByRole('radio', { name: 'We no longer use it' });
+    await user.click(radio);
+    radio.focus();
+    await user.keyboard('{Enter}');
+    // Still open and nothing was revoked.
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    expect(screen.queryByText(/Webhook URL revoked\./)).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: 'Revoke webhook URL' }));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(await screen.findByText(/Webhook URL revoked\./)).toBeTruthy();
+  });
+
+  it('offers no revoke control to a member, who lacks integration.revoke', async () => {
+    await renderApp('/integrations/int_1', { api: { me: MEMBER } });
+    await screen.findByText('Fingerprint');
+    expect(screen.queryByRole('button', { name: 'Revoke webhook URL' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Replace webhook URL' })).toBeTruthy();
+  });
+
+  it('shows the fingerprint of an unrevoked URL and no revoke state', async () => {
+    await renderApp('/integrations/int_1');
+    await screen.findByRole('button', { name: 'Revoke webhook URL' });
+    expect(screen.getByText('Fingerprint')).toBeTruthy();
+    expect(screen.getByText('K3M7QXAZ')).toBeTruthy();
+    expect(screen.queryByText('Revoked')).toBeNull();
+  });
+
+  it('is announced in Vietnamese, with the diacritics intact', async () => {
+    await renderApp('/integrations/int_1', { locale: 'vi' });
+    expect(await screen.findByRole('button', { name: 'Thu hồi webhook URL' })).toBeTruthy();
+    expect(screen.getByText('Dấu vân tay')).toBeTruthy();
   });
 });
 

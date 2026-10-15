@@ -81,10 +81,27 @@ function dependents(table, version) {
  * an integer, so nothing user-controlled is interpolated.
  * @param {number} version
  */
-export function destroyCheckSql(version) {
+export function destroyCheckSql(version, options = {}) {
   const v = assertVersion(version);
-  return `SELECT ${dependents('integrations', v)} AS integrations, ${dependents('sources', v)} AS sources`;
+  return `SELECT ${integrationDependents(v, options.legacyOld === true)} AS integrations, ${dependents('sources', v)} AS sources`;
 }
+
+/**
+ * Integrations, plus the kept original `integrations_old` while migration 0026 has not been finalized: it holds
+ * the pre-swap wrapped keys, and `migration-0026-recover.mjs` can put it back, so a KEK version it still uses is
+ * not destroyable. Only when the table exists (a reference to a missing table is an error), hence the option.
+ * @param {number} v
+ * @param {boolean} legacyOld
+ */
+function integrationDependents(v, legacyOld) {
+  return legacyOld
+    ? `(${dependents('integrations', v)} + ${dependents('integrations_old', v)})`
+    : dependents('integrations', v);
+}
+
+/** `SELECT COUNT(*)` of `integrations_old`: 1 while migration 0026's kept original exists. */
+export const LEGACY_OLD_SQL =
+  "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'integrations_old'";
 
 /**
  * @param {{ integrations?: number | null, sources?: number | null } | undefined} row
@@ -104,9 +121,10 @@ export function evaluateDestroyCheck(row) {
  * or source row depends on `version` at that instant. A destroyed-version event carries no
  * workspace (`organization_id` NULL): it is a platform event, never shown in a workspace's log.
  * Everything interpolated is validated here: an integer, an allow-listed reason, a restricted actor.
- * @param {{ version: number, active: number, actor: string, reason: string, id?: string }} entry
+ * @param {{ version: number, active: number, actor: string, reason: string, id?: string, legacyOld?: boolean }} entry
  */
 export function destroyAuditSql(entry) {
+  const legacyOld = entry.legacyOld === true;
   const version = assertVersion(entry.version);
   const active = assertVersion(entry.active);
   if (version === active) throw new Error('refusing to destroy the ACTIVE KEK version');
@@ -118,7 +136,7 @@ export function destroyAuditSql(entry) {
   const metadata = JSON.stringify({ kekVersion: version, reason: entry.reason, activeVersion: active });
   return `INSERT INTO audit_events(id,organization_id,actor_id,action,subject_type,subject_id,outcome,metadata_json)
 SELECT '${id}',NULL,'${entry.actor}','key.destroy','key','kek_v${version}','success','${metadata}'
-WHERE ${dependents('integrations', version)} = 0 AND ${dependents('sources', version)} = 0`;
+WHERE ${integrationDependents(version, legacyOld)} = 0 AND ${dependents('sources', version)} = 0`;
 }
 
 /**
@@ -167,7 +185,8 @@ async function main() {
       console.error(`KEK v${version} is the active version: refusing.`);
       return 1;
     }
-    const verdict = evaluateDestroyCheck(wrangler(destroyCheckSql(version), target)[0]);
+    const legacyOld = Number(wrangler(LEGACY_OLD_SQL, target)[0]?.n ?? 0) > 0;
+    const verdict = evaluateDestroyCheck(wrangler(destroyCheckSql(version, { legacyOld }), target)[0]);
     console.info(JSON.stringify({ version, ...verdict }));
     if (!verdict.safe)
       console.error(`Refusing: rows remain wrapped under KEK v${version}. Run the rewrap job to zero first.`);
@@ -179,6 +198,7 @@ async function main() {
       active: Number(args.active),
       actor: String(args.actor ?? ''),
       reason: String(args.reason ?? ''),
+      legacyOld: Number(wrangler(LEGACY_OLD_SQL, target)[0]?.n ?? 0) > 0,
     });
     const before = wrangler("SELECT COUNT(*) AS n FROM audit_events WHERE action='key.destroy'", target)[0]
       ?.n;

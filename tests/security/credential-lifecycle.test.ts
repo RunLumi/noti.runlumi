@@ -175,6 +175,8 @@ describe('revoking an integration credential (F40)', () => {
       staleKekRemaining: 0,
       quarantined: 0,
       revoked: 1,
+      // Nothing was in flight, so the key was destroyed in the revoke request itself.
+      revokedKeysRemaining: 0,
     });
   });
 

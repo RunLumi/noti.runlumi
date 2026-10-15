@@ -186,7 +186,7 @@ Decisions and verification: [ADR 0007](adr/0007-integrations-ux.md).
 | `test/` | "Send a test notification" ([ADR 0018](adr/0018-test-send.md)): `TestSend.tsx` (settings section, list row and wizard step), `useTestSend.ts`, `poll.ts` (bounded wait, pure and unit-tested), `api.ts`, `test-send.css` |
 | `filters/` | Routing filters ([ADR 0010](adr/0010-routing-filters.md)): `model.ts` (lines to API shape, error mapping, "Try it"), `FiltersEditor`, `FilterTester`, `RoutingLog` |
 | `noise/` | Quiet hours and summaries ([ADR 0016](adr/0016-noise-control.md)): `model.ts` (draft, validation with the server parser, the preview sentences from the server's `decideNoise`, time-zone list), `NoiseEditor`, `NoiseSection`, `hooks.ts` (waiting count), `noise.css` |
-| `settings/` | Per-integration screen: details form, filters, quiet hours and summaries, credential replacement, delete dialog |
+| `settings/` | Per-integration screen: details form, filters, quiet hours and summaries, credential section (state, fingerprint, replacement, `RevokeDialog`), delete dialog |
 | `destinations.ts` | One entry per destination: copy ids, numbered setup steps, docs link, `supportsSigningSecret` (Lark: a pasted secret) and `issuesSigningSecret` (custom webhook: server-generated, shown once) |
 | `IssuedSecret.tsx` | The custom webhook's one-time signing secret (create wizard and credential rotation); same behaviour as `sources/SecretReveal.tsx` |
 | `validation.ts` | Client checks mirroring `src/api/integration-input.ts` (imports the Worker allowlist) |
@@ -421,7 +421,21 @@ Deploy with `npm run deploy` (`build:web`, then `wrangler deploy --config web/di
 Set the custom domain, origin policy, secure cookies, D1, Queue and outbound transactional email
 before public use. Rollback: see ADR 0017.
 
+## Revoke and fingerprint (ADR 0036, `web/src/integrations/settings/`)
+
+The credentials section of an integration shows the webhook's **fingerprint** (monospace, keyed and tenant-scoped, with a line saying it is
+not the URL, or why there is none), a `Revoked` badge, and for a revoked integration whether the encrypted copy is destroyed or being
+destroyed. `RevokeDialog` is an alert dialog like the delete one (focus starts on Cancel; Escape and Tab are tested) with the destination
+radio cards reused for three fixed reasons (`compromised`, `no_longer_used`, `other`), no typed phrase (a new URL restores everything but
+the burned one), and a plain consequence sentence. On success the replace form opens and a status region says what happened. `CredentialsNotice`
+has a revoked variant; the delivery detail shows the integration's current fingerprint; `redeliver.integration.revoked` explains why no
+redelivery is offered. Controls are 44 px, the dialog uses the existing opaque modal surface, strings are in `messages.en.ts` and `messages.vi.ts`
+(including the audit labels `key_destroyed`). Role: the button is shown to everyone and the server answers 403 for a member, as the delete
+button does. Not built: the same control and fingerprint on the Sources page.
+
 ## Not yet verified
+
+- Revoke dialog and fingerprint (ADR 0036): jsdom, axe (en and vi) and unit tests only. No browser pass at 320 px or desktop, no real-contrast check of the new radio list, no screen-reader pass, no screenshot.
 
 - Slice 6f (setup flow, shell, settings sections): see the browser record in `docs/adr/0025-setup-and-shell-ux.md`. Not exercised anywhere: the GitHub connect round trip with a real App, a real provider accepting a test from the setup flow, screen readers, Safari and Firefox, a real 320px run in CI.
 

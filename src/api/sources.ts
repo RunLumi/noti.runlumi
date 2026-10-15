@@ -21,6 +21,10 @@ import { blob } from '../pipeline/credentials';
 import { hit } from '../security/rate-limit';
 import { sameSecret } from '../lib/digest';
 import { readRevokeReason } from './revoke';
+import { destroySettings, destroySourceKey } from '../pipeline/credential-destroy';
+import { backfillSourceFingerprint } from '../pipeline/fingerprint-backfill';
+import { credentialFingerprint } from '../crypto/fingerprint';
+import { log } from '../platform/log';
 import { isDeletionPending } from './workspace-lifecycle';
 
 /**
@@ -61,12 +65,13 @@ interface SourceRow {
   last_dropped_at: string | null;
   credential_fingerprint: string | null;
   credentials_revoked_at: string | null;
+  key_destroyed: number;
   integration_count: number;
 }
 
 const SELECT = `s.id,s.name,s.kind,s.endpoint_id,s.enabled,s.created_at,s.updated_at,s.last_received_at,
   s.secret_rotated_at,s.reused_id_rejections,s.last_reuse_rejected_at,s.auth_mode,s.livemode,s.dropped_events,s.last_dropped_at,
-  s.credential_fingerprint,s.credentials_revoked_at,
+  s.credential_fingerprint,s.credentials_revoked_at,(length(s.dek_wrapped) = 0) AS key_destroyed,
   (SELECT COUNT(*) FROM integrations i WHERE i.source_id=s.id AND i.organization_id=s.organization_id) AS integration_count`;
 
 export interface SourceView {
@@ -91,10 +96,12 @@ export interface SourceView {
   /** Events dropped because the source exceeded its rate limit (GitLab flood policy, ADR 0015). */
   readonly droppedEvents: number;
   readonly lastDroppedAt: string | null;
-  /** base32(SHA-256(secret))[0:8] to match the secret in the sender's console; null if sealed before F39. */
+  /** Keyed, tenant-scoped base32 HMAC of the secret, 8 characters, to match it in the sender's console; null without a fingerprint key or when sealed before F39. Kept after a revoke. */
   readonly credentialFingerprint: string | null;
   /** The credential was revoked (F40): the source stays off until a new secret is entered. */
   readonly revoked: boolean;
+  /** Revoked and the wrapped key destroyed (F40): the sealed secret can no longer be opened by anyone. */
+  readonly keyDestroyed: boolean;
   readonly integrationCount: number;
 }
 
@@ -122,6 +129,7 @@ function toView(row: SourceRow, appOrigin: string): SourceView {
     lastDroppedAt: row.last_dropped_at,
     credentialFingerprint: row.credential_fingerprint,
     revoked: row.credentials_revoked_at !== null,
+    keyDestroyed: row.credentials_revoked_at !== null && row.key_destroyed === 1,
     integrationCount: row.integration_count,
   };
 }
@@ -400,12 +408,15 @@ sources.patch('/:id', async (c) => {
       422,
     );
 
+  // Turning a source on is guarded in the statement: a revoke (or its destroy) that landed after this request
+  // read the row must not be undone by an "enabled" written from the stale read. A revoked, wiped source that
+  // were enabled would answer 5xx to every webhook (its secret cannot be opened).
+  const turningOn = 'enabled' in body && body.enabled === true ? 1 : 0;
   const results = await c.env.DB.batch([
-    c.env.DB.prepare(`UPDATE sources SET ${sets.join(',')} WHERE id=? AND organization_id=?`).bind(
-      ...values,
-      id,
-      who.orgId,
-    ),
+    c.env.DB.prepare(
+      `UPDATE sources SET ${sets.join(',')} WHERE id=? AND organization_id=?
+         AND (? = 0 OR credentials_revoked_at IS NULL)`,
+    ).bind(...values, id, who.orgId, turningOn),
     audit(c, who, 'source.update', id, {
       fields: changed,
       ...(typeof body.enabled === 'boolean' ? { enabled: body.enabled } : {}),
@@ -414,7 +425,12 @@ sources.patch('/:id', async (c) => {
         : {}),
     }),
   ]);
-  if (results[0]?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
+  if (results[0]?.meta.changes !== 1) {
+    const now = await load(c, who.orgId, id);
+    return now
+      ? c.json({ error: 'The source changed while saving. Nothing was changed; reload and try again.' }, 409)
+      : c.json({ error: 'Not found' }, 404);
+  }
   const row = await load(c, who.orgId, id);
   return row ? c.json({ source: toView(row, c.env.APP_ORIGIN) }) : c.json({ error: 'Not found' }, 404);
 });
@@ -471,6 +487,8 @@ sources.post('/:id/rotate', async (c) => {
     .first<{ dek_wrapped: unknown }>();
   const seenWrap = seen ? blob(toBytes(seen.dek_wrapped)) : null;
   if (!seenWrap) return c.json({ error: 'Not found' }, 404);
+  // A destroyed key is an empty blob: the guard then matches "still empty" instead of binding an empty value.
+  const guardWrap = seenWrap.byteLength === 0 ? null : seenWrap;
   if (existing.credentials_revoked_at !== null && existing.kind !== 'generic') {
     // The pasted credential of a revoked provider source must be a NEW one, not the burned value again.
     const stored = await c.env.DB.prepare(
@@ -481,7 +499,15 @@ sources.post('/:id/rotate', async (c) => {
     const burned = stored
       ? await openSourceSecretText(stored, keyringFromEnv(c.env)).catch(() => null)
       : null;
-    if (burned !== null && (await sameSecret(burned, secret)))
+    // Once the key is destroyed the burned value cannot be opened to compare, so the fingerprint that
+    // outlives the wipe stands in for it (keyed, tenant-scoped; without FINGERPRINT_KEY there is none).
+    const sameAsBurned =
+      burned !== null
+        ? await sameSecret(burned, secret)
+        : existing.credential_fingerprint !== null &&
+          existing.credential_fingerprint ===
+            (await credentialFingerprint(secret, who.orgId, c.env.FINGERPRINT_KEY));
+    if (sameAsBurned)
       return c.json(
         {
           error: 'Validation failed',
@@ -505,7 +531,7 @@ sources.post('/:id/rotate', async (c) => {
          enabled=CASE WHEN credentials_revoked_at IS NOT NULL THEN 1 ELSE enabled END,
          credentials_revoked_at=NULL,
          secret_rotated_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-       WHERE id=? AND organization_id=? AND dek_wrapped=?`,
+       WHERE id=? AND organization_id=? AND (dek_wrapped=? OR (length(dek_wrapped)=0 AND ? IS NULL))`,
     ).bind(
       sealed.secretEnvelope,
       sealed.keySalt,
@@ -515,7 +541,8 @@ sources.post('/:id/rotate', async (c) => {
       sealed.fingerprint,
       id,
       who.orgId,
-      seenWrap,
+      guardWrap,
+      guardWrap,
     ),
     audit(c, who, 'source.secret.rotate', id, {
       kind: existing.kind,
@@ -564,6 +591,24 @@ sources.post('/:id/revoke-credentials', async (c) => {
       ).bind(id, who.orgId),
       audit(c, who, 'source.credentials.revoke', id, { kind: existing.kind, reason }),
     ]);
+  }
+  // Finish the order revoke -> drain -> destroy when the drain window has already passed (a repeated
+  // revoke); otherwise the scheduled sweep wipes the key once it has. Idempotent either way.
+  try {
+    // A source with no fingerprint gets one now, while its secret can still be opened (see destroyKey in integrations).
+    await backfillSourceFingerprint(c.env, who.orgId, id).catch((error: unknown) =>
+      log('warn', 'fingerprint_backfill_failed', { source_id: id, error }),
+    );
+    await destroySourceKey(
+      c.env.DB,
+      who.orgId,
+      id,
+      Date.now(),
+      { actorId: who.userId, trigger: 'revoke' },
+      await destroySettings(c.env),
+    );
+  } catch (error) {
+    log('error', 'source_key_destroy_failed', { source_id: id, error });
   }
   const row = await load(c, who.orgId, id);
   return row ? c.json({ source: toView(row, c.env.APP_ORIGIN) }) : c.json({ error: 'Not found' }, 404);

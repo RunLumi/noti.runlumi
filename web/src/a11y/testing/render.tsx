@@ -422,6 +422,17 @@ export function installFetch(state: ApiState): void {
         json({ error: 'refused' }, state.testSend, state.testSend === 429 ? { 'retry-after': '42' } : {}),
       );
     }
+    const revoke = /^\/api\/integrations\/([^/]+)\/revoke-credentials$/.exec(path);
+    if (method === 'POST' && revoke) {
+      const current = (state.integrations as { id: string }[]).find((i) => i.id === revoke[1]);
+      if (!current) return Promise.resolve(json({ error: 'Not found' }, 404));
+      // Like the server: stopped at once, the encrypted copy destroyed, the fingerprint kept.
+      const revoked = { ...current, credentials: 'quarantined', revoked: true, keyDestroyed: true };
+      state.integrations = (state.integrations as { id: string }[]).map((i) =>
+        i.id === revoke[1] ? revoked : i,
+      );
+      return Promise.resolve(json({ integration: revoked }));
+    }
     if (method === 'POST' && path === '/api/integrations') {
       const created = { ...INTEGRATIONS[0], id: 'int_new', name: 'New integration' };
       // Later reads of the new id find it, as they would against the real API.

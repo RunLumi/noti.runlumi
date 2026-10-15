@@ -77,6 +77,9 @@ export const en = {
     'The stored webhook URL failed an integrity check, so Noti stopped using it rather than guess. Paste the URL from {destination} again to resume.',
   'credentials.fix': 'Replace webhook URL',
   'credentials.ok': 'Stored encrypted. Noti never shows it again.',
+  'credentials.revoked.title': 'Webhook URL revoked: nothing is sent',
+  'credentials.revoked.body':
+    'You revoked this webhook URL, so Noti stopped using it. Updates still waiting for this integration are not delivered. Paste a new {destination} webhook URL to start sending again.',
 
   // --- Destinations -------------------------------------------------------
   'destination.lark': 'Lark',
@@ -257,6 +260,17 @@ export const en = {
   'settings.credentials.stateOk': 'Encrypted',
   'settings.credentials.stateLegacy': 'Needs re-entry',
   'settings.credentials.stateQuarantined': 'Unreadable — replace it',
+  'settings.credentials.stateRevoked': 'Revoked',
+  'settings.credentials.fingerprint': 'Fingerprint',
+  'settings.credentials.fingerprintHint':
+    'A short code computed from the stored URL, so you can tell which URL this is without Noti showing it. It is not the URL and cannot be turned back into it.',
+  'settings.credentials.fingerprintNone':
+    'No fingerprint is available for this URL: it was saved before fingerprints existed, or this deployment has no fingerprint key.',
+  'settings.credentials.encryptedCopy': 'Encrypted copy',
+  'settings.credentials.copyDestroyed':
+    'Destroyed in the live database, so Noti cannot read it. Cloudflare’s database history can keep a copy for up to 30 days.',
+  'settings.credentials.copyDestroying':
+    'Being destroyed. It is not used for anything, and is destroyed as soon as a send already in progress ends.',
   'settings.credentials.destinationFixed':
     'To send to a different kind of destination, create a new integration.',
   'settings.credentials.replace': 'Replace webhook URL',
@@ -264,6 +278,19 @@ export const en = {
     'Paste a new URL from {destination}. Noti stops using the old one as soon as you save, and its encryption key is discarded.',
   'settings.credentials.save': 'Save new webhook URL',
   'settings.credentials.saved': 'New webhook URL saved. The old one is no longer used.',
+  'revoke.open': 'Revoke webhook URL',
+  'revoke.title': 'Revoke the webhook URL for “{name}”?',
+  'revoke.body':
+    'Noti stops using this URL immediately and destroys its encrypted copy, so Noti cannot read it again. Cloudflare’s database history can keep a copy for up to 30 days. Updates still waiting to be delivered here will not be sent. This cannot be undone: to send again you paste a new URL. If the URL was leaked, also delete it at {destination}.',
+  'revoke.reason.label': 'Why are you revoking it?',
+  'revoke.reason.compromised': 'It may have been leaked or misused',
+  'revoke.reason.no_longer_used': 'We no longer use it',
+  'revoke.reason.other': 'Another reason',
+  'revoke.cancel': 'Cancel',
+  'revoke.confirm': 'Revoke webhook URL',
+  'revoke.revoking': 'Revoking…',
+  'revoke.done':
+    'Webhook URL revoked. Nothing more is sent through this integration until you paste a new one.',
   'settings.danger.title': 'Delete integration',
   'settings.danger.body':
     'Deleting removes this integration and destroys its stored webhook URL and signing secret. They cannot be recovered. To stop messages for a while instead, pause it above.',
@@ -475,6 +502,7 @@ export const en = {
   'delivery.detail.id': 'Delivery ID',
   'delivery.detail.replayOf': 'Redelivery of',
   'delivery.detail.destination': 'Sends to',
+  'delivery.detail.fingerprint': 'Webhook fingerprint',
   'delivery.detail.timeline': 'What Noti recorded',
   'delivery.detail.timeline.note':
     'Noti records when a delivery was created, its first and latest attempt, and when it stopped. It does not keep a log of every attempt.',
@@ -513,6 +541,8 @@ export const en = {
     'This integration is paused. Turn it back on in its settings first, then come back to redeliver.',
   'redeliver.integration.quarantined':
     'Noti stopped using this integration’s saved webhook URL. Paste the URL again in its settings first, then come back to redeliver.',
+  'redeliver.integration.revoked':
+    'You revoked this integration’s webhook URL, so this cannot be redelivered. Paste a new URL in its settings first, then come back to redeliver.',
   'redeliver.notOffered': 'Only failed deliveries can be redelivered. This one is not failed.',
   'redeliver.deletionPending':
     'This workspace is scheduled for deletion, so nothing can be redelivered. Cancel the deletion in Settings first.',

@@ -115,6 +115,10 @@ export const isDestinationKind = (value: unknown): value is DestinationKind =>
   typeof value === 'string' && DESTINATION_KINDS.includes(value);
 export type CredentialsState = 'ok' | 'legacy' | 'quarantined';
 
+/** The closed reasons the server accepts for a revoke; it never takes free text. */
+export const REVOKE_REASONS = ['compromised', 'no_longer_used', 'other'] as const;
+export type RevokeReason = (typeof REVOKE_REASONS)[number];
+
 /** The server never returns a webhook URL or a signing secret; only the host. */
 export interface Integration {
   readonly id: string;
@@ -129,6 +133,15 @@ export interface Integration {
   readonly destinationHost: string | null;
   readonly enabled: boolean;
   readonly credentials: CredentialsState;
+  /** The customer revoked the credential (F40): it is burned, not merely unreadable. `credentials` stays `quarantined`. */
+  readonly revoked: boolean;
+  /** Revoked and the encrypted copy destroyed. False while a send already in progress drains. */
+  readonly keyDestroyed: boolean;
+  /**
+   * A short, keyed code derived from the stored webhook URL (F39): it identifies the URL without showing it.
+   * Null when the server has no fingerprint key or the URL was sealed before fingerprints existed.
+   */
+  readonly credentialFingerprint: string | null;
   /** Routing filters, normalised by the server; `{}` when none. */
   readonly filters: FilterConfig;
   /** The stored filters could not be read, so every chosen update is being sent. */
@@ -272,6 +285,10 @@ export function parseIntegration(value: unknown): Integration {
     destinationHost: value.destinationHost,
     enabled: value.enabled,
     credentials: value.credentials,
+    revoked: value.revoked === true,
+    keyDestroyed: value.keyDestroyed === true,
+    credentialFingerprint:
+      typeof value.credentialFingerprint === 'string' ? value.credentialFingerprint : null,
     ...filtersOf(value),
     ...noiseOf(value),
     createdAt: value.createdAt,
@@ -333,6 +350,14 @@ export const integrationsApi = {
     input: RotateCredentialsBody,
   ): Promise<IssuedIntegration> =>
     issued(await request(withOrg(item(id), orgId), { method: 'PATCH', body: JSON.stringify(input) })),
+  /** Revoke the credential (F40): the server stops using it at once and destroys the encrypted copy. */
+  revokeCredentials: async (orgId: string, id: string, reason: RevokeReason): Promise<Integration> =>
+    one(
+      await request(withOrg(`${item(id)}/revoke-credentials`, orgId), {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+    ),
   routingLog: async (orgId: string, id: string, cursor: string | null): Promise<RoutingLogPage> => {
     const query = `org=${encodeURIComponent(orgId)}&limit=20${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
     return parseRoutingLog(await request(`${item(id)}/routing-log?${query}`));

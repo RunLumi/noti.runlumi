@@ -55,10 +55,15 @@ import type { Bindings, DeliveryMessage } from '../env';
 import { withMessageCorrelation } from '../platform/correlation';
 import { log } from '../platform/log';
 import type { DestinationKind } from './allowlist';
-import { CREDENTIAL_COLUMNS, blob, openCredentials, type CredentialRow } from './credentials';
+import { CREDENTIAL_COLUMNS, REVOKED_REASON, blob, openCredentials, type CredentialRow } from './credentials';
 import { parseDeliveryMessage } from './outbox';
 
-type IntegrationRow = CredentialRow & { destination: DestinationKind };
+type IntegrationRow = CredentialRow & {
+  destination: DestinationKind;
+  enabled: number;
+  credentials_quarantined_at: string | null;
+  credentials_quarantine_reason: string | null;
+};
 
 /**
  * Mirrors `max_retries` on the `noti-deliveries` consumer in wrangler.jsonc (asserted by a
@@ -73,9 +78,11 @@ export const OUTBOUND_TIMEOUT_MS = 10_000;
 
 async function loadIntegration(env: Bindings, d: DeliveryMessage): Promise<IntegrationRow | null> {
   // Tenant re-check: the row must belong to the organization the ingress resolved.
+  // The state is read, not filtered in SQL, so a REVOKED row is told apart from a missing, paused or
+  // quarantined one (F40). Nothing is opened until the row has passed every check in `resolveTarget`.
   return env.DB.prepare(
-    `SELECT destination,${CREDENTIAL_COLUMNS} FROM integrations
-     WHERE id=? AND organization_id=? AND enabled=1 AND credentials_quarantined_at IS NULL`,
+    `SELECT destination,enabled,credentials_quarantined_at,credentials_quarantine_reason,${CREDENTIAL_COLUMNS}
+     FROM integrations WHERE id=? AND organization_id=?`,
   )
     .bind(d.integrationId, d.organizationId)
     .first<IntegrationRow>();
@@ -110,6 +117,12 @@ const urlPolicyOf = (env: Bindings): UrlPolicyOptions => ({ ownHosts: ownHostsOf
 async function resolveTarget(env: Bindings, keyring: Keyring, d: DeliveryMessage): Promise<Target> {
   const row = await loadIntegration(env, d);
   if (!row) return failed('config_invalid', 'integration_unavailable');
+  // The customer revoked this connection's credential (F40): permanent, no retry, and nothing is decrypted.
+  // Queued and in-flight messages fail closed here, whenever they were enqueued.
+  if (row.credentials_quarantined_at !== null && row.credentials_quarantine_reason === REVOKED_REASON)
+    return failed('destination_revoked', 'credentials_revoked');
+  if (row.enabled !== 1 || row.credentials_quarantined_at !== null)
+    return failed('config_invalid', 'integration_unavailable');
   // A gated kind never reaches the network while its feature is off, even for a row that was
   // stored while it was on (ADR 0014). Permanent: turning the feature on and redelivering works.
   if (row.destination === 'generic_webhook' && !genericWebhookEnabled(env))

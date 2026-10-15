@@ -20,6 +20,8 @@ export function CredentialsNotice({ integration, showFix = true }: CredentialsNo
   if (integration.credentials === 'ok') return null;
   const quarantined = integration.credentials === 'quarantined';
   const destination = t(DESTINATIONS[integration.destination].name);
+  // A revoke is the customer's own decision, so it is explained as that, not as a fault of ours.
+  const kind = integration.revoked ? 'revoked' : quarantined ? 'quarantined' : 'legacy';
   return (
     <div className={quarantined ? 'cred-notice cred-notice-stop' : 'cred-notice cred-notice-advice'}>
       {quarantined ? (
@@ -28,12 +30,8 @@ export function CredentialsNotice({ integration, showFix = true }: CredentialsNo
         <IconShieldLock size={20} aria-hidden="true" />
       )}
       <div>
-        <p className="cred-notice-title">
-          {t(quarantined ? 'credentials.quarantined.title' : 'credentials.legacy.title')}
-        </p>
-        <p className="cred-notice-body">
-          {t(quarantined ? 'credentials.quarantined.body' : 'credentials.legacy.body', { destination })}
-        </p>
+        <p className="cred-notice-title">{t(`credentials.${kind}.title`)}</p>
+        <p className="cred-notice-body">{t(`credentials.${kind}.body`, { destination })}</p>
         {showFix && (
           <Link
             to="/integrations/$id"
