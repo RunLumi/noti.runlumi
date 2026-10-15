@@ -343,6 +343,10 @@ export const LOG_EVENTS = {
     description: 'Sending an outbox row to the delivery queue failed; the claim is released.',
     fields: ['delivery_id', 'workspace_id', 'error'],
   },
+  password_changed_notice_failed: {
+    description: 'The password-changed notice mail could not be sent; the reset still completes.',
+    fields: ['error'],
+  },
   probe_audit_capped: {
     description: 'Workspace probe denials hit the per-minute audit cap; further probes are not recorded.',
     fields: ['limit'],

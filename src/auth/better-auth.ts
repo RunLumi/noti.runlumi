@@ -79,6 +79,17 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
         } catch {
           log('error', 'audit_note_failed', { action: 'session.revoke_all' });
         }
+        // Tell the address on file that the password changed (spec 02 F18), so a reset the owner did not make
+        // is noticed. Better Auth calls this only after the new password is stored. The mail carries no token
+        // and nothing that signs anyone in: its one link is the plain sign-in page. Best effort, like the audit
+        // note: Better Auth ends the sessions after this hook returns, so a send failure must not throw here.
+        // With an execution context the send runs in the background and a failure is logged by
+        // `settleBackground` as `background_task_failed` (task `auth_email_send`).
+        try {
+          await send(passwordChangedNotice(user.email, env.APP_ORIGIN));
+        } catch (error) {
+          log('warn', 'password_changed_notice_failed', { error });
+        }
       },
       sendResetPassword: async ({ user, url }) => {
         await send({
@@ -244,3 +255,19 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
 }
 
 export type NotiAuth = ReturnType<typeof createAuth>;
+
+/** The "your password was changed" notice (spec 02 F18). Plain text, fixed wording, one link to sign-in. */
+export function passwordChangedNotice(to: string, appOrigin: string): Parameters<typeof sendAuthEmail>[1] {
+  return {
+    to,
+    subject: 'Your Lumi Noti password was changed',
+    intro:
+      'The password for your Lumi Noti account was just changed with a reset link, and every device that was ' +
+      'signed in is signed out. To sign in with the new password, open the sign-in page:',
+    url: new URL('/signin', appOrigin).toString(),
+    outro:
+      'If this was not you, someone else changed your password. Open the sign-in page, choose ' +
+      '"Forgot password?" to set a new one, and tell an admin of your workspace. Anyone who can read this ' +
+      'mailbox can reset the password, so secure your email account too.',
+  };
+}

@@ -141,5 +141,27 @@ describe('creating and joining a workspace', () => {
     expect(requests).toContain('POST /api/workspace/active');
     expect(await screen.findByRole('button', { name: /Invited Co, Member\. Switch workspace/ })).toBeTruthy();
     expect(screen.queryByText(/already belong to an organization/)).toBeNull();
+    expect(requests).not.toContain('POST /api/auth/organization/create');
+  });
+
+  it('a person with no workspace accepts an invitation: joins it, never asks to create one (F21)', async () => {
+    const user = userEvent.setup();
+    const app = await renderApp('/invite?id=inv_1', {
+      api: {
+        me: NO_WORKSPACE,
+        orgs,
+        invitation: { orgId: OTHER_ORG_ID, name: 'Bao Retail', role: 'member' },
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Accept invitation' }));
+    await waitFor(() => expect(app.router.state.location.pathname).toBe('/'));
+    expect(requests.filter((r) => r === 'POST /api/auth/organization/accept-invitation')).toHaveLength(1);
+    expect(requests).toContain('POST /api/workspace/active');
+    // The invitation page has no path to workspace creation, and it does not send the person to /onboarding.
+    expect(requests).not.toContain('POST /api/auth/organization/create');
+    expect(app.api.me !== 'unauthenticated' && app.api.me.user.organizations.map((o) => o.orgId)).toEqual([
+      OTHER_ORG_ID,
+    ]);
+    expect(app.api.me !== 'unauthenticated' && app.api.me.user.activeOrgId).toBe(OTHER_ORG_ID);
   });
 });

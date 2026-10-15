@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createAuthHarness, NEW_PASSWORD, PASSWORD, SHORT_PASSWORD, WRONG_PASSWORD } from './harness';
+import { describe, expect, it, vi } from 'vitest';
+import { createAuthHarness, NEW_PASSWORD, ORIGIN, PASSWORD, SHORT_PASSWORD, WRONG_PASSWORD } from './harness';
 
 /**
  * Spec 02 F16 (identity), F17 (email verification), F18 (password reset): what the deployed Better Auth
@@ -234,5 +234,78 @@ describe('password reset (F18)', () => {
       ip: '203.0.113.32',
     });
     expect(res.status).toBe(400);
+  });
+
+  describe('the password-changed notice', () => {
+    const NOTICE = 'Your Lumi Noti password was changed';
+    const notices = (h: ReturnType<typeof createAuthHarness>) => h.mail.filter((m) => m.subject === NOTICE);
+
+    it('mails the address on file once, with no token and only a link to the sign-in page', async () => {
+      const h = createAuthHarness();
+      await h.register('owner@example.test', { ip: '203.0.113.40' });
+      const token = await resetFor(h, 'owner@example.test', '203.0.113.41');
+      expect(notices(h)).toHaveLength(0); // asking for a reset is not a change
+      const done = await h.call('/reset-password', {
+        body: { newPassword: NEW_PASSWORD, token },
+        ip: '203.0.113.41',
+      });
+      expect(done.status).toBe(200);
+
+      const sent = notices(h);
+      expect(sent).toHaveLength(1);
+      const [notice] = sent;
+      expect(notice?.to).toBe('owner@example.test');
+      const text = notice?.text ?? '';
+      expect(text).toMatch(/password for your Lumi Noti account was just changed/);
+      expect(text).toMatch(/If this was not you, someone else changed your password/);
+      expect(text).toMatch(/"Forgot password\?"/);
+      // A security notice must never tell a takeover victim to ignore it.
+      expect(text).not.toMatch(/ignore this email/);
+      // Exactly one link, to the plain sign-in page: no token, no query, nothing that signs anyone in.
+      const links = text.match(/https?:\/\/\S+/g) ?? [];
+      expect(links).toEqual([`${ORIGIN}/signin`]);
+      expect(text).not.toContain(token);
+      expect(text).not.toContain(NEW_PASSWORD);
+      expect(text).not.toMatch(/token|callbackURL|\/api\/auth/);
+    });
+
+    it('is not sent when the reset fails: a bad token, a weak password or a used link', async () => {
+      const h = createAuthHarness();
+      await h.register('safe@example.test', { ip: '203.0.113.42' });
+      const token = await resetFor(h, 'safe@example.test', '203.0.113.43');
+      const attempt = (body: Record<string, string>) =>
+        h.call('/reset-password', { body, ip: '203.0.113.43' });
+      expect((await attempt({ newPassword: NEW_PASSWORD, token: 'not-a-token' })).status).toBe(400);
+      expect((await attempt({ newPassword: SHORT_PASSWORD, token })).status).toBe(400);
+      expect(notices(h)).toHaveLength(0);
+      expect((await attempt({ newPassword: NEW_PASSWORD, token })).status).toBe(200);
+      expect((await attempt({ newPassword: NEW_PASSWORD + '2', token })).status).toBe(400);
+      expect(notices(h)).toHaveLength(1);
+    });
+
+    it('a refused send never undoes the reset: the password changes, sessions end, the failure is logged without the address', async () => {
+      const h = createAuthHarness({}, { refuseMail: (m) => m.subject === NOTICE });
+      const cookie = await h.register('flaky@example.test', { ip: '203.0.113.44' });
+      const token = await resetFor(h, 'flaky@example.test', '203.0.113.45');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        const done = await h.call('/reset-password', {
+          body: { newPassword: NEW_PASSWORD, token },
+          ip: '203.0.113.45',
+        });
+        expect(done.status).toBe(200);
+        const lines = warn.mock.calls.map((args) => args.map(String).join(' '));
+        expect(lines.filter((l) => l.includes('password_changed_notice_failed'))).toHaveLength(1);
+        expect(lines.join('\n')).not.toContain('flaky@example.test');
+      } finally {
+        warn.mockRestore();
+      }
+      expect(notices(h)).toHaveLength(0);
+      expect(sessionCount(h)).toBe(0);
+      expect(await (await h.call('/get-session', { cookie })).text()).toBe('null');
+      expect(
+        (await h.signIn('flaky@example.test', { password: NEW_PASSWORD, ip: '203.0.113.46' })).res.status,
+      ).toBe(200);
+    });
   });
 });

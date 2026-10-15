@@ -124,6 +124,7 @@ Event names are the existing snake_case names. Spec 13 F194 sketches dotted name
 | `outbox_dispatch_incomplete` | An outbox dispatch pass released claims or found invalid rows. | `workspaces`, `dispatched`, `reclaimed`, `lostRace`, `released`, `invalid` |
 | `outbox_reconcile` | Summary of one outbox reconcile run (sweep stale claims, dispatch, purge). | `workspaces`, `dispatched`, `reclaimed`, `lostRace`, `released`, `invalid`, `released_claims`, `purged` |
 | `outbox_send_failed` | Sending an outbox row to the delivery queue failed; the claim is released. | `delivery_id`, `workspace_id`, `error` |
+| `password_changed_notice_failed` | The password-changed notice mail could not be sent; the reset still completes. | `error` |
 | `probe_audit_capped` | Workspace probe denials hit the per-minute audit cap; further probes are not recorded. | `limit` |
 | `provider_event_rejected` | A verified provider event was rejected by its connector mapping. | `source_id`, `kind`, `reason` |
 | `provider_integration_event_types_unreadable` | An integration event-type selection is unreadable; it receives nothing. | `integration_id`, `kind` |

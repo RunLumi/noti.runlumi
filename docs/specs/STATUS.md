@@ -14,9 +14,9 @@
 
 | Status | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
-| All features | 40 | 155 | 40 | 4 | 23 | 262 |
-| P0 | 35 | 105 | 3 | 3 | 12 | 158 |
-| P1 | 5 | 44 | 19 | 0 | 4 | 72 |
+| All features | 43 | 152 | 40 | 4 | 23 | 262 |
+| P0 | 37 | 103 | 3 | 3 | 12 | 158 |
+| P1 | 6 | 43 | 19 | 0 | 4 | 72 |
 | P2 | 0 | 6 | 18 | 1 | 7 | 32 |
 
 ## Per spec
@@ -24,7 +24,7 @@
 | Spec | ✅ Done | 🟡 Partial | ❌ Not started | ⛔ Blocked | 🚫 Deferred / decided against | Total |
 | --- | --- | --- | --- | --- | --- | --- |
 | [01-platform-runtime.md](01-platform-runtime.md) | 3 | 9 | 1 | 0 | 1 | 14 |
-| [02-identity-tenancy.md](02-identity-tenancy.md) | 8 | 10 | 0 | 0 | 0 | 18 |
+| [02-identity-tenancy.md](02-identity-tenancy.md) | 11 | 7 | 0 | 0 | 0 | 18 |
 | [03-secrets-and-crypto.md](03-secrets-and-crypto.md) | 3 | 5 | 0 | 0 | 0 | 8 |
 | [04-event-model.md](04-event-model.md) | 1 | 10 | 1 | 0 | 2 | 14 |
 | [05-source-github.md](05-source-github.md) | 8 | 7 | 1 | 2 | 0 | 18 |
@@ -58,12 +58,12 @@
 | F13 | Error taxonomy and classification | [01](01-platform-runtime.md) | P0 | ✅ | closed, versioned `ErrorCode` union with `retryable`, `user_actionable` and message per code, default `internal_error` (`src/platform/errors.ts`, `tests/platform/errors.test.ts`); provider classifiers map onto it … |
 | F14 | Architecture decision record process | [01](01-platform-runtime.md) | P1 | 🟡 | ADRs in `docs/adr/` with Status/Context/Decision/Consequences sections, and a dated sources list and known-contradictions table in `docs/specs/README.md`; the five listed decisions are recorded (ADRs 0031 to 0035, numbers differ … |
 | F15 | Organization model | [02](02-identity-tenancy.md) | P0 | ✅ | multi-org: no `organizationLimit`; `selectMembership` returns 404 for non-member org, explicit `?org=` required on writes for multi-workspace users; `tests/workspace.test.ts`, `tests/api/org-required.test.ts`, … |
-| F16 | User identity | [02](02-identity-tenancy.md) | P0 | 🟡 | `requireEmailVerification`, 12 to 128 character policy, hash-only storage, lower-cased email with no second account for a case variant, indistinguishable sign-in failures and the verified-email gate are shown through the real … |
+| F16 | User identity | [02](02-identity-tenancy.md) | P0 | ✅ | `requireEmailVerification`, 12 to 128 character policy, hash-only storage, lower-cased email with no second account for a case variant, indistinguishable sign-in failures and the verified-email gate are shown through the real … |
 | F17 | Email verification | [02](02-identity-tenancy.md) | P0 | 🟡 | verification link: 1 h (now a named constant, tested), once only, signs no one in; sign-in before verification is refused and re-sends; 3/900 s resend limit shown per address (`tests/auth/credentials-policy.test.ts`, … |
 | F18 | Password reset | [02](02-identity-tenancy.md) | P0 | 🟡 | reset ends every session, answers identically for a known and an unknown address, is single use, expires after 1 h (explicit constant) and applies the password policy (`tests/auth/credentials-policy.test.ts`); the revocation is … |
 | F19 | Passkeys | [02](02-identity-tenancy.md) | P1 | 🟡 | sign-in ceremony run against a software authenticator: a counter that does not advance is refused and not stored, a never-counting authenticator is accepted, a challenge answers once, wrong origin, relying party or key is refused, … |
 | F20 | Sessions | [02](02-identity-tenancy.md) | P0 | ✅ | DB sessions, 30-day idle expiry with 24 h refresh and a 90-day absolute lifetime (decision in ADR 0030, enforced exactly in `currentSession` and by the hourly purge), `cookieCache` off asserted … |
-| F21 | Invitations | [02](02-identity-tenancy.md) | P0 | 🟡 | role validation, who may invite, accept only by the invited address (case-insensitive, once), no workspace created on accept, a second workspace allowed, explicit 7-day expiry, cancellation and the last-admin trigger are shown … |
+| F21 | Invitations | [02](02-identity-tenancy.md) | P0 | ✅ | role validation, who may invite, accept only by the invited address (case-insensitive, once), no workspace created on accept, a second workspace allowed, explicit 7-day expiry, cancellation and the last-admin trigger are shown … |
 | F22 | Rate limiting | [02](02-identity-tenancy.md) | P0 | ✅ | every rule in `AUTH_RATE_RULES` (`src/auth/rate-limit-rules.ts`) is driven to its limit, reset after its window, counted per `cf-connecting-ip` (a forged `X-Forwarded-For` does not move it; no address shares one bucket) and stored … |
 | F23 | CSRF and origin policy | [02](02-identity-tenancy.md) | P0 | ✅ | `requireSameOrigin` middleware enforces exact `APP_ORIGIN` on all mutating `/api/*` routes (`src/security/csrf.ts`); `trustedOrigins` pinned; `tests/security/csrf.test.ts`, `tests/api/workspace-active.test.ts`. SameSite cookie … |
 | F24 | Authorization model | [02](02-identity-tenancy.md) | P0 | ✅ | domain capabilities in `src/auth/permissions.ts`, single `authorize()` gate with audited denials and capability named in 403 (`src/auth/workspace.ts`); role x capability table in `tests/auth/permissions.test.ts` (PR #9); no viewer … |
@@ -74,7 +74,7 @@
 | F29 | Webhook ingress protection | [02](02-identity-tenancy.md) | P0 | 🟡 | per-installation GitHub limiter (`ingressLimiter`, `tests/security/rate-limit.test.ts`) and per-source flood limit with 429 + Retry-After for generic and provider sources (`tests/sources/ingress.test.ts`); D1 counters, fails open. … |
 | F30 | Workspace deletion and data export | [02](02-identity-tenancy.md) | P1 | ✅ | two-phase deletion, bounded purge, credential-free export (PR #12); personal-account export and erasure added in slice S3 (`docs/DSAR.md`) |
 | F31 | Retire the superseded identity schema | [02](02-identity-tenancy.md) | P1 | ✅ | `migrations/0004_identity.sql` marked superseded, `docs/AUTH_SETUP.md` rewritten, CI guard that no source references retired tables (`tests/retired-schema.test.ts`, ADR 0003, PR #12) |
-| F32 | Better Auth ADR | [02](02-identity-tenancy.md) | P1 | 🟡 | `docs/adr/0003-better-auth.md` records Better Auth ownership, pinned versions, `organization.id` reuse, database rate-limit storage, server-derived passkey RP ID, plugin-is-not-isolation. Not recorded: multi-org decision as … |
+| F32 | Better Auth ADR | [02](02-identity-tenancy.md) | P1 | ✅ | `docs/adr/0003-better-auth.md` records Better Auth ownership, pinned versions, `organization.id` reuse, database rate-limit storage, server-derived passkey RP ID, plugin-is-not-isolation, and (amended by ADR 0053) the … |
 | F33 | Envelope encryption core | [03](03-secrets-and-crypto.md) | P0 | ✅ | AES-256-GCM seal/open with versioned strict envelope, random IV, BLOB storage, size limits (PR #7, ADR 0004, `src/crypto/envelope.ts`, `tests/crypto/envelope.test.ts`) |
 | F34 | Key storage boundary: Secrets Store holds keys, D1 holds ciphertext | [03](03-secrets-and-crypto.md) | P0 | 🟡 | tier 2 only: KEKs are Worker secrets (`src/crypto/keyring-env.ts`), boot check at every entrypoint, never in D1; a per-environment KEK check value (`KEK_CHECK_V<n>`, `ENVIRONMENT_NAME`) makes a Worker with another environment's … |
 | F35 | Tenant-scoped key derivation | [03](03-secrets-and-crypto.md) | P0 | ✅ | per-connection DEK wrapped by KEK, HKDF info binds org id and purpose, wrapped key refuses a moved org or connection (PR #7, `src/crypto/envelope.ts`, `tests/crypto/envelope.test.ts`) |

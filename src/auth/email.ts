@@ -18,6 +18,12 @@ export async function sendAuthEmail(
     subject: string;
     intro: string;
     url: string;
+    /**
+     * The closing line. Defaults to "you can ignore this email", which is right for a link the person asked
+     * for and wrong for a security notice (a password-changed notice must not tell a takeover victim to
+     * ignore it), so a notice states its own.
+     */
+    outro?: string;
   },
 ): Promise<void> {
   const site = new URL(env.APP_ORIGIN);
@@ -31,7 +37,11 @@ export async function sendAuthEmail(
     to: input.to,
     subject: input.subject,
     text:
-      input.intro + '\n\n' + link.toString() + '\n\nIf you did not request this, you can ignore this email.',
+      input.intro +
+      '\n\n' +
+      link.toString() +
+      '\n\n' +
+      (input.outro ?? 'If you did not request this, you can ignore this email.'),
   });
 }
 

@@ -1,6 +1,7 @@
 # ADR 0003: Adopt Better Auth, and pin the dependency graph exactly
 
-Status: Accepted · Date: 2026-10-13 · Supersedes nothing
+Status: Accepted · Date: 2026-10-13 · Supersedes nothing · Amended 2026-10-15 by ADR 0053 (items 5 and 6:
+multi-organisation membership and the Email Sending constraints)
 
 ## Context
 
@@ -33,6 +34,39 @@ green local build would not imply a green CI build.
 
 **4. Our tenant-owned tables reuse Better Auth's `organization.id` directly.** No mapping
 table, no sync job, no dual key.
+
+**5. A person may belong to any number of organisations (accepted 2026-10-13, recorded here
+2026-10-15 by ADR 0053).** The organization plugin is configured with no `organizationLimit`
+and without the old `ensureNotMember` hooks, because `docs/PRODUCT.md` names an agency or
+operator who serves many customer workspaces as a target audience, and a cap of one excludes
+them (`docs/specs/00-current-state.md` N2). Isolation never comes from membership
+cardinality: it is the `organization_id` predicate on our own tables (`02` F24 to F27). The
+one place cardinality had been standing in for isolation is the workspace a request acts on,
+so that is chosen by `selectMembership` (`src/auth/workspace.ts`): an explicit `?org=` that
+must name one of the caller's memberships (404 otherwise), then the session's active
+organisation, then the only membership, and **refusal when it is still ambiguous**, never the
+first row the database yields (N7; `tests/workspace.test.ts`, `tests/api/org-required.test.ts`,
+`tests/api/workspace-active.test.ts`). A new session starts in the earliest membership
+(`session.create.before`), and accepting an invitation adds a membership to the inviting
+organisation only, creating none (`tests/auth/invitations.test.ts`).
+
+**6. Mail goes through Cloudflare Email Sending, and its constraints are accepted for V1
+(recorded 2026-10-15 by ADR 0053).** Verification, password reset, invitations and the
+password-changed and account-deletion notices are sent through the `AUTH_EMAIL` binding as
+plain text from the server-controlled `AUTH_FROM_EMAIL` (`src/auth/email.ts`). The
+constraints, as read on 2026-10-13 and recorded with their source in
+[`docs/AUTH_SETUP.md`](../AUTH_SETUP.md) ("Cloudflare Email Sending — corrected") and
+[`docs/EMAIL_LIMITS.md`](../EMAIL_LIMITS.md), and not re-read for this ADR:
+
+| Constraint (as recorded in those pages) | Consequence for us |
+| --- | --- |
+| Workers Paid only, and the service is in beta | a paid plan is a deployment prerequisite; the binding is in the auth tier of the boot check (ADR 0047) |
+| Before a sending domain is onboarded, only verified destination addresses (200 per account) can be mailed; after onboarding, any recipient | a real sign-up cannot be verified until `runlumi.app` is onboarded; whether it is, is not known from the repository |
+| Mail may only be sent from the account's own domains | the sender is ours, never a customer's |
+| 3,000 messages a month included, then charged per 1,000 | about 100 sign-ups a month at three messages each: a growth limit, monitored by nobody yet |
+| No suppression, bounce or quota handling in our code | a send failure propagates to the caller (or is logged, for a best-effort notice); deliverability is not managed |
+
+Email Sending is the only provider; a migration plan to another one is not written (`02` F17).
 
 ## Why the exact pin, specifically
 
@@ -91,4 +125,7 @@ Run on 2026-10-13:
   (better-auth#11490, merged 2026-10-10) reaches a release. We use the Drizzle adapter, so
   that fix likely does not apply — re-verify rather than assume.
 - Session token hashing becomes configurable.
-- `organizationLimit: 1` is relaxed (`02` F15).
+- ~~`organizationLimit: 1` is relaxed (`02` F15).~~ Done 2026-10-13; the decision is item 5 above.
+- Cloudflare's Email Sending limits or pricing pages change, sign-ups approach half the
+  monthly allowance, or the service leaves beta: re-read them and update `docs/EMAIL_LIMITS.md`
+  and item 6 (the 180-day re-read of `docs/EMAIL_LIMITS.md` applies).

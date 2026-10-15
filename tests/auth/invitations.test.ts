@@ -160,6 +160,102 @@ describe('accepting an invitation', () => {
     expect(orgs.map((r) => r.o).sort()).toEqual([acme, globex].sort());
   });
 
+  describe('joins the inviting workspace only (F21: no second workspace for the invitee)', () => {
+    type MeBody = { user: { activeOrgId: string | null; organizations: { orgId: string; role: string }[] } };
+    const me = async (cookie: string): Promise<MeBody> => {
+      const res = await h.api('/api/workspace/me', { cookie });
+      expect(res.status).toBe(200);
+      return res.json<MeBody>();
+    };
+    const membershipsOf = (email: string): string[] =>
+      (
+        h.db.raw
+          .prepare(
+            `SELECT organization_id AS o FROM member WHERE user_id=(SELECT id FROM "user" WHERE email=?) ORDER BY o`,
+          )
+          .all(email) as { o: string }[]
+      ).map((r) => r.o);
+
+    it('a newcomer who signs up from the invitation (invite-only deployment) ends in that workspace and no other', async () => {
+      // The deployed configuration: invite-only, with the operator on the allowlist (ADR 0047).
+      h = createAuthHarness({ SIGNUP_MODE: 'invite_only', SIGNUP_ALLOWLIST: 'boss@example.test' });
+      admin = await h.register('boss@example.test', { ip: '10.9.1.1' });
+      const acme = await createWorkspace(admin, 'acme');
+      expect((await invite(admin, acme, 'fresh@example.test', 'member')).status).toBe(200);
+      const workspaces = count('organization');
+
+      // Sign-up, verification and sign-in create no workspace: the invitee has none until they accept.
+      const fresh = await h.register('fresh@example.test', { ip: '10.9.1.2' });
+      expect(count('organization')).toBe(workspaces);
+      expect(membershipsOf('fresh@example.test')).toEqual([]);
+      expect((await me(fresh)).user.organizations).toEqual([]);
+
+      const res = await h.call('/organization/accept-invitation', {
+        body: { invitationId: invitationIdFor('fresh@example.test') },
+        cookie: fresh,
+        ip: '10.9.1.2',
+      });
+      expect(res.status).toBe(200);
+      // The answer names the inviting workspace, which is what the invitation page switches to.
+      const joined = await res.json<{
+        invitation: { organizationId: string };
+        member: { organizationId: string };
+      }>();
+      expect(joined.member.organizationId).toBe(acme);
+      expect(joined.invitation.organizationId).toBe(acme);
+
+      expect(count('organization')).toBe(workspaces);
+      expect(membershipsOf('fresh@example.test')).toEqual([acme]);
+      const after = (await me(fresh)).user;
+      expect(after.organizations.map((o) => [o.orgId, o.role])).toEqual([[acme, 'member']]);
+      expect(
+        h.db.raw.prepare(`SELECT status FROM invitation WHERE email='fresh@example.test'`).get(),
+      ).toEqual({
+        status: 'accepted',
+      });
+
+      // Accepting again changes nothing: no second membership and no workspace.
+      const again = await h.call('/organization/accept-invitation', {
+        body: { invitationId: invitationIdFor('fresh@example.test') },
+        cookie: fresh,
+        ip: '10.9.1.2',
+      });
+      expect(again.status).toBeGreaterThanOrEqual(400);
+      expect(count('organization')).toBe(workspaces);
+      expect(membershipsOf('fresh@example.test')).toEqual([acme]);
+    });
+
+    it('a person who already has a workspace gains exactly the inviting one: no third workspace, the first kept', async () => {
+      const acme = await createWorkspace(admin, 'acme');
+      const owner = await h.register('owner@example.test', { ip: '10.9.1.3' });
+      const own = await createWorkspace(owner, 'own-shop');
+      await invite(admin, acme, 'owner@example.test', 'admin');
+      const workspaces = count('organization');
+
+      const res = await h.call('/organization/accept-invitation', {
+        body: { invitationId: invitationIdFor('owner@example.test') },
+        cookie: owner,
+        ip: '10.9.1.3',
+      });
+      expect(res.status).toBe(200);
+      expect(count('organization')).toBe(workspaces);
+      expect(membershipsOf('owner@example.test')).toEqual([acme, own].sort());
+      const listed = (await me(owner)).user.organizations.map((o) => [o.orgId, o.role]);
+      expect(listed.sort()).toEqual(
+        [
+          [own, 'admin'],
+          [acme, 'admin'],
+        ].sort(),
+      );
+      // The inviting workspace gained exactly one member beside its creator: the invitee.
+      expect(
+        h.db.raw.prepare('SELECT COUNT(*) AS n FROM member WHERE organization_id=?').get(acme) as {
+          n: number;
+        },
+      ).toEqual({ n: 2 });
+    });
+  });
+
   it('only the invited address may accept: another signed-in person is refused and nothing changes', async () => {
     const org = await createWorkspace(admin, 'acme');
     await invite(admin, org, 'meant@example.test', 'admin');

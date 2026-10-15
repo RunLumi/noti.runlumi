@@ -31,6 +31,12 @@ setup instructions. Whether the domain `runlumi.app` is onboarded for sending in
 sender, and refuses a link whose origin is not ours. It calls `env.AUTH_EMAIL.send(...)` and lets a rejection propagate to
 the caller. There is **no** quota counter, no suppression list, no bounce or complaint handling and no retry for email.
 
+Two messages are best-effort security notices rather than part of a flow: the account-deletion notice
+(`src/api/account.ts`) and, since ADR 0053, the password-changed notice sent after a successful reset
+(`src/auth/better-auth.ts`, `onPasswordReset`). A failure to send either is logged (`account_deletion_notice_failed`,
+`password_changed_notice_failed`, or `background_task_failed` when the send runs after the response) and never undoes
+the action. Each successful reset therefore costs two messages against the quota: the link and the notice.
+
 Failure behaviour by design (target, partly built):
 
 | Condition | Required behaviour | Built? |

@@ -57,8 +57,15 @@ export interface AuthHarness {
   ): Promise<{ res: Response; cookie: string }>;
 }
 
-/** `overrides` replace bindings of the harness environment, e.g. `{ SIGNUP_MODE: 'invite_only' }`. */
-export function createAuthHarness(overrides: Record<string, string> = {}): AuthHarness {
+/**
+ * `overrides` replace bindings of the harness environment, e.g. `{ SIGNUP_MODE: 'invite_only' }`.
+ * `options.refuseMail` makes the mail binding reject (and record nothing) for the messages it matches, as the
+ * Cloudflare binding does for an unverified recipient or an exhausted quota.
+ */
+export function createAuthHarness(
+  overrides: Record<string, string> = {},
+  options: { refuseMail?: (m: SentMail) => boolean } = {},
+): AuthHarness {
   const db = createFakeD1();
   const mail: SentMail[] = [];
   const env = {
@@ -69,7 +76,10 @@ export function createAuthHarness(overrides: Record<string, string> = {}): AuthH
     AUTH_FROM_EMAIL: 'noti@noti.test',
     AUTH_EMAIL: {
       send: (m: { to: string; subject: string; text: string }) => {
-        mail.push({ to: m.to, subject: m.subject, text: m.text });
+        const message = { to: m.to, subject: m.subject, text: m.text };
+        if (options.refuseMail?.(message))
+          return Promise.reject(new Error('mail binding refused the message'));
+        mail.push(message);
         return Promise.resolve();
       },
     },

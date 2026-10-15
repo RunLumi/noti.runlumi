@@ -536,6 +536,12 @@ sources are worded for a pasted credential. Strings in `messages.en.ts` and `mes
   and are checked against `SUMMARY_WINDOW_MS`. A new figure comes from a query; while that query is loading or has
   failed, the screen shows a dash (`DeliveryStats.tsx`, `IntegrationsStat.tsx`).
 - **Empty sections.** The empty state's body copy is 16px (`.empty p`), the minimum for body text.
+- **No logging of the address (ADR 0053, spec 02 F16).** `web/src/lib/no-email-logging.test.tsx` reads every
+  non-test source file in `web/src` (not `a11y/testing`) as a TypeScript syntax tree and fails on any reference to
+  `console`, any `sendBeacon`, a call on a known analytics or error-reporting global, or an import of a known
+  analytics or logging package. There is no allowlist: the client has no logging call. It also types an address into
+  the sign-in (refused and accepted), sign-up and forgot-password forms with every console method spied, and fails if
+  the address reaches the console, a beacon or any request URL. No screen changed; this is a test-only rule.
 
 ## Not yet verified
 

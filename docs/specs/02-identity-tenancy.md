@@ -112,7 +112,7 @@ client-supplied role.
 
 ## F16 — User identity
 
-**Priority** P0 · **Status** 🟡 `requireEmailVerification`, 12 to 128 character policy, hash-only storage, lower-cased email with no second account for a case variant, indistinguishable sign-in failures and the verified-email gate are shown through the real handler (`tests/auth/credentials-policy.test.ts`, ADR 0030). Not built: a test that the web client never logs the address (a grep finds no `console` call in `web/src` outside a sample snippet)
+**Priority** P0 · **Status** ✅ `requireEmailVerification`, 12 to 128 character policy, hash-only storage, lower-cased email with no second account for a case variant, indistinguishable sign-in failures and the verified-email gate are shown through the real handler (`tests/auth/credentials-policy.test.ts`, ADR 0030). The web client never logs the address: a syntax-tree scan of `web/src` finds no `console`, beacon or analytics call or import, and the sign-in, sign-up and forgot-password forms put the address in no console call, beacon or URL (`web/src/lib/no-email-logging.test.tsx`, ADR 0053); server-side, `email` is a redacted key (`src/platform/redact.ts`, `tests/platform/redact.test.ts`)
 
 **Acceptance** — verified present:
 - [x] `user` table via Better Auth, email unique.
@@ -123,7 +123,7 @@ client-supplied role.
 **Remaining**
 - [x] ⚠️ Email canonicalization is Better Auth's responsibility; verified explicitly (lower-cased, case variants
       are one account, sign-in is case-insensitive): `tests/auth/credentials-policy.test.ts`.
-- [ ] Email is on the F12 log denylist. `web/src/lib/api.ts` must never log it.
+- [x] Email is on the F12 log denylist (`src/platform/redact.ts`). The web client never logs it: `web/src/lib/no-email-logging.test.tsx` (ADR 0053).
 - [x] Account deletion path: `DELETE /api/workspace/me` (slice S3, `docs/DSAR.md`). A sole admin is refused until another admin exists or the workspace is deleted; no step-up re-authentication (AR-41).
 
 **Security** — Better Auth does the hashing; we do not reimplement. `AGENTS.md`'s lean-
@@ -168,13 +168,14 @@ only send from your routing domains.
 
 ## F18 — Password reset
 
-**Priority** P0 · **Status** 🟡 reset ends every session, answers identically for a known and an unknown address, is single use, expires after 1 h (explicit constant) and applies the password policy (`tests/auth/credentials-policy.test.ts`); the revocation is audited as `session.revoke_all` with a count (`tests/auth/audit-events.test.ts`, ADR 0030). Not built: a real email delivery check; no notice email to the address on file
+**Priority** P0 · **Status** 🟡 reset ends every session, answers identically for a known and an unknown address, is single use, expires after 1 h (explicit constant) and applies the password policy (`tests/auth/credentials-policy.test.ts`); the revocation is audited as `session.revoke_all` with a count (`tests/auth/audit-events.test.ts`, ADR 0030). A successful reset mails the address on file a password-changed notice with no token and only a sign-in link; a failed reset sends none, and a refused send never undoes the reset (`tests/auth/credentials-policy.test.ts`, ADR 0053). Not built: a real email delivery check; no notice after a signed-in `/change-password`
 
 **Acceptance**
 - [x] `sendResetPassword` implemented.
 - [x] `revokeSessionsOnPasswordReset: true` — all other sessions die on reset.
 - [x] Response is generic whether or not the email exists. Rate limited to 3 per 900 s.
 - [x] Reset link TTL is explicit (1 h, `RESET_PASSWORD_TOKEN_EXPIRES_IN_SECONDS`) and tested.
+- [x] The address on file is told after a successful reset (`onPasswordReset`, ADR 0053); best effort, never blocks the reset.
 
 **Tests** — `reset_revokes_other_sessions`; `reset_response_is_generic_for_unknown_email`.
 
@@ -222,14 +223,15 @@ about Better Auth's internal token storage beyond what its docs say.
 
 ## F21 — Invitations
 
-**Priority** P0 · **Status** 🟡 role validation, who may invite, accept only by the invited address (case-insensitive, once), no workspace created on accept, a second workspace allowed, explicit 7-day expiry, cancellation and the last-admin trigger are shown (`tests/auth/invitations.test.ts`, ADR 0030); invitation, acceptance, cancellation, role change and removal are audited (`tests/auth/audit-events.test.ts`). Built in ADR 0045: an admin-only list of pending invitations on the Team page, with cancel (`src/api/invitations.ts`, `tests/api/invitations.test.ts`, `web/src/team/pending-invitations.test.tsx`); the cancel writes its audit row in the same batch as the change. Not built: a check that the accept UI `web/src/onboarding.tsx` never creates a second workspace for an existing person
+**Priority** P0 · **Status** ✅ role validation, who may invite, accept only by the invited address (case-insensitive, once), no workspace created on accept, a second workspace allowed, explicit 7-day expiry, cancellation and the last-admin trigger are shown (`tests/auth/invitations.test.ts`, ADR 0030); invitation, acceptance, cancellation, role change and removal are audited (`tests/auth/audit-events.test.ts`). Built in ADR 0045: an admin-only list of pending invitations on the Team page, with cancel (`src/api/invitations.ts`, `tests/api/invitations.test.ts`, `web/src/team/pending-invitations.test.tsx`); the cancel writes its audit row in the same batch as the change. Accepting joins the inviting workspace only: a newcomer on an invite-only deployment and a person who already owns a workspace each gain exactly that membership and no workspace is created (`tests/auth/invitations.test.ts`, real handler and `/api/workspace/me`), and the `/invite` page sends no `organization/create` (`web/src/workspace/stale-tab.test.tsx`, ADR 0053)
 
 **Acceptance**
 - [x] `sendInvitationEmail` with a `/invite?id=` link.
 - [x] `requireEmailVerificationOnInvitation: true`.
 - [x] Invites are **role-validated** in `beforeCreateInvitation`.
-- [ ] Invite acceptance UI exists at `web/src/onboarding.tsx`; confirm it does not create a
-      second organization for an existing user (this was the original invariant-2 risk).
+- [x] Invite acceptance UI exists at `web/src/onboarding.tsx`; confirm it does not create a
+      second organization for an existing user (this was the original invariant-2 risk). Confirmed by
+      `tests/auth/invitations.test.ts` and `web/src/workspace/stale-tab.test.tsx` (ADR 0053).
 - [x] Invite TTL is explicit (7 days, `INVITATION_EXPIRES_IN_SECONDS`) and tested.
 - [x] Per F15, accepting an invite into a second organization is now **allowed** (shown by test).
 
@@ -492,7 +494,7 @@ cannot exhaust our Worker quota.
 
 ## F32 — Better Auth ADR
 
-**Priority** P1 · **Status** 🟡 `docs/adr/0003-better-auth.md` records Better Auth ownership, pinned versions, `organization.id` reuse, database rate-limit storage, server-derived passkey RP ID, plugin-is-not-isolation. Not recorded: multi-org decision as accepted (still listed under revisit), Email Sending constraint
+**Priority** P1 · **Status** ✅ `docs/adr/0003-better-auth.md` records Better Auth ownership, pinned versions, `organization.id` reuse, database rate-limit storage, server-derived passkey RP ID, plugin-is-not-isolation, and (amended by ADR 0053) the multi-organisation decision as accepted with `selectMembership` refusing ambiguity (item 5) and the Email Sending constraints as recorded in `docs/AUTH_SETUP.md` and `docs/EMAIL_LIMITS.md` (item 6)
 
 **Records**
 1. Better Auth owns identity, sessions, organizations, roles, invitations, passkeys and auth

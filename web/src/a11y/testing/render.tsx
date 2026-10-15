@@ -156,6 +156,11 @@ export interface ApiState {
   /** The body of the last `POST /api/auth/sign-up/email`, answered with Better Auth's uniform 200. */
   lastSignUp?: Record<string, unknown>;
   /**
+   * How `POST /api/auth/sign-in/email` answers: `ok`, or `invalid` (Better Auth's 401 for a wrong address or
+   * password). Unset leaves the route unmocked, as before.
+   */
+  signIn?: 'ok' | 'invalid';
+  /**
    * Request paths (prefixes) that never answer, so a test can see the loading state a person sees
    * while a list is still on its way. Everything else answers at once, as before.
    */
@@ -292,6 +297,16 @@ export function installFetch(state: ApiState): void {
         unknown
       >;
       return Promise.resolve(json({ token: null, user: { id: 'user_new', email: state.lastSignUp.email } }));
+    }
+    if (method === 'POST' && path === '/api/auth/sign-in/email' && state.signIn) {
+      if (state.signIn === 'invalid')
+        return Promise.resolve(
+          json({ code: 'INVALID_EMAIL_OR_PASSWORD', message: 'Invalid email or password' }, 401),
+        );
+      const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as { email?: string };
+      return Promise.resolve(
+        json({ redirect: false, token: 'session-fixture', user: { id: 'user_1', email: body.email } }),
+      );
     }
     if (method === 'POST' && path === '/api/auth/organization/remove-member') {
       if (state.removeMemberStatus)
