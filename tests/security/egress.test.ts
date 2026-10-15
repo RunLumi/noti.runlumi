@@ -250,13 +250,54 @@ describe('generic-webhook/host-control.ts: resolution goes only through dns-chec
     for (const c of calls) expect(c.arguments[1]?.getText(sf)).toBe('deps.fetcher');
   });
 
-  it('the consumer verifies the host before it sends a custom webhook request', () => {
-    const text = read('src/pipeline/consumer.ts');
-    const verify = text.indexOf('verifyHostAtSend(');
-    const send = text.indexOf('await sendRequest(');
-    expect(verify).toBeGreaterThan(0);
-    expect(send).toBeGreaterThan(verify);
-    expect(text).toContain("config.kind === 'generic_webhook'");
+  it('only the permitted modules call sendRequest or deliver, and nobody calls deliver (AST, review M3)', () => {
+    const calls = (name: string): Record<string, number> => {
+      const out: Record<string, number> = {};
+      for (const f of srcFiles) {
+        const n = callsTo(parse(readFileSync(f, 'utf8'), rel(f)), name).length;
+        if (n > 0) out[rel(f)] = n;
+      }
+      return out;
+    };
+    expect(calls('sendRequest')).toEqual({
+      'src/connectors/destinations/index.ts': 1, // deliver()
+      'src/observability/alerts/sinks.ts': 1, // alert sink: never a custom webhook, see below
+      'src/pipeline/consumer.ts': 1,
+    });
+    expect(calls('deliver')).toEqual({});
+  });
+
+  it('alert sinks can never target a custom webhook, so they need no host verification', async () => {
+    const { ALERT_WEBHOOK_KINDS } = await import('../../src/observability/alerts/sinks');
+    expect(ALERT_WEBHOOK_KINDS as readonly string[]).not.toContain('generic_webhook');
+  });
+
+  it('sendRequest refuses generic_webhook without a matching HostVerification (AST)', () => {
+    const file = 'src/connectors/destinations/send.ts';
+    const text = read(file);
+    expect(text).toMatch(/request\.kind === 'generic_webhook'/);
+    expect(text).toMatch(
+      /options\.hostVerification\?\.host !== new URL\(request\.url\)\.hostname\.toLowerCase\(\)/,
+    );
+  });
+
+  it('mintHostVerification is called from host-control.ts only', () => {
+    const where = srcFiles
+      .filter((f) => callsTo(parse(readFileSync(f, 'utf8'), rel(f)), 'mintHostVerification').length > 0)
+      .map(rel);
+    expect(where).toEqual(['src/connectors/destinations/generic-webhook/host-control.ts']);
+  });
+
+  it('the consumer calls verifyHostAtSend before sendRequest and passes its verification on (AST)', () => {
+    const file = 'src/pipeline/consumer.ts';
+    const sf = parse(read(file), file);
+    const verify = callsTo(sf, 'verifyHostAtSend');
+    const send = callsTo(sf, 'sendRequest');
+    expect(verify).toHaveLength(1);
+    expect(send).toHaveLength(1);
+    expect(enclosingFunction(verify[0] as ts.Node)).toBe(enclosingFunction(send[0] as ts.Node));
+    expect((verify[0] as ts.Node).getStart()).toBeLessThan((send[0] as ts.Node).getStart());
+    expect(send[0]?.arguments[2]?.getText(sf)).toContain('hostVerification');
   });
 });
 

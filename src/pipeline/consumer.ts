@@ -1,5 +1,6 @@
 import { auditStatement } from '../audit/audit';
 import { isDeadWebhook } from '../connectors/destinations/discord/classify';
+import type { HostVerification } from '../connectors/destinations/generic-webhook/verified';
 import { verifyHostAtSend } from '../connectors/destinations/generic-webhook/host-control';
 import { genericWebhookEnabled } from '../connectors/destinations/features';
 import { ownHostsOf, type UrlPolicyOptions } from '../connectors/destinations/url-policy';
@@ -186,6 +187,7 @@ async function attemptDelivery(
   }
   // A custom webhook goes only to a host the workspace approved, re-resolved when its record is stale and
   // refused if it now points at a private or reserved address (host-control.ts, ADR 0029). Fails closed.
+  let hostVerification: HostVerification | undefined;
   if (config.kind === 'generic_webhook') {
     const hostCheck = await verifyHostAtSend(
       { db: env.DB, urlPolicy: urlPolicyOf(env) },
@@ -205,14 +207,20 @@ async function attemptDelivery(
         null,
         null,
       );
+    hostVerification = hostCheck.verification;
   }
   // Platform-wide, cross-tenant guard (egress-guard.ts): a Discord request that would feed the shared
   // invalid-request budget, or exceed the shared rate, waits instead of leaving the platform.
   if (config.kind === 'discord') {
-    const guard = await guardGate(env.DB, 'discord', deps.now());
+    const guard = await guardGate(
+      env.DB,
+      'discord',
+      { organizationId: d.organizationId, integrationId: d.integrationId },
+      deps.now(),
+    );
     if (guard.action === 'defer')
       return {
-        ...reportOf(failed('destination_unavailable', 'platform_paused'), null, null),
+        ...reportOf(failed('destination_unavailable', guard.reason), null, null),
         deferred: { untilMs: guard.untilMs, reason: guard.reason },
       };
   }
@@ -223,9 +231,21 @@ async function attemptDelivery(
       seen.res = res;
       return classifyDeliveryResponse(config.kind, res, at);
     },
-    { timeoutMs: OUTBOUND_TIMEOUT_MS, now: deps.now, urlPolicy: urlPolicyOf(env) },
+    {
+      timeoutMs: OUTBOUND_TIMEOUT_MS,
+      now: deps.now,
+      urlPolicy: urlPolicyOf(env),
+      ...(hostVerification ? { hostVerification } : {}),
+    },
   );
-  if (config.kind === 'discord') await recordEgress(env.DB, 'discord', deps.now(), seen.res?.status ?? null);
+  if (config.kind === 'discord')
+    await recordEgress(
+      env.DB,
+      'discord',
+      { organizationId: d.organizationId, integrationId: d.integrationId },
+      deps.now(),
+      seen.res?.status ?? null,
+    );
   const classification = config.kind === 'discord' ? capDiscordAuthRetries(sent, attempt) : sent;
   if (config.kind === 'discord' && seen.res && isDeadWebhook(seen.res.status, classification)) {
     try {

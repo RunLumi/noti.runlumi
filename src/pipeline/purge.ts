@@ -31,6 +31,7 @@ export const TENANT_TABLES = [
   // Ingress usage accounting (0028). Cascades from the organization too; drained first to keep that small.
   'ingress_usage',
   // Custom-webhook host controls (0029).
+  'egress_guard_tenant_buckets',
   'workspace_webhook_hosts',
   'webhook_host_resolutions',
 ] as const;

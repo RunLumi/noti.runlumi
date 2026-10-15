@@ -44,6 +44,12 @@ export const ledgerEn = {
   'attempts.code': 'Code {code}',
   'attempts.reason.circuit_open': 'Paused automatically because the destination keeps failing.',
   'attempts.reason.destination_paced': 'Waited because the destination asked Noti to slow down.',
+  'attempts.reason.workspace_paused':
+    'Waited because this workspace sent Discord more refused or rate-limited requests than its share allows. Nothing was sent.',
+  'attempts.reason.platform_paused_timeout':
+    'Stopped waiting: Noti kept Discord paused for everyone for more than a day. Redeliver it later.',
+  'attempts.reason.workspace_paused_timeout':
+    'Stopped waiting: this workspace stayed over its Discord request share for more than a day. Fix the failing Discord webhooks, then redeliver.',
   'attempts.reason.platform_paused':
     'Waited because Noti paused sending to this service for everyone while it recovers. Nothing was sent.',
 
@@ -68,6 +74,9 @@ export const ledgerEn = {
 
   'delivery.detail.paused.platform_paused':
     'Waiting because Noti paused sending to this service for all workspaces for a short while. Noti sends it by itself afterwards. Nothing is lost, and nothing was turned off.',
+
+  'delivery.detail.paused.workspace_paused':
+    'Waiting because this workspace sent Discord too many refused or rate-limited requests. Noti slowed this workspace down to protect everyone else, and retries by itself. Check that your Discord webhooks still exist.',
 
   'health.open.title': 'Paused automatically',
   'health.open.body':

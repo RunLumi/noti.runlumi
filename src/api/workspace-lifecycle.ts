@@ -186,54 +186,60 @@ lifecycle.get('/export', async (c) => {
   const who = await gate(c, 'workspace.export');
   if (who instanceof Response) return who;
   const db = c.env.DB;
-  const [members, integrations, sources, installations, deliveries, attempts, audit] = await db.batch([
-    db
-      .prepare(
-        `SELECT u.name AS name, u.email AS email, m.role AS role, m.created_at AS joined_at
+  const [members, integrations, sources, installations, deliveries, attempts, audit, webhookHosts] =
+    await db.batch([
+      db
+        .prepare(
+          `SELECT u.name AS name, u.email AS email, m.role AS role, m.created_at AS joined_at
          FROM member m JOIN "user" u ON u.id=m.user_id WHERE m.organization_id=? ORDER BY m.created_at`,
-      )
-      .bind(who.orgId),
-    db
-      .prepare(
-        `SELECT id,name,repo,source_id,event_types,filters_json,noise_json,destination,destination_host,enabled,created_at,updated_at
+        )
+        .bind(who.orgId),
+      db
+        .prepare(
+          `SELECT id,name,repo,source_id,event_types,filters_json,noise_json,destination,destination_host,enabled,created_at,updated_at
          FROM integrations WHERE organization_id=? ORDER BY created_at`,
-      )
-      .bind(who.orgId),
-    // Never the secret, key, salt or envelope: an explicit column list, not SELECT *.
-    db
-      .prepare(
-        `SELECT id,kind,name,endpoint_id,auth_mode,livemode,enabled,created_at,updated_at,last_received_at,
+        )
+        .bind(who.orgId),
+      // Never the secret, key, salt or envelope: an explicit column list, not SELECT *.
+      db
+        .prepare(
+          `SELECT id,kind,name,endpoint_id,auth_mode,livemode,enabled,created_at,updated_at,last_received_at,
            secret_rotated_at,dropped_events,last_dropped_at
          FROM sources WHERE organization_id=? ORDER BY created_at`,
-      )
-      .bind(who.orgId),
-    db
-      .prepare(
-        `SELECT installation_id,account_login,account_type,repository_selection,status,created_at
+        )
+        .bind(who.orgId),
+      db
+        .prepare(
+          `SELECT installation_id,account_login,account_type,repository_selection,status,created_at
          FROM github_installations WHERE organization_id=?`,
-      )
-      .bind(who.orgId),
-    db
-      .prepare(
-        `SELECT id,integration_id,state,attempts,updated_at,possible_duplicate,suppressed_reason,duplicate_of
+        )
+        .bind(who.orgId),
+      db
+        .prepare(
+          `SELECT id,integration_id,state,attempts,updated_at,possible_duplicate,suppressed_reason,duplicate_of
          FROM deliveries WHERE organization_id=? ORDER BY updated_at DESC LIMIT ?`,
-      )
-      .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
-    // The attempt history (F184): closed vocabularies and numbers only, no payload or URL.
-    db
-      .prepare(
-        `SELECT delivery_id,attempt,started_at,finished_at,outcome,error_code,reason,status_class,retry_after_ms,
+        )
+        .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
+      // The attempt history (F184): closed vocabularies and numbers only, no payload or URL.
+      db
+        .prepare(
+          `SELECT delivery_id,attempt,started_at,finished_at,outcome,error_code,reason,status_class,retry_after_ms,
            possible_duplicate
          FROM delivery_attempts WHERE organization_id=? ORDER BY started_at DESC LIMIT ?`,
-      )
-      .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
-    db
-      .prepare(
-        `SELECT action,subject_type,subject_id,outcome,metadata_json,created_at FROM audit_events
+        )
+        .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
+      db
+        .prepare(
+          `SELECT action,subject_type,subject_id,outcome,metadata_json,created_at FROM audit_events
          WHERE organization_id=? ORDER BY created_at DESC LIMIT ?`,
-      )
-      .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
-  ]);
+        )
+        .bind(who.orgId, EXPORT_ROW_LIMIT + 1),
+      db
+        .prepare(
+          'SELECT host,created_by,created_at FROM workspace_webhook_hosts WHERE organization_id=? ORDER BY host LIMIT 50',
+        )
+        .bind(who.orgId),
+    ]);
 
   await recordAudit(db, {
     organizationId: who.orgId,
@@ -258,6 +264,7 @@ lifecycle.get('/export', async (c) => {
     deliveries: (deliveries?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
     deliveryAttempts: (attempts?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
     auditEvents: (audit?.results ?? []).slice(0, EXPORT_ROW_LIMIT),
+    webhookHosts: webhookHosts?.results ?? [],
     // The most recent rows are exported; `true` means older rows exist and were left out.
     truncated: {
       deliveries: (deliveries?.results.length ?? 0) > EXPORT_ROW_LIMIT,

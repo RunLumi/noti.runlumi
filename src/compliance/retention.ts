@@ -868,21 +868,22 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     category: 'tenant_configuration',
     personalData: 'indirect',
     dataHeld:
-      'The hostnames (or *.domain rules) a workspace approved for custom webhooks, who added each and when.',
+      'The hostnames (or *.domain rules) a workspace approved for custom webhooks, the user id that added each and when.',
     purpose:
       'A workspace allowlist: a custom webhook may only point at an approved host (SSRF control, F115).',
     retention: workspaceLifetime,
     deletion: [{ kind: 'workspace_purge', route: 'tenant_tables' }],
-    inWorkspaceExport: false,
+    inWorkspaceExport: true,
     inAccountExport: false,
-    exportNote: 'Not exported yet: the feature is off and has no management surface.',
+    exportNote:
+      'Exported with the workspace (`webhookHosts`): the host rules, who added each (a user id) and when.',
     ...placeholders,
   },
   {
     id: 'webhook_host_resolutions',
     table: 'webhook_host_resolutions',
     category: 'delivery_metadata',
-    personalData: 'none',
+    personalData: 'indirect',
     dataHeld:
       'Per custom-webhook integration: the host, the addresses it last resolved to, the result, when, and how many times the address set changed. Never the URL path, query or secret.',
     purpose: 'Re-resolution and rebinding defence for a customer-chosen host (F115).',
@@ -890,7 +891,7 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
       kind: 'fixed',
       ms: RESOLUTION_RETENTION_MS,
       basis: 'RESOLUTION_RETENTION_MS (generic-webhook/host-control.ts)',
-      note: 'Counted from the last resolution.',
+      note: 'Counted from the last send that checked the host (`last_used_at`); the cron sweep does not renew it. Rows of a deleted or disabled integration are removed at once by `egress_maintenance`.',
     },
     deletion: [
       { kind: 'cron_job', job: 'egress_maintenance' },
@@ -898,6 +899,31 @@ export const RETENTION_MATRIX: readonly RetentionRow[] = [
     ],
     inWorkspaceExport: false,
     inAccountExport: false,
+    exportNote:
+      'Not exported: the resolved addresses are operator data about a name the workspace already sees; a host name can identify a person (a personal domain), hence `indirect`.',
+    ...placeholders,
+  },
+  {
+    id: 'egress_guard_tenant_buckets',
+    table: 'egress_guard_tenant_buckets',
+    category: 'abuse_control_counter',
+    personalData: 'none',
+    dataHeld:
+      'Per workspace, integration, provider and minute: outbound requests made and invalid (401, 403, 429) answers received. Counts only.',
+    purpose:
+      'Holds a workspace that sends a provider too many refused requests, before the platform-wide guard is involved (F108).',
+    retention: {
+      kind: 'fixed',
+      ms: BUCKET_RETENTION_MS,
+      basis: 'BUCKET_RETENTION_MS (src/delivery/egress-guard.ts)',
+    },
+    deletion: [
+      { kind: 'cron_job', job: 'egress_maintenance' },
+      { kind: 'workspace_purge', route: 'tenant_tables' },
+    ],
+    inWorkspaceExport: false,
+    inAccountExport: false,
+    exportNote: 'Not exported: transient counters that live one hour.',
     ...placeholders,
   },
   {

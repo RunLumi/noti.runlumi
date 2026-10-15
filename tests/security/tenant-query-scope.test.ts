@@ -525,19 +525,30 @@ const ALLOWLIST: readonly Allowed[] = [
     category: 'retention',
     reason: 'PURGE_DESTINATION_HEALTH_SQL: idle closed breakers, for every tenant alike.',
   },
+  // --- egress guard per-tenant buckets (0029): age-based retention across tenants ---
+  {
+    file: 'src/delivery/egress-guard.ts',
+    includes:
+      'DELETE FROM egress_guard_tenant_buckets WHERE rowid IN ( SELECT rowid FROM egress_guard_tenant_buckets WHERE minute_start < ?1',
+    category: 'retention',
+    reason:
+      'Per-workspace guard counters past their one-hour retention, for every tenant alike (counts only).',
+  },
   // --- custom-webhook host re-resolution (0029, ADR 0029): a maintenance sweep across tenants ---
   {
     file: 'src/connectors/destinations/generic-webhook/host-control.ts',
-    includes: 'FROM webhook_host_resolutions WHERE resolved_at < ?1 ORDER BY resolved_at LIMIT ?2',
+    includes: 'FROM webhook_host_resolutions r JOIN integrations i ON i.id = r.integration_id',
     category: 'retention',
     reason:
       'DUE_RESOLUTIONS_SQL: the cron sweep lists the oldest stale records of every tenant; each row is then re-read, checked and rewritten with its own organization_id and integration_id.',
   },
   {
     file: 'src/connectors/destinations/generic-webhook/host-control.ts',
-    includes: 'DELETE FROM webhook_host_resolutions WHERE resolved_at < ?1',
+    includes:
+      'DELETE FROM webhook_host_resolutions WHERE rowid IN ( SELECT r.rowid FROM webhook_host_resolutions r',
     category: 'retention',
-    reason: 'Resolution records nothing has refreshed for the retention period, for every tenant alike.',
+    reason:
+      'PURGE_RESOLUTIONS_SQL: records no send has used for the retention period, and records whose integration is gone or disabled (joined on id AND organization_id), for every tenant alike.',
   },
   // --- correlated by primary key to an org-scoped outer row ---
   {

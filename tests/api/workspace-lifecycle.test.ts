@@ -355,6 +355,24 @@ describe('workspace export', () => {
     expect(body.truncated).toEqual({ deliveries: true, deliveryAttempts: false, auditEvents: false });
   });
 
+  it('exports the webhook host allowlist of this workspace only (review L1)', async () => {
+    db.raw
+      .prepare(
+        "INSERT INTO workspace_webhook_hosts(organization_id,host,created_by,created_at) VALUES('org-a','hooks.example.com','u1',5)",
+      )
+      .run();
+    seedOrganization(db.raw, 'org-z');
+    db.raw
+      .prepare(
+        "INSERT INTO workspace_webhook_hosts(organization_id,host,created_at) VALUES('org-z','other.example.com',5)",
+      )
+      .run();
+    const body = await (
+      await call('GET', '/api/workspace/export', 'alice')
+    ).json<{ webhookHosts: unknown[] }>();
+    expect(body.webhookHosts).toEqual([{ host: 'hooks.example.com', created_by: 'u1', created_at: 5 }]);
+  });
+
   it('exports only the caller’s workspace', async () => {
     await createIntegration('mallory');
     const body = await (

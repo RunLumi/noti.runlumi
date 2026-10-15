@@ -26,6 +26,7 @@ export const ALERT_IDS = [
   'cron_heartbeat_missing',
   'dlq_consumer_no_progress',
   'egress_breaker_open',
+  'egress_guard_failing',
 ] as const;
 export type AlertId = (typeof ALERT_IDS)[number];
 
@@ -200,6 +201,19 @@ export const ALERTS: readonly AlertDef[] = [
     threshold: THRESHOLDS.egressGuardsOpen,
     read: (s) => s.egressGuardsOpen,
     renotifyMs: RENOTIFY_MS.critical,
+    confirmTicks: 1,
+    clearTicks: CLEAR_TICKS,
+    settlesAfterMaintenance: false,
+  },
+  {
+    id: 'egress_guard_failing',
+    severity: 'warning',
+    summary:
+      'The platform-wide Discord guard could not read or write its state and failed open: its protection is off.',
+    unit: 'count',
+    threshold: THRESHOLDS.egressGuardFaults,
+    read: (s) => s.egressGuardFaults,
+    renotifyMs: RENOTIFY_MS.warning,
     confirmTicks: 1,
     clearTicks: CLEAR_TICKS,
     settlesAfterMaintenance: false,

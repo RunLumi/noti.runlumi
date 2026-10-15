@@ -44,6 +44,12 @@ export const ledgerVi = {
   'attempts.code': 'Mã {code}',
   'attempts.reason.circuit_open': 'Tự động tạm dừng vì nơi nhận liên tục lỗi.',
   'attempts.reason.destination_paced': 'Đã chờ vì nơi nhận yêu cầu Noti gửi chậm lại.',
+  'attempts.reason.workspace_paused':
+    'Đã chờ vì không gian làm việc này gửi tới Discord nhiều yêu cầu bị từ chối hoặc bị giới hạn hơn phần cho phép. Chưa có gì được gửi.',
+  'attempts.reason.platform_paused_timeout':
+    'Đã ngừng chờ: Noti tạm dừng Discord cho mọi người hơn một ngày. Hãy gửi lại sau.',
+  'attempts.reason.workspace_paused_timeout':
+    'Đã ngừng chờ: không gian làm việc này vượt phần yêu cầu Discord cho phép hơn một ngày. Hãy sửa các webhook Discord bị lỗi rồi gửi lại.',
   'attempts.reason.platform_paused':
     'Đã chờ vì Noti tạm dừng gửi tới dịch vụ này cho mọi không gian làm việc trong lúc nó phục hồi. Chưa có gì được gửi.',
 
@@ -67,6 +73,9 @@ export const ledgerVi = {
 
   'delivery.detail.paused.platform_paused':
     'Đang chờ vì Noti tạm dừng gửi tới dịch vụ này cho mọi không gian làm việc trong một lúc. Noti sẽ tự gửi sau đó. Không có gì bị mất, và không có gì bị tắt.',
+
+  'delivery.detail.paused.workspace_paused':
+    'Đang chờ vì không gian làm việc này gửi tới Discord quá nhiều yêu cầu bị từ chối hoặc bị giới hạn. Noti làm chậm không gian này để bảo vệ mọi người, và sẽ tự thử lại. Hãy kiểm tra các webhook Discord còn tồn tại.',
 
   'health.open.title': 'Tự động tạm dừng',
   'health.open.body':

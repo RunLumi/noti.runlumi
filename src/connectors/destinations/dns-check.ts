@@ -17,8 +17,8 @@ import { isBlockedCustomerHostname, type UrlPolicyOptions } from './url-policy';
  *  - It fails CLOSED: if the lookup itself fails the host is refused with a retryable message.
  *
  * The per-workspace host allowlist, recorded addresses and periodic re-resolution are built on top of
- * this check in `generic-webhook/host-control.ts` (ADR 0029). The rebinding window is narrowed by them,
- * not closed.
+ * this check in `generic-webhook/host-control.ts` (ADR 0029). They do NOT defend against
+ * rebinding (this resolver path is not the one `fetch` uses).
  */
 
 export type HostCheck =

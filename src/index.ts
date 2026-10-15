@@ -342,12 +342,14 @@ async function purgeDedup(env: Bindings): Promise<JobReport> {
 async function maintainEgress(env: Bindings): Promise<JobReport> {
   const now = Date.now();
   const buckets = await purgeEgressBuckets(env.DB, now);
-  if (!genericWebhookEnabled(env)) return { counters: { buckets_purged: buckets } };
+  // Always: records of deleted or disabled integrations go whatever the flag says.
+  const stale = await purgeStaleResolutions(env.DB, now);
+  if (!genericWebhookEnabled(env))
+    return { counters: { buckets_purged: buckets, resolutions_purged: stale } };
   const report = await reresolveDueHosts(
     { db: env.DB, urlPolicy: { ownHosts: ownHostsOf(env.APP_ORIGIN) } },
     now,
   );
-  const stale = await purgeStaleResolutions(env.DB, now);
   return {
     counters: {
       buckets_purged: buckets,

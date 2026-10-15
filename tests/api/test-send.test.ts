@@ -438,10 +438,10 @@ describe('a test to a custom webhook reveals only three buckets', () => {
       .run();
     db.raw
       .prepare(
-        `INSERT INTO webhook_host_resolutions(organization_id,integration_id,host,addresses,status,resolved_at)
-         VALUES('org-a','int-gen','hooks.example.com','["93.184.216.34"]','ok',?)`,
+        `INSERT INTO webhook_host_resolutions(organization_id,integration_id,host,addresses,status,resolved_at,last_used_at)
+         VALUES('org-a','int-gen','hooks.example.com','["93.184.216.34"]','ok',?,?)`,
       )
-      .run(Date.now());
+      .run(Date.now(), Date.now());
   }
 
   it.each([

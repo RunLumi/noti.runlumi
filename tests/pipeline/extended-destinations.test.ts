@@ -58,10 +58,10 @@ async function integration(
       .run('org-a', host);
     db.raw
       .prepare(
-        `INSERT INTO webhook_host_resolutions(organization_id,integration_id,host,addresses,status,resolved_at)
-         VALUES('org-a',?,?,'["93.184.216.34"]','ok',?)`,
+        `INSERT INTO webhook_host_resolutions(organization_id,integration_id,host,addresses,status,resolved_at,last_used_at)
+         VALUES('org-a',?,?,'["93.184.216.34"]','ok',?,?)`,
       )
-      .run(id, host, NOW);
+      .run(id, host, NOW, NOW);
   }
   return { id, secret };
 }

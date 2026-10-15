@@ -1742,14 +1742,15 @@ falls back to the live tables' DDL. finalize refuses an empty live table over a 
 
 ## Slice 1.16: Discord global guard and custom-webhook host controls (ADR 0029)
 
-- **Discord:** `src/delivery/egress-guard.ts` and migration `0029` (`egress_guard_buckets`, `egress_guard_state`, no tenant columns).
-  Trips at 1,000 invalid (401/403/429) answers in ten minutes, holds every tenant's Discord request for eleven minutes, paces to 2,400
-  a minute, fails open, defers without spending an attempt (`platform_paused`), alert `egress_breaker_open` with a runbook entry.
-- **Custom webhook (flag stays OFF):** per-workspace host allowlist at save and send, recorded resolved addresses, re-resolution before
-  a send when five minutes old and by the new `egress_maintenance` job, refusal of a host that turns private or leaves the allowlist.
-  Egress test extended (host-control makes no call of its own; the consumer verifies before sending).
-- **Verified here:** unit and consumer-level tests with fixture DNS and fixture Discord responses; the migration chain, retention matrix,
-  tenant-query-scope and egress tests.
-- **Not verified:** anything against real Discord or a real resolver; D1 concurrency of the counter; the trip point and pacing numbers
-  (engineering judgment). **Still blockers for the flag:** allowlist management API and UI, pinning the connected address, real-endpoint
-  run (see the ADR).
+- **Discord:** `src/delivery/egress-guard.ts` and migration `0029`. Global counters carry no tenant data. After the review of PR 63 a
+  tenant can no longer open the global breaker by itself: per-workspace (50) and per-integration (10) invalid-answer budgets in a tenant
+  table hold the offender first (`workspace_paused`); only within-budget answers count toward the global trip (1,000 per ten minutes);
+  a workspace has a fair share (600) of the pacing cap and light workspaces are admitted at the soft cap. Fails open and counts the
+  fault; alerts `egress_breaker_open` and `egress_guard_failing`. Alert-sink Discord requests bypass the guard on purpose.
+- **Custom webhook (flag stays OFF):** per-workspace allowlist (wildcards refused over shared hosting), recorded addresses,
+  re-resolution that catches a STATIC private flip only (DNS rebinding is NOT defended), records purged by last send and when the
+  integration is gone or disabled, bounded cron work, and `sendRequest` requires a branded host verification for this kind.
+- **Verified here:** fixture-based unit and consumer tests (attacker with 100 integrations does not open the breaker and a second
+  workspace keeps delivering; starvation; lifecycle; AST pins); full `npm run check`.
+- **Not verified:** real Discord or resolver; D1 concurrency of the counters; every number is engineering judgment; the shared-scope
+  429 exemption (UNVERIFIED, not applied). Blockers for the flag are in the ADR.

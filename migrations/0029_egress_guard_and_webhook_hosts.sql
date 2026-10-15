@@ -2,15 +2,19 @@
 -- 0029 - Platform egress guard (Discord) and generic-webhook host controls
 --        (docs/specs/REMAINING.md 1.16; ADR 0029)
 -- =============================================================================
+-- 0. Fix of the review of PR 63 folded into this (unmerged) migration.
 -- 1. egress_guard_buckets: per provider and per MINUTE, how many outbound requests the PLATFORM made and
 --    how many came back 401, 403 or 429 (Discord counts those toward a Cloudflare ban of our egress IP).
 --    Platform-wide, NOT a tenant table: no organization_id, no integration id, no host, no URL. Counts only.
 -- 2. egress_guard_state: one row per provider; `open_until` is the instant the global breaker closes.
+-- 2b. egress_guard_tenant_buckets: the SAME counts per workspace and integration (a TENANT table), so a
+--    workspace that makes the platform's shared Discord budget worse is cut off on its own budget first
+--    (ADR 0029 section A). The global tables above stay free of tenant data.
 -- 3. workspace_webhook_hosts: per-workspace allowlist of hostnames a custom webhook may use (tenant table).
 -- 4. webhook_host_resolutions: the addresses a custom webhook's host last resolved to (tenant table).
 --
--- Expand-only. ROLLBACK: the previous Worker ignores all four tables. To remove them:
---   DROP TABLE egress_guard_buckets; DROP TABLE egress_guard_state;
+-- Expand-only. ROLLBACK: the previous Worker ignores all five tables. To remove them:
+--   DROP TABLE egress_guard_buckets; DROP TABLE egress_guard_state; DROP TABLE egress_guard_tenant_buckets;
 --   DROP TABLE workspace_webhook_hosts; DROP TABLE webhook_host_resolutions;
 -- =============================================================================
 
@@ -31,6 +35,17 @@ CREATE TABLE egress_guard_state (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE egress_guard_tenant_buckets (
+  organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+  integration_id TEXT NOT NULL,
+  provider TEXT NOT NULL CHECK(length(provider) <= 40),
+  minute_start INTEGER NOT NULL,
+  requests INTEGER NOT NULL DEFAULT 0 CHECK(requests >= 0),
+  invalid INTEGER NOT NULL DEFAULT 0 CHECK(invalid >= 0),
+  PRIMARY KEY (organization_id, provider, minute_start, integration_id)
+);
+CREATE INDEX egress_guard_tenant_age ON egress_guard_tenant_buckets(minute_start);
+
 CREATE TABLE workspace_webhook_hosts (
   organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
   host TEXT NOT NULL CHECK(length(host) BETWEEN 1 AND 253),
@@ -46,7 +61,11 @@ CREATE TABLE webhook_host_resolutions (
   addresses TEXT NOT NULL CHECK(length(addresses) <= 2048),
   status TEXT NOT NULL CHECK(status IN ('ok','blocked_address','unresolvable','lookup_failed','not_allowed')),
   resolved_at INTEGER NOT NULL,
+  -- Last time a SEND (not the cron sweep) checked this host: retention counts from it, so a record nothing
+  -- sends to is purged even though the sweep refreshes resolved_at.
+  last_used_at INTEGER NOT NULL,
   changed_count INTEGER NOT NULL DEFAULT 0 CHECK(changed_count >= 0),
   PRIMARY KEY (organization_id, integration_id)
 );
 CREATE INDEX webhook_host_resolutions_age ON webhook_host_resolutions(resolved_at);
+CREATE INDEX webhook_host_resolutions_used ON webhook_host_resolutions(last_used_at);
