@@ -246,7 +246,7 @@ describe('the real `wrangler d1 migrations apply --local` (workerd SQLite)', () 
     const { rowsOf } = (await import(/* @vite-ignore */ preflightPath)) as {
       rowsOf: (raw: unknown) => { check: string; n: number }[];
     };
-    const predicted = rowsOf(firstJsonArray(pre.out) as unknown)
+    const predicted = rowsOf(firstJsonArray(pre.out))
       .filter((r) => r.check.startsWith('orphan:'))
       .reduce((sum, r) => sum + r.n, 0);
     expect(predicted).toBeGreaterThan(5);
