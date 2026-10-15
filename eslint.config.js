@@ -20,6 +20,8 @@ export default tseslint.config(
       'web/src/routeTree.gen.ts',
       '.claude/**',
       'coverage/**',
+      // Type declarations for the custom lint rule, consumed by the TypeScript test in tests/lint.
+      'eslint-rules/**/*.d.mts',
       'playwright-report/**',
       // This file is config, not product code; it cannot provide type information.
       'eslint.config.js',
