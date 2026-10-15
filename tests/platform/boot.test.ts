@@ -51,6 +51,7 @@ async function makeEnv(over: Partial<Bindings> = {}): Promise<Bindings> {
     KMS_ACTIVE_VERSION: '1',
     ENCRYPTION_KEY: LEGACY,
     ENVIRONMENT_NAME: 'production',
+    SIGNUP_MODE: 'invite_only',
     KEK_CHECK_V1: await check(KEK_1, 'production'),
     KEK_CHECK_V2: '',
     ...over,

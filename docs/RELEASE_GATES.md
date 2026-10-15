@@ -13,6 +13,22 @@ A missing evidence link means the gate is not done. A red gate blocks the merge;
 needs a named owner, a written rationale and an entry in the register in
 [`THREAT_MODEL.md`](THREAT_MODEL.md) (section 7).
 
+## 0. The first release is an invite-only beta (ADR 0047)
+
+The first release is a closed design-partner beta (three to five invited teams, GitHub to Slack, Teams or
+Lark, `SIGNUP_MODE=invite_only`), not a public launch. It still needs every owner action below, in order,
+before the first invitation; the gates in section 1 then apply in full before any public launch.
+
+- [ ] GitHub Actions on for this repository and branch protection on `main` (section 1b). **CI has not run on a
+      pull request**: PR #63 merged with no check run at all, so every CI gate here is advisory until this is done.
+- [ ] Staging Cloudflare account: D1, both queues, secrets, Workers Paid.
+- [ ] GitHub App registered and the `REPLACE_WITH_*` values replaced.
+- [ ] Migration 0026 rehearsed on staging and a throwaway remote D1 (blocking, section 1).
+- [ ] One real create, test, deliver, inspect, retry run to Slack, Teams and Lark.
+- [ ] `scripts/tenant-isolation-drill.mjs` run against staging.
+- [ ] Email sending domain verified; `SIGNUP_ALLOWLIST` set to the operator's address.
+- [ ] Privacy policy and terms reviewed by counsel.
+
 ## 1. Mandatory gates (F240)
 
 | Gate | Evidence required | Status | State today |

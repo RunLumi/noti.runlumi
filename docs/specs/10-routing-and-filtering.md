@@ -52,7 +52,7 @@
 
 ## F121 — Routing rule model
 
-**Priority** P0 · **Status** ❌ no rule object: only a closed per-integration filter set in `integrations.filters_json` (`src/routing/filters.ts`, ADR 0010); rules need the canonical envelope, not built · **Fixes** D3
+**Priority** P0 · **Status** 🚫 deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no rule object: only a closed per-integration filter set in `integrations.filters_json` (`src/routing/filters.ts`, ADR 0010); rules need the canonical envelope, not built · **Fixes** D3
 
 **Story** As a user, I want one object that says which events, under which conditions, go where
 and in what format, so that I can understand and change my setup as a whole rather than as a
@@ -153,7 +153,7 @@ references are resolved server-side — the client never supplies a URL.
 
 ## F122 — Rule persistence, tenancy and audit
 
-**Priority** P0 · **Status** ❌ no rules table, versions or rule audit; filters are one JSON column on `integrations` (migration `0015`), changes audited only as integration updates
+**Priority** P0 · **Status** 🚫 deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no rules table, versions or rule audit; filters are one JSON column on `integrations` (migration `0015`), changes audited only as integration updates
 
 **Story** As a support engineer, I want to see what a customer's routing configuration was at
 any past moment, so that "it worked yesterday" is a question I can answer.
@@ -246,7 +246,7 @@ fact. No query interpolates a user string.
 
 ## F123 — Condition groups: `all` / `any`
 
-**Priority** P0 · **Status** ❌ no `all`/`any` condition groups; filters are a fixed implicit AND of five typed filters (`src/routing/filters.ts`)
+**Priority** P0 · **Status** 🚫 deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no `all`/`any` condition groups; filters are a fixed implicit AND of five typed filters (`src/routing/filters.ts`)
 
 **Story** As a user, I want to say "send me pull requests **and** only ones that are **either**
 failures **or** on the release branch", so that I can express the routing I actually mean
@@ -345,7 +345,7 @@ this path. That property is the security argument, and it is asserted by a test,
 
 ## F124 — Comparison semantics and three-valued logic
 
-**Priority** P0 · **Status** 🟡 three-valued fail-closed evaluation for the five shipped filters, `unknown_fact` reason (`src/routing/filters.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: general operators or comparison engine
+**Priority** P0 · **Status** 🟡 three-valued fail-closed evaluation for the five shipped filters, `unknown_fact` reason (`src/routing/filters.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: general operators or comparison engine The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a user, I want "is not a bot" to behave correctly when the source never told us
 whether someone is a bot, so that my alerts do not silently disappear.
@@ -437,7 +437,7 @@ so no ReDoS surface exists.
 
 ## F125 — Filter field registry
 
-**Priority** P0 · **Status** 🟡 typed, versioned registry of 5 filters with `appliesTo` and evaluate (`src/routing/filters.ts`, `tests/routing/filters.test.ts`); not built: general field registry, operator metadata, nullability or help text · **Blocks** every other feature in this file
+**Priority** P0 · **Status** 🟡 typed, versioned registry of 5 filters with `appliesTo` and evaluate (`src/routing/filters.ts`, `tests/routing/filters.test.ts`); not built: general field registry, operator metadata, nullability or help text · **Blocks** every other feature in this file The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a user, I want the filter list to be short, typed and honest about what each field
 means, so that I can pick the right one without documentation.
@@ -619,7 +619,7 @@ lookup first, which is an independent, tested path.
 
 ## F127 — Branch filter capability
 
-**Priority** P0 · **Status** 🟡 allow/deny glob filters on head and base branch, bounded linear matcher, no RegExp (`src/routing/glob.ts`, `tests/routing/glob.test.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: `eq`/`in`/`not_in` operators
+**Priority** P0 · **Status** 🟡 allow/deny glob filters on head and base branch, bounded linear matcher, no RegExp (`src/routing/glob.ts`, `tests/routing/glob.test.ts`, `tests/routing/filters.test.ts`, ADR 0010); not built: `eq`/`in`/`not_in` operators The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a user, I want "only the release branch" and "not the sandbox branch", so that
 routine work on experimental branches does not page me.
@@ -946,7 +946,7 @@ cross-repository firing pattern that a user can mistake for a targeted rule.
 
 ## F131 — Event type selection and outcome conditions
 
-**Priority** P0 · **Status** 🟡 event types selectable from a closed catalog in the wizard and settings (`web/src/integrations/EventPicker.tsx`, `web/src/integrations/events.ts`); workflow_run is split by conclusion; not built: rule-level event selection or outcome conditions · **Fixes** part of D12, D16
+**Priority** P0 · **Status** 🟡 event types selectable from a closed catalog in the wizard and settings (`web/src/integrations/EventPicker.tsx`, `web/src/integrations/events.ts`); workflow_run is split by conclusion; not built: rule-level event selection or outcome conditions The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md). · **Fixes** part of D12, D16
 
 **Story** As a user, I want to pick "CI failed" from a list of checkboxes rather than type a
 string format, so that I can tell the difference between "no match" and "I misspelled it".
@@ -1035,7 +1035,7 @@ exactly the unbounded key space this feature removes. Free text in this field is
 
 ## F132 — Rule priority, evaluation order, fan-out and conflict resolution
 
-**Priority** P0 · **Status** ❌ no rule priority, first-match or conflict resolution; fan-out exists only as several independent integrations per repository, each filtered on its own
+**Priority** P0 · **Status** 🚫 deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no rule priority, first-match or conflict resolution; fan-out exists only as several independent integrations per repository, each filtered on its own
 
 **Story** As a user with a specific exception, I want my exception to beat my general rule, so
 that "everything from Alice goes to the triage channel" is not swallowed by "everything goes to
@@ -1386,7 +1386,7 @@ template cannot become a way to persist an SSRF payload (F96) or a secret.
 
 ## F136 — Filter evaluator, compiled predicates and the evaluation budget
 
-**Priority** P0 · **Status** 🟡 pure `evaluate` per filter, run at ingress not in the consumer (`src/routing/ingress.ts`, `tests/routing/ingress.test.ts`, ADR 0010); not built: compiled-predicate cache, evaluation budget, consumer-side evaluation · **The reason rules are evaluated in the consumer**
+**Priority** P0 · **Status** 🟡 pure `evaluate` per filter, run at ingress not in the consumer (`src/routing/ingress.ts`, `tests/routing/ingress.test.ts`, ADR 0010); not built: compiled-predicate cache, evaluation budget, consumer-side evaluation · **The reason rules are evaluated in the consumer** The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As an operator, I want rule evaluation to cost a bounded amount of work per event, so
 that adding rules does not degrade delivery for everyone on the platform.
@@ -1525,7 +1525,7 @@ the compiler's input is a validated data structure, not source text — the asse
 
 ## F137 — Delivery provenance: `rule_id` and the evaluation trace
 
-**Priority** P0 · **Status** 🟡 `routing_decisions` records delivered/filtered with a closed reason code, 30-day retention (`src/routing/provenance.ts`, `tests/routing/ingress.test.ts`, ADR 0010); not built: `deliveries.rule_id`, `rule_version`, evaluation trace · **The data half of F149**
+**Priority** P0 · **Status** 🟡 `routing_decisions` records delivered/filtered with a closed reason code, 30-day retention (`src/routing/provenance.ts`, `tests/routing/ingress.test.ts`, ADR 0010); not built: `deliveries.rule_id`, `rule_version`, evaluation trace · **The data half of F149** The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a user who got a notification I did not expect, I want the delivery record to name
 the rule that produced it, so that I can fix the cause instead of muting the symptom.
@@ -1839,7 +1839,7 @@ dialog. Replay and rollback both require an explicit capability (F204) and are a
 
 ## F140 — Event picker and the rule authoring contract
 
-**Priority** P0 · **Status** 🟡 plain-language per-filter controls in wizard and settings (`web/src/integrations/settings/FiltersSection.tsx`, `web/src/integrations/filters/model.ts`); not built: one-sentence rule builder, Otherwise step, advanced collapse · **Blocks** by F42
+**Priority** P0 · **Status** 🟡 plain-language per-filter controls in wizard and settings (`web/src/integrations/settings/FiltersSection.tsx`, `web/src/integrations/filters/model.ts`); not built: one-sentence rule builder, Otherwise step, advanced collapse · **Blocks** by F42 The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a non-technical user, I want the rule builder to read as a sentence I can check,
 so that I can tell what I am about to build without reading documentation.

@@ -3,6 +3,7 @@ import { parseKeyHex } from '../crypto/envelope';
 import { isEnvironmentName, isFingerprintKey, kekCheckValue } from '../crypto/fingerprint';
 import type { Bindings } from '../env';
 import { resolveWebhookTarget } from '../observability/alerts/sinks';
+import { isUnknownSignupMode } from '../auth/signup-policy';
 import { unknownKeys } from './config-keys';
 import { log } from './log';
 
@@ -19,8 +20,8 @@ import { log } from './log';
  *  | storage     | `DB`                                                               | every request except the probes; the queue consumer and `scheduled` |
  *  | credentials | `KEK_V1/2`, `KMS_ACTIVE_VERSION`, `ENVIRONMENT_NAME`, `KEK_CHECK_V<n>`, and a KEK that does not match its check value | writes under `/api/integrations` and `/api/sources` (they seal credentials), the queue consumer and `scheduled`. NOT webhook ingress, auth or any read |
  *  | queue       | `DELIVERY_QUEUE`                                                   | the queue consumer and `scheduled` (dispatch). Ingress already persists to the outbox without it |
- *  | auth        | `APP_ORIGIN` (an absolute origin, https outside local development), `BETTER_AUTH_SECRET` (at least 32 characters, not a placeholder) | every `/api` and `/github` request except the probes (503). NOT webhook ingress, the queue consumer or `scheduled`: none of them needs a session |
- *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), `ALERT_WEBHOOK_URL` (optional, set but not a Slack, Discord, Lark or Teams webhook URL), a second KEK without a check value, the GitHub App bindings (`GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) while a placeholder or malformed, the outbound mail binding `AUTH_EMAIL` when absent and `AUTH_FROM_EMAIL` when absent or a placeholder | nothing at this layer; the GitHub routes already fail closed on their own. Names reach only the log and the platform operator's readiness view, never an anonymous caller. (`AUTH_EMAIL` absence does make `createAuth` throw, so auth routes fail without it; that is an auth-tier fault NOT yet asserted here) |
+ *  | auth        | `APP_ORIGIN` (an absolute origin, https outside local development), `BETTER_AUTH_SECRET` (at least 32 characters, not a placeholder), the outbound mail binding `AUTH_EMAIL` and its sender `AUTH_FROM_EMAIL` (ADR 0047: email verification is mandatory, so without mail nobody can get a usable account, and `createAuth` refuses to build) | every `/api` and `/github` request except the probes (503). NOT webhook ingress, the queue consumer or `scheduled`: none of them needs a session |
+ *  | warnings    | `ENCRYPTION_KEY` (optional legacy key), `FINGERPRINT_KEY` (optional), `ALERT_WEBHOOK_URL` (optional, set but not a Slack, Discord, Lark or Teams webhook URL), a second KEK without a check value, the GitHub App bindings (`GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`) while a placeholder or malformed, `SIGNUP_MODE` when it is an unknown value (treated as `closed`) or unset on a `staging` or `production` deploy (treated as `open`) | nothing at this layer; the GitHub routes already fail closed on their own. Names reach only the log and the platform operator's readiness view, never an anonymous caller |
  */
 
 type ConfigEnv = Partial<
@@ -36,6 +37,7 @@ type ConfigEnv = Partial<
     | 'ALERT_WEBHOOK_URL'
     | 'AUTH_EMAIL'
     | 'AUTH_FROM_EMAIL'
+    | 'SIGNUP_MODE'
     | 'ENVIRONMENT_NAME'
     | 'KEK_CHECK_V1'
     | 'KEK_CHECK_V2'
@@ -145,7 +147,7 @@ function authFaults(env: ConfigEnv): string[] {
 }
 
 /**
- * Outbound mail (Cloudflare Email Sending, `send_email` `AUTH_EMAIL`, src/auth/email.ts), as warnings. There is no
+ * Outbound mail (Cloudflare Email Sending, `send_email` `AUTH_EMAIL`, src/auth/email.ts), in the auth tier. There is no
  * inbound `email` handler in this Worker: no email source is built (ADR 0014), so there is no entrypoint to check.
  * Without the binding, verification and reset mail cannot be sent; a binding that is present is NOT proof that
  * the sending domain is verified or that mail arrives (docs/EMAIL_LIMITS.md, F17).
@@ -225,8 +227,18 @@ export function assessConfig(env: ConfigEnv): ConfigAssessment {
   if (env.ALERT_WEBHOOK_URL && resolveWebhookTarget(env.ALERT_WEBHOOK_URL, env.APP_ORIGIN) === null)
     warnings.push('ALERT_WEBHOOK_URL');
   warnings.push(...githubFaults(env));
-  warnings.push(...mailFaults(env));
-  return { storage, credentials: [...new Set(credentials)], queue, auth: authFaults(env), warnings };
+  // An unknown value fails closed (no sign-up at all); unset on a real deploy means open, which is legal but
+  // almost never intended now that wrangler.jsonc carries invite_only (ADR 0047). Both are worth a name.
+  const deployed = env.ENVIRONMENT_NAME === 'production' || env.ENVIRONMENT_NAME === 'staging';
+  if (isUnknownSignupMode(env.SIGNUP_MODE) || (deployed && !env.SIGNUP_MODE?.trim()))
+    warnings.push('SIGNUP_MODE');
+  return {
+    storage,
+    credentials: [...new Set(credentials)],
+    queue,
+    auth: [...authFaults(env), ...mailFaults(env)],
+    warnings,
+  };
 }
 
 /** Every required-binding fault, in tier order (F04). Warnings are not included. */

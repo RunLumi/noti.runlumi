@@ -59,6 +59,9 @@ function setUp(): void {
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
     BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
+    // The auth tier includes outbound mail (ADR 0047).
+    AUTH_EMAIL: { send: () => Promise.resolve({ messageId: 'test' }) },
+    AUTH_FROM_EMAIL: 'noreply@noti.test',
     KEK_V1: '11'.repeat(32),
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',

@@ -336,7 +336,7 @@ is a supply-chain risk.
 
 ## F62 — Event normalization
 
-**Priority** P0 · **Status** 🟡 every catalogued event maps to the canonical event, with documented examples as fixtures (`src/connectors/sources/github/map.ts`, `tests/fixtures/replay.test.ts`); not built: `rawOutcome`, state transitions (F44), `unmapped:<raw>`
+**Priority** P0 · **Status** 🟡 every catalogued event maps to the canonical event, with documented examples as fixtures (`src/connectors/sources/github/map.ts`, `tests/fixtures/replay.test.ts`); not built: `rawOutcome`, state transitions (F44), `unmapped:<raw>` The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Acceptance**
 - [ ] Every subscribed event maps to the canonical envelope (F41) with

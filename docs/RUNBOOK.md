@@ -646,15 +646,16 @@ on their own until they are real. This route is a `/api` route, so an `auth` fau
 | --- | --- | --- |
 | `DB` missing | every request except `/health` and `/health/ready`, the queue consumer, `scheduled` | the dashboard shell and assets |
 | Key ring invalid, `ENVIRONMENT_NAME` wrong, `KEK_CHECK_V<n>` missing/malformed, or a KEK that does not match (`kek_environment_mismatch`) | creating or editing integrations and sources, rotating a source secret, test sends (503); the delivery consumer; `scheduled` | **webhook ingress**, sign-in, every read, delete and revoke |
-| `APP_ORIGIN` not an https origin (a local development host may be http), or `BETTER_AUTH_SECRET` under 32 characters, copied from an example or repetitive | every `/api` and `/github` request (503, `Retry-After: 30`): no session can be verified | **webhook ingress**, the queue consumer, `scheduled` |
+| `APP_ORIGIN` not an https origin (a local development host may be http), `BETTER_AUTH_SECRET` under 32 characters, copied from an example or repetitive, or the mail binding `AUTH_EMAIL` / sender `AUTH_FROM_EMAIL` missing (ADR 0047: verification mail is mandatory) | every `/api` and `/github` request (503, `Retry-After: 30`): no session can be verified, no account can be verified | **webhook ingress**, the queue consumer, `scheduled` |
+| `DELIVERY_QUEUE` missing | `scheduled` (dispatch) | everything else; ingress still persists to the outbox |
+| `ENCRYPTION_KEY` or `FINGERPRINT_KEY` malformed; a GitHub App binding a placeholder | only the v0 migration step / fingerprints / the GitHub install flow and webhook | everything else |
+| `SIGNUP_MODE` an unknown value (a warning) | creating new accounts (treated as `closed`) | everything else, including sign-in |
 
 For an `auth` fault `GET /health` and `GET /health/ready` answer **503** (config is part of both) while webhook ingress and
 delivery still work. A monitor that pages on `/health` will page although events are still being accepted and delivered: treat
 `503` with `code: config_invalid` as "the dashboard and API are down", check `GET /webhooks/...` ingress and the delivery
 backlog (step 3 of "What to check first") before declaring an outage, and read the failing binding in the log. A monitor that
 must follow ingress should probe a webhook route (a signed no-op) instead of `/health`.
-| `DELIVERY_QUEUE` missing | `scheduled` (dispatch) | everything else; ingress still persists to the outbox |
-| `ENCRYPTION_KEY` or `FINGERPRINT_KEY` malformed; a GitHub App binding a placeholder | only the v0 migration step / fingerprints / the GitHub install flow and webhook | everything else |
 
 Ingress is deliberately not gated on the key ring: it never opens a destination credential, and a
 refused webhook can be lost for good (GitHub does not redeliver automatically; GitLab disables a hook
@@ -681,6 +682,25 @@ postpones; it does not make loss impossible:
 
   There is no supported way to re-dispatch these in bulk; treat the list as the work queue for manual
   replay and tell the affected workspaces.
+
+## Sign-up control and the sign-up kill switch (ADR 0047)
+
+`SIGNUP_MODE` decides who can create an account; existing accounts are unaffected by every value.
+
+| Value | Effect |
+| --- | --- |
+| `invite_only` (what `wrangler.jsonc` deploys) | an address with a pending, unexpired invitation, or listed in the `SIGNUP_ALLOWLIST` secret |
+| `closed` | nobody: the kill switch for an incident (`docs/INCIDENT_RESPONSE.md`, S1 and S4) |
+| `open` | anyone (unset is also `open`; boot names `SIGNUP_MODE` when a staging or production deploy leaves it unset) |
+
+- **Close sign-up now:** set `SIGNUP_MODE` to `closed` (edit `wrangler.jsonc` and deploy, or change the variable in
+  the Cloudflare dashboard, which takes effect on the next request). Reopen by setting `invite_only` again.
+- **First operator:** `wrangler secret put SIGNUP_ALLOWLIST` with your exact address (comma-separated for several; no
+  domains or wildcards). Remove it once the first workspace exists and invitations take over.
+- **What a refused person sees:** the same "check your email" answer as a successful sign-up, and no mail arrives (Better
+  Auth does not reveal whether an address may sign up). The log line `signup_refused` carries only the reason
+  (`signup_closed` or `signup_invite_only`), never the address. If an invited person reports no verification mail, check
+  that their invitation is still pending and unexpired.
 
 ## After an ingress outage
 

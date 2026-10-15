@@ -4,7 +4,7 @@ import { organization } from 'better-auth/plugins';
 import { passkey } from '@better-auth/passkey';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { drizzle } from 'drizzle-orm/d1';
-import { eq } from 'drizzle-orm';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import * as schema from '../db/schema';
 import { sendAuthEmail, type EmailEnvironment } from './email';
 import { ac, roles, isOrgRole } from './permissions';
@@ -12,6 +12,7 @@ import { log } from '../platform/log';
 import { settleBackground } from '../platform/background';
 import { createAuditHooks } from './audit-hooks';
 import { AUTH_DEFAULT_RATE, AUTH_RATE_RULES } from './rate-limit-rules';
+import { allowlistOf, signupMode, signupRefusal } from './signup-policy';
 import {
   ADMIN_INVITATION_EXPIRES_IN_SECONDS,
   EMAIL_VERIFICATION_EXPIRES_IN_SECONDS,
@@ -24,6 +25,10 @@ import {
 export interface AuthBindings extends EmailEnvironment {
   DB: D1Database;
   BETTER_AUTH_SECRET: string;
+  /** `open` (default when unset), `invite_only` or `closed` (src/auth/signup-policy.ts, ADR 0047). */
+  SIGNUP_MODE?: string;
+  /** Exact addresses that may sign up while `invite_only` (the first operator has no one to invite them). */
+  SIGNUP_ALLOWLIST?: string;
 }
 
 /**
@@ -101,6 +106,45 @@ export function createAuth(env: AuthBindings, executionCtx?: ExecutionContextLik
     hooks: { before: audit.before, after: audit.after },
     session: { expiresIn: SESSION_EXPIRES_IN_SECONDS, updateAge: SESSION_UPDATE_AGE_SECONDS },
     databaseHooks: {
+      user: {
+        create: {
+          // Every account-creating path (password sign-up, and any future one) passes here, so the beta's
+          // invite-only rule and the kill switch hold for all of them (ADR 0047).
+          before: async (user) => {
+            const refusal = await signupRefusal({
+              mode: signupMode(env.SIGNUP_MODE),
+              email: user.email,
+              allowlist: allowlistOf(env.SIGNUP_ALLOWLIST),
+              hasPendingInvitation: async (email) => {
+                // Across workspaces on purpose: an invitation to any workspace admits the address. Reads only
+                // existence; nothing about the inviting workspace reaches the caller.
+                const found = await db
+                  .select({ id: schema.invitation.id })
+                  .from(schema.invitation)
+                  .where(
+                    and(
+                      eq(sql`lower(${schema.invitation.email})`, email),
+                      eq(schema.invitation.status, 'pending'),
+                      gt(schema.invitation.expiresAt, new Date()),
+                    ),
+                  )
+                  .limit(1);
+                return found.length > 0;
+              },
+            });
+            if (refusal) {
+              log('info', 'signup_refused', { reason: refusal });
+              throw new APIError('FORBIDDEN', {
+                code: refusal.toUpperCase(),
+                message:
+                  refusal === 'signup_closed'
+                    ? 'New accounts are not being created right now'
+                    : 'Sign-up is by invitation only',
+              });
+            }
+          },
+        },
+      },
       session: {
         create: {
           // A new session starts in the user's earliest workspace, so a member of several

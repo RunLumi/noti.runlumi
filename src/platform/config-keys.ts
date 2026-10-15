@@ -36,6 +36,8 @@ export const KNOWN_BINDINGS = [
   'AUDIT_RETENTION_DAYS',
   'ALERT_WEBHOOK_URL',
   'PLATFORM_OPERATOR_USER_IDS',
+  'SIGNUP_MODE',
+  'SIGNUP_ALLOWLIST',
 ] as const satisfies readonly (keyof Bindings)[];
 
 const KNOWN: ReadonlySet<string> = new Set(KNOWN_BINDINGS);

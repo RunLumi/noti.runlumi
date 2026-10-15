@@ -221,25 +221,57 @@ describe('GitHub App bindings: named warnings, never a fault', () => {
   });
 });
 
-describe('outbound mail: named warnings, never a fault (the Worker has no email entrypoint)', () => {
+describe('outbound mail: an auth-tier fault (ADR 0047; the Worker has no email entrypoint)', () => {
   it('the default export has no inbound email handler: no email source is built (ADR 0014)', () => {
     // If one is added, the boot check must cover it (F04 "every entrypoint"): change this test with it.
     expect(Object.keys(worker).sort()).toEqual(['fetch', 'queue', 'scheduled']);
   });
 
-  it('a missing AUTH_EMAIL binding is a named warning, and blocks no entrypoint', () => {
+  // Email verification is mandatory, so without mail nobody can get a usable account and createAuth refuses
+  // to build: naming it in the auth tier makes /api answer a clear 503 instead of failing inside sign-in.
+  it('a missing AUTH_EMAIL binding is an auth-tier fault, not a warning', () => {
     const env = makeEnv({ AUTH_EMAIL: undefined });
-    expect(assessConfig(env).warnings).toEqual(['AUTH_EMAIL']);
-    expect(assertConfig(env)).toEqual([]);
+    expect(assessConfig(env).auth).toEqual(['AUTH_EMAIL']);
+    expect(assessConfig(env).warnings).toEqual([]);
+    expect(assertConfig(env)).toEqual(['AUTH_EMAIL']);
   });
 
-  it('a sender that is unset, a placeholder or not an address is named', () => {
+  it('a sender that is unset, a placeholder or not an address is an auth-tier fault', () => {
     for (const AUTH_FROM_EMAIL of [undefined, 'REPLACE_WITH_SENDER', 'not-an-address', 'a b@c.d']) {
-      expect(assessConfig(makeEnv({ AUTH_FROM_EMAIL })).warnings, String(AUTH_FROM_EMAIL)).toEqual([
+      expect(assessConfig(makeEnv({ AUTH_FROM_EMAIL })).auth, String(AUTH_FROM_EMAIL)).toEqual([
         'AUTH_FROM_EMAIL',
       ]);
     }
-    expect(assessConfig(makeEnv({ AUTH_FROM_EMAIL: 'noreply@runlumi.app' })).warnings).toEqual([]);
+    expect(assessConfig(makeEnv({ AUTH_FROM_EMAIL: 'noreply@runlumi.app' })).auth).toEqual([]);
+  });
+
+  it('a missing mail binding stops /api with a 503', async () => {
+    const env = makeEnv({ AUTH_EMAIL: undefined });
+    const api = await worker.fetch(new Request(`${ORIGIN}/api/integrations`), env, ctx);
+    expect(api.status).toBe(503);
+  });
+});
+
+describe('SIGNUP_MODE (ADR 0047)', () => {
+  it('names an unknown value, which is treated as closed', () => {
+    for (const SIGNUP_MODE of ['opne', 'INVITE', 'yes'])
+      expect(assessConfig(makeEnv({ SIGNUP_MODE })).warnings, SIGNUP_MODE).toEqual(['SIGNUP_MODE']);
+  });
+
+  it('names it when unset on a staging or production deploy, and not in development', () => {
+    expect(assessConfig(makeEnv({ SIGNUP_MODE: undefined })).warnings).toEqual(['SIGNUP_MODE']);
+    expect(assessConfig(makeEnv({ SIGNUP_MODE: '' })).warnings).toEqual(['SIGNUP_MODE']);
+    for (const SIGNUP_MODE of ['open', 'invite_only', 'closed'])
+      expect(assessConfig(makeEnv({ SIGNUP_MODE })).warnings, SIGNUP_MODE).toEqual([]);
+  });
+
+  it('is never a fault: a bad value closes sign-up, it does not stop the Worker', () => {
+    expect(assertConfig(makeEnv({ SIGNUP_MODE: 'nonsense' }))).toEqual([]);
+  });
+
+  it('the deployed configuration is invite-only', () => {
+    const wrangler = readFileSync(join(root, 'wrangler.jsonc'), 'utf8');
+    expect(wrangler).toMatch(/"SIGNUP_MODE":\s*"invite_only"/);
   });
 });
 

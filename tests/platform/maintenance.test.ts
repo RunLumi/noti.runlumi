@@ -34,6 +34,8 @@ function envWith(mode: string | undefined): { env: Bindings; touched: () => numb
     ENCRYPTION_KEY: '',
     GITHUB_APP_ID: '1',
     GITHUB_WEBHOOK_SECRET: 'x',
+    AUTH_EMAIL: { send: () => Promise.resolve({ messageId: 'maintenance' }) },
+    AUTH_FROM_EMAIL: 'noreply@noti.test',
     ...(mode === undefined ? {} : { MAINTENANCE_MODE: mode }),
   } as unknown as Bindings;
   return { env, touched: () => touched };

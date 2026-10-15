@@ -70,7 +70,8 @@ Each lists first actions only. Add the facts you learn to the incident record.
    is no global kill switch for the API: pausing integrations (above) stops delivery, and an
    operator can disable every integration in D1 as a break-glass write
    (`UPDATE integrations SET enabled=0 WHERE organization_id='<org>'`, one workspace at a time).
-2. There is **no switch to disable public sign-up** (the spec asks for one; it is not built).
+2. Stop new accounts: set `SIGNUP_MODE` to `closed` (`docs/RUNBOOK.md`, "Sign-up control and the sign-up kill
+   switch"; ADR 0047). Existing accounts keep signing in; end their sessions separately if needed.
 3. Preserve evidence (below). Find affected tenants from `audit_events` (`access.denied` and the
    action rows), `deliveries` and `routing_decisions` for the window, selecting ids and counts, not
    payloads. `notification_outbox` holds display text: treat it as customer data.
@@ -232,7 +233,7 @@ Risk-register entries added or reviewed (due within 14 days for S1 and S2):
 
 - Rehearsal of any playbook; a tabletop exercise.
 - A monitored security contact, an on-call rota, paging, and any published response times.
-- A kill switch for sign-up, and a global read-only mode.
+- A global read-only mode. (The sign-up kill switch is `SIGNUP_MODE=closed`, ADR 0047; never rehearsed on a deployment.)
 - A session list and revoke-others screen; admin-initiated session revocation.
 - An automatic evidence hold that blocks the retention jobs.
 - A pre-written customer notice reviewed by counsel, and the decision on regulatory notification.

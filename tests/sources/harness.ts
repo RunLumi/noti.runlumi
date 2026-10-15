@@ -70,6 +70,10 @@ export function setup(): Harness {
     ENCRYPTION_KEY: '',
     GITHUB_APP_ID: '1',
     GITHUB_WEBHOOK_SECRET: 'x',
+    // The auth tier includes outbound mail (ADR 0047); the auth itself is mocked here.
+    AUTH_EMAIL: { send: () => Promise.resolve({ messageId: 'sources-harness' }) },
+    AUTH_FROM_EMAIL: 'noreply@noti.test',
+    SIGNUP_MODE: 'open',
     DELIVERY_QUEUE: { send: (_m: DeliveryMessage) => Promise.resolve() },
   } as unknown as Bindings;
   const fetchMock = vi.fn(() => Promise.resolve(new Response('ok')));

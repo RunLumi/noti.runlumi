@@ -16,7 +16,9 @@ export const BOOT_ENV = {
   FINGERPRINT_KEY: '44'.repeat(32),
   // APP_ORIGIN and BETTER_AUTH_SECRET are asserted at boot too (ADR 0036); each test adds its own origin.
   BETTER_AUTH_SECRET: 'boot-env-better-auth-secret-0123456789',
-  // The outbound mail binding and its sender (wrangler.jsonc `send_email`, `AUTH_FROM_EMAIL`): absent is a warning.
+  // The outbound mail binding and its sender (wrangler.jsonc `send_email`, `AUTH_FROM_EMAIL`): auth tier (ADR 0047).
   AUTH_EMAIL: { send: () => Promise.resolve({ messageId: 'boot-env' }) } as unknown as Bindings['AUTH_EMAIL'],
   AUTH_FROM_EMAIL: 'noreply@noti.test',
+  // Set, so a staging-named test env is a complete one; `open` so tests can create accounts (ADR 0047).
+  SIGNUP_MODE: 'open',
 } satisfies Partial<Bindings>;

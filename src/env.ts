@@ -107,4 +107,15 @@ export type Bindings = AuthBindings & {
    * and the alert webhook's health in `GET /api/observability/summary`. Unset or empty: nobody (src/observability/operator.ts).
    */
   PLATFORM_OPERATOR_USER_IDS?: string;
+  /**
+   * Who may create an account: `open` (the default when unset), `invite_only` (a pending invitation or an
+   * address on SIGNUP_ALLOWLIST) or `closed` (the kill switch). Any other value is treated as `closed` and
+   * named at boot. Not a secret; wrangler.jsonc sets `invite_only` (src/auth/signup-policy.ts, ADR 0047).
+   */
+  SIGNUP_MODE?: string;
+  /**
+   * Comma-separated exact email addresses that may sign up while SIGNUP_MODE is `invite_only` (the first
+   * operator has nobody to invite them). Personal data: set it with `wrangler secret put`, not as a var.
+   */
+  SIGNUP_ALLOWLIST?: string;
 };

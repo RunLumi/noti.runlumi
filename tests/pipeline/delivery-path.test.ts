@@ -44,6 +44,9 @@ function makeEnv(over: Partial<Bindings> = {}): Bindings {
     GITHUB_APP_ID: APP_ID,
     APP_ORIGIN: 'https://noti.test',
     BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
+    // The auth tier includes outbound mail (ADR 0047).
+    AUTH_EMAIL: { send: () => Promise.resolve({ messageId: 'test' }) },
+    AUTH_FROM_EMAIL: 'noreply@noti.test',
     ENCRYPTION_KEY: K_LEGACY,
     KEK_V1: K1,
     KEK_V2: '',

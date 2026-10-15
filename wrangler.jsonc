@@ -105,5 +105,9 @@
     // a secret of the same name collide on deploy. See docs/RUNBOOK.md "Alerts".
     // "true" freezes every writer (HTTP 503, cron skipped, queue retried) for a migration window.
     "MAINTENANCE_MODE": "false",
+    // Who may create an account (ADR 0047): "invite_only" admits an address with a pending invitation or on
+    // SIGNUP_ALLOWLIST (a secret: `wrangler secret put SIGNUP_ALLOWLIST`, the first operator's address);
+    // "closed" is the sign-up kill switch; "open" admits anyone. Not a secret.
+    "SIGNUP_MODE": "invite_only",
   },
 }

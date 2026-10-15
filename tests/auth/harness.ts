@@ -57,7 +57,8 @@ export interface AuthHarness {
   ): Promise<{ res: Response; cookie: string }>;
 }
 
-export function createAuthHarness(): AuthHarness {
+/** `overrides` replace bindings of the harness environment, e.g. `{ SIGNUP_MODE: 'invite_only' }`. */
+export function createAuthHarness(overrides: Record<string, string> = {}): AuthHarness {
   const db = createFakeD1();
   const mail: SentMail[] = [];
   const env = {
@@ -72,6 +73,7 @@ export function createAuthHarness(): AuthHarness {
         return Promise.resolve();
       },
     },
+    ...overrides,
   };
   const auth = createAuth(env);
 

@@ -217,6 +217,9 @@ beforeEach(async () => {
     } as unknown as Queue<DeliveryMessage>,
     APP_ORIGIN: ORIGIN,
     BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
+    // The auth tier includes outbound mail (ADR 0047).
+    AUTH_EMAIL: { send: () => Promise.resolve({ messageId: 'test' }) },
+    AUTH_FROM_EMAIL: 'noreply@noti.test',
     GITHUB_WEBHOOK_SECRET: 'unused',
     GITHUB_APP_ID: '777',
     ENCRYPTION_KEY: K_LEGACY,
@@ -226,7 +229,7 @@ beforeEach(async () => {
     ENVIRONMENT_NAME: 'staging',
     KEK_CHECK_V1: '4464ea2121d3a99ebd188370f1ef6cd0',
     GENERIC_WEBHOOK_ENABLED: 'true',
-  } as Bindings;
+  } as unknown as Bindings;
   fetchMock = vi.fn<typeof fetch>();
   vi.stubGlobal('fetch', fetchMock);
   await integration('int-lark', 'lark');

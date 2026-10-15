@@ -41,7 +41,7 @@ That is a spec-grade dedup contract, not advice. Two more rules shape the design
 
 ## F41 — Canonical envelope
 
-**Priority** P0 · **Status** 🟡 `CanonicalEvent` (`src/events/canonical.ts`) is validated before routing for all four sources (`src/events/validate.ts`, `tests/events/canonical.test.ts`, `tests/conformance/conformance.test.ts`, [ADR 0020](../adr/0020-canonical-event.md)); not built: ULID `id`, `orgid`/`connectionid`, `application/cloudevents+json` ingress, a resolvable `dataschema`
+**Priority** P0 · **Status** 🟡 `CanonicalEvent` (`src/events/canonical.ts`) is validated before routing for all four sources (`src/events/validate.ts`, `tests/events/canonical.test.ts`, `tests/conformance/conformance.test.ts`, [ADR 0020](../adr/0020-canonical-event.md)); not built: ULID `id`, `orgid`/`connectionid`, `application/cloudevents+json` ingress, a resolvable `dataschema` The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a routing rule author, I want one stable field vocabulary, so that a filter on
 "which repository" works identically whether the event came from GitHub or GitLab.
@@ -121,7 +121,7 @@ short and makes it safe to log `orgid`/`connectionid`/`correlation_id` (F11).
 
 ## F42 — Closed event type catalog
 
-**Priority** P0 · **Status** 🟡 one registry (`src/events/catalog.ts`) with label key and default status per type, closed and enforced by the validator (`tests/events/canonical.test.ts`); not built: `event_types` table, `unmapped:<raw>` capture and view · **Fixes** D12, D16
+**Priority** P0 · **Status** 🟡 one registry (`src/events/catalog.ts`) with label key and default status per type, closed and enforced by the validator (`tests/events/canonical.test.ts`); not built: `event_types` table, `unmapped:<raw>` capture and view The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md). · **Fixes** D12, D16
 
 **Story** As a user picking events in the UI, I want a finite list of checkboxes, so that I
 can find "pull request opened" instead of guessing a string format.
@@ -173,7 +173,7 @@ strings that become routing keys.
 
 ## F43 — Identity fields
 
-**Priority** P0 · **Status** 🟡 `data.actor {login, type, isBot, isGhost}` on the canonical event, ghost never shown as a person, `null` when unknown (`src/connectors/sources/github/map.ts`, `tests/events/canonical.test.ts`); `data.actor` is omitted rather than an empty object when there is no sender
+**Priority** P0 · **Status** 🟡 `data.actor {login, type, isBot, isGhost}` on the canonical event, ghost never shown as a person, `null` when unknown (`src/connectors/sources/github/map.ts`, `tests/events/canonical.test.ts`); `data.actor` is omitted rather than an empty object when there is no sender The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a filter author, I want to say "not bots", so that I can route real humans'
 activity to a chat and machine activity to a ticketing system.
@@ -200,7 +200,7 @@ be length-capped and treated as plain text in every renderer.
 
 ## F44 — Outcome and state model
 
-**Priority** P0 · **Status** 🟡 `status` and `severity` are on the event with documented defaults per type (`src/events/catalog.ts`); not built: `rawOutcome`, `closesEventId`, the three-value `outcome` enum
+**Priority** P0 · **Status** 🟡 `status` and `severity` are on the event with documented defaults per type (`src/events/catalog.ts`); not built: `rawOutcome`, `closesEventId`, the three-value `outcome` enum The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a user, I want CI failures coloured red and successes green everywhere,
 including in Slack and Teams, so that I can triage from a glance.
@@ -241,7 +241,7 @@ UI shows "resolved (original not retained)" rather than failing.
 
 ## F45 — Envelope size budget
 
-**Priority** P0 · **Status** 🟡 64 KiB budget enforced by the validator as `payload_too_large`, never a truncation (`tests/events/canonical.test.ts`); the 1 MiB cap is a named constant (`src/connectors/sources/github/route.ts`); not built: R2 raw body storage, `truncated` markers (no payload arrays are carried) · **Fixes** part of D15
+**Priority** P0 · **Status** 🟡 64 KiB budget enforced by the validator as `payload_too_large`, never a truncation (`tests/events/canonical.test.ts`); the 1 MiB cap is a named constant (`src/connectors/sources/github/route.ts`); not built: R2 raw body storage, `truncated` markers (no payload arrays are carried) The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md). · **Fixes** part of D15
 
 **Story** As an operator, I want bounded envelopes, so that a comment-heavy event cannot
 blow up the queue, the database, or a 28 KB Teams limit.
@@ -280,7 +280,7 @@ under the policy in F184 and is never logged.
 
 ## F46 — Schema versioning and evolution
 
-**Priority** P0 · **Status** 🟡 versioning rules and `adapterversion` on every event ([ADR 0020](../adr/0020-canonical-event.md), `tests/conformance/conformance.test.ts`); not built: published JSON Schemas, `schema_unknown`, dual `v1`/`v2` emission
+**Priority** P0 · **Status** 🟡 versioning rules and `adapterversion` on every event ([ADR 0020](../adr/0020-canonical-event.md), `tests/conformance/conformance.test.ts`); not built: published JSON Schemas, `schema_unknown`, dual `v1`/`v2` emission The unbuilt remainder is deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md).
 
 **Story** As a customer with a working integration, I want schema changes to be additive, so
 that my notifications never break because we renamed a field.
@@ -511,7 +511,7 @@ a test that asserts the row is gone, not merely flagged.
 
 ## F52 — Event schema registry
 
-**Priority** P1 · **Status** ❌ no event schema registry; depends on the unbuilt envelope (F41) and versioning (F46)
+**Priority** P1 · **Status** 🚫 deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no event schema registry; depends on the unbuilt envelope (F41) and versioning (F46)
 
 **Story** As a customer integrating against us programmatically, I want a published schema
 I can validate against, so that my consumer breaks in CI rather than in a chat channel.
@@ -590,7 +590,7 @@ choose a key that exempts them.
 
 ## F54 — Normalization versioning and replay compatibility
 
-**Priority** P1 · **Status** ❌ no normalization version stamp or replay-compatibility tests; depends on the envelope (F41) and replay tooling
+**Priority** P1 · **Status** 🚫 deferred past V1 by [ADR 0047](../adr/0047-v1-beta-release-scope.md) (the beta routes with the closed filters of ADR 0010); state when deferred: no normalization version stamp or replay-compatibility tests; depends on the envelope (F41) and replay tooling
 
 **Story** As a customer, I want old notifications to keep rendering correctly after we
 improve our parsing, so that my delivery history stays meaningful.

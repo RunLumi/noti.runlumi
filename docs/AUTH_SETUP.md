@@ -43,7 +43,11 @@ Two configuration choices worth preserving deliberately:
   to live databases. See `docs/specs/02-identity-tenancy.md` F31.
 - `BETTER_AUTH_SECRET` — minimum 32 characters, asserted in `createAuth()`.
 - `APP_ORIGIN` and `AUTH_FROM_EMAIL` as non-secret vars; `AUTH_EMAIL` as the Cloudflare
-  Email Sending binding.
+  Email Sending binding. Both mail bindings are in the boot check's auth tier (ADR 0047): without them every
+  `/api` request answers 503, because no account could ever be verified.
+- `SIGNUP_MODE` (`open`, `invite_only`, `closed`; `wrangler.jsonc` deploys `invite_only`) and the
+  `SIGNUP_ALLOWLIST` secret for the first operator's address. Enforced in Better Auth's `user.create.before`
+  hook, so every account-creating path is covered (`src/auth/signup-policy.ts`, `docs/RUNBOOK.md`).
 - `tests/config.dev_vars.test.ts` asserts `.dev.vars.example` and the source agree, so a
   secret can no longer be renamed in code without failing CI.
 

@@ -68,6 +68,12 @@ ALERT_WEBHOOK_URL=
 # and alert-webhook health in GET /api/observability/summary (a workspace admin does not). Empty: nobody.
 PLATFORM_OPERATOR_USER_IDS=
 
+# Who may create an account (ADR 0047): open | invite_only | closed. Empty means open, which suits local
+# development; wrangler.jsonc sets invite_only for a deploy. An unknown value is treated as closed.
+SIGNUP_MODE=
+# Exact addresses that may sign up while invite_only (comma-separated). A secret on a deploy.
+SIGNUP_ALLOWLIST=
+
 # --- Notes -----------------------------------------------------------------
 # `AUTH_EMAIL` is a Cloudflare Email Sending binding declared in wrangler.jsonc,
 # not an environment variable, so it does not belong in this file. Local email
