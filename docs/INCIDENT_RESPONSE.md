@@ -132,14 +132,34 @@ Each lists first actions only. Add the facts you learn to the incident record.
    redelivery"). Delivery is at least once; do not promise exactly once.
 3. State what was lost or duplicated and for whom, from the ledger.
 
+### S4: security-relevant degradation without exposure
+
+Examples: a spike in signature failures, rate-limit abuse, a dependency advisory with no reachable path, a
+`unmapped_provider_response` event, a registry staleness alert.
+
+1. Record it: time, signal, source (alert, log, report). Do not page for S4; triage in working hours.
+2. Decide whether it is S4 or a precursor. A signature-failure spike against one installation may be a leaked URL (S2) or a
+   probe; check `audit_events` for `access.denied` and the ingress counters before dismissing it.
+3. Contain only if cheap: pause one integration or source; tighten the edge rule for a flood (RUNBOOK).
+4. Close with a line in the incident record saying what was checked and what the data showed. An S4 that turns out to expose
+   data is reclassified and the clock for the higher class starts at the reclassification, with the original time kept.
+5. A dependency advisory with no fix: record it in the risk register (`docs/THREAT_MODEL.md` section 7) with an owner and a
+   review date, and add a dated exception to `scripts/audit-gate.mjs` only with a reason and an expiry of at most 90 days.
+
 ### Compromised dependency
 
-1. Pin to the last good version in `package-lock.json`, run `npm run audit:gate`, redeploy.
-   `npm audit signatures` and an install-script review are not set up (spec 15 F239).
+1. Pin to the last good version in `package-lock.json`, run `npm run audit:gate` and `npm audit signatures`, redeploy. The
+   install-script policy is `docs/SUPPLY_CHAIN.md`; a package that gained an install script or lost its provenance
+   attestation is a red flag in itself.
 2. Check whether the affected code path can read secrets (the Worker holds KEKs and the Better Auth
    secret as bindings) and, if so, treat it as S2.
 
 ## Evidence and retention
+
+**The rule.** Evidence is preserved before anything that deletes it, and preservation wins over retention and erasure for the
+incident window; the conflict is written into the incident record afterwards. Nobody runs a purge, a restore, a rollback of
+data or a credential destruction on an affected workspace until step 1 below is done and noted in the record. A destructive
+act taken to contain an incident (disabling rows, rotating a KEK) is recorded before it is done, with the rows it will change.
 
 A purge can destroy the record of an incident. No automatic hold exists (the spec's
 `incident_preservation_blocks_retention_purges_for_the_window` is not built). Do this by hand:
@@ -186,6 +206,26 @@ Retention or erasure conflicts and how they were resolved:
 Detected by us or by someone else:
 Controls that held / controls that failed:
 Risk-register review due (14 days):
+```
+
+## Postmortem template
+
+Internal, for S1 to S3 (and for any S4 that was reclassified). Blameless: describe controls and decisions, not people. Written
+within 14 days, the same window as the risk-register review. Say what was measured, what is inferred and what is unknown;
+state nothing that the data cannot show. Keep tenant identifiers in the restricted record, not here.
+
+```
+Title / class (S1-S4) / dates (first signal, detected, contained, resolved):
+Summary (three sentences, no adjectives):
+Timeline (UTC, one line per event, with the source of each: log, audit row, person):
+Blast radius: tenants (count), rows by table (count), credentials, time window. How it was measured.
+Detected by us or by someone else, and how long after the first signal:
+What was load-bearing: controls that held (cite the control ID, e.g. AR-n or a test) and controls that failed or did not exist:
+What we did not know at the time and what it cost:
+Evidence preserved (what, where, when) and any retention or erasure conflict and its resolution:
+Customer and regulator communication: what was said, when, on what facts. Any notification decision and who made it:
+Actions: owner, due date, and the test or check that will prove each one:
+Risk-register entries added or reviewed (due within 14 days for S1 and S2):
 ```
 
 ## Not done

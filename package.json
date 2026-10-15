@@ -28,6 +28,7 @@
     "migrations:seal": "node scripts/migration-seal.mjs",
     "migrations:check": "node scripts/migration-seal.mjs --check",
     "test:integration": "vitest run tests/migration-0026-d1.test.ts",
+    "docs:check": "node scripts/check-docs.mjs",
     "docs:spec-status": "node scripts/spec-status.mjs",
     "docs:retention": "node scripts/render-retention.mjs",
     "docs:authorization": "UPDATE_AUTHORIZATION_DOC=1 vitest run tests/security/authorization-doc.test.ts",

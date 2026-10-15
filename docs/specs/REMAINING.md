@@ -53,7 +53,7 @@ Buildable now, without external access.
 | 1.21 | Abuse controls: outbound provider bucket (with 1.8), quota ledger, abuse alerts, coarse pre-filter | F231 | Ingress limiter is wired; nothing else | L |
 | 1.22 | Retention matrix and enforcement: matrix doc, per-workspace setting, per-job staleness alert, resolve ledger retention against the spec (ledger purged at 90 days) | F237 | Purge job is tested; the matrix and setting are not | M |
 | 1.23 | The staging tenant-isolation drill (`scripts/tenant-isolation-drill.mjs`, unrun) and the Time Travel re-drill are group 3. **Done (ADR 0028):** unknown-installation and suspended-installation 403s are audited (bounded), and the decision that not every cross-tenant probe is recorded is explicit and visible | F233 | Static query test and the fake-D1 drill are done; the staging drill needs an environment | S |
-| 1.24 | Threat-model hygiene, remainder: control-ID CI check (every control ID cited exists in `docs/specs/`). Built (ADR 0030): session revoke-others, revoke-all after a restore (`scripts/revoke-all-sessions.mjs`), token storage verified on the installed Better Auth (1.7.7). Left for F234: run the script against a real D1, a no-token-in-any-log test | F227, F234 | The CI check does not exist; the restore script has never run on a real D1 | S |
+| 1.24 | Threat-model hygiene, remainder. Built: control-ID check (`scripts/check-docs.mjs`: AR ids unique and defined, F ids exist in `docs/specs/`); and (ADR 0030) session revoke-others, revoke-all after a restore (`scripts/revoke-all-sessions.mjs`), token storage verified on the installed Better Auth (1.7.7). Left for F234: run the script against a real D1, a no-token-in-any-log test | F227, F234 | The restore script has never run on a real D1 | S |
 | 1.25 | Security release gate: all four gates green (real-provider run, isolation drill, KEK and rollback rehearsal) | F240 | No gate is green; see group 3 | L |
 
 ### Dashboard and UX P0s (spec 14)
@@ -92,7 +92,7 @@ path, then noise control, then the rest.
 | 2.15 | Preset library and rule-based filters: label picker, path and PR/issue number filters, bot "don't know" choice, impact preview, versioning and rollback, per-rule formats, default rules, presets | F128, F129, F130, F133, F134, F138, F139, F154, F155 | Depends on 1.13 for most; the picker, bot choice and number/path filters can go first | L |
 | 2.16 | Observability P1s: closed log message catalogue and byte budget, console lint and one-to-one redaction site test, acceptance, routing and duplicate rates with a publication gate and an SLI view, refusal table and banned-string test | F194, F195, F197, F198, F203 | Logs and SLIs exist; closed catalogue, enforcement and UI do not | M to L |
 | 2.17 | Delivery P1s: ack-ordering and rollback tests plus a waitUntil lint rule, Slack API code mapping, retry policy stored per connection | F169, F177, F179, F180 | See status lines | S to M |
-| 2.18 | ADR process: ADRs for no Durable Objects, envelope choice, Secrets Store scope, at-least-once contract and single-D1 decision; CI check of ADR headings | F14, F06 (ADR for deferral) | Five decisions are unrecorded | S |
+| 2.18 | ADR process, remainder: a CI check of external-claim URLs in ADRs (the five decision ADRs 0031 to 0035 and the ADR heading and numbering check are built) | F14 | The URL check does not exist | S |
 
 ### Dashboard P1s (spec 14)
 
@@ -107,9 +107,9 @@ path, then noise control, then the rest.
 | --- | --- | --- | --- | --- |
 | 2.22 | Audit immutability: append-only test, audit of audit reads, heartbeat, redaction check | F236 | Tenant-scoped admin reads only | M |
 | 2.23 | Data-subject requests: per-user access and erasure, tests (legal wording is group 3) | F238 | Workspace export and deletion exist | M |
-| 2.24 | Supply chain: `npm audit signatures`, install-script review, OIDC deploy | F239 | Audit gate, pinned actions, Dependabot exist | S |
-| 2.25 | Incident response: S1 to S4 runbooks, postmortem template, evidence-preservation rule; `security.txt` once the domain is settled | F242 | `SECURITY.md` and availability runbook only | M |
-| 2.26 | Email platform limits doc and failure handling | F235 | Not recorded; P1 in the spec but only matters once mail volume exists | M |
+| 2.24 | Supply chain, remainder: OIDC deploy (unverified whether Workers supports it; `docs/SUPPLY_CHAIN.md`). Built: `npm audit signatures` and `--ignore-scripts` in CI, install-script review | F239 | Needs a Cloudflare docs read and a staging try, and a decision on any CI deploy credential | S |
+| 2.25 | Incident response, remainder: rehearsal, a monitored contact, response targets, an automatic evidence hold, a sign-up kill switch; `security.txt` stays as generated (contact is the GitHub advisory form). Built: S1 to S4 playbooks, postmortem template, evidence-preservation rule | F242 | Never rehearsed; no owner watches the contact | M |
+| 2.26 | Email failure handling: quota counter and alert, suppression list, bounce handling, DKIM/SPF record names (limits doc `docs/EMAIL_LIMITS.md` is written) | F235 | Handling not built; matters once mail volume exists | M |
 
 ## 3. Blocked on external access
 

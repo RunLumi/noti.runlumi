@@ -215,7 +215,7 @@ release that touches `deliveries` or `event_receipts`.
 
 ## F06 — Tenant-sharded D1 topology
 
-**Priority** P1 · **Status** 🚫 deferred by design: V1 runs on one D1 database, there is no `dbFor(workspaceId)` and `env.DB` is used directly; every tenant table carries `organization_id` so sharding stays possible; the revisit signal (`overloaded` rate) is in `docs/RUNBOOK.md` and the SLI work (ADR 0011); no sharding ADR written
+**Priority** P1 · **Status** 🚫 deferred by design: V1 runs on one D1 database, there is no `dbFor(workspaceId)` and `env.DB` is used directly; every tenant table carries `organization_id` so sharding stays possible; the revisit signal (`overloaded` rate) is in `docs/RUNBOOK.md` and the SLI work (ADR 0011); the decision is recorded in ADR 0034
 
 **Story** As an operator, I want to escape the single-writer bottleneck before real
 customers feel it, so that growth does not require a database migration.
@@ -560,7 +560,7 @@ code's `retryable` flag matches its class. Plus per-provider mapping fixtures.
 
 ## F14 — Architecture decision record process
 
-**Priority** P1 · **Status** 🟡 19 ADRs in `docs/adr/` with Status/Context/Decision/Consequences sections, and a dated sources list and known-contradictions table in `docs/specs/README.md`; not built: the five decisions the spec lists (no Durable Objects, CloudEvents envelope, Secrets Store scope, at-least-once contract, single-D1) have no dedicated ADRs and ADR numbers differ, no CI check of ADR headings or of external-claim URLs
+**Priority** P1 · **Status** 🟡 ADRs in `docs/adr/` with Status/Context/Decision/Consequences sections, and a dated sources list and known-contradictions table in `docs/specs/README.md`; the five listed decisions are recorded (ADRs 0031 to 0035, numbers differ from the table below), and `scripts/check-docs.mjs` (run by `tests/docs/check-docs.test.ts`) checks ADR file names, unique numbering, title, Status line and headings (Context, Consequences and Revisit when from ADR 0031); not built: a check of external-claim URLs
 
 **Story** As a maintainer, I want material decisions recorded with the alternatives and
 revisit triggers, so that the reasoning survives the person who made it.

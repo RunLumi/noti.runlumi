@@ -180,13 +180,13 @@ Controls: committed lockfile with `npm ci`; actions pinned to commit SHAs
 `pull_request_target`; Dependabot for npm and Actions; `npm run audit:gate` (production
 dependency advisories at high or critical, with dated exceptions in `scripts/audit-gate.mjs`);
 dependency-review on PRs; `verify:worker-bundle` guards the scrypt fallback.
-Not done: `npm audit signatures` on release builds, `--ignore-scripts` review, OIDC deploy
-(F239 marks OIDC support as unverified).
+`npm audit signatures` and `npm ci --ignore-scripts` run in every CI job, and the install-script review is
+`docs/SUPPLY_CHAIN.md`. Not done: OIDC deploy (F239 marks OIDC support as unverified; no deploy credential is in CI today).
 
 ## 6. What we do not defend against
 
 - Compromise of the Cloudflare account or of an operator with secret access.
-- A malicious package that executes at install time (partly mitigated by the lockfile only).
+- A malicious package that executes at runtime in the Worker (install-time scripts are off in CI, `docs/SUPPLY_CHAIN.md`; signatures and provenance are checked, which is not a review of the code).
 - Volumetric DDoS (Cloudflare's edge).
 - A destination that answers `2xx` to everything while dropping messages.
 - Anything about real providers: no real-provider end-to-end validation has happened.
