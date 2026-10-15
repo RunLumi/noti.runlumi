@@ -39,6 +39,23 @@ import {
 const SOURCES_TRIGGER = 'sources_delete_integrations';
 
 /**
+ * Holds which integrations were revoked on the LIVE table while it is swapped out for the kept original. The kept
+ * original (`integrations_old`) predates those revokes, so restoring it alone would silently un-revoke a
+ * connection AND bring its destroyed secret back (ADR 0036). Written before the live table is dropped, applied
+ * after the original is back, then dropped; kept across an interrupted run so a re-run still applies it.
+ */
+export const REVOKED_SCRATCH = '_recover_revoked';
+const WIPE_REVOKED = `UPDATE integrations
+SET credentials_quarantined_at = COALESCE((SELECT r.at FROM ${REVOKED_SCRATCH} r
+                                           WHERE r.id = integrations.id AND r.organization_id = integrations.organization_id),
+                                          CURRENT_TIMESTAMP),
+    credentials_quarantine_reason = 'revoked',
+    webhook_ciphertext = '', lark_secret_ciphertext = NULL, key_salt = NULL, dek_wrapped = NULL,
+    kek_version = NULL, webhook_envelope = NULL, lark_secret_envelope = NULL
+WHERE EXISTS (SELECT 1 FROM ${REVOKED_SCRATCH} r
+              WHERE r.id = integrations.id AND r.organization_id = integrations.organization_id)`;
+
+/**
  * @param {{ query(sql: string): Promise<Record<string, unknown>[]>, run(statements: string[]): Promise<void> }} executor
  * @param {{ discardLiveChanges?: boolean }} [options]
  * @returns {Promise<{ statements: string[], restored: string[], blockers: string[], notes: string[] }>}
@@ -51,6 +68,7 @@ export async function planRecovery(executor, options = {}) {
     ...SCRATCH_VIEWS,
     SNAPSHOT_TABLE,
     SOURCES_TRIGGER,
+    REVOKED_SCRATCH,
     'd1_migrations',
   ]);
   const has = (name) => present.has(name);
@@ -101,6 +119,16 @@ export async function planRecovery(executor, options = {}) {
   for (const view of SCRATCH_VIEWS) if (has(view)) drop('VIEW', view);
   if (restore.length > 0 && has(SOURCES_TRIGGER)) drop('TRIGGER', SOURCES_TRIGGER);
   for (const name of SCRATCH_TABLES) if (has(name)) drop('TABLE', name);
+
+  // 1b. Remember which integrations are revoked NOW (the live table is about to be replaced by an older copy).
+  // A scratch table left by an interrupted run already holds that answer and is kept.
+  const reapplyRevoked = restore.includes('integrations') || has(REVOKED_SCRATCH);
+  if (restore.includes('integrations') && has('integrations') && !has(REVOKED_SCRATCH))
+    statements.push(
+      `CREATE TABLE ${REVOKED_SCRATCH} AS SELECT id, organization_id, credentials_quarantined_at AS at FROM integrations WHERE credentials_quarantine_reason = 'revoked' AND credentials_quarantined_at IS NOT NULL`,
+    );
+  else if (restore.includes('integrations') && !has(REVOKED_SCRATCH))
+    statements.push(`CREATE TABLE ${REVOKED_SCRATCH} (id TEXT, organization_id TEXT, at TEXT)`);
 
   // 2. Put each kept original back under its own name.
   for (const table of restore) {
@@ -154,6 +182,13 @@ export async function planRecovery(executor, options = {}) {
       blockers.push(
         `no ${SOURCES_TRIGGER} in ${SNAPSHOT_TABLE} or on the live tables; restore from the Time Travel bookmark`,
       );
+  }
+  // 4. Re-apply every revoke (and the destruction of its secret) to the restored original.
+  if (reapplyRevoked && (restore.includes('integrations') || has('integrations'))) {
+    statements.push(WIPE_REVOKED, `DROP TABLE ${ident(REVOKED_SCRATCH)}`);
+    notes.push(
+      'integrations revoked since the swap are re-quarantined as revoked and their secrets wiped again in the restored table',
+    );
   }
   return { statements, restored: restore, blockers, notes };
 }

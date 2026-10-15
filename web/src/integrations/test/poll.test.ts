@@ -5,7 +5,14 @@ import { PANEL_TERMINAL, RATE_LIMIT_WAIT_MAX_MS, outcomeOf, pollTest, POLL_MAX_R
 
 const delivery = (state: DeliveryState): DeliveryItem => ({
   id: 'd',
-  integration: { id: 'i', name: 'n', repo: null, destination: 'slack', destinationHost: null },
+  integration: {
+    id: 'i',
+    name: 'n',
+    repo: null,
+    destination: 'slack',
+    destinationHost: null,
+    credentialFingerprint: null,
+  },
   integrationExists: true,
   integrationStatus: 'available',
   state,

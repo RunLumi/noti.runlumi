@@ -110,7 +110,8 @@ type Integration = {
   enabled: boolean;
   credentials: 'ok' | 'legacy' | 'quarantined'; // a revoked credential reads 'quarantined' (nothing is sent) with revoked: true
   revoked: boolean;                   // the customer revoked the credential (ADR 0022); cleared only by entering a new one
-  credentialFingerprint: string | null; // 8 base32 chars of a tenant-keyed HMAC of the webhook URL (key FINGERPRINT_KEY); null if no key is configured or it was sealed before this release
+  keyDestroyed: boolean;              // revoked AND the sealed secret destroyed (ADR 0036); false while a send already in progress drains
+  credentialFingerprint: string | null; // 8 base32 chars of a tenant-keyed HMAC of the webhook URL (key FINGERPRINT_KEY); null if no key is configured or it was sealed before this release; kept after a revoke
   filters: FilterConfig;              // {} when none; see "Routing filters"
   filtersInvalid: boolean;            // stored filters corrupt/invalid: events are HELD BACK until replaced
   filtersNewer: boolean;              // saved by a newer release (rollback): sent unfiltered
@@ -144,7 +145,7 @@ are not dead-lettered.
 | `GET /api/integrations/:id` | — | `200 {integration}` |
 | `POST /api/integrations` | `{name, repo, eventTypes, destination, webhookUrl, signingSecret?, triggerAuth?, filters?, noise?}` | `201 {integration, warnings}` (plus `signingSecret` once for `generic_webhook`, with `Cache-Control: no-store`); `409` at 100 per workspace |
 | `PATCH /api/integrations/:id` | any of `{name, repo, eventTypes, enabled, filters, noise}` (`filters` and `noise` replace everything; `null` or `{}` clears them), and/or `{webhookUrl, signingSecret?, triggerAuth?}` to rotate credentials | `200 {integration, warnings}` (rotating a `generic_webhook` also returns a new `signingSecret`, once) |
-| `POST /api/integrations/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` (default `other`) | **Admin only** (`integration.revoke`), Origin and JSON content type required. `200 {integration}` with `revoked: true`, `credentials: 'quarantined'`. Nothing more is sent for it, including messages already queued. Entering a new credential (`PATCH` with `webhookUrl`) clears it, but only for an admin (`integration.revoke`; a member gets `403`) and only with a value different from the revoked one (`422`). Repeating the call, or two racing calls, is a no-op (one audit entry). `422` for an unknown `reason`. |
+| `POST /api/integrations/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` (default `other`) | **Admin only** (`integration.revoke`), Origin and JSON content type required. `200 {integration}` with `revoked: true`, `credentials: 'quarantined'`. Nothing more is sent for it, including messages already queued (they end `dead_lettered` with `destination_revoked`, diagnostic `credentials_revoked`, never decrypted). The sealed secret is then destroyed (ADR 0036): in this request when no consumer claim of the integration is live (`keyDestroyed: true`), otherwise by the credential cron within a few minutes; a repeated call retries it. One `integration.key_destroyed` audit event. Entering a new credential (`PATCH` with `webhookUrl`) clears it, but only for an admin (`integration.revoke`; a member gets `403`) and only with a value different from the revoked one (`422`; once the secret is destroyed this is decided by the fingerprint). Without `FINGERPRINT_KEY` the secret is not destroyed (`keyDestroyed` stays false) so the comparison keeps working. A PATCH that changes credentials is `409` if the row changed (for example a revoke) after it was read. Repeating the call, or two racing calls, is a no-op (one audit entry). `422` for an unknown `reason`. |
 | `DELETE /api/integrations/:id` | — | `204` |
 
 Validation failures return `422 {"error":"Validation failed","fields":[{field,message}]}`. Every
@@ -421,6 +422,7 @@ type Source = {
   secretRotatedAt: string | null;
   credentialFingerprint: string | null; // 8 base32 chars of a tenant-keyed HMAC of the secret (key FINGERPRINT_KEY); null if no key is configured or it was sealed before this release
   revoked: boolean;                   // the secret was revoked: the source is off until `rotate` enters a new one
+  keyDestroyed: boolean;              // revoked AND the sealed secret destroyed (ADR 0036)
   reusedIdRejections: number;         // events refused with 409 webhook_id_reused
   lastReuseRejectedAt: string | null;
   integrationCount: number;           // chats bound to it
@@ -434,7 +436,7 @@ type Source = {
 | `POST /api/sources` | `{name, kind?}` (1–80 characters, no control characters; `kind` defaults to `generic`; GitLab and Stripe take a pasted credential, see [Provider sources](#provider-sources-gitlab-and-stripe)) | `201 {source, secret}` for `generic`, `201 {source}` for a provider; `Cache-Control: no-store` |
 | `PATCH /api/sources/:id` | `{name?, enabled?}` | `200 {source}`; any other field is `422` |
 | `POST /api/sources/:id/rotate` | none for `generic`; the new pasted credential for a provider | **Admin only** (`source.rotate`). `200 {source, secret}` (generic) or `200 {source}` (provider), `Cache-Control: no-store`; the previous secret is invalid at once. `409` if the source changed while rotating (nothing changed; retry). |
-| `POST /api/sources/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` | **Admin only** (`source.revoke`). `200 {source}` with `revoked: true, enabled: false`: ingress answers `410 Gone` for it at once and `PATCH {enabled: true}` is `422` until `rotate` seals a new secret (which clears `revoked` and turns the source back on; a revoked GitLab or Stripe source refuses the same pasted credential with `422`). Repeating the call, or two racing calls, is a no-op (one audit entry). |
+| `POST /api/sources/:id/revoke-credentials` | optional `{reason?: 'compromised' \| 'no_longer_used' \| 'other'}` | **Admin only** (`source.revoke`). `200 {source}` with `revoked: true, enabled: false`: ingress answers `410 Gone` for it at once and `PATCH {enabled: true}` is `422` until `rotate` seals a new secret (which clears `revoked` and turns the source back on; a revoked GitLab or Stripe source refuses the same pasted credential with `422`). The signing secret is destroyed 60 seconds later by the credential cron (`keyDestroyed: true`, one `source.key_destroyed` audit event); `rotate` works before and after. Repeating the call, or two racing calls, is a no-op (one audit entry). |
 | `DELETE /api/sources/:id[?cascade=true]` | none | **Admin only** (`source.delete`). `204`. A source with connected chats returns `409 {error, integrations: n}` unless `cascade=true`, which also deletes those integrations and their saved webhook URLs. |
 
 `secret` (`whsec_` + base64 of 32 random bytes) is returned **only** by create and rotate and is
@@ -632,7 +634,7 @@ no adapter response carries one.
 
 A replay never edits the original row (not even `updated_at`): it writes a new delivery with
 `replayOf` set, so the log shows both. Each delivery carries `integrationStatus`
-(`available`, `missing`, `disabled`, `quarantined`); `canReplay` is true only for
+(`available`, `missing`, `disabled`, `quarantined`, `revoked`), and `integration.credentialFingerprint` (the CURRENT credential's, or null); `canReplay` is true only for
 `available`. Reads are limited to 300 per minute per user and mutations to 30, both `429`
 with `Retry-After`.
 
@@ -787,6 +789,7 @@ partial list. The dashboard shows that as an error, not as "no events".
 
 | Method and path | Capability | Result |
 | --- | --- | --- |
+| `GET /api/observability/readiness` | platform operator (`PLATFORM_OPERATOR_USER_IDS`) | `200 {ok, checks: {config, d1, queue}, code, misconfigured: {storage, credentials, queue, auth}, warnings, unknownKeys}`: binding **names** only, never a value, length or prefix; `Cache-Control: no-store`; 30 a minute per user. `401` without a session, `404` for anyone who is not an operator (and for everyone when the list is unset). Unavailable (`503`) while `APP_ORIGIN` or `BETTER_AUTH_SECRET` is unusable, like every `/api` route. ADR 0036. |
 | `GET /api/observability/summary?window=24h` | `delivery.read` | `200` JSON, workspace-scoped, `Cache-Control: no-store`. `window` is `<n>h` or `<n>d` from `1h` to `30d` (default `24h`); anything else is `400`. Limited to 30 requests a minute per user (`429` with `Retry-After`). |
 
 Each delivery view and the detail carry `correlationId` (string or `null` for rows older than migration 0027 and rows no request created). Every caller gets `jobsStatus` (`ok`, `degraded` or `unknown`). Platform operators only (user ids on the secret `PLATFORM_OPERATOR_USER_IDS`, comma separated, checked server-side; unset or empty means nobody, and a workspace admin is not an operator) also get `jobs: {name, lastOk, lastFailed, stale}[]` (epoch ms or `null`; `lastOk` is the last `ok` or `skipped` run; `stale` means more than three cadences overdue; platform-wide, names and times only; `null` if job state could not be read) and `alerting: {webhookConfigured, lastSuccessAt, lastFailureAt, consecutiveFailures}` (times and a count; never the URL).
@@ -826,7 +829,7 @@ Public, unauthenticated, `Cache-Control: no-store`, carrying the same security h
 
 | Method and path | Success | Failure |
 | --- | --- | --- |
-| `GET /health` | `200 {ok: true, service: 'lumi-noti', warnings?: string[]}`. Configuration only: it does not touch D1, so it stays `200` while D1 is down. `warnings` names malformed optional bindings (`ENCRYPTION_KEY`, `FINGERPRINT_KEY`) or a second KEK without a check value. | `503 {ok: false, service, code: 'config_invalid' \| 'kek_environment_mismatch', misconfigured: string[]}`: binding **names** only (e.g. `KEK_V1`, `KEK_CHECK_V1`, `ENVIRONMENT_NAME`), never a value, length or prefix. |
+| `GET /health` | `200 {ok: true, service: 'lumi-noti'}`. Configuration only: it does not touch D1, so it stays `200` while D1 is down. Optional-binding warnings do not change it. | `503 {ok: false, service, code: 'config_invalid' \| 'kek_environment_mismatch'}`. No binding is named to an anonymous caller (ADR 0036): the names are in the log and in `GET /api/observability/readiness`. |
 | `GET /health/ready` | `200 {ok: true, checks: {config: true, d1: true, queue: true}}` | `503 {ok: false, checks: {...}}` with the failing checks `false`. `d1` is a `SELECT 1` bounded at 3 seconds; `queue` is a presence check of the binding; `config` is the `/health` check, without the names. The answer is cached for 5 seconds per isolate. |
 
 What a configuration fault stops is tiered (docs/RUNBOOK.md, "What a configuration fault stops"):

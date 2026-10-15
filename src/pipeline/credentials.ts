@@ -348,6 +348,11 @@ export interface CredentialStatus {
   readonly quarantined: number;
   /** Revoked by the customer (F40): the secret is burned and a new one must be entered. */
   readonly revoked: number;
+  /**
+   * Revoked connections (integrations and sources) whose key material has not been destroyed yet: the drain
+   * has not completed. Zero once every revoke has run its course (F40, src/pipeline/credential-destroy.ts).
+   */
+  readonly revokedKeysRemaining: number;
 }
 
 /** The numbers the rotation runbook's zero-check reads (F37). Counts only, never values. */
@@ -358,20 +363,28 @@ export async function credentialStatus(db: D1Database, activeVersion: number): P
          SUM(CASE WHEN webhook_envelope IS NULL AND organization_id IS NOT NULL AND credentials_quarantined_at IS NULL THEN 1 ELSE 0 END) AS legacy,
          SUM(CASE WHEN dek_wrapped IS NOT NULL AND kek_version IS NOT ? AND credentials_quarantined_at IS NULL THEN 1 ELSE 0 END) AS stale,
          SUM(CASE WHEN credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason IS NOT ? THEN 1 ELSE 0 END) AS quarantined,
-         SUM(CASE WHEN credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason IS ? THEN 1 ELSE 0 END) AS revoked
+         SUM(CASE WHEN credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason IS ? THEN 1 ELSE 0 END) AS revoked,
+         COALESCE(SUM(CASE WHEN credentials_quarantined_at IS NOT NULL AND credentials_quarantine_reason IS ?
+                   AND (dek_wrapped IS NOT NULL OR key_salt IS NOT NULL OR webhook_envelope IS NOT NULL
+                        OR lark_secret_envelope IS NOT NULL OR webhook_ciphertext <> '' OR lark_secret_ciphertext IS NOT NULL)
+                  THEN 1 ELSE 0 END), 0)
+           + (SELECT COUNT(*) FROM sources WHERE credentials_revoked_at IS NOT NULL
+                AND (length(dek_wrapped) > 0 OR length(key_salt) > 0 OR length(secret_envelope) > 0)) AS revoked_keys
        FROM integrations`,
     )
-    .bind(activeVersion, REVOKED_REASON, REVOKED_REASON)
+    .bind(activeVersion, REVOKED_REASON, REVOKED_REASON, REVOKED_REASON)
     .first<{
       legacy: number | null;
       stale: number | null;
       quarantined: number | null;
       revoked: number | null;
+      revoked_keys: number | null;
     }>();
   return {
     legacyRemaining: row?.legacy ?? 0,
     staleKekRemaining: row?.stale ?? 0,
     quarantined: row?.quarantined ?? 0,
     revoked: row?.revoked ?? 0,
+    revokedKeysRemaining: row?.revoked_keys ?? 0,
   };
 }

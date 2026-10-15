@@ -131,7 +131,9 @@ const REWRAP_BATCH = 25;
  */
 export async function rewrapStaleSourceKeys(db: D1Database, keyring: Keyring): Promise<number> {
   const rows = await db
-    .prepare(`SELECT ${SOURCE_CREDENTIAL_COLUMNS} FROM sources WHERE kek_version IS NOT ? LIMIT ?`)
+    .prepare(
+      `SELECT ${SOURCE_CREDENTIAL_COLUMNS} FROM sources WHERE kek_version IS NOT ? AND length(dek_wrapped) > 0 LIMIT ?`,
+    )
     .bind(keyring.activeVersion, REWRAP_BATCH)
     .all<SourceCredentialRow>();
   let done = 0;

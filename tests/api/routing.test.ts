@@ -104,6 +104,7 @@ beforeEach(() => {
   env = {
     DB: db.d1,
     APP_ORIGIN: ORIGIN,
+    BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
     KEK_V1: '11'.repeat(32),
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',

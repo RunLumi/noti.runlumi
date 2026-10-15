@@ -38,6 +38,10 @@ import {
 } from '../routing/noise';
 import { canonicalRepository, REPO_NOT_CONNECTED } from './repo-scope';
 import { readRevokeReason } from './revoke';
+import { destroyIntegrationKey, destroySettings, legacyOldPresent } from '../pipeline/credential-destroy';
+import { backfillIntegrationFingerprint } from '../pipeline/fingerprint-backfill';
+import { credentialFingerprint } from '../crypto/fingerprint';
+import { log } from '../platform/log';
 import { isDeletionPending } from './workspace-lifecycle';
 import {
   activeFilterIds,
@@ -105,11 +109,14 @@ interface IntegrationRow {
   filters_json: string | null;
   noise_json: string | null;
   sealed: number;
+  key_destroyed: number;
 }
 
 const SELECT_COLUMNS = `id,name,repo,source_id,event_types,destination,destination_host,enabled,created_at,updated_at,
   credentials_quarantined_at,credentials_quarantine_reason,credential_fingerprint,filters_json,noise_json,
-  (webhook_envelope IS NOT NULL) AS sealed`;
+  (webhook_envelope IS NOT NULL) AS sealed,
+  (webhook_envelope IS NULL AND dek_wrapped IS NULL AND key_salt IS NULL AND webhook_ciphertext = ''
+   AND lark_secret_ciphertext IS NULL AND lark_secret_envelope IS NULL) AS key_destroyed`;
 
 export interface IntegrationView {
   readonly id: string;
@@ -129,8 +136,13 @@ export interface IntegrationView {
   readonly credentials: 'ok' | 'legacy' | 'quarantined';
   /** The customer revoked the credential (F40): its secret is burned, not merely unreadable. */
   readonly revoked: boolean;
-  /** base32(SHA-256(webhook URL))[0:8] to match it in the provider's console; null if sealed before F39. */
+  /**
+   * Keyed, tenant-scoped base32 HMAC of the webhook URL, 8 characters, to match it in the provider's console
+   * without showing it (F39). Null without a fingerprint key or when sealed before F39. Kept after a revoke.
+   */
   readonly credentialFingerprint: string | null;
+  /** Revoked and the wrapped key destroyed (F40): the sealed secret can no longer be opened by anyone. */
+  readonly keyDestroyed: boolean;
   /** Routing filters; `{}` when none. A stored document that no longer validates reads as `{}`. */
   readonly filters: FilterConfig;
   /**
@@ -180,6 +192,10 @@ export function toView(row: IntegrationRow, health: DestinationHealthView | null
     credentials: row.credentials_quarantined_at ? 'quarantined' : row.sealed ? 'ok' : 'legacy',
     revoked: row.credentials_quarantined_at !== null && row.credentials_quarantine_reason === REVOKED_REASON,
     credentialFingerprint: row.credential_fingerprint,
+    keyDestroyed:
+      row.credentials_quarantined_at !== null &&
+      row.credentials_quarantine_reason === REVOKED_REASON &&
+      row.key_destroyed === 1,
     filters: stored.kind === 'ok' ? stored.config : {},
     filtersInvalid: stored.kind === 'invalid',
     filtersNewer: stored.kind === 'newer',
@@ -582,6 +598,8 @@ integrations.patch('/:id', async (c) => {
   }
 
   const statements = [];
+  /** Audit rows written right after the UPDATE, each only if the statement before it changed a row. */
+  const trailingAudits: D1PreparedStatement[] = [];
   if (input.credentials && isRevoked(existing)) {
     // A burned credential must not be brought back by whoever can still edit the integration, nor by
     // pasting the same value again: clearing a revoke takes the revoke capability and a NEW secret.
@@ -618,12 +636,20 @@ integrations.patch('/:id', async (c) => {
       sealed.fingerprint,
       new URL(input.credentials.webhookUrl).hostname,
     );
-    statements.push(
-      audit(c, who, 'integration.credentials.rotate', id, {
-        destinationHost: new URL(input.credentials.webhookUrl).hostname,
-        signed: input.credentials.signingSecret !== null,
-        clearedQuarantine: existing.credentials_quarantined_at !== null,
-      }),
+    // After the UPDATE, and only if it changed the row: a concurrent revoke makes the UPDATE a no-op (below).
+    trailingAudits.push(
+      audit(
+        c,
+        who,
+        'integration.credentials.rotate',
+        id,
+        {
+          destinationHost: new URL(input.credentials.webhookUrl).hostname,
+          signed: input.credentials.signingSecret !== null,
+          clearedQuarantine: existing.credentials_quarantined_at !== null,
+        },
+        'previous',
+      ),
     );
   }
 
@@ -665,43 +691,68 @@ integrations.patch('/:id', async (c) => {
     .map((k) => (k === 'sourceEventTypes' ? 'eventTypes' : k));
   const nextEvents = input.eventTypes ?? input.sourceEventTypes;
   if (changed.length) {
-    statements.push(
-      audit(c, who, 'integration.update', id, {
-        fields: changed,
-        ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
-        ...(input.eventTypes ? { eventTypes: input.eventTypes } : {}),
-        ...(input.sourceEventTypes ? { eventTypes: input.sourceEventTypes } : {}),
-        ...(input.repo ? { repo: input.repo } : {}),
-        // Before values for the few non-secret fields that have one (F222, ADR 0028).
-        ...diffMetadata(
-          {
-            enabled: existing.enabled === 1,
-            repo: existing.repo,
-            eventTypes: eventTypesOf(existing.event_types),
-          },
-          {
-            ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
-            ...(input.repo !== undefined ? { repo: input.repo } : {}),
-            ...(nextEvents !== undefined ? { eventTypes: nextEvents } : {}),
-          },
-        ),
-        ...(input.filters ? { filters: changedFilterIds(currentFilters(existing), input.filters) } : {}),
-        ...(input.noise !== undefined ? { noise: activeNoiseFeatures(input.noise) } : {}),
-      }),
+    trailingAudits.push(
+      audit(
+        c,
+        who,
+        'integration.update',
+        id,
+        {
+          fields: changed,
+          ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+          ...(input.eventTypes ? { eventTypes: input.eventTypes } : {}),
+          ...(input.sourceEventTypes ? { eventTypes: input.sourceEventTypes } : {}),
+          ...(input.repo ? { repo: input.repo } : {}),
+          // Before values for the few non-secret fields that have one (F222, ADR 0028).
+          ...diffMetadata(
+            {
+              enabled: existing.enabled === 1,
+              repo: existing.repo,
+              eventTypes: eventTypesOf(existing.event_types),
+            },
+            {
+              ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+              ...(input.repo !== undefined ? { repo: input.repo } : {}),
+              ...(nextEvents !== undefined ? { eventTypes: nextEvents } : {}),
+            },
+          ),
+          ...(input.filters ? { filters: changedFilterIds(currentFilters(existing), input.filters) } : {}),
+          ...(input.noise !== undefined ? { noise: activeNoiseFeatures(input.noise) } : {}),
+        },
+        'previous',
+      ),
     );
   }
 
-  // Audits run first and only if the row still exists, so a concurrent delete yields 404
-  // and no false "success" entry.
+  // The audit rows follow the UPDATE and exist only if it changed a row, so a concurrent delete or revoke
+  // yields no false "success" entry. A credential change also requires the row to still be in the quarantine
+  // state this request read (`?`-guard below): a revoke that landed in between must not be cleared by a PATCH
+  // that read the row before it, nor may a quarantine we just set be wiped.
+  const guardState = input.credentials ? 1 : 0;
   const results = await c.env.DB.batch([
     ...statements,
-    c.env.DB.prepare(`UPDATE integrations SET ${sets.join(',')} WHERE id=? AND organization_id=?`).bind(
+    c.env.DB.prepare(
+      `UPDATE integrations SET ${sets.join(',')} WHERE id=? AND organization_id=?
+         AND (? = 0 OR (credentials_quarantined_at IS ? AND credentials_quarantine_reason IS ?))`,
+    ).bind(
       ...values,
       id,
       who.orgId,
+      guardState,
+      existing.credentials_quarantined_at,
+      existing.credentials_quarantine_reason,
     ),
+    ...trailingAudits,
   ]);
-  if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);
+  if (results[statements.length]?.meta.changes !== 1) {
+    // Gone, or changed under us (a revoke, a quarantine, another rotation): say which.
+    return (await loadRow(c, who.orgId, id))
+      ? c.json(
+          { error: 'The integration changed while saving. Nothing was changed; reload and try again.' },
+          409,
+        )
+      : c.json({ error: 'Not found' }, 404);
+  }
   const row = await loadRow(c, who.orgId, id);
   if (!row) return c.json({ error: 'Not found' }, 404);
   // Rotating a custom webhook's credentials issues a new signing secret, shown once.
@@ -742,17 +793,47 @@ async function sameAsStoredCredentials(
   next: DestinationCredentials,
 ): Promise<boolean> {
   const row = await c.env.DB.prepare(
-    `SELECT ${CREDENTIAL_COLUMNS} FROM integrations WHERE id=? AND organization_id=?`,
+    `SELECT ${CREDENTIAL_COLUMNS},credential_fingerprint FROM integrations WHERE id=? AND organization_id=?`,
   )
     .bind(id, orgId)
-    .first<CredentialRow>();
+    .first<CredentialRow & { credential_fingerprint: string | null }>();
   if (!row) return false;
+  // After the key is destroyed (F40) the stored value cannot be opened, so the fingerprint that outlives
+  // the wipe stands in for it: keyed and tenant-scoped, and absent without FINGERPRINT_KEY (then a repeat
+  // of the burned value cannot be recognised, which the runbook says).
+  if (!row.webhook_envelope && row.webhook_ciphertext === '')
+    return (
+      row.credential_fingerprint !== null &&
+      row.credential_fingerprint ===
+        (await credentialFingerprint(next.webhookUrl, orgId, c.env.FINGERPRINT_KEY))
+    );
   try {
     const stored = await openCredentials(row, keyringFromEnv(c.env), c.env.ENCRYPTION_KEY ?? '');
     // The URL alone is the bearer credential: the same URL with a different signing secret is still the same URL.
     return await sameSecret(stored.webhookUrl, next.webhookUrl);
   } catch {
     return false;
+  }
+}
+
+/** Wipe the revoked key now if it has drained. A failure here never fails the revoke: the sweep retries. */
+async function destroyKey(c: Ctx, who: Resolved, id: string): Promise<void> {
+  try {
+    // A connection with no fingerprint gets one now, while its secret can still be opened; without one the
+    // destroy waits (outside development), because the "same value again" check would otherwise fail open.
+    await backfillIntegrationFingerprint(c.env, who.orgId, id).catch((error: unknown) =>
+      log('warn', 'fingerprint_backfill_failed', { integration_id: id, error }),
+    );
+    await destroyIntegrationKey(
+      c.env.DB,
+      who.orgId,
+      id,
+      Date.now(),
+      { actorId: who.userId, trigger: 'revoke' },
+      await destroySettings(c.env),
+    );
+  } catch (error) {
+    log('error', 'integration_key_destroy_failed', { integration_id: id, error });
   }
 }
 
@@ -764,7 +845,12 @@ integrations.post('/:id/revoke-credentials', async (c) => {
   if (!existing) return c.json({ error: 'Not found' }, 404);
   const reason = await readRevokeReason(c);
   if (reason instanceof Response) return reason;
-  if (isRevoked(existing)) return c.json({ integration: toView(existing) });
+  if (isRevoked(existing)) {
+    // Idempotent, and it finishes a destroy the first call could not (a consumer still held a claim).
+    await destroyKey(c, who, id);
+    const again = await loadRow(c, who.orgId, id);
+    return again ? c.json({ integration: toView(again) }) : c.json({ error: 'Not found' }, 404);
+  }
   // The UPDATE is guarded on "not already revoked" and the audit row on that UPDATE having changed a
   // row, so two concurrent revokes write exactly one audit entry.
   await c.env.DB.batch([
@@ -783,6 +869,9 @@ integrations.post('/:id/revoke-credentials', async (c) => {
       'previous',
     ),
   ]);
+  // Revoke has stopped every use of the secret. Drain, then destroy, when no consumer claim is live; if one
+  // is, the scheduled sweep finishes it (src/pipeline/credential-destroy.ts).
+  await destroyKey(c, who, id);
   const row = await loadRow(c, who.orgId, id);
   return row ? c.json({ integration: toView(row) }) : c.json({ error: 'Not found' }, 404);
 });
@@ -805,7 +894,9 @@ integrations.delete('/:id', async (c) => {
   const existing = await loadRow(c, who.orgId, id);
   if (!existing) return c.json({ error: 'Not found' }, 404);
   // Deleting the row deletes its wrapped DEK, so every ciphertext it sealed becomes
-  // unrecoverable (crypto-shredding). Delivery history keeps ids and states only.
+  // unrecoverable (crypto-shredding). Delivery history keeps ids and states only. While migration 0026 has not
+  // been finalized its kept original holds a second copy of the sealed secret, so that row goes in the same batch.
+  const legacyOld = await legacyOldPresent(c.env.DB).catch(() => false);
   const results = await c.env.DB.batch([
     audit(c, who, 'integration.delete', id, { repo: existing.repo, destination: existing.destination }),
     // Routing provenance for this integration goes with it, in the same transaction.
@@ -822,6 +913,14 @@ integrations.delete('/:id', async (c) => {
       id,
       who.orgId,
     ),
+    ...(legacyOld
+      ? [
+          c.env.DB.prepare('DELETE FROM integrations_old WHERE id=? AND organization_id=?').bind(
+            id,
+            who.orgId,
+          ),
+        ]
+      : []),
     c.env.DB.prepare('DELETE FROM integrations WHERE id=? AND organization_id=?').bind(id, who.orgId),
   ]);
   if (results.at(-1)?.meta.changes !== 1) return c.json({ error: 'Not found' }, 404);

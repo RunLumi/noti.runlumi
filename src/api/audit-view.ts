@@ -55,6 +55,12 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
     clearedQuarantine: 'boolean',
   },
   'integration.credentials.revoke': { destinationHost: 'string', reason: 'string' },
+  'integration.key_destroyed': {
+    destinationHost: 'string',
+    kekVersion: 'number',
+    trigger: 'string',
+    reason: 'string',
+  },
   'integration.auto_pause': {
     destination: 'string',
     providerStatus: 'number',
@@ -67,6 +73,7 @@ export const SUMMARY_FIELDS: Readonly<Record<AuditAction, Readonly<Record<string
   'source.delete': { integrationsDeleted: 'number' },
   'source.secret.rotate': { kind: 'string', authMode: 'string', downgrade: 'boolean' },
   'source.credentials.revoke': { kind: 'string', reason: 'string' },
+  'source.key_destroyed': { kind: 'string', kekVersion: 'number', trigger: 'string', reason: 'string' },
   'delivery.replay': { replayDeliveryId: 'string' },
   'delivery.bulk_replay': {
     phase: 'string',

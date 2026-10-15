@@ -216,6 +216,7 @@ beforeEach(async () => {
       },
     } as unknown as Queue<DeliveryMessage>,
     APP_ORIGIN: ORIGIN,
+    BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
     GITHUB_WEBHOOK_SECRET: 'unused',
     GITHUB_APP_ID: '777',
     ENCRYPTION_KEY: K_LEGACY,

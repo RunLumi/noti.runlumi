@@ -84,6 +84,9 @@ export const vi = {
     'Webhook URL đã lưu không qua được bước kiểm tra toàn vẹn, nên Noti ngừng dùng nó thay vì đoán. Hãy dán lại URL từ {destination} để tiếp tục.',
   'credentials.fix': 'Thay webhook URL',
   'credentials.ok': 'Đã lưu dưới dạng mã hóa. Noti sẽ không hiển thị lại URL này.',
+  'credentials.revoked.title': 'Đã thu hồi webhook URL: không có gì được gửi',
+  'credentials.revoked.body':
+    'Bạn đã thu hồi webhook URL này nên Noti ngừng dùng nó. Các cập nhật đang chờ của tích hợp này sẽ không được gửi. Hãy dán một webhook URL mới từ {destination} để gửi lại.',
 
   // --- Destinations -------------------------------------------------------
   'destination.lark': 'Lark',
@@ -264,12 +267,36 @@ export const vi = {
   'settings.credentials.stateOk': 'Đã mã hóa',
   'settings.credentials.stateLegacy': 'Cần nhập lại',
   'settings.credentials.stateQuarantined': 'Không đọc được — hãy thay',
+  'settings.credentials.stateRevoked': 'Đã thu hồi',
+  'settings.credentials.fingerprint': 'Dấu vân tay',
+  'settings.credentials.fingerprintHint':
+    'Một mã ngắn tính từ URL đã lưu, để bạn nhận ra đây là URL nào mà Noti không cần hiển thị nó. Mã này không phải là URL và không thể đổi ngược lại thành URL.',
+  'settings.credentials.fingerprintNone':
+    'Không có dấu vân tay cho URL này: nó được lưu trước khi có dấu vân tay, hoặc hệ thống này chưa có khóa tạo dấu vân tay.',
+  'settings.credentials.encryptedCopy': 'Bản mã hóa',
+  'settings.credentials.copyDestroyed':
+    'Đã hủy trong cơ sở dữ liệu đang chạy nên Noti không đọc được nữa. Lịch sử cơ sở dữ liệu của Cloudflare có thể giữ một bản trong tối đa 30 ngày.',
+  'settings.credentials.copyDestroying':
+    'Đang được hủy. Nó không còn được dùng vào việc gì và sẽ bị hủy ngay khi lượt gửi đang chạy kết thúc.',
   'settings.credentials.destinationFixed': 'Để gửi đến một loại nơi nhận khác, hãy tạo tích hợp mới.',
   'settings.credentials.replace': 'Thay webhook URL',
   'settings.credentials.replaceIntro':
     'Dán một URL mới từ {destination}. Noti ngừng dùng URL cũ ngay khi bạn lưu, và khóa mã hóa của nó bị hủy.',
   'settings.credentials.save': 'Lưu webhook URL mới',
   'settings.credentials.saved': 'Đã lưu webhook URL mới. URL cũ không còn được dùng.',
+  'revoke.open': 'Thu hồi webhook URL',
+  'revoke.title': 'Thu hồi webhook URL của “{name}”?',
+  'revoke.body':
+    'Noti ngừng dùng URL này ngay lập tức và hủy bản mã hóa của nó, nên Noti không đọc lại được. Lịch sử cơ sở dữ liệu của Cloudflare có thể giữ một bản trong tối đa 30 ngày. Các cập nhật đang chờ gửi đến đây sẽ không được gửi. Không thể hoàn tác: để gửi lại, bạn dán một URL mới. Nếu URL đã bị lộ, hãy xóa nó cả ở {destination}.',
+  'revoke.reason.label': 'Vì sao bạn thu hồi nó?',
+  'revoke.reason.compromised': 'Nó có thể đã bị lộ hoặc bị lạm dụng',
+  'revoke.reason.no_longer_used': 'Chúng tôi không dùng nó nữa',
+  'revoke.reason.other': 'Lý do khác',
+  'revoke.cancel': 'Hủy',
+  'revoke.confirm': 'Thu hồi webhook URL',
+  'revoke.revoking': 'Đang thu hồi…',
+  'revoke.done':
+    'Đã thu hồi webhook URL. Sẽ không có gì được gửi qua tích hợp này cho đến khi bạn dán URL mới.',
   'settings.danger.title': 'Xóa tích hợp',
   'settings.danger.body':
     'Xóa sẽ gỡ tích hợp này và hủy webhook URL cùng signing secret đã lưu. Không thể khôi phục chúng. Nếu chỉ muốn ngừng gửi tin một thời gian, hãy tạm dừng tích hợp ở phần trên.',
@@ -479,6 +506,7 @@ export const vi = {
   'delivery.detail.id': 'Mã lượt gửi',
   'delivery.detail.replayOf': 'Gửi lại từ lượt gửi',
   'delivery.detail.destination': 'Gửi đến',
+  'delivery.detail.fingerprint': 'Dấu vân tay webhook',
   'delivery.detail.timeline': 'Những gì Noti đã ghi lại',
   'delivery.detail.timeline.note':
     'Noti ghi lại thời điểm một lượt gửi được tạo, lần thử đầu tiên và gần nhất, và lúc nó dừng lại. Noti không lưu nhật ký của từng lần thử.',
@@ -518,6 +546,8 @@ export const vi = {
     'Tích hợp này đang tạm dừng. Hãy bật lại trong phần cài đặt của nó trước, rồi quay lại để gửi lại.',
   'redeliver.integration.quarantined':
     'Noti đã ngừng dùng webhook URL đã lưu của tích hợp này. Hãy dán lại URL trong phần cài đặt của nó trước, rồi quay lại để gửi lại.',
+  'redeliver.integration.revoked':
+    'Bạn đã thu hồi webhook URL của tích hợp này nên không thể gửi lại. Hãy dán URL mới trong phần cài đặt của nó trước, rồi quay lại để gửi lại.',
   'redeliver.notOffered': 'Chỉ các lượt gửi bị lỗi mới gửi lại được. Lượt gửi này không bị lỗi.',
   'redeliver.deletionPending':
     'Không gian làm việc này đang được lên lịch xóa, nên không thể gửi lại gì cả. Hãy hủy việc xóa trong Cài đặt trước.',

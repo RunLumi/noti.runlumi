@@ -15,6 +15,12 @@ import { genericWebhook } from './connectors/sources/generic/route';
 import { providerWebhook } from './connectors/sources/provider-route';
 import { PROVIDER_KINDS } from './connectors/sources/types';
 import { rewrapStaleSourceKeys } from './connectors/sources/generic/secret';
+import {
+  destroyRevokedCredentials,
+  destroySettings,
+  type DestroySweepReport,
+} from './pipeline/credential-destroy';
+import { backfillRevokedFingerprints } from './pipeline/fingerprint-backfill';
 import { keyringFromEnv } from './crypto/keyring-env';
 import type { Bindings } from './env';
 import { consumeDeliveries } from './pipeline/consumer';
@@ -49,6 +55,7 @@ import { sweepStaleClaims } from './pipeline/sweep';
 import { correlation } from './platform/correlation';
 import { ingressErrorBodies } from './platform/ingress-errors';
 import { bootReport } from './platform/config';
+import { d1Answers } from './platform/readiness';
 import { log } from './platform/log';
 import { requireSameOrigin } from './security/csrf';
 import { securityHeaders } from './security/headers';
@@ -70,12 +77,16 @@ const PROBE_PATHS: ReadonlySet<string> = new Set(['/health', '/health/ready']);
  */
 const SEALING_METHODS: ReadonlySet<string> = new Set(['POST', 'PATCH', 'PUT']);
 const SEALING_PATH = /^\/api\/(integrations|sources)(\/[^/]+(\/(test|rotate))?)?$/;
+/** Routes that need a working session (`createAuth`): the dashboard API and the GitHub browser flow. */
+const SESSION_PATH = /^\/(api|github)(\/|$)/;
 let configFailureLogged = false;
 
 /**
  * Fail closed only where a fault makes the work unsafe or impossible (F04, F34; tiers in
  * src/platform/config.ts, ADR 0022):
  *  - no D1: nothing can be served, so everything except the probes is 503;
+ *  - an unusable `APP_ORIGIN` or `BETTER_AUTH_SECRET`: every `/api` and `/github` request (no session can be
+ *    verified), but not webhook ingress;
  *  - a bad key ring or a KEK that does not match this environment: requests that SEAL or OPEN a
  *    credential (see SEALING_PATH) are 503. Webhook ingress, sign-in and every read keep
  *    working: ingress never opens a credential to persist an event, and a webhook sender may not
@@ -89,11 +100,12 @@ app.use('*', async (c, next) => {
   const report = await bootReport(c.env);
   const blocked =
     report.storage.length > 0 ||
+    (report.auth.length > 0 && SESSION_PATH.test(c.req.path)) ||
     (report.credentials.length > 0 && SEALING_METHODS.has(c.req.method) && SEALING_PATH.test(c.req.path));
   if (!blocked) return next();
   if (!configFailureLogged) {
     configFailureLogged = true;
-    log('error', 'config_invalid', { misconfigured: report.names, code: report.code });
+    log('error', 'config_invalid', { misconfigured: [...report.names, ...report.auth], code: report.code });
   }
   return c.json({ error: 'Service unavailable' }, 503, { 'retry-after': '30', 'cache-control': 'no-store' });
 });
@@ -130,35 +142,18 @@ app.route('/github', githubBrowser);
 
 /**
  * Liveness plus configuration (F04, F10): cheap, public, and it touches no dependency, so it stays
- * 200 while D1 is down. Names the misconfigured bindings, never a value, a length or a prefix.
- * Optional-binding faults are `warnings` on a 200: they stop one job, not the Worker.
+ * 200 while D1 is down. An anonymous caller learns only WHETHER the Worker is configured and a coarse
+ * `code`, never which binding is wrong (ADR 0036): the names go to the log and to the platform operator's
+ * `GET /api/observability/readiness`. Optional-binding faults do not change the answer.
  */
 app.get('/health', async (c) => {
   const report = await bootReport(c.env);
-  return report.names.length > 0
-    ? c.json(
-        {
-          ok: false,
-          service: 'lumi-noti',
-          code: report.code,
-          misconfigured: report.names,
-          ...(report.warnings.length > 0 ? { warnings: report.warnings } : {}),
-        },
-        503,
-        { 'cache-control': 'no-store' },
-      )
-    : c.json(
-        {
-          ok: true,
-          service: 'lumi-noti',
-          ...(report.warnings.length > 0 ? { warnings: report.warnings } : {}),
-        },
-        200,
-        { 'cache-control': 'no-store' },
-      );
+  const healthy = report.names.length === 0 && report.auth.length === 0;
+  return healthy
+    ? c.json({ ok: true, service: 'lumi-noti' }, 200, { 'cache-control': 'no-store' })
+    : c.json({ ok: false, service: 'lumi-noti', code: report.code }, 503, { 'cache-control': 'no-store' });
 });
 
-const READY_D1_TIMEOUT_MS = 3000;
 const READY_CACHE_MS = 5000;
 const readyCache = new WeakMap<
   object,
@@ -186,22 +181,6 @@ async function readyWarnings(db: D1Database): Promise<string[]> {
   }
 }
 
-async function d1Answers(db: D1Database): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const probe = db.prepare('SELECT 1 AS ok').first<{ ok: number }>();
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('timeout')), READY_D1_TIMEOUT_MS);
-    });
-    return (await Promise.race([probe, timeout]))?.ok === 1;
-  } catch {
-    log('error', 'ready_d1_failed');
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * Readiness (F10): is configuration valid, does D1 answer `SELECT 1`, is the queue binding present?
  * Booleans only, so it is safe to leave public; it sends no queue message and makes no outbound
@@ -224,7 +203,7 @@ app.get('/health/ready', async (c) => {
   const report = await bootReport(c.env);
   const d1 = await d1Answers(c.env.DB);
   const queue = typeof c.env.DELIVERY_QUEUE?.send === 'function';
-  const checks = { config: report.names.length === 0, d1, queue };
+  const checks = { config: report.names.length === 0 && report.auth.length === 0, d1, queue };
   const ok = checks.config && checks.d1 && checks.queue;
   const warnings = d1 ? await readyWarnings(c.env.DB) : [];
   readyCache.set(c.env, { at: now, ok, checks, warnings });
@@ -238,12 +217,49 @@ app.post('/webhooks/generic/:endpointId', genericWebhook);
 // GitLab and Stripe (ADR 0015); the kind selects the connector, so there is no per-provider route code.
 for (const kind of PROVIDER_KINDS) app.post(`/webhooks/${kind}/:endpointId`, providerWebhook(kind));
 
+const NO_DESTROY: DestroySweepReport = {
+  integrations: 0,
+  sources: 0,
+  deferred: 0,
+  failed: 0,
+  awaitingFingerprint: 0,
+};
+
 /**
- * Credential maintenance, bounded per tick: v0 → v1 migration, then KEK rewrap (F37).
- * Logs counts only — the runbook's zero-check reads `remaining`. An aborted batch throws,
- * so the cron invocation fails visibly instead of quarantining healthy rows.
+ * The destroy half of credential maintenance. It needs no key, so it runs FIRST and on its own: a bad KEK, a
+ * failing migration batch or a rewrap abort must never leave a revoked secret in place (F40, ADR 0036).
+ */
+async function sweepDestroy(env: Bindings): Promise<DestroySweepReport> {
+  try {
+    return await destroyRevokedCredentials(env.DB, Date.now(), await destroySettings(env));
+  } catch (error) {
+    log('error', 'credential_destroy_sweep_failed', { error });
+    return NO_DESTROY;
+  }
+}
+
+/**
+ * Credential maintenance, bounded per tick: first finish revokes (wipe and audit; no key needed, isolated),
+ * then fingerprint backfill for revoked rows that lack one (so their destroy can proceed), then the v0 -> v1
+ * migration and the KEK rewrap (F37). Logs counts only; the runbook's zero-check reads `remaining`. A
+ * migration or rewrap abort still throws AFTER the destroy ran, so the cron invocation fails visibly.
  */
 async function maintainCredentials(env: Bindings): Promise<JobReport> {
+  let destroyed = await sweepDestroy(env);
+  const backfilled = await backfillRevokedFingerprints(env).catch((error: unknown) => {
+    log('warn', 'fingerprint_backfill_sweep_failed', { error });
+    return 0;
+  });
+  if (backfilled > 0) {
+    const again = await sweepDestroy(env);
+    destroyed = {
+      integrations: destroyed.integrations + again.integrations,
+      sources: destroyed.sources + again.sources,
+      deferred: again.deferred,
+      failed: destroyed.failed + again.failed,
+      awaitingFingerprint: again.awaitingFingerprint,
+    };
+  }
   const keyring = keyringFromEnv(env);
   // A malformed optional legacy key stands down only this step (`/health` warns), never the Worker.
   const migrated =
@@ -254,13 +270,24 @@ async function maintainCredentials(env: Bindings): Promise<JobReport> {
   const rewrapped = await rewrapStaleKeys(env.DB, keyring);
   const sourcesRewrapped = await rewrapStaleSourceKeys(env.DB, keyring);
   const remaining = await credentialStatus(env.DB, keyring.activeVersion);
-  log('info', 'credential_maintenance', { migrated, rewrapped, sourcesRewrapped, remaining });
+  log('info', 'credential_maintenance', {
+    migrated,
+    rewrapped,
+    sourcesRewrapped,
+    destroyed,
+    backfilled,
+    remaining,
+  });
   return {
     counters: {
       migrated: migrated?.processed ?? 0,
       rewrapped: rewrapped.processed,
       quarantined: (migrated?.quarantined ?? 0) + rewrapped.quarantined,
       sources_rewrapped: sourcesRewrapped,
+      keys_destroyed: destroyed.integrations + destroyed.sources,
+      keys_destroy_deferred: destroyed.deferred,
+      keys_destroy_failed: destroyed.failed,
+      keys_awaiting_fingerprint: destroyed.awaitingFingerprint,
     },
   };
 }

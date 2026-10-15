@@ -29,6 +29,7 @@ import {
   type Bindings,
   type DeliveryMessage,
 } from '../env';
+import { withD1Retry } from '../db/retry';
 import { asRecord, str } from '../lib/json';
 import { sanitiseCorrelationId } from '../platform/correlation';
 import { log } from '../platform/log';
@@ -112,6 +113,20 @@ function parseClaimedPayload(payload: string, orgId: string, rowId: string): Del
   return message && message.organizationId === orgId && message.id === rowId ? message : null;
 }
 
+/**
+ * D1 write discipline for the dispatcher (F09, ADR 0036). A transient write failure used to abandon the
+ * whole pass; the guarded UPDATEs below are retried with full jitter instead, and the retry's
+ * `idempotent` flag is chosen per statement, not assumed:
+ *
+ *  - the claim and the expired-lease reclaim are NOT idempotent: if the first attempt committed and only
+ *    the answer was lost, the repeat finds the row no longer `pending` (or no longer expired), reports
+ *    `lost_race`, and the row sits `claimed` under a lease nobody holds until it expires and the next
+ *    reconcile reclaims it. So only failures that mean "it did not run" are retried for them;
+ *  - the dispatched mark, the release and the invalid-payload batch are idempotent: each is guarded on the
+ *    lease token and on `state = 'claimed'`, so a repeat after a committed first attempt changes zero rows.
+ */
+const OUTBOX_WRITE = { idempotent: true } as const;
+
 async function reclaimIfExpired(
   env: Bindings,
   orgId: string,
@@ -119,9 +134,13 @@ async function reclaimIfExpired(
   now: number,
 ): Promise<boolean> {
   if (row.state !== 'claimed') return false;
-  const result = await env.DB.prepare(RECLAIM_EXPIRED_LEASE_SQL)
-    .bind(...reclaimExpiredParams(orgId, row.id, now))
-    .all();
+  const result = await withD1Retry(
+    () =>
+      env.DB.prepare(RECLAIM_EXPIRED_LEASE_SQL)
+        .bind(...reclaimExpiredParams(orgId, row.id, now))
+        .all(),
+    { idempotent: false, label: 'outbox_reclaim' },
+  );
   return result.results.length === 1;
 }
 
@@ -137,14 +156,22 @@ async function publish(
     // Awaited, never waitUntil-wrapped: a failed send must be seen (F169, F173).
     await env.DELIVERY_QUEUE.send(message);
   } catch {
-    await env.DB.prepare(RELEASE_CLAIM_SQL)
-      .bind(...releaseClaimParams(orgId, rowId, lease, 'internal_error', now))
-      .run();
+    await withD1Retry(
+      () =>
+        env.DB.prepare(RELEASE_CLAIM_SQL)
+          .bind(...releaseClaimParams(orgId, rowId, lease, 'internal_error', now))
+          .run(),
+      { ...OUTBOX_WRITE, label: 'outbox_release' },
+    );
     return 'released';
   }
-  await env.DB.prepare(MARK_DISPATCHED_SQL)
-    .bind(...markDispatchedParams(orgId, rowId, lease, new Date(now).toISOString()))
-    .run();
+  await withD1Retry(
+    () =>
+      env.DB.prepare(MARK_DISPATCHED_SQL)
+        .bind(...markDispatchedParams(orgId, rowId, lease, new Date(now).toISOString()))
+        .run(),
+    { ...OUTBOX_WRITE, label: 'outbox_mark_dispatched' },
+  );
   return 'dispatched';
 }
 
@@ -166,19 +193,27 @@ async function dispatchRow(
   const reclaimed = await reclaimIfExpired(env, orgId, row, now);
   if (row.state === 'claimed' && !reclaimed) return { reclaimed, outcome: 'lost_race' };
   const claim = buildClaim({ orgId, rowId: row.id, nowMs: now, leaseToken: deps.newLeaseToken() });
-  const result = await env.DB.prepare(claim.sql)
-    .bind(...claim.params)
-    .all();
+  const result = await withD1Retry(
+    () =>
+      env.DB.prepare(claim.sql)
+        .bind(...claim.params)
+        .all(),
+    { idempotent: false, label: 'outbox_claim' },
+  );
   const claimed = claimedRow(result.results, claim);
   if (!claimed) return { reclaimed, outcome: 'lost_race' };
   const message = parseClaimedPayload(claimed.payload_json, orgId, row.id);
   if (!message) {
     // One transaction: the outbox row is retired and its delivery reaches a terminal state,
     // so the ledger never waits on a row that will not be sent (F180).
-    await env.DB.batch([
-      env.DB.prepare(MARK_INVALID_SQL).bind(...markInvalidParams(orgId, row.id, claim.lease)),
-      env.DB.prepare(DEAD_LETTER_INVALID_DELIVERY_SQL).bind(orgId, row.id, now),
-    ]);
+    await withD1Retry(
+      () =>
+        env.DB.batch([
+          env.DB.prepare(MARK_INVALID_SQL).bind(...markInvalidParams(orgId, row.id, claim.lease)),
+          env.DB.prepare(DEAD_LETTER_INVALID_DELIVERY_SQL).bind(orgId, row.id, now),
+        ]),
+      { ...OUTBOX_WRITE, label: 'outbox_mark_invalid' },
+    );
     return { reclaimed, outcome: 'invalid' };
   }
   return { reclaimed, outcome: await publish(env, orgId, row.id, claim.lease, message, now) };

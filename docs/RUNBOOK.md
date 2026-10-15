@@ -60,10 +60,12 @@ Opsgenie style paging is not built (ADR 0024).
 
 ## What to check first
 
-1. `GET /health` on the Worker. 503 names the misconfigured bindings and a `code`
-   (`config_invalid`, or `kek_environment_mismatch` for a KEK from another environment) and
-   nothing else; 200 proves the Worker boots with a valid configuration, and says nothing about
-   D1. Then `GET /health/ready` (see "Readiness endpoint").
+1. `GET /health` on the Worker. 503 carries a `code` (`config_invalid`, or `kek_environment_mismatch`
+   for a KEK from another environment) and nothing else: it no longer names the bindings to an
+   anonymous caller (ADR 0036). Read the names from the `config_invalid` log line (`wrangler tail`)
+   or as a platform operator from `GET /api/observability/readiness` ("Operator readiness view").
+   200 proves the Worker boots with a valid configuration, and says nothing about D1. Then
+   `GET /health/ready` (see "Readiness endpoint").
 2. Is the cron running? Every tick upserts a heartbeat first:
    `SELECT value AS last_tick_ms, updated_at FROM ops_state WHERE key='cron_heartbeat';`
    Compare with `strftime('%s','now')*1000`; it should be under about two minutes old. The
@@ -629,14 +631,32 @@ sends no queue message and makes no outbound call. Reading it:
 
 | `config` | `d1` | `queue` | Meaning and first action |
 | --- | --- | --- | --- |
-| false | any | any | A required binding is wrong. `GET /health` names it and says whether it is `config_invalid` or `kek_environment_mismatch`. What that stops depends on the binding (see "What a configuration fault stops"). Fix the deploy. |
+| false | any | any | A required binding is wrong. `GET /health` says whether it is `config_invalid` or `kek_environment_mismatch`; the operator readiness view and the log name the binding. What that stops depends on the binding (see "What a configuration fault stops"). Fix the deploy. |
 | true | false | true | D1 is unreachable or too slow. `/health` still says 200 (it does not touch D1). Check Cloudflare status and `wrangler tail` for `ready_d1_failed` and `d1_write_shed`. Ingress answers 5xx; see "After an ingress outage". |
 | true | true | false | The queue binding is missing from the deployment. Re-deploy with `wrangler.jsonc` intact. |
 
 The answer is cached for 5 seconds in each isolate, so a probe loop does not turn into D1 load, and a
 change shows up within that time. Warnings (a malformed optional `ENCRYPTION_KEY` or
-`FINGERPRINT_KEY`, a second KEK without a check value) appear on `/health` under `warnings` with a
-200: they stop one job, not the Worker.
+`FINGERPRINT_KEY`, a second KEK without a check value, a GitHub App binding still a placeholder) are
+shown only in the operator readiness view and the log: they stop one job or one feature, not the Worker.
+
+## Operator readiness view
+
+`GET /api/observability/readiness` (signed in; the user id must be on the secret `PLATFORM_OPERATOR_USER_IDS`,
+otherwise `404`, and `404` for everyone while it is unset) returns the failing binding **names** per tier,
+never a value:
+
+```json
+{"ok":false,"checks":{"config":false,"d1":true,"queue":true},"code":"config_invalid",
+ "misconfigured":{"storage":[],"credentials":["KEK_V1"],"queue":[],"auth":[]},
+ "warnings":["GITHUB_APP_ID"],"unknownKeys":["KEK_V_1"]}
+```
+
+`unknownKeys` are names in the Worker's environment that it does not read: almost always a typo in a
+secret or var (also logged once per isolate as `config_unknown_keys`, field `unknown_bindings`).
+`warnings` includes the five GitHub App bindings while any is a placeholder: the GitHub routes answer 503
+on their own until they are real. This route is a `/api` route, so an `auth` fault (`APP_ORIGIN` or
+`BETTER_AUTH_SECRET`) answers 503 here too; for that one read the log line.
 
 ## What a configuration fault stops
 
@@ -644,8 +664,15 @@ change shows up within that time. Warnings (a malformed optional `ENCRYPTION_KEY
 | --- | --- | --- |
 | `DB` missing | every request except `/health` and `/health/ready`, the queue consumer, `scheduled` | the dashboard shell and assets |
 | Key ring invalid, `ENVIRONMENT_NAME` wrong, `KEK_CHECK_V<n>` missing/malformed, or a KEK that does not match (`kek_environment_mismatch`) | creating or editing integrations and sources, rotating a source secret, test sends (503); the delivery consumer; `scheduled` | **webhook ingress**, sign-in, every read, delete and revoke |
+| `APP_ORIGIN` not an https origin (a local development host may be http), or `BETTER_AUTH_SECRET` under 32 characters, copied from an example or repetitive | every `/api` and `/github` request (503, `Retry-After: 30`): no session can be verified | **webhook ingress**, the queue consumer, `scheduled` |
+
+For an `auth` fault `GET /health` and `GET /health/ready` answer **503** (config is part of both) while webhook ingress and
+delivery still work. A monitor that pages on `/health` will page although events are still being accepted and delivered: treat
+`503` with `code: config_invalid` as "the dashboard and API are down", check `GET /webhooks/...` ingress and the delivery
+backlog (step 3 of "What to check first") before declaring an outage, and read the failing binding in the log. A monitor that
+must follow ingress should probe a webhook route (a signed no-op) instead of `/health`.
 | `DELIVERY_QUEUE` missing | `scheduled` (dispatch) | everything else; ingress still persists to the outbox |
-| `ENCRYPTION_KEY` or `FINGERPRINT_KEY` malformed | only the v0 migration step / fingerprints | everything |
+| `ENCRYPTION_KEY` or `FINGERPRINT_KEY` malformed; a GitHub App binding a placeholder | only the v0 migration step / fingerprints / the GitHub install flow and webhook | everything else |
 
 Ingress is deliberately not gated on the key ring: it never opens a destination credential, and a
 refused webhook can be lost for good (GitHub does not redeliver automatically; GitLab disables a hook
@@ -777,25 +804,76 @@ SELECT created_at, actor_id, subject_id, metadata_json FROM audit_events WHERE a
 Step 3 is not atomic with step 2; the script cannot delete a Worker secret. If rows reappear between
 them (a restore, a rollback of the rewrap), stop and rerun step 1.
 
+The KEK itself is still a Worker secret (storage tier 2). Moving it to a Secrets Store binding was assessed in
+ADR 0036 and not done: the binding is asynchronous and the key ring is built synchronously at every entrypoint.
+
 ## Revoked credentials
 
-A customer (admin) can declare a credential burned: `POST /api/integrations/:id/revoke-credentials`
-or `POST /api/sources/:id/revoke-credentials` (docs/API.md). An integration is marked quarantined
-with the reason `revoked`; a source is switched off with `credentials_revoked_at` set. Both stop
-immediately and stay stopped until a new credential is entered.
+A customer (admin) can declare a credential burned: the dashboard's `Revoke webhook URL`, or
+`POST /api/integrations/:id/revoke-credentials` / `POST /api/sources/:id/revoke-credentials` (docs/API.md). The order is
+fixed (ADR 0036): **revoke** (an integration is quarantined with the reason `revoked`; a source is switched off with
+`credentials_revoked_at` set; both stop at once), **drain** (no delivery of the integration is `claimed` with a claim
+younger than 5 minutes; a source waits 60 seconds), **destroy** (one statement wipes the wrapped key and every ciphertext
+column), **audit** (`integration.key_destroyed` / `source.key_destroyed`, written in the same batch, so it exists exactly
+when the wipe did). An integration is usually destroyed inside the revoke request; anything deferred is finished by the
+`credential_maintenance` cron (25 per table per tick) and by a repeated revoke call. Messages for a revoked integration
+that were already queued end `dead_lettered` with `destination_revoked` (diagnostic `credentials_revoked`) and are never decrypted.
 
 ```sql
-SELECT id, organization_id, destination, credentials_quarantined_at
+-- Revoked, and whether the key has been destroyed yet (a row with all-NULL key columns is destroyed):
+SELECT id, organization_id, destination, credentials_quarantined_at,
+       (dek_wrapped IS NULL AND webhook_envelope IS NULL AND webhook_ciphertext = '') AS key_destroyed
 FROM integrations WHERE credentials_quarantine_reason='revoked';
-SELECT id, organization_id, kind, credentials_revoked_at FROM sources WHERE credentials_revoked_at IS NOT NULL;
+SELECT id, organization_id, kind, credentials_revoked_at, length(dek_wrapped) = 0 AS key_destroyed
+FROM sources WHERE credentials_revoked_at IS NOT NULL;
+-- The audit trail, per connection (the revoke event has the actor and reason; the destroy event the key version):
+SELECT created_at, action, actor_id, subject_id, metadata_json FROM audit_events
+WHERE action IN ('integration.credentials.revoke','integration.key_destroyed','source.credentials.revoke','source.key_destroyed')
+ORDER BY created_at DESC LIMIT 50;
 ```
 
-Do **not** clear these by hand the way a quarantine can be cleared: the customer said the secret is
-burned. Through the API, clearing needs a **new** secret: an admin (`integration.revoke`) enters a
-different webhook URL (a member who can edit gets 403; the same value is refused with 422), and a revoked
-provider source refuses the same pasted credential on `rotate`. The `credential_maintenance` log line reports `revoked` separately from `quarantined`. The
-sealed secret stays in D1 until the customer replaces it or deletes the connection (deleting removes
-the wrapped key with the row, which is the cryptographic erasure).
+The `credential_maintenance` log line carries `destroyed` and `remaining.revokedKeysRemaining`; the latter should be 0 a
+few minutes after the last revoke. A value that does not fall means a live delivery claim that never ends (look at
+`SELECT * FROM deliveries WHERE state='claimed' ORDER BY claimed_at LIMIT 20;` and the stale-claim sweep) or a failing
+cron (`credential_maintenance` in `job_runs`). The destroy is irreversible: the sealed secret cannot be recovered even by
+whoever holds the KEK. A destroyed connection keeps its non-secret fingerprint.
+
+Do **not** clear a revoke by hand the way a quarantine can be cleared: the customer said the secret is burned. Through
+the API, clearing needs a **new** secret: an admin (`integration.revoke`) enters a different webhook URL (a member who can
+edit gets 403), and a revoked provider source refuses the same pasted credential on `rotate`. After the key is destroyed
+the "same value again" check compares the fingerprint, which exists only when `FINGERPRINT_KEY` is set: **set
+`FINGERPRINT_KEY` in every environment** (64 hex characters): without it a revoked secret is NOT destroyed (it stays sealed
+but unusable, `revokedKeysRemaining` stays above zero, `/api/observability/readiness` warns `FINGERPRINT_KEY`), because the
+destroy would otherwise let the burned value be pasted back unnoticed. With a key, the revoke (or the next cron tick) computes
+a missing fingerprint while the secret can still be opened, then destroys it. **Do not rotate `FINGERPRINT_KEY`
+casually**: every stored fingerprint stops matching, so a destroyed connection's burned value is no longer recognised.
+Rows revoked before ADR 0036 hold their key until the next cron tick after the deploy.
+
+**A revoked secret that is never wiped.** If `/api/observability/readiness` shows `revoked_secrets_not_wiped` (or the
+`credential_maintenance` log has `keys_awaiting_fingerprint` above zero), a revoked connection holds a secret the Worker cannot give a
+fingerprint: it was sealed before fingerprints existed and cannot be opened now (lost key, corrupt envelope, no
+`ENCRYPTION_KEY`). First fix the cause if it is a missing binding (the next tick backfills and destroys it). If it cannot be
+opened, wipe it yourself, after confirming with the customer that the old value is burned and cannot be recognised afterwards:
+
+```sh
+node scripts/force-destroy-revoked.mjs --integration <id> --organization <orgId> --actor "<your login>" --remote          # dry run
+node scripts/force-destroy-revoked.mjs --integration <id> --organization <orgId> --actor "<your login>" --remote --apply
+# a source: --source <id> (after its 60 second drain window)
+```
+
+It refuses a connection that is not revoked or is in another workspace, waits for a live delivery claim (rerun later), also wipes the
+`integrations_old` copy, and writes `*.key_destroyed` with `trigger: operator`, `reason: destroyed_without_fingerprint`. Deleting
+an integration also removes its `integrations_old` row. UNVERIFIED on a real D1: it assumes `wrangler d1 execute --command` runs
+its statements in order; each is idempotent, so a partial run is repaired by running it again.
+
+**What "destroyed" means.** Gone from the live database and, while migration 0026 has not been finalized, from
+`integrations_old` (wiped in the same batch; the sweep also wipes a kept copy that reappears). Not gone from D1 Time Travel,
+which keeps point-in-time history for up to 30 days (AR-6): a secret revoked today can be read from a restore for up to 30
+days. If `migration-0026-recover.mjs` restores the kept original, it re-quarantines the integrations that were revoked since
+the swap and wipes their secrets again (a scratch table `_recover_revoked`, kept if the run is interrupted).
+`kek-destroy-check.mjs` counts `integrations_old` while it exists, so a KEK version still used there is not destroyable.
+The destroy runs first in `credential_maintenance` and per row, so a bad KEK or a failing migration batch does not
+delay it; the migration and rewrap still fail the cron afterwards.
 
 ## KEK rotation (pointer)
 

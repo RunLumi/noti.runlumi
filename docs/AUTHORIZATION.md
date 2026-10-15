@@ -97,6 +97,7 @@ Every route the Hono app registers has exactly one entry in `src/auth/route-poli
 | `DELETE /api/sources/:id` | capability `source.delete` | `src/api/sources.ts` |
 | `GET /api/deliveries` | capability `delivery.read` | `src/api/deliveries.ts` |
 | `GET /api/deliveries/summary` | capability `delivery.read` | `src/api/deliveries.ts` |
+| `GET /api/observability/readiness` | the caller's own account (user id from the verified session) | `src/api/observability.ts` |
 | `GET /api/deliveries/:id` | capability `delivery.read` | `src/api/deliveries.ts` |
 | `POST /api/deliveries/replay-plan` | capability `delivery.replay` | `src/api/deliveries.ts` |
 | `POST /api/deliveries/replay` | capability `delivery.replay` | `src/api/deliveries.ts` |

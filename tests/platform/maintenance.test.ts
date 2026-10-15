@@ -27,6 +27,7 @@ function envWith(mode: string | undefined): { env: Bindings; touched: () => numb
   const env = {
     DB,
     APP_ORIGIN: 'https://noti.test',
+    BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
     KEK_V1: '11'.repeat(32),
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',

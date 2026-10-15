@@ -37,8 +37,13 @@ async function makeEnv(over: Partial<Bindings> = {}): Promise<Bindings> {
       },
     } as unknown as Queue<DeliveryMessage>,
     APP_ORIGIN: 'https://noti.test',
+    BETTER_AUTH_SECRET: 'test-better-auth-secret-0123456789ab',
     GITHUB_WEBHOOK_SECRET: 'scan-fixture-github-webhook-value',
     GITHUB_APP_ID: '777',
+    FINGERPRINT_KEY: '44'.repeat(32),
+    GITHUB_APP_SLUG: 'noti-test',
+    GITHUB_CLIENT_ID: 'Iv1.scan-fixture-client-id',
+    GITHUB_CLIENT_SECRET: 'scan-fixture-github-client-value',
     KEK_V1: KEK_1,
     KEK_V2: '',
     KMS_ACTIVE_VERSION: '1',
@@ -72,7 +77,13 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('assessConfig tiers (F04, ADR 0022)', () => {
   it('accepts a complete configuration', async () => {
-    expect(assessConfig(await makeEnv())).toEqual({ storage: [], credentials: [], queue: [], warnings: [] });
+    expect(assessConfig(await makeEnv())).toEqual({
+      storage: [],
+      credentials: [],
+      queue: [],
+      auth: [],
+      warnings: [],
+    });
     expect(assertConfig(await makeEnv())).toEqual([]);
   });
 
@@ -191,13 +202,12 @@ describe('GET /health (F10)', () => {
     expect((await get('/health', await makeEnv({ DB: downDb() }))).status).toBe(200);
   });
 
-  it('503s naming the binding for a bad key ring, never a value', async () => {
+  it('503s with a coarse code for a bad key ring, naming no binding and no value (ADR 0036)', async () => {
     const res = await get('/health', await makeEnv({ KEK_V1: 'short' }));
     expect(res.status).toBe(503);
     const text = await res.text();
-    expect(text).toContain('KEK_V1');
-    expect(text).not.toContain('short');
-    expect(JSON.parse(text)).toMatchObject({ ok: false, code: 'config_invalid' });
+    expect(JSON.parse(text)).toEqual({ ok: false, service: 'lumi-noti', code: 'config_invalid' });
+    expect(text).not.toMatch(/KEK|short|misconfigured/);
   });
 
   it('503s with kek_environment_mismatch when the KEK belongs to another environment', async () => {
@@ -208,16 +218,15 @@ describe('GET /health (F10)', () => {
       ok: false,
       service: 'lumi-noti',
       code: 'kek_environment_mismatch',
-      misconfigured: ['KEK_CHECK_V1'],
     });
     expect(text).not.toContain(KEK_2);
     expect(text).not.toContain(await check(KEK_1, 'production'));
   });
 
-  it('lists optional-binding faults as warnings on a 200', async () => {
+  it('an optional-binding fault stays a 200 and is not named to an anonymous caller', async () => {
     const res = await get('/health', await makeEnv({ ENCRYPTION_KEY: 'nope' }));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, service: 'lumi-noti', warnings: ['ENCRYPTION_KEY'] });
+    expect(await res.json()).toEqual({ ok: true, service: 'lumi-noti' });
   });
 
   it('carries the security headers and a correlation id', async () => {

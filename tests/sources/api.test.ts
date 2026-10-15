@@ -413,6 +413,8 @@ describe('workspace lifecycle', () => {
     expect(Object.keys(body.sources[0] ?? {}).sort()).toEqual([
       'auth_mode',
       'created_at',
+      'credential_fingerprint',
+      'credentials_revoked',
       'dropped_events',
       'enabled',
       'endpoint_id',
