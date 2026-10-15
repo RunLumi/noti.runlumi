@@ -436,6 +436,37 @@ describe('ingress tenant isolation', () => {
     // 1 MiB cap = 16 chunks; the reader stops at the first byte over, not at 64 chunks.
     expect(pulled).toBeLessThan(25);
   });
+
+  it('verifies the signature over the exact bytes, then refuses a body that is not valid UTF-8 (ADR 0057)', async () => {
+    // {"a":"<0xff>"}: signed over these bytes, so it verifies; a lenient decode would read 0xff as U+FFFD and
+    // parse cleanly, so the route must decode strictly and answer like invalid JSON instead.
+    const bytes = new Uint8Array([0x7b, 0x22, 0x61, 0x22, 0x3a, 0x22, 0xff, 0x22, 0x7d]);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(HMAC_FIXTURE),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, bytes));
+    const signature = 'sha256=' + Array.from(mac, (b) => b.toString(16).padStart(2, '0')).join('');
+    const res = await worker.fetch(
+      new Request('https://noti.test/webhooks/github', {
+        method: 'POST',
+        body: bytes,
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': signature,
+          'x-github-event': 'issues',
+          'x-github-delivery': 'not-utf8',
+        },
+      }),
+      env,
+      { waitUntil: () => undefined } as unknown as ExecutionContext,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'Invalid JSON' });
+  });
 });
 
 describe('consumer', () => {

@@ -45,7 +45,7 @@ function hexToBytes(hex: string): Uint8Array<ArrayBuffer> {
  * hand-rolled, per docs/specs/05-source-github.md F58.
  */
 export async function verifyGithubSignature(
-  body: string,
+  body: Uint8Array | string,
   signature: string,
   secret: string,
 ): Promise<boolean> {
@@ -62,7 +62,9 @@ export async function verifyGithubSignature(
       'HMAC',
       key,
       hexToBytes(signature.slice(7)),
-      new TextEncoder().encode(body),
+      // The ingress path passes the exact raw bytes (AGENTS.md: verify against raw bytes). A string is
+      // accepted for known-answer tests and is UTF-8 encoded, which is the same thing for valid UTF-8.
+      typeof body === 'string' ? new TextEncoder().encode(body) : new Uint8Array(body),
     );
   } catch {
     // A malformed key or buffer must be a verification failure, never a thrown error that

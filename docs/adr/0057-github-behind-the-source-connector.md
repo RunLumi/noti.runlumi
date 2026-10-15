@@ -59,11 +59,13 @@ GitHub does not fit the endpoint shape, and forcing it would weaken the tenant m
    the route; no other source has it yet. `route-policy.ts` now names `verify` as the GitHub route's guard, like the
    provider route.
 
-5. **The GitHub HMAC input is kept as it was.** The verifier still runs over the UTF-8 re-encoding of the decoded
-   body. That equals the raw bytes for every valid UTF-8 body, which is all GitHub sends, but a body that is not
-   valid UTF-8, or starts with a byte-order mark, does not verify. Verifying the exact bytes would accept such bodies
-   and then parse a lossy decoding, which changes behaviour; it is a follow-up with its own test, not part of a
-   refactor that promised the same responses. `tests/github/connector.test.ts` pins today's outcome.
+5. **The GitHub HMAC runs over the exact raw bytes** (`AGENTS.md`). The refactor first kept the old input (the
+   UTF-8 re-encoding of the decoded body, which equals the raw bytes for every valid UTF-8 body); the follow-up
+   in the same branch switches to the bytes received and makes the route decode strictly
+   (`TextDecoder('utf-8', { fatal: true })`), so a body that is not valid UTF-8 verifies against what was
+   signed and is then refused as invalid JSON instead of being parsed with replacement characters.
+   `tests/github/connector.test.ts` pins the verifier, including that a signature over the re-encoded copy is
+   refused; `tests/pipeline/delivery-path.test.ts` pins the route's 400.
 
 6. **The contract moves into `src/` and the suite reads it from there.** `SOURCE_CONTRACTS`
    (`src/connectors/sources/contracts.ts`) lists GitHub, generic, GitLab and Stripe; `SOURCE_CONNECTORS` lists the

@@ -42,15 +42,10 @@ export const githubConnector: InstallationSourceConnector = {
   },
 
   verify: async ({ secret, headers, raw }) => {
-    // Kept exactly as before this connector existed: the HMAC runs over the UTF-8 re-encoding of
-    // the decoded body, which equals the raw bytes for every valid UTF-8 body GitHub sends. A body
-    // that is not valid UTF-8 (or starts with a BOM) therefore does not verify. ADR 0057 lists
-    // the switch to the exact bytes as a separate, behaviour-changing follow-up.
-    const ok = await verifyGithubSignature(
-      new TextDecoder().decode(raw),
-      headers.get('x-hub-signature-256') || '',
-      secret,
-    );
+    // The HMAC runs over the exact raw bytes received (AGENTS.md), never a decoded and re-encoded
+    // copy. For every valid UTF-8 body the two are the same; a body that is not valid UTF-8 or starts
+    // with a BOM now verifies against what was actually signed, and is then refused by the parser.
+    const ok = await verifyGithubSignature(raw, headers.get('x-hub-signature-256') || '', secret);
     // X-GitHub-Delivery is outside the signature, so the verifier vouches for no identity.
     return ok ? { ok: true, eventId: null } : { ok: false, reason: 'signature' };
   },

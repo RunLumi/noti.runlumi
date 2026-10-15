@@ -119,11 +119,12 @@ export async function githubWebhook(c: Context<{ Bindings: Bindings }>): Promise
     nowSeconds: Math.floor(Date.now() / 1000),
   });
   if (!verdict.ok) return c.text('Unauthorized', 401);
-  const body = new TextDecoder().decode(read.bytes);
 
+  // The signature covers the exact bytes, so the decode must not repair them: a body that is not valid UTF-8
+  // is refused like invalid JSON rather than parsed with replacement characters (ADR 0057).
   let parsed: unknown;
   try {
-    parsed = JSON.parse(body);
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(read.bytes));
   } catch {
     return c.text('Invalid JSON', 400);
   }

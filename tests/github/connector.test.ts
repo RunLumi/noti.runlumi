@@ -38,11 +38,16 @@ describe('githubConnector.verify', () => {
     expect((await verify(enc(`${KNOWN_ANSWER.body} `), KNOWN_ANSWER.signature)).ok).toBe(false);
   });
 
-  it('keeps the pre-connector outcome for a body that is not valid UTF-8: it does not verify (ADR 0057 follow-up)', async () => {
+  it('verifies over the exact raw bytes, including a body that is not valid UTF-8 or starts with a BOM', async () => {
+    // A decoded-then-re-encoded copy would differ from these bytes (U+FFFD for 0xff, the BOM stripped), so
+    // only an HMAC over the raw bytes verifies them; the parser refuses such a body afterwards.
     const raw = new Uint8Array([0x7b, 0xff, 0x7d]);
-    expect((await verify(raw, sign(KNOWN_ANSWER.secret, raw))).ok).toBe(false);
+    expect((await verify(raw, sign(KNOWN_ANSWER.secret, raw))).ok).toBe(true);
     const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...enc('{}')]);
-    expect((await verify(bom, sign(KNOWN_ANSWER.secret, bom))).ok).toBe(false);
+    expect((await verify(bom, sign(KNOWN_ANSWER.secret, bom))).ok).toBe(true);
+    // A signature over the re-encoded copy is NOT accepted for the raw bytes.
+    const reencoded = enc(new TextDecoder().decode(raw));
+    expect((await verify(raw, sign(KNOWN_ANSWER.secret, reencoded))).ok).toBe(false);
   });
 });
 
