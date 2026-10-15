@@ -31,7 +31,7 @@ import {
 } from '../env';
 import { withD1Retry } from '../db/retry';
 import { asRecord, str } from '../lib/json';
-import { sanitiseCorrelationId } from '../platform/correlation';
+import { sanitiseCorrelationId, withMessageCorrelation } from '../platform/correlation';
 import { log } from '../platform/log';
 
 /**
@@ -100,7 +100,7 @@ export interface DispatchReport {
   readonly invalid: number;
 }
 
-type CandidateRow = { id: string; state: 'pending' | 'claimed' };
+type CandidateRow = { id: string; state: 'pending' | 'claimed'; correlation_id: string | null };
 
 /** The payload must name the same row and tenant it is stored under, or it is not ours. */
 function parseClaimedPayload(payload: string, orgId: string, rowId: string): DeliveryMessage | null {
@@ -155,7 +155,8 @@ async function publish(
   try {
     // Awaited, never waitUntil-wrapped: a failed send must be seen (F169, F173).
     await env.DELIVERY_QUEUE.send(message);
-  } catch {
+  } catch (error) {
+    log('warn', 'outbox_send_failed', { delivery_id: rowId, workspace_id: orgId, error });
     await withD1Retry(
       () =>
         env.DB.prepare(RELEASE_CLAIM_SQL)
@@ -187,6 +188,17 @@ async function dispatchRow(
   row: CandidateRow,
   deps: DispatchDeps,
 ): Promise<{ reclaimed: boolean; outcome: RowOutcome }> {
+  // The cron pass has no request, so the row's own id is bound here: every line about this row, from
+  // its claim to its mark, names it (F193). A row without one (written before 0027) runs unbound.
+  return withMessageCorrelation(row.correlation_id, () => dispatchBoundRow(env, orgId, row, deps));
+}
+
+async function dispatchBoundRow(
+  env: Bindings,
+  orgId: string,
+  row: CandidateRow,
+  deps: DispatchDeps,
+): Promise<{ reclaimed: boolean; outcome: RowOutcome }> {
   // Read per row: a pass can visit many rows serially, and a lease stamped with a stale
   // clock would expire early (M3).
   const now = deps.now();
@@ -203,6 +215,8 @@ async function dispatchRow(
   const claimed = claimedRow(result.results, claim);
   if (!claimed) return { reclaimed, outcome: 'lost_race' };
   const message = parseClaimedPayload(claimed.payload_json, orgId, row.id);
+  if (message && !message.correlationId)
+    log('warn', 'correlation_missing', { delivery_id: row.id, workspace_id: orgId });
   if (!message) {
     // One transaction: the outbox row is retired and its delivery reaches a terminal state,
     // so the ledger never waits on a row that will not be sent (F180).

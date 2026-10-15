@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeliveryMessage } from '../../src/env';
 import { consumeDeliveries, type ConsumerDeps } from '../../src/pipeline/consumer';
 import { consumeDeadLetters } from '../../src/pipeline/dead-letter';
-import { parseDeliveryMessage } from '../../src/pipeline/outbox';
+import { dispatchOutbox, parseDeliveryMessage } from '../../src/pipeline/outbox';
 import { EVENT, SLACK, caller, setup, signHeaders, type CreatedSource, type Harness } from './harness';
 
 vi.mock('../../src/auth/better-auth', async () => (await import('./harness')).mockAuth());
@@ -229,6 +229,20 @@ describe('lookup by correlation id', () => {
     expect(operator.map((p) => p.detail).join('\n')).toMatch(/deliveries_correlation\b/);
   });
 
+  it('a member of another workspace who names this one gets 404 and no row, even with a real id', async () => {
+    const { id } = await ingest();
+    // Named in the query, as a client names it. (Named only by the session, an invalid choice falls back to
+    // the caller's own workspace, which the test below covers: it is still never org-a's data.)
+    const res = await call('GET', `/api/deliveries?correlationId=${id}&org=org-a`, { as: 'mallory' });
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toContain(id);
+    const fallback = await call('GET', `/api/deliveries?correlationId=${id}`, {
+      as: 'mallory',
+      org: 'org-a',
+    });
+    expect(await fallback.json()).toMatchObject({ organizationId: 'org-b', deliveries: [] });
+  });
+
   it('a replay carries the id of the replay request, never the original ingress id', async () => {
     const { id, deliveryId } = await ingest();
     h.db.raw
@@ -246,5 +260,118 @@ describe('lookup by correlation id', () => {
     expect(replay.c).toBe(replayId);
     const message = outboxMessages().find((m) => m.correlationId === replayId);
     expect(message).toBeDefined();
+  });
+});
+
+/**
+ * Every log line on the ingress to outbox to consumer path names the id (F193). The ingress kick and the
+ * cron pass are both driven, and every console line either one writes is captured.
+ */
+describe('every log line on the delivery path names the correlation id', () => {
+  /** Pass-level summaries describe a whole pass over many rows, so they name no single id. */
+  const PASS_SUMMARIES = new Set(['outbox_dispatch_incomplete', 'outbox_reconcile']);
+
+  function allLines(spies: ReturnType<typeof vi.spyOn>[]): Record<string, unknown>[] {
+    return spies.flatMap((s) => logLines(s));
+  }
+
+  /** The ingress kick (`waitUntil`) is awaited here, so its sends and logs happen before the assertions. */
+  async function settle(): Promise<void> {
+    await Promise.all(h.waitUntil.mock.calls.map((c) => c[0] as Promise<unknown>));
+  }
+
+  function withSend(send: (m: DeliveryMessage) => Promise<void>): void {
+    h.env = { ...h.env, DELIVERY_QUEUE: { send } as unknown as Queue<DeliveryMessage> };
+  }
+
+  it('ingress, the kick, the consumer and its failure line all carry the id the sender was given', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    const spies = [
+      vi.spyOn(console, 'info').mockImplementation(() => undefined),
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined),
+      vi.spyOn(console, 'error').mockImplementation(() => undefined),
+    ];
+    const sent: DeliveryMessage[] = [];
+    withSend((m) => {
+      sent.push(m);
+      return Promise.resolve();
+    });
+    const res = await post(src, 'evt_path_1');
+    const id = res.headers.get('x-request-id');
+    await settle();
+    const [message] = sent;
+    expect(message?.correlationId).toBe(id);
+    h.fetchMock.mockClear();
+    await consume(message);
+    // A consumer that fails after the claim logs under the same id (the catch around the message).
+    h.fetchMock.mockRejectedValueOnce(new Error('network down'));
+    await consume(message);
+
+    const lines = allLines(spies);
+    expect(lines.map((l) => l.msg)).toEqual(expect.arrayContaining(['delivery_attempt']));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line, String(line.msg)).toMatchObject({ correlation_id: id });
+  });
+
+  it('a send that fails on the cron pass logs under the row id; the pass summary is the only line without one', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    withSend(() => Promise.reject(new Error('queue down')));
+    const res = await post(src, 'evt_cron_1');
+    const id = res.headers.get('x-request-id');
+    await settle();
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const report = await dispatchOutbox(h.env, {
+      now: () => Date.now() + 3_600_000,
+      newLeaseToken: () => crypto.randomUUID(),
+    });
+    expect(report.released).toBe(1);
+    const lines = logLines(warn);
+    const failed = lines.find((l) => l.msg === 'outbox_send_failed');
+    expect(failed).toMatchObject({ correlation_id: id });
+    expect(failed?.delivery_id).toEqual(expect.any(String));
+    for (const line of lines) {
+      if (PASS_SUMMARIES.has(String(line.msg))) expect(line).not.toHaveProperty('delivery_id');
+      else expect(line, String(line.msg)).toMatchObject({ correlation_id: id });
+    }
+  });
+
+  it('a row written without an id is still dispatched, and logs correlation_missing once', async () => {
+    const src = await createSource();
+    await route('alice', src.id);
+    withSend(() => Promise.reject(new Error('queue down')));
+    await post(src, 'evt_legacy_1');
+    await settle();
+    // Make the pending row look like one written before the id existed: no column, no payload field.
+    h.db.raw.prepare('UPDATE notification_outbox SET correlation_id = NULL').run();
+    const rows = h.db.raw.prepare('SELECT id, payload_json FROM notification_outbox').all() as {
+      id: string;
+      payload_json: string;
+    }[];
+    for (const r of rows) {
+      const { correlationId: _dropped, ...legacy } = JSON.parse(r.payload_json) as DeliveryMessage;
+      h.db.raw
+        .prepare('UPDATE notification_outbox SET payload_json = ? WHERE id = ?')
+        .run(JSON.stringify(legacy), r.id);
+    }
+
+    const sent: DeliveryMessage[] = [];
+    withSend((m) => {
+      sent.push(m);
+      return Promise.resolve();
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const report = await dispatchOutbox(h.env, {
+      now: () => Date.now() + 3_600_000,
+      newLeaseToken: () => crypto.randomUUID(),
+    });
+    expect(report.dispatched).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).not.toHaveProperty('correlationId');
+    const missing = logLines(warn).filter((l) => l.msg === 'correlation_missing');
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).not.toHaveProperty('correlation_id');
   });
 });

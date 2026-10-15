@@ -433,7 +433,7 @@ everywhere to unauthenticated callers while giving authenticated operators detai
 
 ## F11 — Correlation IDs and structured logging
 
-**Priority** P0 · **Status** 🟡 correlation id minted at ingress, echoed as `x-request-id`, `cf-ray` captured, carried in every `log()` line through `AsyncLocalStorage` (`src/platform/correlation.ts`, `src/platform/log.ts`, `tests/platform/correlation.test.ts`, `tests/api/observability.test.ts`); not built: id is not stored on D1 rows, not carried in queue messages, not shown in the delivery detail view, fixed key set not asserted
+**Priority** P0 · **Status** 🟡 correlation id minted at ingress, echoed as `x-request-id`, `cf-ray` captured, carried in every `log()` line through `AsyncLocalStorage` (`src/platform/correlation.ts`, `src/platform/log.ts`, `tests/platform/correlation.test.ts`, `tests/api/observability.test.ts`); stored on the delivery, outbox and attempt rows and carried in queue messages (ADR 0024); `correlation_missing` is logged once per message or row without an id, and the cron-run outbox and noise-release lines name their row (ADR 0046, `tests/sources/correlation.test.ts`, `tests/noise/correlation.test.ts`); not built: the fixed key set is not asserted by a test (F194), and the id is not in the dashboard's delivery detail dialog
 
 **Story** As a support engineer, I want one identifier to follow a notification from
 webhook receipt to destination, so that a user report can be answered without guessing.

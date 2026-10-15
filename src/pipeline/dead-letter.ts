@@ -80,6 +80,8 @@ export async function consumeDeadLetters(
   let moved = 0;
   for (const msg of batch.messages as readonly DeadLetterMessage[]) {
     const d = parseDeliveryMessage(msg.body);
+    if (d && !d.correlationId)
+      log('warn', 'correlation_missing', { delivery_id: d.id, workspace_id: d.organizationId });
     const handled = await withMessageCorrelation(d?.correlationId, async () => {
       try {
         const changed = d ? await markDeadLettered(env.DB, d, now()) : false;

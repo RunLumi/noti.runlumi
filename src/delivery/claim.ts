@@ -133,7 +133,7 @@ export function sqliteTimestamp(ms: number): string {
  * F174 candidates for one workspace: due `pending` rows, and `claimed` rows whose lease has
  * expired. ?1 organization_id · ?2 now (epoch ms) · ?3 limit
  */
-export const SELECT_RECONCILE_CANDIDATES_SQL = `SELECT id, state FROM ${OUTBOX_TABLE}
+export const SELECT_RECONCILE_CANDIDATES_SQL = `SELECT id, state, correlation_id FROM ${OUTBOX_TABLE}
 WHERE organization_id = ?1
   AND ((state = 'pending' AND (not_before IS NULL OR not_before <= ?2))
     OR (state = 'claimed' AND lease_expires_at <= ?2))

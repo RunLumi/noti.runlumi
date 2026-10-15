@@ -124,6 +124,18 @@ export async function postGithub(
   deliveryId: string,
   options: { installation?: number; repo?: string } = {},
 ): Promise<PostResult> {
+  const { requestId: _requestId, ...result } = await postGithubWithId(h, kind, event, deliveryId, options);
+  return result;
+}
+
+/** As {@link postGithub}, and also the correlation id the request was answered with (`x-request-id`). */
+export async function postGithubWithId(
+  h: Harness,
+  kind: string,
+  event: Record<string, unknown>,
+  deliveryId: string,
+  options: { installation?: number; repo?: string } = {},
+): Promise<PostResult & { requestId: string }> {
   const repo = options.repo ?? 'acme/web';
   const body = JSON.stringify({
     installation: { id: options.installation ?? 1001, app_id: Number(APP_ID) },
@@ -154,6 +166,7 @@ export async function postGithub(
     status: res.status,
     ...(json.persisted !== undefined ? { persisted: json.persisted } : {}),
     ...(json.held !== undefined ? { held: json.held } : {}),
+    requestId: res.headers.get('x-request-id') ?? '',
   };
 }
 

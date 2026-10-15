@@ -388,7 +388,8 @@ Interpretation (src/pipeline/outbox.ts, src/delivery/claim.ts):
 - `claimed`, `lease_expires_at` in the past: a dispatcher died mid-send. The next cron tick
   reclaims it. If it persists across ticks, the cron is not running (see "What to check first").
 - `pending`, due, old, `last_error_code` set: the dispatch itself is failing. Read the latest
-  `outbox_dispatch_incomplete` log line; `Queue.send()` failures leave the row for the next tick.
+  `outbox_dispatch_incomplete` log line; `Queue.send()` failures leave the row for the next tick and log
+  `outbox_send_failed` with that row's `delivery_id` and `correlation_id` (ADR 0046).
 - `state='invalid'`, `last_error_code='config_invalid'`: a row with no organization (pre-0006
   data). It is deliberately never routed; leave it.
 
@@ -423,7 +424,8 @@ Interpretation (src/pipeline/noise-release.ts):
   next send time (`GET /api/integrations/:id/noise-status`).
 - `held`, `release_at` in the past for more than a few minutes: the cron is not running (see
   "What to check first") or `noise_release` is failing; look for `cron_job_failed` with
-  `job: noise_release` and `noise_release_failed` (integration id only). At most 20 integrations are
+  `job: noise_release` and `noise_release_failed` (integration id; once a notification exists, also its
+  `delivery_id` and `correlation_id`, ADR 0046). At most 20 integrations are
   released per tick, so a very large backlog drains over several ticks.
 - `claimed`, `lease_until` in the past: a run died mid-release. The next tick returns the rows to
   `held` (counting an attempt) and releases them; the release is atomic, so nothing was half-sent.

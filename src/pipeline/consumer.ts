@@ -727,7 +727,11 @@ export async function consumeDeliveries(
   for (const msg of batch.messages) {
     // The consumer has no request to inherit a correlation id from: bind the one the message carries,
     // so every log line of this delivery (including the failure line below) names it (F193).
-    await withMessageCorrelation(parseDeliveryMessage(msg.body)?.correlationId, async () => {
+    const parsed = parseDeliveryMessage(msg.body);
+    // A message written before the id existed still delivers; its absence is logged once (F11, F193).
+    if (parsed && !parsed.correlationId)
+      log('warn', 'correlation_missing', { delivery_id: parsed.id, workspace_id: parsed.organizationId });
+    await withMessageCorrelation(parsed?.correlationId, async () => {
       try {
         await handleMessage(msg, env, keyring, deps);
       } catch (e) {

@@ -1,6 +1,6 @@
 import { dedupKey, deliveryId as deriveDeliveryId } from '../delivery/ids';
 import { COMBINED_COUNT_MAX, type Bindings, type DeliveryMessage } from '../env';
-import { mintCorrelationId } from '../platform/correlation';
+import { mintCorrelationId, withMessageCorrelation } from '../platform/correlation';
 import { log } from '../platform/log';
 import { HELD_CAPACITY } from '../routing/noise';
 import { DIGEST_MAX_PARTS, renderDigestParts, renderGroup, type HeldItem } from '../routing/noise-render';
@@ -155,10 +155,17 @@ const CLAIM_COLUMNS =
 
 interface Planned {
   readonly message: DeliveryMessage;
+  /** Minted once per notification, here: every log line about it and its rows carry this id (F193). */
+  readonly correlationId: string;
   /** Which claimed rows this notification stands for. */
   readonly scope: Scope;
   /** Rows covered, for the report. */
   readonly rows: number;
+}
+
+/** A fresh correlation id for a released notification (its ingress id was never stored; ADR 0046). */
+function mintNotification(message: DeliveryMessage, scope: Scope, rows: number): Planned {
+  return { message, correlationId: mintCorrelationId(), scope, rows };
 }
 
 type Scope =
@@ -202,10 +209,10 @@ async function plan(
     const scope: Scope = { kind: 'group', groupKey };
     if (bucket.length === 1 && only) {
       // Released under its own deterministic id: a redelivery cannot create a second one.
-      out.push({ message: singleMessage({ ...base, id: only.id }, only), scope, rows: 1 });
+      out.push(mintNotification(singleMessage({ ...base, id: only.id }, only), scope, 1));
     } else {
       const id = await newId(orgId, integrationId, token, groupKey);
-      out.push({ message: { ...base, id, ...renderGroup(bucket) }, scope, rows: bucket.length });
+      out.push(mintNotification({ ...base, id, ...renderGroup(bucket) }, scope, bucket.length));
     }
   }
   if (digest.length > 0) {
@@ -217,15 +224,17 @@ async function plan(
       void listedItems;
       const id = await newId(orgId, integrationId, token, `digest:${index}`);
       const whole = parts.length === 1 && notShown === 0;
-      out.push({
-        message: { ...base, id, ...fields },
-        scope: {
-          kind: 'digest',
-          keys: whole ? null : groupKeys,
-          leftoverOutside: !whole && notShown > 0 ? allListed : null,
-        },
-        rows,
-      });
+      out.push(
+        mintNotification(
+          { ...base, id, ...fields },
+          {
+            kind: 'digest',
+            keys: whole ? null : groupKeys,
+            leftoverOutside: !whole && notShown > 0 ? allListed : null,
+          },
+          rows,
+        ),
+      );
     }
   }
   return out;
@@ -258,8 +267,10 @@ function releaseStatements(
   for (const p of planned) {
     const { sql, params } = scopeSql(p.scope);
     // A release runs in the cron with no request. Held events do not store their ingress id, so a
-    // released notification gets a fresh one: traceable from here on, not linked back to ingress.
-    const correlationId = mintCorrelationId();
+    // released notification gets a fresh one (minted in plan). It links back to the held rows through
+    // `held_events.id` (the originating event's delivery id, equal to the id of a lone released event)
+    // and `held_events.released_in` (the notification id); the ingress id itself is not recorded (ADR 0046).
+    const { correlationId } = p;
     const message = { ...p.message, correlationId };
     // Created only while the claim is still ours; `changes()` then gates the outbox row, so a
     // delivery that already exists (a redelivered single event) is not sent twice.
@@ -366,6 +377,8 @@ interface UnitResult {
   readonly events: number;
   /** Budget consumed: notifications planned (a digest counts as the parts it needs). */
   readonly cost: number;
+  /** At least one batch failed; its rows were counted as failed attempts and the run fails at the end. */
+  readonly failed: boolean;
 }
 
 async function releaseUnit(
@@ -382,11 +395,11 @@ async function releaseUnit(
   const scopes = await env.DB.prepare(SCOPES_SQL)
     .bind(orgId, integrationId, nowMs, nowMs, budgetLeft)
     .all<ScopeRow>();
-  if (scopes.results.length === 0) return { notifications: 0, events: 0, cost: 0 };
+  if (scopes.results.length === 0) return { notifications: 0, events: 0, cost: 0, failed: false };
   const groupKeys = scopes.results.map((s) => s.scope).filter((s) => s !== '');
   const digest = scopes.results.some((s) => s.scope === '');
   const claimed = await claimScopes(env, orgId, integrationId, token, nowMs, groupKeys, digest);
-  if (claimed.length === 0) return { notifications: 0, events: 0, cost: 0 };
+  if (claimed.length === 0) return { notifications: 0, events: 0, cost: 0, failed: false };
   const planned = await plan(orgId, integrationId, token, claimed.map(toItem));
 
   // Several notifications per batch (each guarded on the claim). If a batch fails, none of its
@@ -395,7 +408,7 @@ async function releaseUnit(
   const size = deps.batchSize ?? BATCH_NOTIFICATIONS;
   let notifications = 0;
   let events = 0;
-  let failure: unknown;
+  let failed = false;
   for (let i = 0; i < planned.length; i += size) {
     const slice = planned.slice(i, i + size);
     try {
@@ -403,7 +416,17 @@ async function releaseUnit(
       notifications += slice.length;
       events += slice.reduce((n, p) => n + p.rows, 0);
     } catch (error) {
-      failure ??= error;
+      // One line per notification in the failed batch, each under that notification's id (F193). The
+      // unit is reported as failed to the caller, which fails the run once every unit has been tried.
+      failed = true;
+      for (const p of slice)
+        withMessageCorrelation(p.correlationId, () =>
+          log('error', 'noise_release_failed', {
+            integration_id: integrationId,
+            delivery_id: p.message.id,
+            error,
+          }),
+        );
       try {
         await env.DB.batch(failureStatements(env.DB, orgId, token, nowMs, slice));
       } catch {
@@ -411,8 +434,7 @@ async function releaseUnit(
       }
     }
   }
-  if (failure !== undefined) throw failure instanceof Error ? failure : new Error('noise release failed');
-  return { notifications, events, cost: planned.length };
+  return { notifications, events, cost: planned.length, failed };
 }
 
 /**
@@ -443,7 +465,9 @@ export async function releaseHeldEvents(
       events += done.events;
       budget -= done.cost;
       if (done.cost > 0) units++;
+      if (done.failed) failed++;
     } catch (error) {
+      // Before any notification of this unit existed (claim or plan failed): there is no id to name.
       failed++;
       budget -= 1;
       log('error', 'noise_release_failed', { integration_id: unit.integration_id, error });
