@@ -73,7 +73,7 @@
     // Public identifier of the GitHub App. Not a secret: it appears in install URLs.
     // Used to reject payloads that claim a different App, alongside the webhook secret.
     // Replace with the real App ID; until then, webhook ingress fails closed.
-    "GITHUB_APP_ID": "REPLACE_WITH_GITHUB_APP_ID",
+    "GITHUB_APP_ID": "5340232",
     // Which KEK version (secret KEK_V<n>) wraps new connection keys. Not a secret.
     // Flip only after the new KEK secret is deployed; see docs/IMPLEMENTATION.md.
     "KMS_ACTIVE_VERSION": "1",
@@ -95,8 +95,8 @@
     "AUDIT_RETENTION_DAYS": "365",
     // Public GitHub App identifiers (see docs/GITHUB_APP.md). The client SECRET is a
     // Worker secret, never a var. Until these are real, /api/github/install returns 503.
-    "GITHUB_APP_SLUG": "REPLACE_WITH_GITHUB_APP_SLUG",
-    "GITHUB_CLIENT_ID": "REPLACE_WITH_GITHUB_CLIENT_ID",
+    "GITHUB_APP_SLUG": "lumi-noti",
+    "GITHUB_CLIENT_ID": "Iv23lip5fWsTE0SnewIa",
     // The custom-webhook destination sends to a URL the customer chooses (SSRF surface, ADR
     // 0014, AR-30). It stays "false" until the release criteria in the ADR are met: workspace
     // host allowlist, periodic re-resolution, and a canary test of Workers egress. When it is
