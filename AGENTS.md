@@ -3,6 +3,21 @@
 ## Mission
 Build a globally competitive, simple, trustworthy, standalone notification router under the Lumi brand. Optimize for a nontechnical user connecting systems in minutes, not for the number of integrations shown on a landing page. No AI slop, fake screenshots, unsupported claims or placeholder connectors advertised as working.
 
+## Ambition with evidence
+
+**Aim higher at verified user outcomes, not at uncontrolled scope.** For non-trivial work, apply these lenses inside the existing task/PR; small fixes stay small.
+
+- **Altitude — outcome before tactic.** Name the user's intended result, acceptance evidence, constraints and stop condition. Challenge a weak requested approach with a better bounded alternative; do not silently replace approved scope.
+- **Depth — professional methods, not expert-sounding prose.** Inspect source code, representative raw payloads and redacted runtime evidence. Reproduce the problem, test the root cause and use a measured baseline. Treat a stretch target as a hypothesis for a bounded experiment, never as an achieved result.
+- **Range — borrow techniques, not personas.** Apply the adjacent discipline that could expose the failure: distributed-systems fault injection, security threat modeling, or nontechnical onboarding observation. Do the actual check; do not add agents, dependencies or infrastructure merely to look ambitious.
+- **Speed — shorten the verified feedback loop.** Deliver the smallest complete authorized slice, use existing tools and preserve reusable fixtures/tests. Continue through verification and in-scope repair, not just a plan; stop when acceptance is proven or a specific blocker needs human input.
+
+**Here:** improve “a workspace receives useful, authorized event context and can diagnose failed delivery,” not merely the connector count. For delivery changes, exercise signed provider fixtures, tenant rejection, duplicate events, rate limits, retry exhaustion and the visible recovery path. Fixture success is not live-provider acceptance; preserve the connector definition of done below.
+
+**Evidence and authority:** use observable tests, provider receipts and user-journey checks rather than the implementing model's confidence. Report the tested revision, actual results and unverified boundaries. Existing product, security, approval and release rules remain authoritative; ambition grants no permission to contact users, expose data or change production. Propose larger opportunities separately. Any claimed improvement to these instructions needs representative tasks and independent evaluation, not a self-score.
+
+**Credit:** adapted from [Felix Rieseberg, “How to be more ambitious: A tutorial for humans with models”](https://felixrieseberg.com/how-to-be-more-ambitious-a-tutorial-for-humans-with-models/) (13 October 2026). Speed, Altitude, Depth and Range are his framework; the repository examples and scope/authority safeguards are Lumi's adaptation.
+
 ## Product boundaries
 - Sources: GitHub first; then generic signed webhooks, GitLab, Stripe, Sentry, Cloudflare and other high-demand sources based on evidence.
 - Destinations: Lark, Slack, Microsoft Teams first; add Discord, Telegram and email only when demand justifies.
