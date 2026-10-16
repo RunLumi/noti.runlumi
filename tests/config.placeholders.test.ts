@@ -35,8 +35,12 @@ const GOOD = {
 describe('the committed wrangler.jsonc (CI check)', () => {
   it('contains placeholders only under keys on the allow-list', () => {
     const found = predeploy.placeholders(committed).map(([key]) => key);
-    expect(found.length).toBeGreaterThan(0); // the scan is not vacuous
     expect(found.filter((k) => !predeploy.ALLOWED_PLACEHOLDER_KEYS.has(k))).toEqual([]);
+  });
+
+  it('accepts the configured production deployment', () => {
+    expect(predeploy.evaluatePredeploy(committed).fatal).toEqual([]);
+    expect(predeploy.placeholders(committed)).toEqual([]);
   });
 
   it('refuses an unconfigured template, naming what to set', () => {

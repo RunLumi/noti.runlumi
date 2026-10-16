@@ -35,8 +35,9 @@ is claimed. `KEK_CHECK_V1` is a public HKDF check value, not the key.
 
 ## Retained limits and operating notes
 
-- GitHub App ID/slug/client ID remain placeholders, and its secrets have not been installed. GitHub install
-  and ingress remain closed until a real App is configured using `docs/GITHUB_APP.md`.
+- GitHub App `lumi-noti` is registered under RunLumi (2026-10-16). Its public identifiers are recorded in
+  `wrangler.jsonc` and its client/webhook secrets are stored on the Worker. See `GITHUB_APP.md` for the
+  verified permissions, pending private-key/installation step and remaining provider acceptance checks.
 - `GENERIC_WEBHOOK_ENABLED=false` is retained.
 - Readiness warns `migration_0026_old_tables_present`. Automatic approval review rejected production
   finalization because it irreversibly drops tables. The six retained originals and `_snapshot_0026` remain;

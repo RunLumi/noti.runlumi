@@ -75,3 +75,22 @@ until reconciliation (F69) and permission reads (F61) are built.
 
 `/github/setup` and `/github/callback` must reach the Worker, not the SPA. Route them the
 same way as `/api/*` and `/webhooks/*`. The Vite dev server proxies them in development.
+
+
+## Production registration — 2026-10-16
+
+- Owner: `RunLumi`; name: **Lumi Noti**; slug: `lumi-noti`.
+- Public page: https://github.com/apps/lumi-noti
+- App ID: `5340232`; Client ID: `Iv23lip5fWsTE0SnewIa` (both public identifiers).
+- Read-only permissions and all nine subscriptions above were read back from GitHub's public App API.
+- The callback/setup URLs were entered exactly as above. Webhook activation, URL and a generated signing
+  secret were set in the General form. A later independent readback of those private settings is still
+  needed because the Browser connection became unavailable after credentials were generated.
+- `GITHUB_CLIENT_SECRET` and `GITHUB_WEBHOOK_SECRET` were generated and installed as Worker secrets;
+  their values were not printed or committed. The mode-0600 temporary upload file was removed after
+  Cloudflare confirmed both writes. No separate backup is claimed.
+
+The runtime does not consume an App private key today, but GitHub displayed a registration banner
+asking for one to be generated before installation. No key pair has been generated. Installation,
+OAuth verification and real webhook/destination delivery remain unverified; registering/configuring
+an App is not evidence that a workspace is connected.
