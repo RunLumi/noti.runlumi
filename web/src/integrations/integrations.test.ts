@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseCreateIntegration } from '../../../src/api/integration-input';
-import { ApiError, parseInstallation, parseIntegration, type GithubInstallation } from '../lib/api';
+import {
+  ApiError,
+  githubApi,
+  parseInstallation,
+  parseIntegration,
+  type GithubInstallation,
+} from '../lib/api';
 import { allInstallationFor, isCovered, repoName } from './github/coverage';
 import { returnMessage } from './github/ReturnStatus';
 import { en, t, tp } from '../i18n';
@@ -34,6 +40,22 @@ const INSTALLATIONS: GithubInstallation[] = [
 
 const SLACK = 'https://hooks.slack.com/services/T000/B000/XXXX';
 const LARK = 'https://open.larksuite.com/open-apis/bot/v2/hook/abc';
+
+it('Connect GitHub requests discovery for the chosen workspace instead of reinstalling', async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(Response.json({ url: 'https://github.com/login/oauth/authorize?client_id=test' }));
+  vi.stubGlobal('fetch', fetchMock);
+  try {
+    await githubApi.startInstall('workspace-choice');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/github/install?org=workspace-choice',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ mode: 'connect' }) }),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 describe('event catalog labels', () => {
   it('labels every catalog event with an existing message', () => {

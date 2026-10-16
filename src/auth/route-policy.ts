@@ -372,6 +372,24 @@ export const ROUTE_POLICY: readonly RoutePolicy[] = [
     access: { kind: 'session' },
   },
 
+  {
+    method: 'GET',
+    path: '/github/connect.css',
+    file: 'src/api/github.ts',
+    handler: local('/connect.css'),
+    access: {
+      kind: 'public',
+      reason: 'Static stylesheet for the script-free, session-bound account-choice form.',
+    },
+  },
+  {
+    method: 'POST',
+    path: '/github/choose',
+    file: 'src/api/github.ts',
+    handler: local('/choose'),
+    access: { kind: 'session' },
+  },
+
   // --- ingress: signed webhooks; the tenant is read from OUR row, never from the request --------
   {
     method: 'POST',

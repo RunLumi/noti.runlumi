@@ -19,6 +19,7 @@ const RETURN_MESSAGES = {
   installation_bound_elsewhere: 'github.return.installation_bound_elsewhere',
   installation_deleted: 'github.return.installation_deleted',
   installation_too_large: 'github.return.installation_too_large',
+  installation_list_too_large: 'github.return.unexpected_error',
   workspace_access_lost: 'github.return.workspace_access_lost',
   github_unavailable: 'github.return.github_unavailable',
   not_configured: 'github.return.not_configured',

@@ -91,13 +91,15 @@ export function planAttacks(routes, victim) {
     const add = (a) => plan.push({ key, method: route.method, ...(capability ? { capability } : {}), ...a });
 
     if (route.path.startsWith('/github/')) {
-      // Browser redirects: with no state they bounce to the dashboard, and must never echo B.
+      // Browser callbacks with no state bounce to the dashboard. The choice POST requires
+      // a URL-encoded form, so this bodyless request must fail closed as unsupported media.
+      // Neither response may echo B or change tenant data.
       add({
         name: `${key} (own-scope)`,
         path: route.path,
         body: undefined,
         vector: 'own-scope',
-        expect: [302],
+        expect: key === 'POST /github/choose' ? [415] : [302],
         readOnly: true,
       });
       continue;

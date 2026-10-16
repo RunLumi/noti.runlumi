@@ -461,3 +461,10 @@ and forced-colours were **tested in the stylesheet only, not seen in a browser**
 build only; native select pop-ups were not keyboard-driven; the delivery detail dialog was
 scanned in jsdom but not in a browser pass; the Vietnamese copy has had no native-speaker
 review. See the ADR for the full record.
+
+
+GitHub Connect now starts OAuth discovery before installation (ADR 0038), preserving already-installed
+accounts. The rare multiple-account handoff is a server-rendered, script-free paper sheet with canonical
+Lumi colors, system sans fallback, 16px text, 44px controls and visible keyboard focus. It is not TanStack
+SSR and grants nothing until a chosen account passes fresh PKCE/authority checks. EN/VI labels follow the
+browser Accept-Language on this handoff; the React dashboard retains its existing locale selection.

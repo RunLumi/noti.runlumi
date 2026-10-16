@@ -2,8 +2,7 @@
  * Security response headers (docs/specs/15-security-and-compliance.md; docs/THREAT_MODEL.md).
  *
  * Two surfaces, two policies:
- *  - The Worker serves JSON, redirects and webhook acks. Nothing it returns should ever
- *    render, so its CSP is `default-src 'none'`.
+ *  - The API normally serves JSON, redirects and webhook acks. Its default CSP is `default-src 'none'`.
  *  - The React SPA is a TanStack Start build in SPA mode, served by the same Worker (ADR 0017).
  *    Two paths carry its headers: the Worker, which serves the HTML shell for every
  *    navigation (src/web/shell.ts, with script hashes added to the CSP), and the static assets
@@ -30,7 +29,7 @@ const COMMON_HEADERS: Readonly<Record<string, string>> = {
   'X-Frame-Options': 'DENY',
 };
 
-/** The Worker never returns a renderable document. */
+/** Default API policy; the script-free GitHub choice page explicitly adds self-hosted styles. */
 export const API_CSP = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /**

@@ -481,7 +481,10 @@ export const githubApi = {
   },
   /** Starts the verified install flow; the caller navigates the browser to the returned URL. */
   startInstall: async (orgId: string): Promise<string> => {
-    const body = await request(withOrg('/api/github/install', orgId), { method: 'POST', body: '{}' });
+    const body = await request(withOrg('/api/github/install', orgId), {
+      method: 'POST',
+      body: JSON.stringify({ mode: 'connect' }),
+    });
     if (!isRecord(body) || typeof body.url !== 'string') throw new ApiError('Unexpected response', 500);
     // Only ever leave the app for GitHub over https, whatever the response claims.
     let url: URL;

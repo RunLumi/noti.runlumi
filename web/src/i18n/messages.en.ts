@@ -375,7 +375,7 @@ export const en = {
   'github.return.workspace_access_lost':
     'You no longer have access to this workspace, so nothing was connected. Ask a workspace admin to check your role.',
   'github.return.github_unavailable':
-    'GitHub didn’t respond, so nothing was connected. Try again in a few minutes.',
+    'GitHub verification could not be completed, so nothing was connected. Choose Connect GitHub to start again. If this keeps happening, contact the server operator.',
   'github.return.not_configured':
     'This Noti server has no GitHub App configured, so GitHub can’t be connected yet.',
   'github.return.signin_required': 'Sign in to Noti, then choose Connect GitHub again.',

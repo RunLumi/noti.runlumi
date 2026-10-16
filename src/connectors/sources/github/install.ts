@@ -14,6 +14,8 @@
  */
 
 import { insertRepositories } from './repos';
+import { log } from '../../../platform/log';
+import { readBodyCapped } from '../../../lib/body';
 
 export const STATE_TTL_MS = 10 * 60 * 1000;
 const GITHUB_API = 'https://api.github.com';
@@ -38,6 +40,7 @@ export type InstallError =
   | 'installation_admin_required'
   | 'installation_deleted'
   | 'installation_too_large'
+  | 'installation_list_too_large'
   | 'workspace_access_lost'
   | 'unexpected_error'
   | 'installation_bound_elsewhere'
@@ -200,6 +203,71 @@ export async function continueFromSetup(
   return url.toString();
 }
 
+/** Start with OAuth so an existing installation does not get stranded on GitHub settings. */
+export async function startConnect(
+  db: D1Database,
+  config: GithubAppConfig,
+  who: { organizationId: string; userId: string },
+  now: number,
+  claimedInstallationId?: string,
+): Promise<string> {
+  const verifier = randomToken(48);
+  const state = await createState(
+    db,
+    {
+      purpose: 'verify',
+      ...who,
+      pkceVerifier: verifier,
+      ...(claimedInstallationId ? { claimedInstallationId } : {}),
+    },
+    now,
+  );
+  const url = new URL(`${GITHUB_WEB}/login/oauth/authorize`);
+  url.searchParams.set('client_id', config.clientId);
+  url.searchParams.set('redirect_uri', callbackUrl(config));
+  url.searchParams.set('state', state);
+  url.searchParams.set('code_challenge', await sha256Base64url(verifier));
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('allow_signup', 'false');
+  return url.toString();
+}
+
+export interface InstallationChoice {
+  readonly account: string;
+  readonly state: string;
+}
+export type ConnectResult =
+  | BindResult
+  | { readonly organizationId: string; readonly next: string }
+  | {
+      readonly organizationId: string;
+      readonly choices: readonly InstallationChoice[];
+      readonly install: string;
+    };
+
+/** Choice tickets reuse verify states with NO PKCE verifier; they cannot be exchanged as OAuth states. */
+export async function chooseInstallation(
+  db: D1Database,
+  config: GithubAppConfig,
+  state: string | undefined,
+  userId: string,
+  now: number,
+  mayConnect: WorkspaceCheck,
+): Promise<string> {
+  const choice = await consumeState(db, state, 'verify', userId, now);
+  if (choice.pkce_verifier !== null || !choice.claimed_installation_id)
+    throw new InstallFlowError('state_invalid');
+  if (!(await mayConnect(choice.organization_id, userId)))
+    throw new InstallFlowError('workspace_access_lost');
+  return startConnect(
+    db,
+    config,
+    { organizationId: choice.organization_id, userId },
+    now,
+    choice.claimed_installation_id,
+  );
+}
+
 export interface VerifiedInstallation {
   readonly installationId: string;
   /** GitHub's numeric account id; stable across renames. */
@@ -222,13 +290,64 @@ function githubHeaders(token: string): HeadersInit {
   };
 }
 
+export type GithubStage = 'oauth_exchange' | 'installation_list' | 'repository_list' | 'authority' | 'revoke';
+
+/** Workerd rejects redirect:error despite the DOM typings. Never follow redirects with credentials. */
+async function githubRequest(
+  f: Fetch,
+  stage: GithubStage,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  let response: Response;
+  const headers = new Headers(init.headers);
+  headers.set('user-agent', 'lumi-noti');
+  try {
+    response = await f(url, {
+      ...init,
+      headers,
+      redirect: 'manual',
+      signal: AbortSignal.timeout(stage === 'revoke' ? 2000 : 10000),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name);
+    log('warn', 'github_install_request_failed', {
+      stage,
+      reason: timedOut ? 'timeout' : 'network_or_runtime',
+    });
+    throw new InstallFlowError('github_unavailable');
+  }
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel().catch(() => undefined);
+    log('warn', 'github_install_request_failed', { stage, reason: 'redirect', status: response.status });
+    throw new InstallFlowError('github_unavailable');
+  }
+  if (!response.ok)
+    log('warn', 'github_install_request_failed', { stage, reason: 'http', status: response.status });
+  return response;
+}
+
+async function githubJson(response: Response, stage: GithubStage): Promise<unknown> {
+  try {
+    const body = await readBodyCapped(response, stage === 'oauth_exchange' ? 16384 : 2 * 1024 * 1024);
+    if (!body.ok) throw new Error('oversized');
+    return JSON.parse(new TextDecoder().decode(body.bytes)) as unknown;
+  } catch {
+    log('warn', 'github_install_request_failed', {
+      stage,
+      reason: 'invalid_response',
+      status: response.status,
+    });
+    throw new InstallFlowError('github_unavailable');
+  }
+}
+
 async function exchangeCode(
   f: Fetch,
   config: GithubAppConfig,
   code: string,
   verifier: string,
 ): Promise<string> {
-  // Credentials in a form body, not the query string, so they never land in access logs.
   const body = new URLSearchParams({
     client_id: config.clientId,
     client_secret: config.clientSecret,
@@ -236,35 +355,37 @@ async function exchangeCode(
     redirect_uri: callbackUrl(config),
     code_verifier: verifier,
   });
-  let res: Response;
-  try {
-    res = await f(`${GITHUB_WEB}/login/oauth/access_token`, {
-      method: 'POST',
-      headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
-      body,
-      redirect: 'error',
-    });
-  } catch {
-    throw new InstallFlowError('github_unavailable');
+  const response = await githubRequest(f, 'oauth_exchange', `${GITHUB_WEB}/login/oauth/access_token`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new InstallFlowError(
+      response.status >= 500 || response.status === 429 ? 'github_unavailable' : 'oauth_failed',
+    );
   }
-  if (!res.ok) throw new InstallFlowError(res.status >= 500 ? 'github_unavailable' : 'oauth_failed');
-  const reply: unknown = await res.json().catch(() => null);
-  const token = (reply as { access_token?: unknown } | null)?.access_token;
-  if (typeof token !== 'string' || token.length === 0) throw new InstallFlowError('oauth_failed');
+  const reply = record(await githubJson(response, 'oauth_exchange'));
+  const token = reply?.access_token;
+  if (typeof token !== 'string' || token.length === 0 || token.length > 1024)
+    throw new InstallFlowError('oauth_failed');
   return token;
 }
 
 async function getJson(f: Fetch, path: string, token: string): Promise<unknown> {
-  let res: Response;
-  try {
-    res = await f(`${GITHUB_API}${path}`, { headers: githubHeaders(token), redirect: 'error' });
-  } catch {
+  const stage: GithubStage = path.startsWith('/user/installations/')
+    ? 'repository_list'
+    : path.startsWith('/user/installations?')
+      ? 'installation_list'
+      : 'authority';
+  const response = await githubRequest(f, stage, `${GITHUB_API}${path}`, { headers: githubHeaders(token) });
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    if ([401, 403, 404].includes(response.status)) throw new InstallFlowError('installation_not_accessible');
     throw new InstallFlowError('github_unavailable');
   }
-  if (res.status === 401 || res.status === 403 || res.status === 404)
-    throw new InstallFlowError('installation_not_accessible');
-  if (!res.ok) throw new InstallFlowError('github_unavailable');
-  return res.json();
+  return githubJson(response, stage);
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -289,8 +410,15 @@ export function pickInstallation(
     const type = account?.type;
     const accountId = account?.id;
     const selection = r.repository_selection;
-    if (typeof login !== 'string' || (type !== 'User' && type !== 'Organization')) return null;
-    if (typeof accountId !== 'number' || !Number.isSafeInteger(accountId)) return null;
+    if (
+      typeof login !== 'string' ||
+      !login ||
+      login.length > 100 ||
+      (type !== 'User' && type !== 'Organization')
+    )
+      throw new InstallFlowError('github_unavailable');
+    if (typeof accountId !== 'number' || !Number.isSafeInteger(accountId) || accountId < 1)
+      throw new InstallFlowError('github_unavailable');
     if (selection !== 'all' && selection !== 'selected') return null;
     return {
       installationId,
@@ -306,12 +434,20 @@ export function pickInstallation(
 
 export function pickRepositories(body: unknown): { id: string; fullName: string }[] {
   const list = record(body)?.repositories;
-  if (!Array.isArray(list)) return [];
-  return list.flatMap((item) => {
+  if (!Array.isArray(list)) throw new InstallFlowError('github_unavailable');
+  return list.map((item) => {
     const r = record(item);
-    return r && typeof r.id === 'number' && typeof r.full_name === 'string'
-      ? [{ id: String(r.id), fullName: r.full_name }]
-      : [];
+    if (
+      !r ||
+      typeof r.id !== 'number' ||
+      !Number.isSafeInteger(r.id) ||
+      r.id < 1 ||
+      typeof r.full_name !== 'string' ||
+      r.full_name.length > 300 ||
+      !/^[^/]+\/[^/]+$/.test(r.full_name)
+    )
+      throw new InstallFlowError('github_unavailable');
+    return { id: String(r.id), fullName: r.full_name };
   });
 }
 
@@ -357,8 +493,10 @@ async function verifyAccess(
   let found: Omit<VerifiedInstallation, 'repositories'> | null = null;
   for (let page = 1; page <= MAX_PAGES && !found; page++) {
     const body = await getJson(f, `/user/installations?per_page=100&page=${page}`, token);
+    const entries = record(body)?.installations;
+    if (!Array.isArray(entries)) throw new InstallFlowError('github_unavailable');
     found = pickInstallation(body, installationId, config.appId);
-    const count = (record(body)?.installations as unknown[] | undefined)?.length ?? 0;
+    const count = entries.length;
     if (count < 100) break;
   }
   if (!found) throw new InstallFlowError('installation_not_accessible');
@@ -370,7 +508,17 @@ async function verifyAccess(
 
   const repositories: { id: string; fullName: string }[] = [];
   for (let page = 1; ; page++) {
-    if (page > MAX_PAGES) throw new InstallFlowError('installation_too_large');
+    if (page > MAX_PAGES) {
+      const extra = pickRepositories(
+        await getJson(
+          f,
+          `/user/installations/${installationId}/repositories?per_page=1&page=${MAX_PAGES * 100 + 1}`,
+          token,
+        ),
+      );
+      if (extra.length) throw new InstallFlowError('installation_too_large');
+      break;
+    }
     const batch = pickRepositories(
       await getJson(f, `/user/installations/${installationId}/repositories?per_page=100&page=${page}`, token),
     );
@@ -383,18 +531,23 @@ async function verifyAccess(
 /** Best effort: the token has done its one job. A failure here is not a binding failure. */
 async function revokeToken(f: Fetch, config: GithubAppConfig, token: string): Promise<void> {
   try {
-    await f(`${GITHUB_API}/applications/${encodeURIComponent(config.clientId)}/token`, {
-      method: 'DELETE',
-      headers: {
-        accept: 'application/vnd.github+json',
-        authorization: `Basic ${btoa(`${config.clientId}:${config.clientSecret}`)}`,
-        'x-github-api-version': GITHUB_API_VERSION,
-        'user-agent': 'lumi-noti',
-        'content-type': 'application/json',
+    const response = await githubRequest(
+      f,
+      'revoke',
+      `${GITHUB_API}/applications/${encodeURIComponent(config.clientId)}/token`,
+      {
+        method: 'DELETE',
+        headers: {
+          accept: 'application/vnd.github+json',
+          authorization: `Basic ${btoa(`${config.clientId}:${config.clientSecret}`)}`,
+          'x-github-api-version': GITHUB_API_VERSION,
+          'user-agent': 'lumi-noti',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ access_token: token }),
       },
-      body: JSON.stringify({ access_token: token }),
-      redirect: 'error',
-    });
+    );
+    await response.body?.cancel().catch(() => undefined);
   } catch {
     // The token expires on its own (8 h); nothing was stored.
   }
@@ -421,28 +574,70 @@ export async function completeVerification(
   // token revoke). Every URL is built from the GITHUB_API and GITHUB_WEB constants in this file;
   // nothing a tenant supplies selects the host (F228).
   f: Fetch = fetch,
-): Promise<BindResult> {
+): Promise<ConnectResult> {
   const verify = await consumeState(db, params.state, 'verify', userId, now);
   // The PKCE verifier has done its job once read; do not leave it at rest.
   await db
     .prepare('UPDATE github_auth_states SET pkce_verifier=NULL WHERE state_hash=?')
     .bind(await sha256Base64url(params.state ?? ''))
     .run();
-  if (!params.code || params.code.length > 256 || !verify.claimed_installation_id || !verify.pkce_verifier)
+  if (!params.code || params.code.length > 256 || !verify.pkce_verifier)
     throw new InstallFlowError('oauth_failed');
   // Membership or role may have changed since the flow started (10-minute window).
   if (!(await mayConnect(verify.organization_id, userId)))
     throw new InstallFlowError('workspace_access_lost');
 
-  const claimed = verify.claimed_installation_id;
+  let claimed = verify.claimed_installation_id;
   const token = await exchangeCode(f, config, params.code, verify.pkce_verifier);
   try {
     let installation: VerifiedInstallation;
     try {
+      if (!claimed) {
+        const candidates: Omit<VerifiedInstallation, 'repositories'>[] = [];
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const body = await getJson(f, `/user/installations?per_page=100&page=${page}`, token);
+          const entries = record(body)?.installations;
+          if (!Array.isArray(entries)) throw new InstallFlowError('github_unavailable');
+          for (const entry of entries) {
+            const id = record(entry)?.id;
+            if (typeof id !== 'number' || !Number.isSafeInteger(id) || id < 1) continue;
+            const candidate = pickInstallation({ installations: [entry] }, String(id), config.appId);
+            if (candidate && !candidates.some((c) => c.installationId === candidate.installationId))
+              candidates.push(candidate);
+          }
+          if (candidates.length > 20) throw new InstallFlowError('installation_list_too_large');
+          if (entries.length < 100) break;
+          if (page === MAX_PAGES) throw new InstallFlowError('installation_list_too_large');
+        }
+        const who = { organizationId: verify.organization_id, userId };
+        if (candidates.length === 0)
+          return { organizationId: who.organizationId, next: await startInstall(db, config, who, now) };
+        if (candidates.length > 1) {
+          const choices: InstallationChoice[] = [];
+          for (const candidate of candidates)
+            choices.push({
+              account: candidate.accountLogin,
+              state: await createState(
+                db,
+                { purpose: 'verify', ...who, claimedInstallationId: candidate.installationId },
+                now,
+              ),
+            });
+          return {
+            organizationId: who.organizationId,
+            choices,
+            install: await startInstall(db, config, who, now),
+          };
+        }
+        claimed = candidates[0]?.installationId ?? null;
+      }
+      if (!claimed) throw new InstallFlowError('installation_not_accessible');
       installation = await verifyAccess(f, config, token, claimed);
     } finally {
       await revokeToken(f, config, token);
     }
+    if (!(await mayConnect(verify.organization_id, userId)))
+      throw new InstallFlowError('workspace_access_lost');
     const installationRowId = await bindInstallation(
       db,
       config.appId,
@@ -453,7 +648,7 @@ export async function completeVerification(
     return { organizationId: verify.organization_id, installation, installationRowId };
   } catch (e) {
     // Attach the claimed id to refusals so the audit row can correlate repeated attempts.
-    if (e instanceof InstallFlowError && !e.claimedInstallationId)
+    if (e instanceof InstallFlowError && !e.claimedInstallationId && claimed)
       throw new InstallFlowError(e.code, claimed);
     throw e;
   }

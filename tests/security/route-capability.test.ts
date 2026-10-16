@@ -356,7 +356,7 @@ describe('every route has the guard its policy claims (F232)', () => {
     const publicRoutes = ROUTE_POLICY.filter((p) => p.access.kind === 'public').map((p) =>
       key(p.method, p.path),
     );
-    expect(publicRoutes).toEqual(['GET /health', 'GET /health/ready']);
+    expect(publicRoutes).toEqual(['GET /github/connect.css', 'GET /health', 'GET /health/ready']);
   });
 
   it('never leaves a state-changing route open: it is a capability, a session flow, a signed webhook or Better Auth', () => {
