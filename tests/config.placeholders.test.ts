@@ -39,8 +39,17 @@ describe('the committed wrangler.jsonc (CI check)', () => {
     expect(found.filter((k) => !predeploy.ALLOWED_PLACEHOLDER_KEYS.has(k))).toEqual([]);
   });
 
-  it('would be refused for deployment as committed, naming what to set', () => {
-    const { fatal, warnings } = predeploy.evaluatePredeploy(committed);
+  it('refuses an unconfigured template, naming what to set', () => {
+    const template = {
+      ...GOOD,
+      d1_databases: [{ binding: 'DB', database_id: 'REPLACE_WITH_D1_DATABASE_ID' }],
+      vars: {
+        ...GOOD.vars,
+        KEK_CHECK_V1: 'REPLACE_WITH_KEK_CHECK_V1',
+        GITHUB_APP_ID: 'REPLACE_WITH_GITHUB_APP_ID',
+      },
+    };
+    const { fatal, warnings } = predeploy.evaluatePredeploy(template);
     expect(fatal.join('\n')).toMatch(/KEK_CHECK_V1/);
     expect(fatal.join('\n')).toMatch(/database_id/);
     // The GitHub App identifiers only warn: that feature stays closed by design.
