@@ -83,14 +83,14 @@ same way as `/api/*` and `/webhooks/*`. The Vite dev server proxies them in deve
 - Public page: https://github.com/apps/lumi-noti
 - App ID: `5340232`; Client ID: `Iv23lip5fWsTE0SnewIa` (both public identifiers).
 - Read-only permissions and all nine subscriptions above were read back from GitHub's public App API.
-- The callback/setup URLs were entered exactly as above. Webhook activation, URL and a generated signing
-  secret were set in the General form. A later independent readback of those private settings is still
-  needed because the Browser connection became unavailable after credentials were generated.
+- Callback/setup URLs match the values above. The active webhook URL was verified after a page reload.
+  A real GitHub ping returned HTTP 202 (delivery `b84b9f66-c916-11f1-904b-548d191f79de`); a signed fixture
+  ping against the live Worker also returned 202, while a tampered raw body returned 401.
 - `GITHUB_CLIENT_SECRET` and `GITHUB_WEBHOOK_SECRET` were generated and installed as Worker secrets;
   their values were not printed or committed. The mode-0600 temporary upload file was removed after
   Cloudflare confirmed both writes. No separate backup is claimed.
 
-The runtime does not consume an App private key today, but GitHub displayed a registration banner
-asking for one to be generated before installation. No key pair has been generated. Installation,
-OAuth verification and real webhook/destination delivery remain unverified; registering/configuring
-an App is not evidence that a workspace is connected.
+No App private key was generated: the runtime does not consume one. GitHub displayed a generic key
+reminder after registration, but its installation account picker is available without generating one.
+Installation binding, OAuth verification and delivery to a real destination remain unverified. A passing
+GitHub ping proves webhook reachability and signature agreement, not a connected workspace or delivery.
