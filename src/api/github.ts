@@ -5,6 +5,8 @@ import { authorize, currentSession, isFailure } from '../auth/workspace';
 import { githubAppConfig } from '../connectors/sources/github/app-config';
 import {
   completeVerification,
+  chooseInstallation,
+  startConnect,
   continueFromSetup,
   InstallFlowError,
   startInstall,
@@ -12,14 +14,16 @@ import {
 } from '../connectors/sources/github/install';
 import type { Bindings } from '../env';
 import { isDeletionPending } from './workspace-lifecycle';
+import { choicePage, CONNECTION_CSS } from './github-choice';
+import { readBodyCapped, isJsonContentType } from '../lib/body';
 
 /**
  * GitHub connection endpoints (F56, F57, F67; ADR 0008).
  *
  * `/api/github/*` is the JSON API used by the dashboard. `/github/setup` and
  * `/github/callback` are browser redirects from GitHub: they need the user's session, and
- * every outcome ends in a redirect back to the dashboard with a short status code, never
- * an error page that echoes a parameter.
+ * outcomes return to the dashboard with a short status code or an escaped account-choice
+ * form, never an error page that echoes a parameter.
  */
 type Ctx = Context<{ Bindings: Bindings }>;
 
@@ -57,7 +61,26 @@ api.post('/install', async (c) => {
   if (isFailure(who)) return c.json({ error: who.error }, who.status);
   if (await isDeletionPending(c.env.DB, who.orgId))
     return c.json({ error: 'This workspace is scheduled for deletion.' }, 409);
-  const url = await startInstall(
+  const read = await readBodyCapped(c.req.raw, 1024);
+  if (!read.ok) return c.json({ error: 'Request too large' }, 413);
+  let mode = 'install';
+  if (read.bytes.length) {
+    if (!isJsonContentType(c.req.header('content-type')))
+      return c.json({ error: 'Expected application/json' }, 415);
+    let value: unknown;
+    try {
+      value = JSON.parse(new TextDecoder().decode(read.bytes)) as unknown;
+    } catch {
+      return c.json({ error: 'Invalid JSON' }, 400);
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      return c.json({ error: 'Invalid request' }, 400);
+    if ('mode' in value) {
+      if (value.mode !== 'connect' && value.mode !== 'install') return c.json({ error: 'Invalid mode' }, 400);
+      mode = value.mode;
+    }
+  }
+  const url = await (mode === 'connect' ? startConnect : startInstall)(
     c.env.DB,
     config,
     { organizationId: who.orgId, userId: who.userId },
@@ -146,6 +169,21 @@ browser.get('/callback', async (c) => {
       Date.now(),
       mayConnect(c.env.DB),
     );
+    if ('next' in bound) return c.redirect(bound.next, 302);
+    if ('choices' in bound) {
+      c.header('cache-control', 'no-store');
+      c.header(
+        'content-security-policy',
+        "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      );
+      return c.html(
+        choicePage(
+          bound.choices,
+          bound.install,
+          /^vi\b/i.test(c.req.header('accept-language') ?? '') ? 'vi' : 'en',
+        ),
+      );
+    }
     await recordAudit(c.env.DB, {
       organizationId: bound.organizationId,
       actorId: session.user.id,
@@ -188,5 +226,42 @@ browser.get('/callback', async (c) => {
       });
     }
     return backToDashboard(c, e.code);
+  }
+});
+
+browser.get('/connect.css', (c) =>
+  c.body(CONNECTION_CSS, 200, {
+    'content-type': 'text/css; charset=utf-8',
+    'cache-control': 'public, max-age=3600',
+  }),
+);
+
+browser.post('/choose', async (c) => {
+  if (c.req.header('origin') !== c.env.APP_ORIGIN) return c.text('Forbidden', 403);
+  const config = githubAppConfig(c.env);
+  if (!config) return backToDashboard(c, 'not_configured');
+  const session = await currentSession(c);
+  if (!session) return backToDashboard(c, 'signin_required');
+  const body = await readBodyCapped(c.req.raw, 1024);
+  if (!body.ok) return c.text('Too large', 413);
+  if (!/^application\/x-www-form-urlencoded(?:;|$)/i.test(c.req.header('content-type') ?? ''))
+    return c.text('Unsupported content type', 415);
+  const fields = new URLSearchParams(new TextDecoder().decode(body.bytes));
+  if (fields.getAll('state').length !== 1 || [...fields.keys()].some((key) => key !== 'state'))
+    return backToDashboard(c, 'state_invalid');
+  try {
+    return c.redirect(
+      await chooseInstallation(
+        c.env.DB,
+        config,
+        fields.get('state') ?? undefined,
+        session.user.id,
+        Date.now(),
+        mayConnect(c.env.DB),
+      ),
+      302,
+    );
+  } catch (error) {
+    return backToDashboard(c, error instanceof InstallFlowError ? error.code : 'unexpected_error');
   }
 });

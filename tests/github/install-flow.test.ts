@@ -89,9 +89,10 @@ const ctx = {
   passThroughOnException: () => undefined,
 } as unknown as ExecutionContext;
 
-async function browserGet(path: string, as?: string): Promise<Response> {
+async function browserGet(path: string, as?: string, language?: string): Promise<Response> {
   const headers = new Headers();
   if (as) headers.set('x-test-user', as);
+  if (language) headers.set('accept-language', language);
   return await worker.fetch(new Request(`${ORIGIN}${path}`, { headers, redirect: 'manual' }), env, ctx);
 }
 
@@ -677,4 +678,315 @@ describe('lifecycle and repository scope', () => {
     expect(res.status).toBe(401);
     expect(installationRow()?.status).toBe('active');
   });
+});
+
+async function beginConnect(as = 'bob'): Promise<string> {
+  const response = await worker.fetch(
+    new Request(`${ORIGIN}/api/github/install`, {
+      method: 'POST',
+      headers: { origin: ORIGIN, 'content-type': 'application/json', 'x-test-user': as },
+      body: JSON.stringify({ mode: 'connect' }),
+    }),
+    env,
+    ctx,
+  );
+  expect(response.status).toBe(200);
+  const body = await response.json<{ url: string }>();
+  const url = new URL(body.url);
+  expect(url.origin + url.pathname).toBe('https://github.com/login/oauth/authorize');
+  return url.searchParams.get('state') ?? '';
+}
+async function discovery(as = 'bob', language?: string): Promise<Response> {
+  return browserGet(`/github/callback?code=fixture-code&state=${await beginConnect(as)}`, as, language);
+}
+async function choose(state: string, as = 'bob', origin = ORIGIN): Promise<Response> {
+  return worker.fetch(
+    new Request(`${ORIGIN}/github/choose`, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/x-www-form-urlencoded', 'x-test-user': as },
+      body: new URLSearchParams({ state }),
+    }),
+    env,
+    ctx,
+  );
+}
+async function choices(language?: string) {
+  github.installations.push({
+    ...(github.installations[0] as object),
+    id: 556,
+    account: { login: 'beta', type: 'Organization', id: 9002 },
+  });
+  const response = await discovery('bob', language);
+  expect(response.status).toBe(200);
+  const body = await response.text();
+  const tickets = [...body.matchAll(/name="state" value="([^"]+)"/g)].map((m) => m[1] ?? '');
+  expect(tickets).toHaveLength(2);
+  return { response, body, tickets };
+}
+
+describe('real-runtime transport regressions', () => {
+  it('uses manual redirect mode for every GitHub request and never the unsupported error mode', async () => {
+    const base = globalThis.fetch;
+    const modes: string[] = [];
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.redirect === 'error') throw new TypeError('Invalid redirect value');
+      modes.push(String(init?.redirect));
+      expect(new Headers(init?.headers).get('user-agent')).toBe('lumi-noti');
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      return base(input, init);
+    });
+    expect((await connect()).searchParams.get('github')).toBe('connected');
+    expect(modes.length).toBeGreaterThan(3);
+    expect(new Set(modes)).toEqual(new Set(['manual']));
+  });
+  it.each([
+    '/login/oauth/access_token',
+    '/user/installations',
+    '/user/memberships/orgs/acme',
+    '/user/installations/555/repositories',
+  ])('refuses provider redirects at %s without following credentials', async (path) => {
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === path)
+        return Promise.resolve(
+          new Response(null, { status: 302, headers: { location: 'https://untrusted.test/credentials' } }),
+        );
+      return base(input, init);
+    });
+    expect((await connect()).searchParams.get('github')).toBe('github_unavailable');
+    expect(installationRow()).toBeUndefined();
+    expect(github.calls.some((call) => call.url.includes('untrusted.test'))).toBe(false);
+  });
+  it.each([429, 500, 503])('does not bind or retry a code exchange after HTTP %s', async (status) => {
+    github.exchangeStatus = status;
+    expect((await connect()).searchParams.get('github')).toBe('github_unavailable');
+    expect(installationRow()).toBeUndefined();
+    expect(github.calls.filter((c) => c.url.includes('/login/oauth/access_token'))).toHaveLength(1);
+  });
+  it.each(['not JSON', 'x'.repeat(17000)])(
+    'refuses invalid or oversized OAuth responses without echoing them',
+    async (body) => {
+      const base = globalThis.fetch;
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+        (input instanceof Request ? input.url : String(input)).includes('/login/oauth/access_token')
+          ? Promise.resolve(new Response(body))
+          : base(input, init),
+      );
+      expect((await connect()).searchParams.get('github')).toBe('github_unavailable');
+      expect(installationRow()).toBeUndefined();
+      expect(JSON.stringify(warning.mock.calls)).not.toContain(body);
+      warning.mockRestore();
+    },
+  );
+  it('clears PKCE and does not bind on a fetch timeout, recording only a bounded stage/reason', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', () => Promise.reject(new DOMException('secret-provider-details', 'TimeoutError')));
+    expect((await connect()).searchParams.get('github')).toBe('github_unavailable');
+    expect(installationRow()).toBeUndefined();
+    expect(
+      db.raw.prepare('SELECT COUNT(*) AS n FROM github_auth_states WHERE pkce_verifier IS NOT NULL').get(),
+    ).toEqual({ n: 0 });
+    const logged = JSON.stringify(warning.mock.calls);
+    expect(logged).toContain('oauth_exchange');
+    expect(logged).not.toContain('secret-provider-details');
+    expect(logged).not.toContain(CLIENT_FIXTURE);
+    warning.mockRestore();
+  });
+  it('does not connect a silently truncated or malformed selected-repository response', async () => {
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      (input instanceof Request ? input.url : String(input)).includes('/repositories?')
+        ? Promise.resolve(Response.json({ repositories: [{ id: 'wrong', full_name: 'acme/web' }] }))
+        : base(input, init),
+    );
+    expect((await connect()).searchParams.get('github')).toBe('github_unavailable');
+    expect(installationRow()).toBeUndefined();
+    expect(github.calls.some((c) => c.method === 'DELETE')).toBe(true);
+  });
+});
+
+describe('OAuth-first install discovery and reconnect', () => {
+  it('binds an existing installation without sending the user to GitHub configuration', async () => {
+    const response = await discovery();
+    expect(new URL(response.headers.get('location') ?? '').searchParams.get('github')).toBe('connected');
+    expect(installationRow()).toMatchObject({ organization_id: 'org-a', account_login: 'acme' });
+  });
+  it('sends a first-time installer through the original single-use installation flow and revokes the discovery token', async () => {
+    github.installations = [];
+    const response = await discovery();
+    const next = new URL(response.headers.get('location') ?? '');
+    expect(next.origin + next.pathname).toBe('https://github.com/apps/lumi-noti/installations/new');
+    expect(next.searchParams.get('state')).toBeTruthy();
+    expect(installationRow()).toBeUndefined();
+    expect(github.calls.some((c) => c.method === 'DELETE')).toBe(true);
+  });
+  it('does not silently choose between several installations or retain an access token', async () => {
+    const { response, body } = await choices();
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('content-security-policy')).toContain("form-action 'self'");
+    expect(response.headers.get('content-security-policy')).toContain("default-src 'none'");
+    expect(body).toContain('Connect acme');
+    expect(body).toContain('Connect beta');
+    expect(body).not.toContain('ghu_fixture');
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM github_installations').get()).toEqual({ n: 0 });
+    expect(github.calls.some((c) => c.method === 'DELETE')).toBe(true);
+  });
+  it('reverifies the chosen account through fresh PKCE before binding and refuses a replayed choice', async () => {
+    const { tickets } = await choices();
+    const ticket = tickets[1] ?? '';
+    const selected = await choose(ticket);
+    const authorize = new URL(selected.headers.get('location') ?? '');
+    expect(authorize.hostname).toBe('github.com');
+    expect(authorize.searchParams.get('code_challenge')).toBeTruthy();
+    const replay = await choose(ticket);
+    expect(new URL(replay.headers.get('location') ?? '').searchParams.get('github')).toBe('state_invalid');
+    expect((await callback(authorize.searchParams.get('state') ?? '')).searchParams.get('github')).toBe(
+      'connected',
+    );
+    expect(
+      db.raw.prepare("SELECT account_login FROM github_installations WHERE installation_id='556'").get(),
+    ).toEqual({ account_login: 'beta' });
+  });
+  it('refuses a choice from another user and a choice after loss of workspace authority', async () => {
+    const { tickets } = await choices();
+    const wrong = await choose(tickets[0] ?? '', 'eve');
+    expect(new URL(wrong.headers.get('location') ?? '').searchParams.get('github')).toBe(
+      'state_user_mismatch',
+    );
+    user('backup-admin');
+    member('backup-admin', 'org-a');
+    db.raw.exec("DELETE FROM member WHERE user_id='bob' AND organization_id='org-a'");
+    const lost = await choose(tickets[1] ?? '');
+    expect(new URL(lost.headers.get('location') ?? '').searchParams.get('github')).toBe(
+      'workspace_access_lost',
+    );
+    expect(installationRow()).toBeUndefined();
+  });
+  it('requires same-origin form submission without consuming a valid choice on a foreign-origin request', async () => {
+    const { tickets } = await choices();
+    expect((await choose(tickets[0] ?? '', 'bob', 'https://foreign.test')).status).toBe(403);
+    expect((await choose(tickets[0] ?? '')).status).toBe(302);
+  });
+  it('does not allow a choice ticket to stand in for an OAuth verify state', async () => {
+    const { tickets } = await choices();
+    expect((await callback(tickets[0] ?? '')).searchParams.get('github')).toBe('oauth_failed');
+    expect(installationRow()).toBeUndefined();
+  });
+  it('bounds account discovery instead of returning a truncated choice list', async () => {
+    github.installations = Array.from({ length: 21 }, (_, i) => ({
+      ...(github.installations[0] as object),
+      id: i + 1,
+      account: { login: `account-${i}`, type: 'Organization', id: i + 100 },
+    }));
+    const response = await discovery();
+    expect(new URL(response.headers.get('location') ?? '').searchParams.get('github')).toBe(
+      'installation_list_too_large',
+    );
+    expect(installationRow()).toBeUndefined();
+  });
+  it('escapes account names on the script-free choice page', async () => {
+    github.installations[0] = {
+      ...(github.installations[0] as object),
+      account: { id: 9001, type: 'Organization', login: '<script>alert(1)</script>' },
+    };
+    const { body } = await choices();
+    expect(body).not.toContain('<script>');
+    expect(body).toContain('&lt;script&gt;');
+  });
+});
+
+describe('pagination boundaries and choice input rejection', () => {
+  it.each([1000, 1001])('handles exactly %s selected repositories without truncation', async (count) => {
+    const all = Array.from({ length: count }, (_, i) => ({ id: i + 1, full_name: `acme/r${i}` }));
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname.endsWith('/repositories')) {
+        const size = Number(url.searchParams.get('per_page'));
+        const page = Number(url.searchParams.get('page'));
+        return Promise.resolve(Response.json({ repositories: all.slice((page - 1) * size, page * size) }));
+      }
+      return base(input, init);
+    });
+    expect((await connect()).searchParams.get('github')).toBe(
+      count === 1000 ? 'connected' : 'installation_too_large',
+    );
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM github_installation_repositories').get()).toEqual({
+      n: count === 1000 ? 1000 : 0,
+    });
+  });
+  it('does not accept an OAuth state as an account-choice ticket', async () => {
+    const state = await beginConnect();
+    const response = await choose(state);
+    expect(new URL(response.headers.get('location') ?? '').searchParams.get('github')).toBe('state_invalid');
+    expect(installationRow()).toBeUndefined();
+  });
+  it('refuses expired choices and duplicate state form fields', async () => {
+    const { tickets } = await choices();
+    db.raw.exec('UPDATE github_auth_states SET expires_at=0');
+    expect(
+      new URL((await choose(tickets[0] ?? '')).headers.get('location') ?? '').searchParams.get('github'),
+    ).toBe('state_invalid');
+    const duplicate = await worker.fetch(
+      new Request(`${ORIGIN}/github/choose`, {
+        method: 'POST',
+        headers: {
+          origin: ORIGIN,
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-test-user': 'bob',
+        },
+        body: new URLSearchParams([
+          ['state', 'a'],
+          ['state', 'b'],
+        ]),
+      }),
+      env,
+      ctx,
+    );
+    expect(new URL(duplicate.headers.get('location') ?? '').searchParams.get('github')).toBe('state_invalid');
+  });
+  it('refuses an unsupported connect mode or oversized start request before creating any states', async () => {
+    for (const body of [JSON.stringify({ mode: 'unknown' }), 'x'.repeat(1025)]) {
+      const response = await worker.fetch(
+        new Request(`${ORIGIN}/api/github/install`, {
+          method: 'POST',
+          headers: { origin: ORIGIN, 'content-type': 'application/json', 'x-test-user': 'bob' },
+          body,
+        }),
+        env,
+        ctx,
+      );
+      expect([400, 413]).toContain(response.status);
+    }
+    expect(db.raw.prepare('SELECT COUNT(*) AS n FROM github_auth_states').get()).toEqual({ n: 0 });
+  });
+  it('serves only a static stylesheet for the choice page', async () => {
+    const response = await browserGet('/github/connect.css');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/css');
+    expect(await response.text()).not.toContain('state=');
+  });
+});
+
+describe('authority changes while GitHub requests are in flight', () => {
+  it('rechecks workspace authority after token revocation and before binding', async () => {
+    user('second-admin');
+    member('second-admin', 'org-a');
+    const base = globalThis.fetch;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') db.raw.exec("DELETE FROM member WHERE user_id='bob'");
+      return base(input, init);
+    });
+    expect((await connect()).searchParams.get('github')).toBe('workspace_access_lost');
+    expect(installationRow()).toBeUndefined();
+  });
+});
+
+it('renders the account-choice handoff in Vietnamese when the browser requests it', async () => {
+  const { body } = await choices('vi-VN,vi;q=0.9');
+  expect(body).toContain('lang="vi"');
+  expect(body).toContain('Chọn tài khoản GitHub cần kết nối');
+  expect(body).toContain('Nhiều tài khoản đã cài Lumi Noti');
 });

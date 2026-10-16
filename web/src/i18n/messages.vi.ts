@@ -384,7 +384,7 @@ export const vi = {
   'github.return.workspace_access_lost':
     'Bạn không còn quyền truy cập không gian làm việc này, nên chưa có gì được kết nối. Hãy nhờ quản trị viên kiểm tra vai trò của bạn.',
   'github.return.github_unavailable':
-    'GitHub không phản hồi, nên chưa có gì được kết nối. Hãy thử lại sau vài phút.',
+    'Không thể xác minh quyền truy cập GitHub. Chưa có tài khoản nào được kết nối. Hãy chọn Kết nối GitHub để thử lại; nếu lỗi vẫn lặp lại, hãy báo người vận hành máy chủ.',
   'github.return.not_configured': 'Máy chủ Noti này chưa cấu hình GitHub App, nên chưa thể kết nối GitHub.',
   'github.return.signin_required': 'Hãy đăng nhập vào Noti, rồi chọn Kết nối GitHub lần nữa.',
   'github.return.unexpected_error':

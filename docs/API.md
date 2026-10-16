@@ -844,3 +844,18 @@ What a configuration fault stops is tiered (docs/RUNBOOK.md, "What a configurati
 A 503 from ingress is **not** reliably retried by the sender: GitHub does not automatically redeliver a
 failed webhook (redeliver by hand from the App's Recent Deliveries), and GitLab disables a webhook after
 repeated failures. That is why ingress is gated on nothing but D1.
+
+
+## GitHub reconnect (ADR 0038)
+
+`POST /api/github/install` accepts an optional JSON `mode`: `connect` starts OAuth installation discovery;
+`install` (or the legacy empty request) starts a new installation. Same-origin and `integration.create`
+checks apply to both. The dashboard uses `connect` so existing installations do not get stranded on GitHub
+settings. Zero/one/multiple installations lead to installation, verified binding, or an escaped, script-free
+choice page respectively. More than twenty accounts or an incomplete discovery list fails closed.
+
+`POST /github/choose` accepts exactly one form field `state` (1 KiB body cap). It requires the same Origin,
+a verified session, a user-bound unexpired unused choice ticket, and current workspace authority. It starts
+fresh PKCE verification for the selected installation. It does not accept an installation ID or OAuth token
+from the form. `GET /github/connect.css` serves only its constant public stylesheet. Choice HTML is no-store,
+has no scripts, and posts only to the same origin. Choice tickets cannot be exchanged at the OAuth callback.

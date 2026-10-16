@@ -310,12 +310,22 @@ describe('github/install.ts: every request URL starts from a GitHub constant (F2
     expect(topLevelStringConst(sf, 'GITHUB_WEB')).toBe('https://github.com');
   });
 
-  it('there are exactly three calls through `f`, each starting with a GitHub constant', () => {
+  it('the single transport boundary rejects redirects and bounds request time', () => {
     const calls = callsTo(sf, 'f');
+    expect(calls).toHaveLength(1);
+    const call = calls[0] as ts.CallExpression;
+    expect(enclosingFunction(call)?.name?.text).toBe('githubRequest');
+    expect(call.arguments[0]?.getText(sf)).toBe('url');
+    expect(call.arguments[1]?.getText(sf)).toContain("redirect: 'manual'");
+    expect(call.arguments[1]?.getText(sf)).toContain('AbortSignal.timeout');
+  });
+
+  it('all three transport callers start with a fixed GitHub host', () => {
+    const calls = callsTo(sf, 'githubRequest');
     expect(calls).toHaveLength(3);
     for (const c of calls) {
       expect(
-        startsWithConstant(c.arguments[0], ['GITHUB_API', 'GITHUB_WEB']),
+        startsWithConstant(c.arguments[2], ['GITHUB_API', 'GITHUB_WEB']),
         c.getText(sf).slice(0, 60),
       ).toBeDefined();
     }

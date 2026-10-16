@@ -83,14 +83,15 @@ same way as `/api/*` and `/webhooks/*`. The Vite dev server proxies them in deve
 - Public page: https://github.com/apps/lumi-noti
 - App ID: `5340232`; Client ID: `Iv23lip5fWsTE0SnewIa` (both public identifiers).
 - Read-only permissions and all nine subscriptions above were read back from GitHub's public App API.
-- The callback/setup URLs were entered exactly as above. Webhook activation, URL and a generated signing
-  secret were set in the General form. A later independent readback of those private settings is still
-  needed because the Browser connection became unavailable after credentials were generated.
+- Callback/setup URLs match the values above. Active webhook settings were verified after a reload.
+  Real GitHub ping delivery `b84b9f66-c916-11f1-904b-548d191f79de` returned 202; a tampered live fixture
+  request returned 401. This verifies signed ingress, not OAuth verification or destination delivery.
 - `GITHUB_CLIENT_SECRET` and `GITHUB_WEBHOOK_SECRET` were generated and installed as Worker secrets;
   their values were not printed or committed. The mode-0600 temporary upload file was removed after
   Cloudflare confirmed both writes. No separate backup is claimed.
 
-The runtime does not consume an App private key today, but GitHub displayed a registration banner
-asking for one to be generated before installation. No key pair has been generated. Installation,
-OAuth verification and real webhook/destination delivery remain unverified; registering/configuring
-an App is not evidence that a workspace is connected.
+No private key was generated: the current runtime does not consume one, and the installation permission
+review page is available without one. A GitHub registration reminder alone is not proof of a runtime
+private-key requirement. The dashboard now starts with OAuth discovery so an already-installed App can
+be verified without changing its repository permissions. See ADR 0038 for the runtime redirect fix,
+account choice, state boundaries and remaining live acceptance checks.
