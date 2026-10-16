@@ -110,3 +110,36 @@ describe('release gates (F240)', () => {
     }
   });
 });
+
+// These guards protect the privilege boundary between public PR checks and production writes.
+describe('automatic deployment boundary', () => {
+  const workflow = read('.github/workflows/ci.yml');
+  const deploy = workflow.slice(workflow.indexOf('\n  deploy:'));
+
+  it('requires both CI gates, the main branch and a push or explicit main rerun', () => {
+    expect(deploy).toMatch(/needs: \[verify, integration\]/);
+    expect(deploy).toContain("github.ref == 'refs/heads/main'");
+    expect(deploy).toContain("github.event_name == 'push'");
+    expect(deploy).toContain("github.event_name == 'workflow_dispatch'");
+    expect(deploy).toMatch(/environment:\s*\n\s+name: production/);
+  });
+
+  it('serializes deploys and skips superseded main revisions', () => {
+    expect(deploy).toMatch(/group: noti-production\s*\n\s+cancel-in-progress: false/);
+    expect(deploy).toContain('git/ref/heads/main');
+    expect(deploy).toContain('if: steps.revision.outputs.current');
+    expect(deploy).toContain('ref: ${{ github.sha }}');
+  });
+
+  it('keeps deployment credentials out of the check jobs and installation', () => {
+    const beforeDeploy = workflow.slice(0, workflow.indexOf('\n  deploy:'));
+    expect(beforeDeploy).not.toContain('secrets.CLOUDFLARE_API_TOKEN');
+    expect(deploy).toContain('npm ci --ignore-scripts');
+    expect(deploy.indexOf('secrets.CLOUDFLARE_API_TOKEN')).toBeGreaterThan(
+      deploy.indexOf('npm run build:web'),
+    );
+    expect(deploy).toContain('node scripts/check-deployment-migrations.mjs');
+    expect(deploy).toContain('npm run smoke');
+    expect(deploy).not.toMatch(/d1 migrations apply|secret (put|bulk|delete)|migration-0026-finalize/);
+  });
+});

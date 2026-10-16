@@ -56,13 +56,28 @@ Policy:
 **UNVERIFIED:** whether Cloudflare Workers deployment accepts GitHub OIDC federation so that no long-lived Cloudflare API
 token exists. It has not been checked against Cloudflare's documentation in this repository, so nothing here promises it.
 
-Until verified, the fallback applies, and these are decisions for the owner that this repository does not change:
+Automatic production deployment is configured in the `deploy` job of `.github/workflows/ci.yml`:
 
-- Deploy is run by an operator with `npm run deploy` (nothing in CI deploys today, and no deploy secret is referenced by any workflow).
-- If a CI deploy is added later: a token scoped to Workers deploy for this one account, stored as a secret of a protected
-  environment with required reviewers, available to `main` only, never to fork pull requests, rotated on suspicion and on
-  the departure of anyone who held it. Record its scope in `docs/SECURITY.md`.
-- Before relying on OIDC: read Cloudflare's current CI/CD and API token documentation, record the URL and date here, and try it on staging first.
+- Only a push to `main` or an explicit workflow dispatch on `main` can deploy, and both `verify` and
+  `integration` must pass. Pull requests cannot run the deploy job.
+- The GitHub `production` environment permits the `main` branch only. Manual reviewers are deliberately not
+  required: the owner explicitly requested automatic deployment. CI gates replace a per-deploy approval;
+  they do not constitute a production-readiness review.
+- Store `CLOUDFLARE_API_TOKEN` only as a `production` environment secret. It is scoped to the RunLumi account
+  and `runlumi.app` zone, with Workers deployment, Queues editing and D1 ledger read access. The token is
+  passed to the final deployment step only; install and build do not receive it. Application secrets remain
+  on Cloudflare and are never copied to GitHub.
+- Deploys are serialized. The current `main` SHA is checked after building, so superseded runs are skipped.
+- The D1 migration ledger is read before uploading. Pending migrations fail the deployment; the job does
+  not apply schema changes, finalize retained tables or rotate secrets. Migrations require their reviewed
+  operator procedure before a deploy can be retried.
+- Rotate the deployment token on suspicion or when someone who held it leaves. See `DEPLOYMENT.md` for setup
+  and recovery steps. A missing secret fails explicitly; preparing the workflow does not prove a hosted deploy.
+
+Verified documentation on 2026-10-16: [Cloudflare GitHub Actions authentication](https://developers.cloudflare.com/workers/ci-cd/external-cicd/github-actions/)
+describes API-token authentication. OIDC federation remains unproven here. Cloudflare Workers Builds is an
+alternative, but the available Wrangler OAuth session returns 403 for its configuration API; its login
+credential is not exported into GitHub as a substitute deployment token.
 
 ## What is not done
 

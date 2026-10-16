@@ -80,7 +80,10 @@ afterAll(() => {
 });
 const DATABASE = 'lumi-noti';
 // Must equal wrangler.jsonc's id: `wrangler d1 execute --local` run from the repo finds the same file by it.
-const DATABASE_ID = 'REPLACE_WITH_D1_DATABASE_ID';
+const DATABASE_ID = readFileSync(join(root, 'wrangler.jsonc'), 'utf8').match(
+  /"database_id":\s*"([^"]+)"/,
+)?.[1];
+if (!DATABASE_ID) throw new Error('Missing D1 database ID in wrangler.jsonc');
 
 function wrangler(args: string[], cwd = root): { status: number | null; out: string } {
   const r = spawnSync(BIN, args, {

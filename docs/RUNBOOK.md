@@ -1283,3 +1283,9 @@ Follow-ups filed (every gap this runbook papered over):
 - Alert thresholds are unmeasured starting values.
 - No ingress counter, so a silent source cannot be detected (`ingress_gap`).
 - Everything above is unrehearsed.
+
+## First live deployment
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the 2026-10-16 deployment, resource IDs, migration rehearsal,
+verified HTTP behavior and remaining limitations. In particular, retained migration 0026 originals
+remain on the deployment database; remote Wrangler file-import statistics are not preflight SELECT results.

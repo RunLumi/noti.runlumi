@@ -1,5 +1,7 @@
 {
   "name": "lumi-noti",
+  "account_id": "73fe06de8746378768229a64680dd62f",
+  "routes": [{ "pattern": "noti.runlumi.app", "custom_domain": true }],
   // The Worker entry composes the API (src/index.ts) with the dashboard (ADR 0017). It imports
   // TanStack Start virtual modules, so it only builds through Vite: use `npm run dev` and
   // `npm run deploy`, not `wrangler dev` or a bare `wrangler deploy`.
@@ -38,7 +40,7 @@
     {
       "binding": "DB",
       "database_name": "lumi-noti",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "3dd3fc34-06d0-453d-9e64-a0314aef73af",
     },
   ],
   "triggers": {
@@ -79,11 +81,11 @@
     // value below. A staging deploy sets "staging" and its own check values.
     "ENVIRONMENT_NAME": "production",
     // Key check values of KEK_V1 / KEK_V2 for THIS environment: 32 hex characters of
-    // HMAC-SHA-256(KEK, "lumi-noti/kcv/v1:" + ENVIRONMENT_NAME). Public and one-way. A Worker whose
+    // HKDF-SHA-256(KEK, empty salt, "lumi-noti/kcv/v2:" + ENVIRONMENT_NAME). Public and one-way. A Worker whose
     // KEK does not produce its check value refuses to serve (kek_environment_mismatch). Compute
     // with `node scripts/kek-destroy-check.mjs check-value` (docs/RUNBOOK.md). Until the real value
     // is set the Worker fails closed, like the GitHub App placeholders below.
-    "KEK_CHECK_V1": "REPLACE_WITH_KEK_CHECK_V1",
+    "KEK_CHECK_V1": "a85a5fbbfaa030dceb518cc283fdfc55",
     // Empty unless a second KEK is deployed for a rotation.
     "KEK_CHECK_V2": "",
     // Retention for operational records (src/pipeline/retention.ts). Days, as strings.
